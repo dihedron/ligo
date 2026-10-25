@@ -70,4 +70,8 @@ lab_start() {
 			bao_unseal "$zone"
 		fi
 	done
+	if inner_exists ldap; then
+		inner_wait ldap
+		ldap_check
+	fi
 }

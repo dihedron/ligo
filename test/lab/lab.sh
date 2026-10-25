@@ -22,6 +22,8 @@ source "$LAB_DIR/lib/fetch.sh"
 source "$LAB_DIR/lib/spire.sh"
 # shellcheck source=lib/bao.sh
 source "$LAB_DIR/lib/bao.sh"
+# shellcheck source=lib/ldap.sh
+source "$LAB_DIR/lib/ldap.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -44,6 +46,7 @@ commands:
                             with that environment
   spire <prod|test> [args]  spire-server on that zone's server
   bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
+  ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
   psql [--as ROLE | --superuser] [args]
                             psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
@@ -86,6 +89,7 @@ cmd_up() {
 	if selected identity; then
 		identity_spire_up
 		identity_bao_up
+		ldap_up
 	fi
 	# a new snapshot when there is none, or when up added inner instances
 	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then
@@ -191,6 +195,7 @@ main() {
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
 	bao) require_lab && bao "$@" ;;
+	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;
 	stop) require_lab && lab_stop ;;

@@ -1,0 +1,206 @@
+# The lab directory (.specs/ligo-test-environment.md, "LDAP"): people, the
+# service accounts ligo uses, and the groups of the server.yaml example
+# (§8.1), for a data centre, two tenancies and the Information Security
+# party. {{PASSWORD:name}} is replaced at "up" with the hash of a random
+# password kept in the lab's state directory.
+
+dn: ou=users,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=services,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: services
+
+dn: ou=groups,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: groups
+
+dn: ou=ligo-accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: ligo-accounts
+description: Principals created by the openldap.v1 identity provider
+
+# --- Service accounts ----------------------------------------------------------
+
+# ligo's administrator authentication (§8.1 admin_auth.ldap, §7.2.1)
+dn: cn=ligo-admin-auth,ou=services,dc=ligo,dc=lab
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: ligo-admin-auth
+userPassword: {{PASSWORD:ligo-admin-auth}}
+
+# the openldap.v1 identity provider: writes ou=ligo-accounts only
+dn: cn=ligo-idp,ou=services,dc=ligo,dc=lab
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: ligo-idp
+userPassword: {{PASSWORD:ligo-idp}}
+
+# --- People ----------------------------------------------------------------------
+
+dn: uid=victor,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: victor
+cn: Victor Viewer
+sn: Viewer
+userPassword: {{PASSWORD:victor}}
+
+dn: uid=olivia,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: olivia
+cn: Olivia Operator
+sn: Operator
+userPassword: {{PASSWORD:olivia}}
+
+dn: uid=dave,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: dave
+cn: Dave Approver
+sn: Approver
+userPassword: {{PASSWORD:dave}}
+
+dn: uid=livia,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: livia
+cn: Livia Breakglass
+sn: Breakglass
+userPassword: {{PASSWORD:livia}}
+
+dn: uid=carol,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: carol
+cn: Carol DBA
+sn: DBA
+userPassword: {{PASSWORD:carol}}
+
+dn: uid=bob,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Lead
+sn: Lead
+userPassword: {{PASSWORD:bob}}
+
+dn: uid=marco,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: marco
+cn: Marco Approver
+sn: Approver
+userPassword: {{PASSWORD:marco}}
+
+dn: uid=tess,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: tess
+cn: Tess Tester
+sn: Tester
+userPassword: {{PASSWORD:tess}}
+
+dn: uid=alice,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Developer
+sn: Developer
+userPassword: {{PASSWORD:alice}}
+
+dn: uid=paul,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: paul
+cn: Paul Lead
+sn: Lead
+userPassword: {{PASSWORD:paul}}
+
+dn: uid=erin,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: erin
+cn: Erin Developer
+sn: Developer
+userPassword: {{PASSWORD:erin}}
+
+dn: uid=frank,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: frank
+cn: Frank Lead
+sn: Lead
+userPassword: {{PASSWORD:frank}}
+
+dn: uid=gina,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: gina
+cn: Gina Breakglass
+sn: Breakglass
+userPassword: {{PASSWORD:gina}}
+
+# --- Groups (§8.1 authorization.bindings) ------------------------------------
+
+dn: cn=ligo-viewers,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-viewers
+member: uid=victor,ou=users,dc=ligo,dc=lab
+
+# the data centre dc/corp-prod: platform owners
+dn: cn=ligo-operators-prod,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-operators-prod
+member: uid=olivia,ou=users,dc=ligo,dc=lab
+
+dn: cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-approvers-prod
+member: uid=dave,ou=users,dc=ligo,dc=lab
+
+dn: cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-breakglass-prod
+member: uid=livia,ou=users,dc=ligo,dc=lab
+
+# an application team owning targets: dc/corp-prod/ledger
+dn: cn=ledger-dbas,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ledger-dbas
+member: uid=carol,ou=users,dc=ligo,dc=lab
+
+dn: cn=ledger-leads,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ledger-leads
+member: uid=bob,ou=users,dc=ligo,dc=lab
+member: uid=marco,ou=users,dc=ligo,dc=lab
+
+# dc/corp-test
+dn: cn=ligo-operators-test,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-operators-test
+member: uid=tess,ou=users,dc=ligo,dc=lab
+
+# the tenancy cloud/fin-01/payments
+dn: cn=cloud-fin01-payments-devs,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: cloud-fin01-payments-devs
+member: uid=alice,ou=users,dc=ligo,dc=lab
+
+dn: cn=cloud-fin01-payments-leads,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: cloud-fin01-payments-leads
+member: uid=paul,ou=users,dc=ligo,dc=lab
+
+# the tenancy cloud/fin-01/hr
+dn: cn=cloud-fin01-hr-devs,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: cloud-fin01-hr-devs
+member: uid=erin,ou=users,dc=ligo,dc=lab
+
+dn: cn=cloud-fin01-hr-leads,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: cloud-fin01-hr-leads
+member: uid=frank,ou=users,dc=ligo,dc=lab
+
+dn: cn=cloud-fin01-breakglass,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: cloud-fin01-breakglass
+member: uid=gina,ou=users,dc=ligo,dc=lab
+
+# the Information Security party sec/infosec (ADR-14); marco is also a ledger
+# lead, as AC-49 needs
+dn: cn=infosec-approvers,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: infosec-approvers
+member: uid=marco,ou=users,dc=ligo,dc=lab
