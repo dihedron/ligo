@@ -36,3 +36,7 @@ go.work.sum
 
 # SonarQube scanner work directory
 .scannerwork/
+
+# lab test environment (test/lab)
+test/lab/.state/
+test/lab/lab.local.env

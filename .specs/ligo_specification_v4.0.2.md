@@ -76,6 +76,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | :--- | :--- |
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
 | Configuration (§8.1, §8.2 rule 9) | New key `secret_sealing.local_kek_file`: the 32-byte key file of the `local-kek` sealer, which must not be readable by group or others. Required with `local-kek`, which still requires `--insecure-dev`. |
+| Lab (§8.3, §11.1) | The lab moves from `deploy/lab/` to `test/lab/`, as in the openstack-spiffe and lxd-spiffe projects, and is specified in `.specs/ligo-test-environment.md`. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 No change to the API, the data model or the workflows.
@@ -3928,7 +3929,7 @@ ligo/
 ├── pkg/pluginsdk/                       # SVID selector, bootstrap creds, redacting logger, error helpers (plugin SDK: specified separately)
 ├── web/{static,templates}/               # built-in stylesheet uses design tokens only (§7.6); vendored htmx 4.0.0 + hx-csp, pinned in web/static/VERSIONS (§7.4)
 ├── migrations/001_init_schema.sql
-├── deploy/lab/                          # lab definition as code (§11.1)
+├── test/lab/                            # lab definition as code (§11.1, .specs/ligo-test-environment.md)
 └── test/
     ├── acceptance/                      # §11.2 scenarios, run on the lab
     ├── invariants/                      # one test suite per INV-nn
@@ -4550,7 +4551,7 @@ So the question "is this the privileged automation or a person on the same machi
 
 All code MUST be tested on a lab that reproduces the production architecture with real components. Unit tests, mocks and fakes are required as well, but they do not replace the lab: a change is complete only when its tests pass on the lab.
 
-**Minimum composition.** The lab is defined as code in `deploy/lab/` (VM definitions or container manifests, with pinned versions), and can be rebuilt from scratch with one command. It contains at least:
+**Minimum composition.** The lab is defined as code in `test/lab/` (VM definitions or container manifests, with pinned versions; see `.specs/ligo-test-environment.md`), and can be rebuilt from scratch with one command. It contains at least:
 
 | Component | Count | Purpose |
 | :--- | :--- | :--- |
@@ -4565,7 +4566,7 @@ All code MUST be tested on a lab that reproduces the production architecture wit
 | Network verification probe | 1 per workload host | A stand-in for the organisation's verification tool: reads `GET /v1/flows` with the host's SVID and checks each flow, so that ADR-16 is exercised end to end |
 | Webhook receiver | 1 | Records notifications and checks their signatures (§7.5) |
 
-Further machines are added as needs emerge during development; each addition is made in `deploy/lab/` and documented there.
+Further machines are added as needs emerge during development; each addition is made in `test/lab/` and documented in `.specs/ligo-test-environment.md`.
 
 **Rules.**
 1. **Production-like security.** The lab uses the production security settings: TLS everywhere with certificate verification, Vault/OpenBao Transit sealing (never `local-kek` or `--insecure-dev`), SVID mTLS between components, root-owned plugin binaries with checksums, and approval required for the data-centre scope of `prod.lab` and for at least one tenancy.
