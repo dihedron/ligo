@@ -157,3 +157,84 @@ func TestPolicy(t *testing.T) {
 		t.Errorf("policy: %+v", p)
 	}
 }
+
+func TestLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/server.yaml"
+	if err := os.WriteFile(path, []byte(example(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, sum, err := Load(path)
+	if err != nil || cfg == nil || len(sum) != 64 {
+		t.Fatalf("Load = (%v, %q, %v)", cfg, sum, err)
+	}
+	if _, _, err := Load(dir + "/missing.yaml"); err == nil {
+		t.Error("missing file accepted")
+	}
+	if err := os.WriteFile(path, []byte("zones: {"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil {
+		t.Error("invalid YAML accepted")
+	}
+}
+
+// TestDefaults checks the defaults of an almost empty file.
+func TestDefaults(t *testing.T) {
+	cfg := parse(t, "target_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
+	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
+		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
+		cfg.TargetProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
+		t.Errorf("defaults: %+v", cfg)
+	}
+	if err := Validate(cfg, Options{}); err == nil {
+		t.Error("an almost empty configuration passed validation")
+	}
+}
+
+// TestPluginRules covers the binary and selector checks of builtin and
+// external plugins.
+func TestPluginRules(t *testing.T) {
+	for _, v := range []struct{ name, old, new string }{
+		{"builtin with a binary", `  - type: "none.v1"
+    builtin: true`, `  - type: "none.v1"
+    builtin: true
+    binary: "x"`},
+		{"binary path", `binary: "store-vault"`, `binary: "../store-vault"`},
+		{"no selector", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: ''`},
+		{"config not a mapping", `          host: "ora-scan.prod.internal"`, `          allowed_endpoints: 7
+          host: "ora-scan.prod.internal"`},
+		{"identity provider flows", `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"`, `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"
+        network_flows: [ { name: x, purpose: DATA, protocol: TCP, destination: "h", ports: [1], tls: false } ]`},
+		{"bad allowlist", `allowed_endpoints: ["vault.test.internal:8200"]`, `allowed_endpoints: ["vault.test.internal:0"]`},
+		{"bad spiffe_id", `spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer"`, `spiffe_id: "http://x"`},
+		{"unknown role", `role: viewer,`, `role: superuser,`},
+		{"two principals", `- { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`, `- { spiffe_id: "spiffe://prod.internal/v", ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`},
+		{"platforms on an operator", `role: operator,    scopes: ["dc/corp-test"] }`, `role: operator,    scopes: ["dc/corp-test"], platforms: ["oracle-prod"] }`},
+		{"no scopes", `role: viewer,      scopes: ["*"]`, `role: viewer,      scopes: []`},
+		{"bad incident pattern", `incident_reference_pattern: '^INC[0-9]{7}$'`, `incident_reference_pattern: 'INC['`},
+		{"bad sealing provider", "provider: vault-transit", "provider: kms"},
+		{"bad default_cross_scope", "default_cross_scope: deny", "default_cross_scope: maybe"},
+		{"bad action", "        action: deny\n", "        action: drop\n"},
+		{"duplicate party", `- { name: security, scope: "sec/infosec" }`, `- { name: security, scope: "sec/infosec" }
+          - { name: security, scope: "sec/other" }`},
+		{"unknown core zone", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  zone: prod", "core_identity:\n  zone: nowhere"},
+		{"bad zone trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
+		{"source scope for an unused trust domain", `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }`, `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
+    - { trust_domain: other.internal, mode: static, scope: "dc/other" }`},
+		{"bad source scope mode", `mode: static, scope: "dc/corp-test"`, `mode: dynamic, scope: "dc/corp-test"`},
+	} {
+		doc := example(t)
+		if !strings.Contains(doc, v.old) {
+			t.Fatalf("%s: %q not in the example", v.name, v.old)
+		}
+		cfg, err := Parse([]byte(strings.Replace(doc, v.old, v.new, 1)))
+		if err != nil {
+			t.Logf("%s: refused by the parser: %v", v.name, err)
+			continue
+		}
+		if err := Validate(cfg, Options{LookupEnv: lookupEnv}); err == nil {
+			t.Errorf("%s: accepted", v.name)
+		}
+	}
+}

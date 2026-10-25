@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp/syntax"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -77,21 +78,32 @@ func compileForNarrowing(expr string) (*syntax.Prog, error) {
 	return prog, nil
 }
 
+// endMode decides what a closure does with $ assertions.
+type endMode int
+
+const (
+	endBlock endMode = iota // the input goes on: $ fails
+	endPass                 // the input ends here: $ holds
+	endKeep                 // undecided: keep the assertion for acceptsAtEnd
+)
+
 // closure returns the sorted set of consuming or match instructions reachable
 // from pcs through empty transitions; atStart and atEnd decide ^ and $.
 func closure(p *syntax.Prog, pcs []uint32, atStart, atEnd bool) []uint32 {
-	return follow(p, pcs, atStart, func(*syntax.Inst) bool { return atEnd })
+	if atEnd {
+		return follow(p, pcs, atStart, endPass)
+	}
+	return follow(p, pcs, atStart, endBlock)
 }
 
 // frontierClose is closure with atEnd false, except that blocked $
 // assertions are kept in the set, so that acceptsAtEnd can resume them.
 func frontierClose(p *syntax.Prog, pcs []uint32, atStart bool) []uint32 {
-	return follow(p, pcs, atStart, nil)
+	return follow(p, pcs, atStart, endKeep)
 }
 
-// follow walks the empty transitions from pcs. passEnd decides whether a $
-// assertion is passed; when it is nil, the assertion is kept in the result.
-func follow(p *syntax.Prog, pcs []uint32, atStart bool, passEnd func(*syntax.Inst) bool) []uint32 {
+// follow walks the empty transitions from pcs.
+func follow(p *syntax.Prog, pcs []uint32, atStart bool, end endMode) []uint32 {
 	seen := make(map[uint32]bool)
 	var out []uint32
 	stack := append([]uint32(nil), pcs...)
@@ -102,34 +114,38 @@ func follow(p *syntax.Prog, pcs []uint32, atStart bool, passEnd func(*syntax.Ins
 			continue
 		}
 		seen[pc] = true
-		in := &p.Inst[pc]
-		switch in.Op {
-		case syntax.InstAlt, syntax.InstAltMatch:
-			stack = append(stack, in.Out, in.Arg)
-		case syntax.InstCapture, syntax.InstNop:
-			stack = append(stack, in.Out)
-		case syntax.InstEmptyWidth:
-			op := emptyOp(in)
-			if op&syntax.EmptyBeginText != 0 && !atStart {
-				continue
-			}
-			if op&syntax.EmptyEndText != 0 {
-				if passEnd == nil {
-					out = append(out, pc) // resumed only at end of input
-					continue
-				}
-				if !passEnd(in) {
-					continue
-				}
-			}
-			stack = append(stack, in.Out)
-		case syntax.InstFail:
-		default: // InstRune*, InstMatch
+		next, keep := emptyStep(&p.Inst[pc], atStart, end)
+		if keep {
 			out = append(out, pc)
 		}
+		stack = append(stack, next...)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// emptyStep returns where the empty transitions of in lead, and whether in
+// itself belongs to the closed set (consuming and match instructions, and $
+// kept with endKeep).
+func emptyStep(in *syntax.Inst, atStart bool, end endMode) (next []uint32, keep bool) {
+	switch in.Op {
+	case syntax.InstAlt, syntax.InstAltMatch:
+		return []uint32{in.Out, in.Arg}, false
+	case syntax.InstCapture, syntax.InstNop:
+		return []uint32{in.Out}, false
+	case syntax.InstEmptyWidth:
+		op := emptyOp(in)
+		if op&syntax.EmptyBeginText != 0 && !atStart {
+			return nil, false
+		}
+		if op&syntax.EmptyEndText != 0 && end != endPass {
+			return nil, end == endKeep // resumed only at end of input
+		}
+		return []uint32{in.Out}, false
+	case syntax.InstFail:
+		return nil, false
+	}
+	return nil, true // InstRune*, InstMatch
 }
 
 // emptyOp returns the assertion of an InstEmptyWidth instruction.
@@ -172,33 +188,21 @@ func matchesRune(in *syntax.Inst, r rune) bool {
 // valid rune of each interval.
 func classes(progs ...*syntax.Prog) []rune {
 	cuts := map[rune]bool{0: true}
-	add := func(r rune) {
-		if r >= 0 && r <= unicode.MaxRune {
-			cuts[r] = true
-		}
-	}
 	for _, p := range progs {
 		for i := range p.Inst {
-			in := &p.Inst[i]
-			switch in.Op {
-			case syntax.InstRune1:
-				add(in.Rune[0])
-				add(in.Rune[0] + 1)
-			case syntax.InstRune:
-				if len(in.Rune) == 1 {
-					add(in.Rune[0])
-					add(in.Rune[0] + 1)
+			for _, r := range cutPoints(&p.Inst[i]) {
+				if r >= 0 && r <= unicode.MaxRune {
+					cuts[r] = true
 				}
-				for j := 0; j+1 < len(in.Rune); j += 2 {
-					add(in.Rune[j])
-					add(in.Rune[j+1] + 1)
-				}
-			case syntax.InstRuneAnyNotNL:
-				add('\n')
-				add('\n' + 1)
 			}
 		}
 	}
+	return representatives(cuts)
+}
+
+// representatives returns the lowest valid rune of each interval starting at
+// a cut point.
+func representatives(cuts map[rune]bool) []rune {
 	reps := make([]rune, 0, len(cuts)+1)
 	surrogate := false
 	for r := range cuts {
@@ -212,70 +216,104 @@ func classes(progs ...*syntax.Prog) []rune {
 		reps = append(reps, 0xE000)
 	}
 	sort.Slice(reps, func(i, j int) bool { return reps[i] < reps[j] })
-	out := reps[:0]
-	for _, r := range reps {
-		if utf8.ValidRune(r) {
-			out = append(out, r)
+	return slices.DeleteFunc(reps, func(r rune) bool { return !utf8.ValidRune(r) })
+}
+
+// cutPoints returns the bounds of the rune ranges an instruction consumes:
+// where the instruction starts or stops matching.
+func cutPoints(in *syntax.Inst) []rune {
+	switch in.Op {
+	case syntax.InstRune1:
+		return []rune{in.Rune[0], in.Rune[0] + 1}
+	case syntax.InstRune:
+		if len(in.Rune) == 1 {
+			return []rune{in.Rune[0], in.Rune[0] + 1}
 		}
+		var out []rune
+		for j := 0; j+1 < len(in.Rune); j += 2 {
+			out = append(out, in.Rune[j], in.Rune[j+1]+1)
+		}
+		return out
+	case syntax.InstRuneAnyNotNL:
+		return []rune{'\n', '\n' + 1}
 	}
-	return out
+	return nil
+}
+
+// productNode is a state of the product exploration: the frontier-closed
+// sets of both programs, and the rune that led to it from its parent.
+type productNode struct {
+	n, w    []uint32
+	atStart bool
+	parent  int
+	r       rune
+}
+
+// product is the breadth-first exploration of the product of two programs.
+type product struct {
+	pn, pw *syntax.Prog
+	reps   []rune
+	nodes  []productNode
+	seen   map[string]bool
 }
 
 // include explores the product of the two programs breadth first, so the
 // first state accepted by pn and not by pw gives a shortest witness.
 func include(pn, pw *syntax.Prog, limit int) (Narrowing, error) {
-	reps := classes(pn, pw)
-	type node struct {
-		n, w    []uint32 // frontier-closed sets
-		atStart bool
-		parent  int
-		r       rune
-	}
-	start := node{
+	start := productNode{
 		n:       frontierClose(pn, []uint32{startPC(pn)}, true),
 		w:       frontierClose(pw, []uint32{startPC(pw)}, true),
 		atStart: true,
 		parent:  -1,
 	}
-	nodes := []node{start}
-	seen := map[string]bool{key(start.n, start.w, true): true}
-	witness := func(i int) string {
-		var rs []rune
-		for ; nodes[i].parent >= 0; i = nodes[i].parent {
-			rs = append(rs, nodes[i].r)
-		}
-		for a, b := 0, len(rs)-1; a < b; a, b = a+1, b-1 {
-			rs[a], rs[b] = rs[b], rs[a]
-		}
-		return string(rs)
-	}
-	for i := 0; i < len(nodes); i++ {
-		cur := nodes[i]
+	x := &product{pn: pn, pw: pw, reps: classes(pn, pw), nodes: []productNode{start}, seen: map[string]bool{key(start.n, start.w, true): true}}
+	for i := 0; i < len(x.nodes); i++ {
+		cur := x.nodes[i]
 		if acceptsAtEnd(pn, cur.n, cur.atStart) && !acceptsAtEnd(pw, cur.w, cur.atStart) {
-			return Narrowing{Witness: witness(i), States: len(nodes)}, nil
+			return Narrowing{Witness: x.witness(i), States: len(x.nodes)}, nil
 		}
 		if len(cur.n) == 0 {
 			continue // the new regex is dead: nothing more it can accept
 		}
-		for _, r := range reps {
-			sn := step(pn, cur.n, r)
-			if len(sn) == 0 {
-				continue
-			}
-			nn := frontierClose(pn, sn, false)
-			nw := frontierClose(pw, step(pw, cur.w, r), false)
-			k := key(nn, nw, false)
-			if seen[k] {
-				continue
-			}
-			seen[k] = true
-			nodes = append(nodes, node{n: nn, w: nw, parent: i, r: r})
-			if len(nodes) > limit {
-				return Narrowing{States: len(nodes)}, ErrUndecided
-			}
+		if !x.expand(i, limit) {
+			return Narrowing{States: len(x.nodes)}, ErrUndecided
 		}
 	}
-	return Narrowing{Narrower: true, States: len(nodes)}, nil
+	return Narrowing{Narrower: true, States: len(x.nodes)}, nil
+}
+
+// expand adds the unseen successors of node i on every representative rune;
+// it returns false when the state budget is exceeded.
+func (x *product) expand(i, limit int) bool {
+	cur := x.nodes[i]
+	for _, r := range x.reps {
+		sn := step(x.pn, cur.n, r)
+		if len(sn) == 0 {
+			continue
+		}
+		nn := frontierClose(x.pn, sn, false)
+		nw := frontierClose(x.pw, step(x.pw, cur.w, r), false)
+		k := key(nn, nw, false)
+		if x.seen[k] {
+			continue
+		}
+		x.seen[k] = true
+		x.nodes = append(x.nodes, productNode{n: nn, w: nw, parent: i, r: r})
+		if len(x.nodes) > limit {
+			return false
+		}
+	}
+	return true
+}
+
+// witness returns the runes on the path from the start to node i.
+func (x *product) witness(i int) string {
+	var rs []rune
+	for ; x.nodes[i].parent >= 0; i = x.nodes[i].parent {
+		rs = append(rs, x.nodes[i].r)
+	}
+	slices.Reverse(rs)
+	return string(rs)
 }
 
 // acceptsAtEnd reports whether a frontier-closed set reaches Match when the

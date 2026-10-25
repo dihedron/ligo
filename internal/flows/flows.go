@@ -143,11 +143,11 @@ func (f Flow) Validate() error {
 	return nil
 }
 
-// ValidateList checks every flow of a declaration, at most max of them,
+// ValidateList checks every flow of a declaration, at most limit of them,
 // with unique names.
-func ValidateList(flows []Flow, max int) error {
-	if len(flows) > max {
-		return fmt.Errorf("%w: at most %d flows", ErrInvalidFlow, max)
+func ValidateList(flows []Flow, limit int) error {
+	if len(flows) > limit {
+		return fmt.Errorf("%w: at most %d flows", ErrInvalidFlow, limit)
 	}
 	seen := make(map[string]bool, len(flows))
 	for _, f := range flows {

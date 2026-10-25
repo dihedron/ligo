@@ -166,24 +166,34 @@ func (p *Policy) SHA256() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Loosening lists the changes from old to new that loosen the policy
-// (§8.2, startup step 2): they are audited as CONFIG_APPROVAL_POLICY_WEAKENED.
-func Loosening(old, new *Policy) []string {
+// Loosening lists the changes from current to proposed that loosen the
+// policy (§8.2, startup step 2): they are audited as
+// CONFIG_APPROVAL_POLICY_WEAKENED.
+func Loosening(current, proposed *Policy) []string {
 	var out []string
-	for _, s := range old.RequiredScopes {
-		if !slices.Contains(new.RequiredScopes, s) {
+	for _, s := range current.RequiredScopes {
+		if !slices.Contains(proposed.RequiredScopes, s) {
 			out = append(out, fmt.Sprintf("%q removed from required_scopes", s))
 		}
 	}
-	if old.RequireDistinctApprovers && !new.RequireDistinctApprovers {
+	if current.RequireDistinctApprovers && !proposed.RequireDistinctApprovers {
 		out = append(out, "require_distinct_approvers_across_scopes turned off")
 	}
-	if old.Interconnects.DefaultCrossScope != "allow" && new.Interconnects.DefaultCrossScope == "allow" {
+	if current.Interconnects.DefaultCrossScope != "allow" && proposed.Interconnects.DefaultCrossScope == "allow" {
 		out = append(out, "default_cross_scope changed to allow")
 	}
-	oldRules := rulesByName(old.Interconnects.Rules)
-	for i, r := range new.Interconnects.Rules {
-		o, existed := oldRules[r.Name]
+	out = append(out, looserRules(current.Interconnects.Rules, proposed.Interconnects.Rules)...)
+	out = append(out, removedRules(current.Interconnects.Rules, proposed.Interconnects.Rules)...)
+	return append(out, raisedBreakGlass(current.BreakGlassPolicies, proposed.BreakGlassPolicies)...)
+}
+
+// looserRules reports the rules of proposed that loosen their counterpart in
+// current, or waive distinct approvers.
+func looserRules(current, proposed []InterconnectRule) []string {
+	var out []string
+	before := rulesByName(current)
+	for i, r := range proposed {
+		o, existed := before[r.Name]
 		if r.DistinctApprovers != nil && !*r.DistinctApprovers && (!existed || o.rule.DistinctApprovers == nil || *o.rule.DistinctApprovers) {
 			out = append(out, fmt.Sprintf("rule %q sets distinct_approvers: false", r.Name))
 		}
@@ -193,31 +203,51 @@ func Loosening(old, new *Policy) []string {
 		if o.rule.Action == "deny" && r.Action == "allow" {
 			out = append(out, fmt.Sprintf("deny rule %q changed to allow", r.Name))
 		}
-		for _, a := range o.rule.AdditionalApprovals {
-			if !slices.ContainsFunc(r.AdditionalApprovals, func(b AdditionalApproval) bool { return b.Name == a.Name }) {
-				out = append(out, fmt.Sprintf("party %q removed from rule %q", a.Name, r.Name))
-			}
-		}
-		if r.Action != "deny" {
-			continue
-		}
-		// allow rules now above this deny rule, which were not above it before
-		// and match some of its pairs
-		for _, above := range new.Interconnects.Rules[:i] {
-			if above.Action != "allow" {
-				continue
-			}
-			if prev, ok := oldRules[above.Name]; ok && prev.index < o.index {
-				continue
-			}
-			if overlap(above.From, r.From) && overlap(above.To, r.To) {
-				out = append(out, fmt.Sprintf("deny rule %q now below allow rule %q", r.Name, above.Name))
-			}
+		out = append(out, removedParties(o.rule, r)...)
+		if r.Action == "deny" {
+			out = append(out, shadowingAllows(r, o.index, proposed[:i], before)...)
 		}
 	}
-	newRules := rulesByName(new.Interconnects.Rules)
-	for _, r := range old.Interconnects.Rules {
-		if _, ok := newRules[r.Name]; ok {
+	return out
+}
+
+// removedParties reports the additional parties of current that proposed,
+// the same rule, no longer has.
+func removedParties(current, proposed InterconnectRule) []string {
+	var out []string
+	for _, a := range current.AdditionalApprovals {
+		if !slices.ContainsFunc(proposed.AdditionalApprovals, func(b AdditionalApproval) bool { return b.Name == a.Name }) {
+			out = append(out, fmt.Sprintf("party %q removed from rule %q", a.Name, proposed.Name))
+		}
+	}
+	return out
+}
+
+// shadowingAllows reports the allow rules now above deny rule r, which were
+// not above it before and match some of its pairs.
+func shadowingAllows(r InterconnectRule, oldIndex int, above []InterconnectRule, before map[string]indexedRule) []string {
+	var out []string
+	for _, a := range above {
+		if a.Action != "allow" {
+			continue
+		}
+		if prev, ok := before[a.Name]; ok && prev.index < oldIndex {
+			continue
+		}
+		if overlap(a.From, r.From) && overlap(a.To, r.To) {
+			out = append(out, fmt.Sprintf("deny rule %q now below allow rule %q", r.Name, a.Name))
+		}
+	}
+	return out
+}
+
+// removedRules reports deny rules and additional parties that disappeared
+// with their rule.
+func removedRules(current, proposed []InterconnectRule) []string {
+	var out []string
+	after := rulesByName(proposed)
+	for _, r := range current {
+		if _, ok := after[r.Name]; ok {
 			continue
 		}
 		if r.Action == "deny" {
@@ -227,16 +257,24 @@ func Loosening(old, new *Policy) []string {
 			out = append(out, fmt.Sprintf("party %q removed with rule %q", a.Name, r.Name))
 		}
 	}
-	for _, o := range old.BreakGlassPolicies {
+	return out
+}
+
+// raisedBreakGlass reports break-glass policies, matched by their scopes,
+// whose max_ttl or max_open was raised.
+func raisedBreakGlass(current, proposed []BreakGlassPolicy) []string {
+	var out []string
+	for _, o := range current {
 		key := strings.Join(o.Scopes, ",")
-		i := slices.IndexFunc(new.BreakGlassPolicies, func(b BreakGlassPolicy) bool { return strings.Join(b.Scopes, ",") == key })
+		i := slices.IndexFunc(proposed, func(b BreakGlassPolicy) bool { return strings.Join(b.Scopes, ",") == key })
 		if i < 0 {
 			continue
 		}
-		if n := new.BreakGlassPolicies[i]; n.MaxTTL > o.MaxTTL {
+		n := proposed[i]
+		if n.MaxTTL > o.MaxTTL {
 			out = append(out, fmt.Sprintf("break-glass policy %v: max_ttl raised from %v to %v", o.Scopes, o.MaxTTL, n.MaxTTL))
 		}
-		if n := new.BreakGlassPolicies[i]; n.MaxOpen > o.MaxOpen {
+		if n.MaxOpen > o.MaxOpen {
 			out = append(out, fmt.Sprintf("break-glass policy %v: max_open raised from %d to %d", o.Scopes, o.MaxOpen, n.MaxOpen))
 		}
 	}

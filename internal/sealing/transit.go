@@ -28,15 +28,15 @@ type TransitConfig struct {
 	KeyName     string `yaml:"key_name"`
 }
 
-// JWTSource provides the JWT-SVID ligo logs in to Vault with.
-type JWTSource interface {
+// JWTFetcher provides the JWT-SVID ligo logs in to Vault with.
+type JWTFetcher interface {
 	FetchJWT(ctx context.Context, audience string) (string, error)
 }
 
 // TransitKEK wraps data keys with Vault Transit.
 type TransitKEK struct {
 	cfg    TransitConfig
-	jwt    JWTSource
+	jwt    JWTFetcher
 	client *http.Client
 
 	mu    sync.Mutex
@@ -47,7 +47,7 @@ type TransitKEK struct {
 var errForbidden = errors.New("permission denied")
 
 // NewTransitKEK returns a Transit KEK. client may be nil.
-func NewTransitKEK(cfg TransitConfig, jwt JWTSource, client *http.Client) (*TransitKEK, error) {
+func NewTransitKEK(cfg TransitConfig, jwt JWTFetcher, client *http.Client) (*TransitKEK, error) {
 	u, err := url.Parse(cfg.Address)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("vault_transit.address %q must be an https URL", cfg.Address)

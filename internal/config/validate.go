@@ -14,6 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"go.yaml.in/yaml/v3"
 )
 
 // Options are the command-line settings that change validation.
@@ -81,57 +82,85 @@ func (c *checker) zones(cfg *Config) map[string]Zone {
 	return zones
 }
 
+const (
+	platformPrefix = "platform "
+	whatErr        = "%s: %v"
+)
+
+// allPlatforms returns the platforms of every target provider, with their
+// provider.
+func allPlatforms(cfg *Config) []providedPlatform {
+	var out []providedPlatform
+	for _, tp := range cfg.TargetProviders {
+		for _, p := range tp.Platforms {
+			out = append(out, providedPlatform{p, tp.Builtin})
+		}
+	}
+	return out
+}
+
+type providedPlatform struct {
+	Platform
+	builtin bool
+}
+
 // instances checks rules 1, 2, 5 and 7 for plugin types, instances and
 // platforms.
 func (c *checker) instances(cfg *Config, zones map[string]Zone) {
 	// instance zones by type, then name
 	zoneOf := map[string]map[string]string{}
-	providers := func(kind string, list []InstanceProvider) {
-		names := map[string]bool{}
-		for _, p := range list {
-			c.binary(kind, p.Type, p.Builtin, p.Binary, p.SHA256)
-			if zoneOf[p.Type] != nil {
-				c.failf(1, "%s type %q is declared twice", kind, p.Type)
-			}
-			zoneOf[p.Type] = map[string]string{}
-			for _, in := range p.Instances {
-				if names[in.Name] {
-					c.failf(1, "%s instance %q is defined twice", kind, in.Name)
-				}
-				names[in.Name] = true
-				zoneOf[p.Type][in.Name] = in.Zone
-				if _, ok := zones[in.Zone]; !ok {
-					c.failf(2, "%s instance %q: zone %q does not exist", kind, in.Name, in.Zone)
-				}
-				c.plugin(kind+" instance "+in.Name, p.Builtin, in.SVIDSelector, &in)
-			}
-		}
-	}
-	providers("identity provider", cfg.IdentityProviders)
-	providers("secret store", cfg.SecretStores)
-
-	platforms := map[string]bool{}
+	c.instanceProviders("identity provider", cfg.IdentityProviders, zones, zoneOf)
+	c.instanceProviders("secret store", cfg.SecretStores, zones, zoneOf)
 	for _, tp := range cfg.TargetProviders {
 		c.binary("target provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
-		for _, p := range tp.Platforms {
-			if platforms[p.Name] {
-				c.failf(1, "platform %q is defined twice", p.Name)
-			}
-			platforms[p.Name] = true
-			if _, ok := zones[p.Zone]; !ok {
-				c.failf(2, "platform %q: zone %q does not exist", p.Name, p.Zone)
-			}
-			for role, w := range map[string]Wiring{"identity_provider": p.IdentityProvider, "secret_store": p.SecretStore} {
-				z, ok := zoneOf[w.Type][w.Instance]
-				switch {
-				case !ok:
-					c.failf(2, "platform %q: %s %s/%s does not exist", p.Name, role, w.Type, w.Instance)
-				case z != p.Zone:
-					c.failf(2, "platform %q (zone %s): %s %q is in zone %s", p.Name, p.Zone, role, w.Instance, z)
-				}
-			}
-			c.plugin("platform "+p.Name, tp.Builtin, p.SVIDSelector, &Instance{Config: p.Config})
+	}
+	names := map[string]bool{}
+	for _, p := range allPlatforms(cfg) {
+		if names[p.Name] {
+			c.failf(1, "platform %q is defined twice", p.Name)
 		}
+		names[p.Name] = true
+		if _, ok := zones[p.Zone]; !ok {
+			c.failf(2, "platform %q: zone %q does not exist", p.Name, p.Zone)
+		}
+		c.wiring(p.Platform, "identity_provider", p.IdentityProvider, zoneOf)
+		c.wiring(p.Platform, "secret_store", p.SecretStore, zoneOf)
+		c.plugin(platformPrefix+p.Name, p.builtin, p.SVIDSelector, &Instance{Config: p.Config})
+	}
+}
+
+// instanceProviders checks the plugin types of one kind and their instances,
+// recording the zone of each instance in zoneOf.
+func (c *checker) instanceProviders(kind string, list []InstanceProvider, zones map[string]Zone, zoneOf map[string]map[string]string) {
+	names := map[string]bool{}
+	for _, p := range list {
+		c.binary(kind, p.Type, p.Builtin, p.Binary, p.SHA256)
+		if zoneOf[p.Type] != nil {
+			c.failf(1, "%s type %q is declared twice", kind, p.Type)
+		}
+		zoneOf[p.Type] = map[string]string{}
+		for _, in := range p.Instances {
+			if names[in.Name] {
+				c.failf(1, "%s instance %q is defined twice", kind, in.Name)
+			}
+			names[in.Name] = true
+			zoneOf[p.Type][in.Name] = in.Zone
+			if _, ok := zones[in.Zone]; !ok {
+				c.failf(2, "%s instance %q: zone %q does not exist", kind, in.Name, in.Zone)
+			}
+			c.plugin(kind+" instance "+in.Name, p.Builtin, in.SVIDSelector, &in)
+		}
+	}
+}
+
+// wiring checks that a platform's instance exists in the platform's zone.
+func (c *checker) wiring(p Platform, role string, w Wiring, zoneOf map[string]map[string]string) {
+	z, ok := zoneOf[w.Type][w.Instance]
+	switch {
+	case !ok:
+		c.failf(2, "platform %q: %s %s/%s does not exist", p.Name, role, w.Type, w.Instance)
+	case z != p.Zone:
+		c.failf(2, "platform %q (zone %s): %s %q is in zone %s", p.Name, p.Zone, role, w.Instance, z)
 	}
 }
 
@@ -179,20 +208,17 @@ func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
 	}
 	check := func(where string, domains []string) {
 		for _, td := range domains {
-			z, f := zoneDomains[td], federated[td]
-			if z+f != 1 {
+			if zoneDomains[td]+federated[td] != 1 {
 				c.failf(12, "%s: trust domain %q must be the trust domain of exactly one zone or listed once in federated_trust_domains, not both", where, td)
 			}
 		}
 	}
 	check("workload_listener.accepted_trust_domains", wl.AcceptedTrustDomains)
 	check("admin_listener.client_svid_auth.accepted_trust_domains", cfg.Server.AdminListener.ClientSVIDAuth.AcceptedTrustDomains)
-	for _, tp := range cfg.TargetProviders {
-		for _, p := range tp.Platforms {
-			for _, td := range p.AllowedSourceTrustDomains {
-				if !slices.Contains(wl.AcceptedTrustDomains, td) {
-					c.failf(6, "platform %q: allowed source trust domain %q is not in workload_listener.accepted_trust_domains", p.Name, td)
-				}
+	for _, p := range allPlatforms(cfg) {
+		for _, td := range p.AllowedSourceTrustDomains {
+			if !slices.Contains(wl.AcceptedTrustDomains, td) {
+				c.failf(6, "platform %q: allowed source trust domain %q is not in workload_listener.accepted_trust_domains", p.Name, td)
 			}
 		}
 	}
@@ -218,56 +244,69 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 // rule 16.
 func (c *checker) authorization(cfg *Config) {
 	platforms := map[string]bool{}
-	for _, tp := range cfg.TargetProviders {
-		for _, p := range tp.Platforms {
-			platforms[p.Name] = true
-		}
+	for _, p := range allPlatforms(cfg) {
+		platforms[p.Name] = true
 	}
 	for i, b := range cfg.Authorization.Bindings {
-		who := b.LDAPGroupDN + b.SPIFFEID
-		if (b.LDAPGroupDN == "") == (b.SPIFFEID == "") {
-			c.failf(16, "authorization binding %d: exactly one of ldap_group_dn and spiffe_id is required", i)
-		}
-		if b.SPIFFEID != "" {
-			if _, err := spiffeid.FromString(b.SPIFFEID); err != nil {
-				c.failf(16, "authorization binding %d: invalid spiffe_id %q", i, b.SPIFFEID)
-			}
-		}
-		if !slices.Contains(knownRoles, b.Role) {
-			c.failf(16, "authorization binding %q: unknown role %q", who, b.Role)
-		}
-		if len(b.Scopes) == 0 {
-			c.failf(16, "authorization binding %q: scopes is required", who)
-		}
-		c.patterns(16, "authorization binding "+who, b.Scopes)
-		if b.Role != RoleTrustedAutomation && (len(b.Platforms) > 0 || b.ApprovalReferencePattern != "") {
-			c.failf(13, "authorization binding %q: platforms and approval_reference_pattern are only for trusted_automation", who)
-		}
+		c.roleBinding(i, b)
 		switch b.Role {
 		case RoleTrustedAutomation:
-			if b.SPIFFEID == "" {
-				c.failf(13, "trusted_automation must be bound to a spiffe_id, never to an LDAP group (%q)", who)
-			}
-			for _, p := range b.Platforms {
-				if !platforms[p] {
-					c.failf(13, "trusted_automation %q: platform %q does not exist", who, p)
-				}
-			}
-			if b.ApprovalReferencePattern != "" {
-				c.anchored(13, "trusted_automation "+who+" approval_reference_pattern", b.ApprovalReferencePattern)
-			}
+			c.trustedAutomation(b, platforms)
 		case RoleBreakGlass:
-			if b.LDAPGroupDN == "" {
-				c.failf(14, "break_glass must be bound to an ldap_group_dn, never to a SPIFFE ID (%q)", who)
-			}
-			for _, s := range b.Scopes {
-				if !slices.ContainsFunc(cfg.BreakGlass.Policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Scopes, s) }) {
-					c.failf(14, "break_glass binding %q: scope pattern %q appears in no break_glass.policies entry", who, s)
-				}
-			}
+			c.breakGlassBinding(b, cfg.BreakGlass.Policies)
 		}
 	}
 	c.patterns(16, "approval.required_scopes", cfg.Authorization.Approval.RequiredScopes)
+}
+
+// roleBinding checks the rules common to every authorization binding.
+func (c *checker) roleBinding(i int, b RoleBinding) {
+	who := b.LDAPGroupDN + b.SPIFFEID
+	if (b.LDAPGroupDN == "") == (b.SPIFFEID == "") {
+		c.failf(16, "authorization binding %d: exactly one of ldap_group_dn and spiffe_id is required", i)
+	}
+	if _, err := spiffeid.FromString(b.SPIFFEID); b.SPIFFEID != "" && err != nil {
+		c.failf(16, "authorization binding %d: invalid spiffe_id %q", i, b.SPIFFEID)
+	}
+	if !slices.Contains(knownRoles, b.Role) {
+		c.failf(16, "authorization binding %q: unknown role %q", who, b.Role)
+	}
+	if len(b.Scopes) == 0 {
+		c.failf(16, "authorization binding %q: scopes is required", who)
+	}
+	c.patterns(16, "authorization binding "+who, b.Scopes)
+	if b.Role != RoleTrustedAutomation && (len(b.Platforms) > 0 || b.ApprovalReferencePattern != "") {
+		c.failf(13, "authorization binding %q: platforms and approval_reference_pattern are only for trusted_automation", who)
+	}
+}
+
+// trustedAutomation checks rule 13.
+func (c *checker) trustedAutomation(b RoleBinding, platforms map[string]bool) {
+	who := b.LDAPGroupDN + b.SPIFFEID
+	if b.SPIFFEID == "" {
+		c.failf(13, "trusted_automation must be bound to a spiffe_id, never to an LDAP group (%q)", who)
+	}
+	for _, p := range b.Platforms {
+		if !platforms[p] {
+			c.failf(13, "trusted_automation %q: platform %q does not exist", who, p)
+		}
+	}
+	if b.ApprovalReferencePattern != "" {
+		c.anchored(13, "trusted_automation "+who+" approval_reference_pattern", b.ApprovalReferencePattern)
+	}
+}
+
+// breakGlassBinding checks rule 14 for a break_glass binding.
+func (c *checker) breakGlassBinding(b RoleBinding, policies []governance.BreakGlassPolicy) {
+	who := b.LDAPGroupDN + b.SPIFFEID
+	if b.LDAPGroupDN == "" {
+		c.failf(14, "break_glass must be bound to an ldap_group_dn, never to a SPIFFE ID (%q)", who)
+	}
+	for _, s := range b.Scopes {
+		if !slices.ContainsFunc(policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Scopes, s) }) {
+			c.failf(14, "break_glass binding %q: scope pattern %q appears in no break_glass.policies entry", who, s)
+		}
+	}
 }
 
 // breakGlass checks rule 14 (policies and webhooks).
@@ -302,19 +341,48 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 // governance checks rule 16.
 func (c *checker) governance(cfg *Config) {
 	sourceDomains := map[string]bool{}
-	for _, tp := range cfg.TargetProviders {
-		for _, p := range tp.Platforms {
-			if !governance.ValidScopePath(p.Scope) {
-				c.failf(16, "platform %q: scope %q must be a valid scope path", p.Name, p.Scope)
-			}
-			c.patterns(16, "platform "+p.Name+" target_scopes", p.TargetScopes)
-			for _, td := range p.AllowedSourceTrustDomains {
-				sourceDomains[td] = true
+	for _, p := range allPlatforms(cfg) {
+		if !governance.ValidScopePath(p.Scope) {
+			c.failf(16, "platform %q: scope %q must be a valid scope path", p.Name, p.Scope)
+		}
+		c.patterns(16, platformPrefix+p.Name+" target_scopes", p.TargetScopes)
+		for _, td := range p.AllowedSourceTrustDomains {
+			sourceDomains[td] = true
+		}
+	}
+	c.sourceScopes(cfg.Governance.SourceScopes, sourceDomains)
+	c.namePrefixes(cfg.Governance.NamePrefixes)
+	ic := cfg.Governance.Interconnects
+	if ic.DefaultCrossScope != "allow" && ic.DefaultCrossScope != "deny" {
+		c.failf(16, "interconnects.default_cross_scope must be allow or deny")
+	}
+	names := map[string]bool{}
+	for _, r := range ic.Rules {
+		if !ruleNameRE.MatchString(r.Name) || r.Name == "default" || names[r.Name] {
+			c.failf(16, "interconnect rule %q: names must be unique, match %s and not be \"default\"", r.Name, ruleNameRE)
+		}
+		names[r.Name] = true
+		c.interconnectRule(r)
+	}
+}
+
+// namePrefixes checks the patterns and resource kinds of name_prefixes.
+func (c *checker) namePrefixes(prefixes []governance.NamePrefix) {
+	for i, p := range prefixes {
+		c.patterns(16, fmt.Sprintf("governance.name_prefixes[%d]", i), p.Scopes)
+		for _, k := range p.Resources {
+			if !slices.Contains(knownKinds, k) {
+				c.failf(16, "governance.name_prefixes[%d]: unknown resource %q", i, k)
 			}
 		}
 	}
+}
+
+// sourceScopes checks that source_scopes has exactly one valid entry for
+// each trust domain that platforms accept.
+func (c *checker) sourceScopes(entries []governance.SourceScope, sourceDomains map[string]bool) {
 	seen := map[string]bool{}
-	for _, s := range cfg.Governance.SourceScopes {
+	for _, s := range entries {
 		if seen[s.TrustDomain] {
 			c.failf(16, "governance.source_scopes: trust domain %q has more than one entry", s.TrustDomain)
 		}
@@ -331,72 +399,35 @@ func (c *checker) governance(cfg *Config) {
 			c.failf(16, "governance.source_scopes: no entry for trust domain %q", td)
 		}
 	}
-	for i, p := range cfg.Governance.NamePrefixes {
-		c.patterns(16, fmt.Sprintf("governance.name_prefixes[%d]", i), p.Scopes)
-		for _, k := range p.Resources {
-			if !slices.Contains(knownKinds, k) {
-				c.failf(16, "governance.name_prefixes[%d]: unknown resource %q", i, k)
-			}
-		}
+}
+
+// interconnectRule checks one rule of the interconnection policy.
+func (c *checker) interconnectRule(r governance.InterconnectRule) {
+	if r.Action != "allow" && r.Action != "deny" {
+		c.failf(16, "interconnect rule %q: action must be allow or deny", r.Name)
 	}
-	ic := cfg.Governance.Interconnects
-	if ic.DefaultCrossScope != "allow" && ic.DefaultCrossScope != "deny" {
-		c.failf(16, "interconnects.default_cross_scope must be allow or deny")
+	c.patterns(16, "interconnect rule "+r.Name+" from", r.From)
+	c.patterns(16, "interconnect rule "+r.Name+" to", r.To)
+	if r.Action != "allow" && (len(r.AdditionalApprovals) > 0 || r.DistinctApprovers != nil) {
+		c.failf(16, "interconnect rule %q: additional_approvals and distinct_approvers are only for allow rules", r.Name)
 	}
-	names := map[string]bool{}
-	for _, r := range ic.Rules {
-		if !ruleNameRE.MatchString(r.Name) || r.Name == "default" || names[r.Name] {
-			c.failf(16, "interconnect rule %q: names must be unique, match %s and not be \"default\"", r.Name, ruleNameRE)
+	parties := map[string]bool{}
+	for _, a := range r.AdditionalApprovals {
+		if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !governance.ValidScopePath(a.Scope) {
+			c.failf(16, "interconnect rule %q: additional approval %q needs a unique name matching %s and a valid scope path", r.Name, a.Name, partyNameRE)
 		}
-		names[r.Name] = true
-		if r.Action != "allow" && r.Action != "deny" {
-			c.failf(16, "interconnect rule %q: action must be allow or deny", r.Name)
-		}
-		c.patterns(16, "interconnect rule "+r.Name+" from", r.From)
-		c.patterns(16, "interconnect rule "+r.Name+" to", r.To)
-		if r.Action != "allow" && (len(r.AdditionalApprovals) > 0 || r.DistinctApprovers != nil) {
-			c.failf(16, "interconnect rule %q: additional_approvals and distinct_approvers are only for allow rules", r.Name)
-		}
-		parties := map[string]bool{}
-		for _, a := range r.AdditionalApprovals {
-			if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !governance.ValidScopePath(a.Scope) {
-				c.failf(16, "interconnect rule %q: additional approval %q needs a unique name matching %s and a valid scope path", r.Name, a.Name, partyNameRE)
-			}
-			parties[a.Name] = true
-		}
+		parties[a.Name] = true
 	}
 }
 
 // platformFlows checks the static part of rule 19.
 func (c *checker) platformFlows(cfg *Config) {
-	check := func(what string, declared []flows.Flow, config *Instance) {
-		pc, err := hostKeys(&config.Config)
-		if err != nil {
-			return // reported by plugin()
-		}
-		if err := flows.ValidateList(declared, maxPlatformFlow); err != nil {
-			c.failf(19, "%s: %v", what, err)
-			return
-		}
-		allow, err := flows.ParseAllowlist(pc.AllowedEndpoints)
-		if err != nil {
-			c.failf(19, "%s: %v", what, err)
-			return
-		}
-		for _, f := range declared {
-			if err := allow.CheckFlow(f); err != nil {
-				c.failf(19, "%s: %v", what, err)
-			}
-		}
-	}
-	for _, tp := range cfg.TargetProviders {
-		for _, p := range tp.Platforms {
-			check("platform "+p.Name, p.NetworkFlows, &Instance{Config: p.Config})
-		}
+	for _, p := range allPlatforms(cfg) {
+		c.declaredFlows(platformPrefix+p.Name, p.NetworkFlows, &p.Config)
 	}
 	for _, sp := range cfg.SecretStores {
 		for _, in := range sp.Instances {
-			check("secret store "+in.Name, in.NetworkFlows, &in)
+			c.declaredFlows("secret store "+in.Name, in.NetworkFlows, &in.Config)
 		}
 	}
 	for _, ip := range cfg.IdentityProviders {
@@ -412,6 +443,29 @@ func (c *checker) platformFlows(cfg *Config) {
 		c.failf(19, "service.workload_advertise must be set")
 	} else if err := ligo.Validate(); err != nil {
 		c.failf(19, "service.workload_advertise: %v", err)
+	}
+}
+
+// declaredFlows checks a platform's or store's flows against its
+// allowed_endpoints.
+func (c *checker) declaredFlows(what string, declared []flows.Flow, config *yaml.Node) {
+	pc, err := hostKeys(config)
+	if err != nil {
+		return // reported by plugin()
+	}
+	if err := flows.ValidateList(declared, maxPlatformFlow); err != nil {
+		c.failf(19, whatErr, what, err)
+		return
+	}
+	allow, err := flows.ParseAllowlist(pc.AllowedEndpoints)
+	if err != nil {
+		c.failf(19, whatErr, what, err)
+		return
+	}
+	for _, f := range declared {
+		if err := allow.CheckFlow(f); err != nil {
+			c.failf(19, whatErr, what, err)
+		}
 	}
 }
 

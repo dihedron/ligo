@@ -164,8 +164,8 @@ func FuzzValidateSVIDRegex(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted pattern %q does not parse: %v", pattern, err)
 		}
-		if got, max := strings.Count(id, "/"), literalSlashes(ast); got > max {
-			t.Fatalf("%q matches %q with %d '/', more than the %d it spells out", pattern, id, got, max)
+		if got, limit := strings.Count(id, "/"), literalSlashes(ast); got > limit {
+			t.Fatalf("%q matches %q with %d '/', more than the %d it spells out", pattern, id, got, limit)
 		}
 	})
 }

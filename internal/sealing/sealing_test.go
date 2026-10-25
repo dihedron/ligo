@@ -161,54 +161,56 @@ func TestRoundTrip(t *testing.T) {
 // TestContextBinding checks that an envelope opens only in the workflow
 // context it was sealed for, and only with its own wrapped key (ADR-07).
 func TestContextBinding(t *testing.T) {
-	ctx := context.Background()
 	for name, kek := range keks(t) {
-		s := NewSealer(kek)
-		env, err := s.Seal(ctx, sc, []byte("secret"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		other, err := s.Seal(ctx, sc, []byte("other"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if env.Nonce == other.Nonce || env.WrappedDEK == other.WrappedDEK {
-			t.Errorf("%s: nonce or DEK reused", name)
-		}
-		wrong := map[string]Context{}
-		c := sc
-		c.BindingID = uuid.NewV7()
-		wrong["binding"] = c
-		c = sc
-		c.Revision++
-		wrong["revision"] = c
-		c = sc
-		c.Attempt++
-		wrong["attempt"] = c
-		c = sc
-		c.Stage = StageIdentity
-		wrong["stage"] = c
-		for field, c := range wrong {
-			if _, err := s.Unseal(ctx, c, env); !errors.Is(err, ErrSealedSecretUnavailable) {
-				t.Errorf("%s: other %s: %v", name, field, err)
-			}
-		}
-		swapped := env
-		swapped.WrappedDEK = other.WrappedDEK
-		if _, err := s.Unseal(ctx, sc, swapped); !errors.Is(err, ErrSealedSecretUnavailable) {
-			t.Errorf("%s: swapped wrappedDek: %v", name, err)
-		}
-		swapped = env
-		swapped.Ciphertext = other.Ciphertext
-		if _, err := s.Unseal(ctx, sc, swapped); !errors.Is(err, ErrSealedSecretUnavailable) {
-			t.Errorf("%s: swapped ciphertext: %v", name, err)
-		}
-		edited := env
-		edited.AAD = "anything" // never trusted
-		if got, err := s.Unseal(ctx, sc, edited); err != nil || string(got) != "secret" {
-			t.Errorf("%s: edited aad: (%q, %v)", name, got, err)
+		checkContextBinding(t, name, NewSealer(kek))
+	}
+}
+
+func checkContextBinding(t *testing.T, name string, s *Sealer) {
+	t.Helper()
+	ctx := context.Background()
+	env, err := s.Seal(ctx, sc, []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.Seal(ctx, sc, []byte("other"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Nonce == other.Nonce || env.WrappedDEK == other.WrappedDEK {
+		t.Errorf("%s: nonce or DEK reused", name)
+	}
+	wrong := otherContexts()
+	for field, c := range wrong {
+		if _, err := s.Unseal(ctx, c, env); !errors.Is(err, ErrSealedSecretUnavailable) {
+			t.Errorf("%s: other %s: %v", name, field, err)
 		}
 	}
+	swapped := env
+	swapped.WrappedDEK = other.WrappedDEK
+	if _, err := s.Unseal(ctx, sc, swapped); !errors.Is(err, ErrSealedSecretUnavailable) {
+		t.Errorf("%s: swapped wrappedDek: %v", name, err)
+	}
+	swapped = env
+	swapped.Ciphertext = other.Ciphertext
+	if _, err := s.Unseal(ctx, sc, swapped); !errors.Is(err, ErrSealedSecretUnavailable) {
+		t.Errorf("%s: swapped ciphertext: %v", name, err)
+	}
+	edited := env
+	edited.AAD = "anything" // never trusted
+	if got, err := s.Unseal(ctx, sc, edited); err != nil || string(got) != "secret" {
+		t.Errorf("%s: edited aad: (%q, %v)", name, got, err)
+	}
+}
+
+// otherContexts returns sc with one field changed at a time.
+func otherContexts() map[string]Context {
+	binding, revision, attempt, stage := sc, sc, sc, sc
+	binding.BindingID = uuid.NewV7()
+	revision.Revision++
+	attempt.Attempt++
+	stage.Stage = StageIdentity
+	return map[string]Context{"binding": binding, "revision": revision, "attempt": attempt, "stage": stage}
 }
 
 func TestInvalidStage(t *testing.T) {
@@ -307,4 +309,84 @@ func TestLocalKEKRefusals(t *testing.T) {
 			t.Errorf("%s accepted", filepath.Base(path))
 		}
 	}
+}
+
+// TestMalformedEnvelope checks that a damaged or foreign envelope fails
+// with ErrSealedSecretUnavailable.
+func TestMalformedEnvelope(t *testing.T) {
+	ctx := context.Background()
+	local := newLocal(t)
+	s := NewSealer(local)
+	env, err := s.Seal(ctx, sc, []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, damage := range map[string]func(*Envelope){
+		"version":           func(e *Envelope) { e.V = 2 },
+		"other key":         func(e *Envelope) { e.KEK = "vault-transit:other" },
+		"nonce encoding":    func(e *Envelope) { e.Nonce = "!" },
+		"nonce size":        func(e *Envelope) { e.Nonce = base64.StdEncoding.EncodeToString([]byte("short")) },
+		"ciphertext":        func(e *Envelope) { e.Ciphertext = "!" },
+		"wrapped prefix":    func(e *Envelope) { e.WrappedDEK = "vault:v1:" + strings.TrimPrefix(e.WrappedDEK, localPrefix) },
+		"wrapped encoding":  func(e *Envelope) { e.WrappedDEK = localPrefix + "!" },
+		"wrapped too short": func(e *Envelope) { e.WrappedDEK = localPrefix + "AAAA" },
+	} {
+		damaged := env
+		damage(&damaged)
+		if _, err := s.Unseal(ctx, sc, damaged); !errors.Is(err, ErrSealedSecretUnavailable) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// TestTransitMalformed covers Transit responses that cannot be used.
+func TestTransitMalformed(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/jwt-spiffe/login":
+			_, _ = w.Write([]byte(`{"auth":{"client_token":"t"}}`))
+		case "/v1/transit/encrypt/k":
+			_, _ = w.Write([]byte(`{"data":{"ciphertext":"not-vault"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":{"plaintext":"!"}}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cfg := TransitConfig{Address: srv.URL, AuthMount: "jwt-spiffe", Role: "r", JWTAudience: "a", Mount: "transit", KeyName: "k"}
+	kek, err := NewTransitKEK(cfg, jwtSource{}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kek.Wrap(context.Background(), []byte("k")); err == nil {
+		t.Error("unexpected ciphertext accepted")
+	}
+	if _, err := kek.Unwrap(context.Background(), "vault:v1:x"); err == nil {
+		t.Error("undecodable plaintext accepted")
+	}
+	if kek.ID() != "vault-transit:k" {
+		t.Errorf("ID = %q", kek.ID())
+	}
+}
+
+func TestTransitNoToken(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) }))
+	t.Cleanup(srv.Close)
+	cfg := TransitConfig{Address: srv.URL, AuthMount: "m", Role: "r", JWTAudience: "a", Mount: "transit", KeyName: "k"}
+	kek, _ := NewTransitKEK(cfg, failingJWT{}, srv.Client())
+	if err := kek.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "fetch JWT-SVID") {
+		t.Errorf("JWT failure: %v", err)
+	}
+	kek, _ = NewTransitKEK(cfg, jwtSource{}, srv.Client())
+	if err := kek.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "no token") {
+		t.Errorf("login without token: %v", err)
+	}
+	if _, err := NewTransitKEK(cfg, jwtSource{}, nil); err != nil {
+		t.Errorf("default client: %v", err)
+	}
+}
+
+type failingJWT struct{}
+
+func (failingJWT) FetchJWT(context.Context, string) (string, error) {
+	return "", errors.New("no SVID")
 }
