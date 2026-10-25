@@ -10,3 +10,14 @@ useDefault = true
 [allowlist]
 description = "git-ignored local state and build output"
 paths = ['''(^|/)test/lab/\.state/''', '''(^|/)dist/''', '''(^|/)build/''']
+
+# The lab pins the fingerprint of lxd-spiffe's packaging key (a public GPG
+# key fingerprint, 40 hex digits) in lab.env; generic-api-key mistakes it for
+# a key. Allowed only in that file and only for that shape.
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "the pinned fingerprint of a public packaging key"
+condition = "AND"
+paths = ['''(^|/)test/lab/lab\.env$''']
+regexes = ['''^[0-9A-F]{40}$''']

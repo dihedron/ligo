@@ -125,9 +125,9 @@ pg_record() {
 		'{scenarios: $scenarios, recorded_at: $at, storage_driver: $driver, inner_lxd: $inner_lxd,
 		  pg: {image: $image, image_fingerprint: $fingerprint, version: $pg, address: $ip, published: $published,
 		       ca_sha256: $ca, cert_sha256: $cert}}' >"$LAB_STATE_DIR/env.json.new"
-	# keep when the snapshot was taken
+	# keep what the other scenarios and the snapshot recorded
 	if [[ -f "$LAB_STATE_DIR/env.json" ]]; then
-		jq -s '.[0] + (.[1] | {snapshot_at} | with_entries(select(.value != null)))' \
+		jq -s '.[1] + .[0]' \
 			"$LAB_STATE_DIR/env.json.new" "$LAB_STATE_DIR/env.json" >"$LAB_STATE_DIR/env.json.merged"
 		mv "$LAB_STATE_DIR/env.json.merged" "$LAB_STATE_DIR/env.json.new"
 	fi

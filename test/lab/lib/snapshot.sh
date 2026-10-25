@@ -11,8 +11,8 @@ has_snapshot() { lxc query "/1.0/instances/lxd/snapshots/$SNAPSHOT?project=$LAB_
 lab_snapshot() {
 	section "Snapshot"
 	lab_stop
-	lxd delete lxd/"$SNAPSHOT" >/dev/null 2>&1 || true
-	lxd snapshot lxd "$SNAPSHOT"
+	lxd_once 120 delete lxd/"$SNAPSHOT" >/dev/null 2>&1 || true
+	lxd_once 300 snapshot lxd "$SNAPSHOT" || die "cannot snapshot the lab VM"
 	jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.snapshot_at = $at' "$LAB_STATE_DIR/env.json" >"$LAB_STATE_DIR/env.json.new" &&
 		mv "$LAB_STATE_DIR/env.json.new" "$LAB_STATE_DIR/env.json"
 	info "lxd: snapshot $SNAPSHOT taken"
@@ -25,7 +25,7 @@ lab_reset() {
 	if vm_running lxd; then
 		lxd stop lxd --force
 	fi
-	lxd restore lxd "$SNAPSHOT"
+	lxd_once 300 restore lxd "$SNAPSHOT" || die "cannot restore the lab VM"
 	info "lxd: restored to $SNAPSHOT"
 	lab_start
 }
@@ -53,4 +53,8 @@ lab_start() {
 	done
 	inner_wait pg
 	pg_wait_ready
+	if inner_exists ligo1; then
+		inner_wait ligo1
+		spire_check
+	fi
 }
