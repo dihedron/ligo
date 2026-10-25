@@ -16,9 +16,9 @@ pki_up() {
 			-keyout "$dir/pg.key" -out "$dir/pg.csr" -subj "/CN=pg.ligo.lab" 2>/dev/null
 		openssl x509 -req -in "$dir/pg.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
 			-days 365 -out "$dir/pg.crt" \
-			-extfile <(printf 'subjectAltName=IP:%s,DNS:pg.ligo.lab\nextendedKeyUsage=serverAuth\n' "$(pg_ip)") 2>/dev/null
+			-extfile <(printf 'subjectAltName=DNS:pg.ligo.lab,IP:%s,IP:%s\nextendedKeyUsage=serverAuth\n' "$(pg_ip)" "$(lxd_ip)") 2>/dev/null
 		rm -f "$dir/pg.csr"
-		info "PostgreSQL server certificate issued for $(pg_ip)"
+		info "PostgreSQL server certificate issued for pg.ligo.lab, $(pg_ip) and $(lxd_ip)"
 	fi
 	chmod 0600 "$dir"/*.key
 	local role

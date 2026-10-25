@@ -70,12 +70,16 @@ select_scenarios() {
 
 # --- Addresses ----------------------------------------------------------------
 
-# subnet_prefix: the first three octets of LAB_SUBNET (a /24).
-subnet_prefix() { printf '%s' "${LAB_SUBNET%.*}"; }
-# lab_gateway: the bridge's address on the lab subnet.
-lab_gateway() { printf '%s.1' "$(subnet_prefix)"; }
-# pg_ip: the PostgreSQL VM's address.
-pg_ip() { printf '%s.%s' "$(subnet_prefix)" "$LAB_PG_HOST"; }
+# prefix24 CIDR: the first three octets of a /24.
+prefix24() { printf '%s' "${1%.*}"; }
+# lab_gateway: the outer bridge's address on the lab subnet.
+lab_gateway() { printf '%s.1' "$(prefix24 "$LAB_SUBNET")"; }
+# lxd_ip: the lab VM's address on the lab subnet.
+lxd_ip() { printf '%s.%s' "$(prefix24 "$LAB_SUBNET")" "$LAB_LXD_HOST"; }
+# inner_gateway: the inner bridge's address.
+inner_gateway() { printf '%s.1' "$(prefix24 "$LAB_INNER_SUBNET")"; }
+# pg_ip: the PostgreSQL container's inner address.
+pg_ip() { printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$LAB_PG_HOST"; }
 
 # --- LXD ----------------------------------------------------------------------
 

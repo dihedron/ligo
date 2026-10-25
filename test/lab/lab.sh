@@ -14,6 +14,8 @@ source "$LAB_DIR/lib/preflight.sh"
 source "$LAB_DIR/lib/lxd.sh"
 # shellcheck source=lib/pki.sh
 source "$LAB_DIR/lib/pki.sh"
+# shellcheck source=lib/inner.sh
+source "$LAB_DIR/lib/inner.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -35,15 +37,16 @@ commands:
                             run "go test -tags integration" (default ./...)
                             with that environment
   psql [--as ROLE | --superuser] [args]
-                            psql in the pg VM as ligo_ROLE (migrator, app,
+                            psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
                             postgres over the Unix socket
   snapshot                  save the VMs as the lab's baseline
   reset                     return the VMs to the baseline (an empty
                             database), and wait until it answers
   stop / start              stop the VMs cleanly / start them as they were
-  ssh <vm> [command]        a root shell, or a command, in a VM
-  logs <vm> [unit]          a VM's cloud-init log, or a unit's journal
+  ssh <name> [command]      a root shell, or a command, in the lab VM (lxd)
+                            or an inner instance (pg, ...)
+  logs <name> [unit]        its cloud-init log, or a unit's journal
   help                      this text
 
 settings: lab.env, overridden by lab.local.env and the environment
@@ -52,7 +55,7 @@ USAGE
 
 # require_lab fails unless "up" has built the lab.
 require_lab() {
-	if [[ ! -f "$LAB_STATE_DIR/env.json" ]] || ! vm_exists pg; then
+	if [[ ! -f "$LAB_STATE_DIR/env.json" ]] || ! vm_exists lxd; then
 		die "the lab is not built: run lab.sh up"
 	fi
 }
@@ -69,6 +72,7 @@ cmd_up() {
 	preflight
 	pki_up
 	lxd_up
+	lxd_vm_up
 	pg_up
 	pg_record
 	has_snapshot || lab_snapshot
@@ -78,17 +82,24 @@ cmd_up() {
 
 cmd_down() {
 	confirm "Destroy the ligo lab (VMs, snapshots, network, project, pool, state)?" || die "cancelled"
-	if vm_exists pg; then
-		lxd delete pg --force && info "VM pg deleted"
-	fi
+	local vm
+	for vm in lxd pg; do # pg: the VM of the lab's first layout
+		if vm_exists "$vm"; then
+			lxd delete "$vm" --force && info "VM $vm deleted"
+		fi
+	done
 	lxd_down
 	rm -rf "$LAB_STATE_DIR"
 	info "state directory removed"
 }
 
 cmd_status() {
-	section "VMs ($LAB_PROJECT)"
+	section "VM ($LAB_PROJECT)"
 	lxd list -c nsN4 -f compact 2>/dev/null || info "no project $LAB_PROJECT"
+	if vm_running lxd; then
+		section "Inner instances"
+		inner list -c ntsN4 -f compact
+	fi
 	section "Recorded (env.json)"
 	if [[ -f "$LAB_STATE_DIR/env.json" ]]; then jq . "$LAB_STATE_DIR/env.json"; else info "nothing recorded"; fi
 }
@@ -126,15 +137,28 @@ cmd_psql() {
 	esac
 }
 
-cmd_ssh() {
-	local vm="${1:?ssh: which VM?}"
+# on NAME ARGS: runs ARGS in the lab VM ("lxd") or in an inner instance.
+on() {
+	local name="$1"
 	shift
-	if (($#)); then lxd exec "$vm" -- "$@"; else lxd exec "$vm" -- bash -l; fi
+	if [[ "$name" == lxd ]]; then lxd exec lxd -- "$@"; else inner_exec "$name" "$@"; fi
+}
+
+cmd_ssh() {
+	local name="${1:?ssh: lxd or an inner instance?}"
+	shift
+	if (($#)); then
+		on "$name" "$@"
+	elif [[ "$name" == lxd ]]; then
+		lxd exec lxd -- bash -l
+	else
+		lxd exec lxd -t -- lxc exec "$name" -- bash -l
+	fi
 }
 
 cmd_logs() {
-	local vm="${1:?logs: which VM?}"
-	if (($# > 1)); then lxd exec "$vm" -- journalctl --no-pager -u "$2"; else lxd exec "$vm" -- cat /var/log/cloud-init-output.log; fi
+	local name="${1:?logs: lxd or an inner instance?}"
+	if (($# > 1)); then on "$name" journalctl --no-pager -u "$2"; else on "$name" cat /var/log/cloud-init-output.log; fi
 }
 
 main() {
