@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sealing"
 	"go.yaml.in/yaml/v3"
@@ -190,37 +190,9 @@ type Approval struct {
 }
 
 type Governance struct {
-	SourceScopes  []SourceScope       `yaml:"source_scopes"`
-	NamePrefixes  []engine.NamePrefix `yaml:"name_prefixes"`
-	Interconnects Interconnects       `yaml:"interconnects"`
-}
-
-// SourceScope is the scope extractor of one trust domain (§3.9).
-type SourceScope struct {
-	TrustDomain   string `yaml:"trust_domain"`
-	Mode          string `yaml:"mode"`
-	Scope         string `yaml:"scope"`
-	PathRegex     string `yaml:"path_regex"`
-	ScopeTemplate string `yaml:"scope_template"`
-}
-
-type Interconnects struct {
-	DefaultCrossScope string             `yaml:"default_cross_scope"`
-	Rules             []InterconnectRule `yaml:"rules"`
-}
-
-type InterconnectRule struct {
-	Name                string               `yaml:"name"`
-	From                []string             `yaml:"from"`
-	To                  []string             `yaml:"to"`
-	Action              string               `yaml:"action"`
-	AdditionalApprovals []AdditionalApproval `yaml:"additional_approvals"`
-	DistinctApprovers   *bool                `yaml:"distinct_approvers"`
-}
-
-type AdditionalApproval struct {
-	Name  string `yaml:"name"`
-	Scope string `yaml:"scope"`
+	SourceScopes  []governance.SourceScope `yaml:"source_scopes"`
+	NamePrefixes  []governance.NamePrefix  `yaml:"name_prefixes"`
+	Interconnects governance.Interconnects `yaml:"interconnects"`
 }
 
 type BindingsPolicy struct {
@@ -295,17 +267,9 @@ type Theme struct {
 }
 
 type BreakGlass struct {
-	MinJustificationLength   int                `yaml:"min_justification_length"`
-	IncidentReferencePattern string             `yaml:"incident_reference_pattern"`
-	Policies                 []BreakGlassPolicy `yaml:"policies"`
-}
-
-type BreakGlassPolicy struct {
-	Scopes     []string      `yaml:"scopes"`
-	DefaultTTL time.Duration `yaml:"default_ttl"`
-	MaxTTL     time.Duration `yaml:"max_ttl"`
-	MaxOpen    int           `yaml:"max_open"`
-	WarnBefore time.Duration `yaml:"warn_before"`
+	MinJustificationLength   int                           `yaml:"min_justification_length"`
+	IncidentReferencePattern string                        `yaml:"incident_reference_pattern"`
+	Policies                 []governance.BreakGlassPolicy `yaml:"policies"`
 }
 
 type Notifications struct {
@@ -456,4 +420,22 @@ func (c *Config) applyDefaults() {
 	if c.Bindings.ExpiryWarning == 0 {
 		c.Bindings.ExpiryWarning = 168 * time.Hour
 	}
+}
+
+// Policy returns the governance policy of the configuration (§8.2 rule 16).
+func (c *Config) Policy() *governance.Policy {
+	p := &governance.Policy{
+		RequiredScopes:           c.Authorization.Approval.RequiredScopes,
+		RequireDistinctApprovers: *c.Authorization.Approval.RequireDistinctApproversAcrossScopes,
+		SourceScopes:             c.Governance.SourceScopes,
+		NamePrefixes:             c.Governance.NamePrefixes,
+		Interconnects:            c.Governance.Interconnects,
+		BreakGlassPolicies:       c.BreakGlass.Policies,
+	}
+	for _, tp := range c.TargetProviders {
+		for _, pl := range tp.Platforms {
+			p.Platforms = append(p.Platforms, governance.PlatformScopes{Platform: pl.Name, Scope: pl.Scope, TargetScopes: pl.TargetScopes})
+		}
+	}
+	return p
 }

@@ -146,3 +146,14 @@ func TestInsecureDev(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// TestPolicy checks the governance policy built from the §8.1 example.
+func TestPolicy(t *testing.T) {
+	p := parse(t, example(t)).Policy()
+	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
+		t.Errorf("AC-51: %+v", d)
+	}
+	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 2 || len(p.SHA256()) != 64 {
+		t.Errorf("policy: %+v", p)
+	}
+}

@@ -29,7 +29,7 @@ var (
 	ruleNameRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	partyNameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess}
-	knownKinds      = []engine.Kind{engine.KindSource, engine.KindTarget, engine.KindBinding}
+	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	maxPlatformFlow = 32
 )
 
@@ -261,7 +261,7 @@ func (c *checker) authorization(cfg *Config) {
 				c.failf(14, "break_glass must be bound to an ldap_group_dn, never to a SPIFFE ID (%q)", who)
 			}
 			for _, s := range b.Scopes {
-				if !slices.ContainsFunc(cfg.BreakGlass.Policies, func(p BreakGlassPolicy) bool { return slices.Contains(p.Scopes, s) }) {
+				if !slices.ContainsFunc(cfg.BreakGlass.Policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Scopes, s) }) {
 					c.failf(14, "break_glass binding %q: scope pattern %q appears in no break_glass.policies entry", who, s)
 				}
 			}
@@ -365,17 +365,6 @@ func (c *checker) governance(cfg *Config) {
 			parties[a.Name] = true
 		}
 	}
-}
-
-// Extractor returns the scope extractor of a source_scopes entry.
-func (s SourceScope) Extractor() (*governance.Extractor, error) {
-	switch s.Mode {
-	case "static":
-		return governance.NewStaticExtractor(s.Scope)
-	case "path_template":
-		return governance.NewPathTemplateExtractor(s.PathRegex, s.ScopeTemplate)
-	}
-	return nil, fmt.Errorf("mode must be static or path_template, not %q", s.Mode)
 }
 
 // platformFlows checks the static part of rule 19.

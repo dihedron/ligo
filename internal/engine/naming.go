@@ -52,16 +52,9 @@ func DerivedPrincipalName(id uuid.UUID, prefix string) (string, error) {
 	return prefix + strings.ToLower(principalEncoding.EncodeToString(sum[:]))[:16], nil
 }
 
-// NamePrefix is an entry of governance.name_prefixes (§3.8).
-type NamePrefix struct {
-	Scopes    []string `yaml:"scopes"`
-	Prefix    string   `yaml:"prefix"`
-	Resources []Kind   `yaml:"resources"` // empty means all three kinds
-}
-
 // CheckName checks a new resource's name against §3.8. ownerScope is the
 // source's scope for a source and a binding, the target's for a target.
-func CheckName(kind Kind, name, ownerScope string, prefixes []NamePrefix) error {
+func CheckName(kind Kind, name, ownerScope string, prefixes []governance.NamePrefix) error {
 	if !ValidName(name) {
 		return fmt.Errorf("%w: %q must match %s", ErrInvalidName, name, nameRE)
 	}
@@ -78,9 +71,9 @@ func CheckName(kind Kind, name, ownerScope string, prefixes []NamePrefix) error 
 // ResolvePrefix returns the prefix of the first entry matching kind and
 // scope, with {n} replaced by the n-th segment of scope, or "" if none
 // matches.
-func ResolvePrefix(kind Kind, scope string, prefixes []NamePrefix) (string, error) {
+func ResolvePrefix(kind Kind, scope string, prefixes []governance.NamePrefix) (string, error) {
 	for _, p := range prefixes {
-		if len(p.Resources) > 0 && !slices.Contains(p.Resources, kind) {
+		if len(p.Resources) > 0 && !slices.Contains(p.Resources, string(kind)) {
 			continue
 		}
 		if !slices.ContainsFunc(p.Scopes, func(pattern string) bool { return governance.ScopeMatches(pattern, scope) }) {

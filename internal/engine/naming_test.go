@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/dihedron/ligo/internal/governance"
 )
 
 // TestAppendixB checks the derived principal name against values computed
@@ -60,9 +62,9 @@ func TestValidName(t *testing.T) {
 	}
 }
 
-var prefixes = []NamePrefix{
+var prefixes = []governance.NamePrefix{
 	{Scopes: []string{"cloud/*"}, Prefix: "{2}-{3}-"},
-	{Scopes: []string{"dc/corp-prod/*"}, Prefix: "prod-", Resources: []Kind{KindTarget}},
+	{Scopes: []string{"dc/corp-prod/*"}, Prefix: "prod-", Resources: []string{string(KindTarget)}},
 }
 
 // TestAC56 is acceptance scenario AC-56.
