@@ -1,0 +1,12 @@
+# Gitleaks configuration: the default rules, with one allowlist for paths
+# that git ignores and that "make secrets" still sees when it scans the
+# working tree: the local lab's state (its CA, server key and passwords),
+# and build output. They are never committed.
+title = "ligo"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "git-ignored local state and build output"
+paths = ['''(^|/)test/lab/\.state/''', '''(^|/)dist/''', '''(^|/)build/''']

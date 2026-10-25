@@ -56,3 +56,17 @@ fuzz: ## run every fuzz target for FUZZTIME each (default 30s); go test runs the
 			go test "$$pkg" -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
 		done; \
 	done
+
+# CONTAINER runs the secret scanners; podman works as well
+CONTAINER ?= docker
+
+.PHONY: secrets
+secrets: ## scan the history and the working tree for secrets with gitleaks and TruffleHog, as CI does (run before every commit)
+	@echo "gitleaks: history..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest git /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@echo "gitleaks: working tree..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest dir /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@echo "TruffleHog: history..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest git file:///repo --results=verified,unknown --fail --no-update
+	@echo "TruffleHog: working tree..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest filesystem /repo --exclude-paths=/repo/.trufflehog-exclude --results=verified,unknown --fail --no-update
