@@ -1,6 +1,6 @@
 module github.com/dihedron/ligo
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/jessevdk/go-flags v1.6.1

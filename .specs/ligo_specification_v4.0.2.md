@@ -1,9 +1,9 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.1` (`v1alpha2` API)
+- **Document Version:** `4.0.2` (`v1alpha2` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.0.0` (the web UI moves to htmx 4, §0.5). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.6).
-- **Target Stack:** Go 1.23+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
+- **Supersedes:** `4.0.1` (no migration from 3.x, Go 1.27.3, §0.5). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.6). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.7).
+- **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
 ---
@@ -71,7 +71,15 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 - A **zone** is a technical placement (ADR-03): one SPIRE trust domain, its agent socket, and the plugin processes attached to it. Zones decide where plugins run and which SVIDs they hold. A platform belongs to one zone.
 - A **governance scope** (or simply **scope**) is an organisational ownership boundary (ADR-13, §3.9), such as a cloud tenancy (`cloud/fin-01/payments`) or a data centre (`dc/corp-prod`). Every source, target and platform has an owner scope. Scopes decide who may propose, approve, see and revoke.
 
-### 0.5 Changelog from 4.0.0 (4.0.1)
+### 0.5 Changelog from 4.0.1 (4.0.2)
+| Area | Change |
+| :--- | :--- |
+| Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
+| Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
+
+No change to the API, the data model or the workflows.
+
+### 0.6 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
 | :--- | :--- |
 | Web UI (§7.4, EXT-14) | The UI moves from htmx 2.x to **htmx 4.0** (released 2026-08-28), pinned to `4.0.0` and served from `ligo`'s own static files. The `htmx-config` is rewritten for htmx 4: `allowEval`, `allowScriptTags`, `selfRequestsOnly`, `historyCacheSize` and `responseHandling` no longer exist. 4xx responses are now swapped by default, so `409` and `422` fragments are directed to the form's error container with `hx-status:409`/`hx-status:422`, and `5xx` is added to `noSwap`. Requests stay same-origin (`mode: same-origin`, the htmx 4 default) and the request timeout is raised to 90 s, above the plugin RPC timeout. htmx 4 no longer stores pages in browser storage for history. Attribute inheritance is no longer implicit, so templates set every htmx attribute on the element that needs it. The CSRF header hook in `app.js` uses the htmx 4 event `htmx:config:request`. |
@@ -81,7 +89,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 
 No change to the API, the data model or the workflows.
 
-### 0.6 Changelog from 3.0.2 (4.0.0)
+### 0.7 Changelog from 3.0.2 (4.0.0)
 | Area | Change |
 | :--- | :--- |
 | Resource model (ADR-15, §0.4, §3) | **Breaking change.** Sources and targets become first-class resources, managed through the API with their own change requests, revisions, audit history and lifecycle (`ACTIVE`, `DEPRECATED`, `RETIRED`). A **Source** is an identity specification (trust domain, SVID regex, sample SPIFFE IDs) with metadata; a **Target** is a specific resource on a platform, with access levels and network flows; **Platforms** replace 3.x target instances and stay in `server.yaml`. A **Binding** links one source to one target at one access level, with optional parameters and expiry, and at most one binding exists per (source, target). The free-form `spec`/`roleGrants` of 3.x is replaced by access levels reviewed once by the target and platform owners. Targets are register-only: publishing a target does not create the resource (FW-3). API version `v1alpha2`. |
@@ -100,14 +108,14 @@ No change to the API, the data model or the workflows.
 | Open issues and future work (§13) | FW-1 resolved by first-class targets. FW-2 becomes consumer policies stored with targets. New FW-3 (target provisioning), FW-4 (access recertification) and OI-3 (privilege identifiers of the existing plugins). |
 | Process flows (Appendix E) | E.3, E.4, E.6 and E.7 updated; new E.14 (register and narrow a source), E.15 (publish a target), E.16 (propagation), E.17 (catalog and network pre-flight check), E.18 (binding expiry). |
 
-### 0.7 Changelog from 3.0.1 (3.0.2)
+### 0.8 Changelog from 3.0.1 (3.0.2)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | The conceptual diagram is split into three parts and the logical diagram into two, with the logical diagrams showing keys and the main attributes only (full columns stay in §4.2), so that every diagram remains legible when printed. Content unchanged. |
 
 A printable PDF edition is generated from this Markdown source; this file remains authoritative.
 
-### 0.8 Changelog from 3.0.0 (3.0.1)
+### 0.9 Changelog from 3.0.0 (3.0.1)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | New conceptual model (business entities, including those held in configuration, with definitions, relationships and cardinalities) and logical model (Mermaid entity-relationship diagrams), with a normative table of every relationship, how it is enforced (foreign key, trigger, startup check or none) and why, and the deliberate denormalizations. Checked against the DDL of §4.2. |
@@ -115,7 +123,7 @@ A printable PDF edition is generated from this Markdown source; this file remain
 
 No behavioral change.
 
-### 0.9 Changelog from 2.9.2 (3.0.0)
+### 0.10 Changelog from 2.9.2 (3.0.0)
 | Area | Change |
 | :--- | :--- |
 | Governance scopes (ADR-13, §3.1, §3.3, §3.7, §4.2, §7.2.2, §8.1, §8.2, Appendix D) | Authorization and approval move from zones to **governance scopes**: slash-separated paths (`dc/corp-prod`, `cloud/fin-01/payments`) that model both multi-tenant cloud tenancies and flat, centrally managed data centres. Every binding has an immutable **source scope**, derived from the fixed literal prefix of its SVID regex by an extractor configured per source trust domain, and a **target scope**, configured on its target instance. A regex whose fixed prefix does not identify one scope is rejected, so no pattern can span two tenancies. Role bindings use `scopes` instead of `zones`; `approval.required_zones` becomes `required_scopes`. Zones remain the technical placement of plugins and trust domains. **Breaking change** for configuration, database schema and API. |
@@ -129,33 +137,33 @@ No behavioral change.
 | Fix (§4.2) | `chk_regex_shape` contained `NOT LIKE '%\$'`. In `LIKE`, `\$` is an escaped literal `$`, so the condition contradicted `LIKE '%$'` and the check rejected **every** valid regex. Replaced by `right(source_svid_regex, 2) <> '\$'`. Found while testing the 3.0.0 schema. |
 | Future work (§13) | FW-1: a target scope chosen by a request field, only for plugins that guarantee the field determines the resource. FW-2: standing interconnection approvals stored in the database. |
 
-### 0.10 Changelog from 2.9.1 (2.9.2)
+### 0.11 Changelog from 2.9.1 (2.9.2)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §5.9, §7.1) | Go module path changed from the placeholder `github.com/yourorg/ligo` to `github.com/dihedron/ligo`, including both Protobuf `go_package` options. |
 
-### 0.11 Changelog from 2.9.0 (2.9.1)
+### 0.12 Changelog from 2.9.0 (2.9.1)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §3.1) | Resource API version changed from `bindings.spiffe.io/v1alpha1` to `ligo.dihedron.org/v1alpha1`, a domain owned by the project, instead of a name under the SPIFFE project's domain. |
 
-### 0.12 Changelog from 2.8.0 (2.9.0)
+### 0.13 Changelog from 2.8.0 (2.9.0)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4 and throughout) | Application renamed from `binding` to `ligo` (Latin for "I bind"). Every application-derived identifier was renamed: binary, CLI and `cmd/` directory, Go module and Protobuf packages, environment variables, metrics, DBOS workflow IDs, PostgreSQL roles, advisory locks and `NOTIFY` channel, cookies, HTTP headers, file system paths, SPIFFE IDs, Vault/OpenBao objects, problem URN, endpoint annotation, ownership tag, go-plugin handshake, example host and group names. Identifiers that name the binding resource are unchanged (§0.4). Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.13 Changelog from 2.7.0 (2.8.0)
+### 0.14 Changelog from 2.7.0 (2.8.0)
 | Area | Change |
 | :--- | :--- |
 | Testing (§11.1, §8.3, EXT-17) | All code MUST be tested on a lab built as code in `deploy/lab/`: two SPIRE servers (two trust domains) with agents, Vault or OpenBao, two `binding` replicas, PostgreSQL, an LDAP directory, workload hosts, target systems and a webhook receiver, extended as development needs emerge. Production-like security settings, real machine separation where attestation is tested, fault injection, a merge gate on the full lab suite, both Vault and OpenBao supported only if both pass, clean state per run, no production data, archived evidence. Acceptance scenarios moved to §11.2. |
 
-### 0.14 Changelog from 2.6.0 (2.7.0)
+### 0.15 Changelog from 2.6.0 (2.7.0)
 | Area | Change |
 | :--- | :--- |
 | Final consistency review (ADR-11, §3.1, §3.6, §4.2, §4.3, §5.6, §6.2, §6.3, §7.2, §7.6, §8.2) | Break-glass: ratify/revert concurrency defined (binding row lock, `409 break-glass-not-open`); refused in maintenance mode (reverts still run); revert payload and its re-validation defined; deleting a binding closes its open break-glass change, which then falls under the overdue-review rule; "emit once" markers stored (`break_glass_warned_at`, `review_overdue_notified_at`); API needs Basic credentials, UI needs password re-entry, failures audited; `status.breakGlass` in the admin representation; RBAC rows for `break_glass`, ratify and revert. Also: stale text removed (ADR-11, §6.2), `zones: ["*"]` defined, `s3-e2ee.v1` marked as planned, dispatcher added to startup, shutdown and the HA singletons, webhook `eventId` made restore-safe (UUIDv7 instead of the outbox row number), maintenance list includes break-glass, SVG responses replace the page CSP, theme wording made consistent with T-27, `min_justification_length ≥ 20` validated. New AC-38a–AC-38c. |
 | UI theming (§7.4, §7.6, §8.1, §8.2, T-27, AC-39–AC-43) | External theming through design tokens: conventional files in `/etc/binding/theme` (`theme.css`, `logo`, `logo-dark`, `favicon`, `fonts/`), explicit paths and token colors in `server.yaml` (explicit paths take precedence). Light, dark and system color modes, with a per-user choice stored in a cookie and rendered server-side (no inline script). Theme files validated at startup, served from memory with safe types and sandboxed SVG, and audited in `CONFIG_LOADED`. CSP gains `font-src 'self'`. |
 
-### 0.15 Changelog from 2.5.0 (2.6.0)
+### 0.16 Changelog from 2.5.0 (2.6.0)
 | Area | Change |
 | :--- | :--- |
 | Break-glass (ADR-12, INV-14, INV-16, §4.2, §6.2, §6.3, §7.2, §7.4, §7.5, §8.1, §8.2, §8.4, T-26, R-07, AC-31–AC-38) | People in a per-zone `break_glass` LDAP group can apply emergency changes in approval-required zones immediately, with fresh re-authentication, justification, incident reference and TTL. Creates and updates are reverted automatically on expiry unless a different approver ratifies them; emergency deletes are final but still reviewed. Database-enforced (`chk_break_glass`, `chk_ratification`, `chk_revert`). New `/v1/admin/break-glass`, `/ratify` and `/revert` endpoints, UI form and banner, CLI commands. |
@@ -163,12 +171,12 @@ No behavioral change.
 | Scope | The plugin SDK, the external plugins (Oracle, PostgreSQL, Kafka, OpenStack, Nexus), the Terraform/OpenTofu provider and the Ansible collection will each have their own specification, with the same structure as this one. They are not part of this document. |
 | Open issues (§13) | OI-1: secondary enforcement points (Vault, Keystone, Kafka) cannot express binding regexes. OI-2: the example Oracle + OpenLDAP wiring is not supported by Oracle. |
 
-### 0.16 Changelog from 2.4.0 (2.5.0)
+### 0.17 Changelog from 2.4.0 (2.5.0)
 | Area | Change |
 | :--- | :--- |
 | Delegated approval (ADR-11, INV-14, §4.2, §6.2, §7.2, §8.1, §8.2, §8.4, §10.6, T-25, R-06, AC-27–AC-30) | New `trusted_automation` role lets a portal or automation platform create, update and delete bindings in approval-required zones without a human approver in `binding`, by delegating approval to its upstream process. SPIFFE principals only (enforced in the database); scoped by zone and optional target instances; every request carries an upstream `approvalReference` (optional format pattern); optional self-asserted `automationContext`; optional per-principal rate limit. Change requests record `approval_basis` (`HUMAN`, `ZONE_AUTO`, `DELEGATED`), and `chk_four_eyes` enforces which decider each basis allows. New §10.6 explains what SPIFFE attestation can and cannot distinguish for Ansible and Terraform, and how to separate automation from people running the same tools. |
 
-### 0.17 Changelog from 2.3.1 (2.4.0)
+### 0.18 Changelog from 2.3.1 (2.4.0)
 | Area | Change |
 | :--- | :--- |
 | Regex validator (Appendix A, ADR-06, T-02, AC-03) | Closed a bypass of segment confinement: a `/` inside a repeated or optional group (`(?:[a-z]+\|/)+`, `(/[a-z]+)*`, `(/[a-z]+)?`) let one pattern match identities at any depth. New rule 7d rejects any `/` under `*`, `+`, `?` or `{n,m}`. Removed the 2.3.0 empty-alternation-branch rule, which protected nothing and was trivially bypassed. Appendix A now states the segment-confinement property, gives the rationale for every rule, and includes normative test vectors (A.5). |
@@ -182,7 +190,7 @@ No behavioral change.
 | Principal names (Appendix B, §3.4, §8.1) | Default prefix changed from `bnd-` to `bnd_`, and `-` removed from the custom-prefix grammar (now `^[a-zA-Z][a-zA-Z0-9_]{0,3}$`; example `svc_`). A hyphen is illegal in unquoted Oracle identifiers and needs quoting in PostgreSQL, so 2.3.0 names were rejected by the Oracle plugin's own identifier grammar. |
 | Trust bundles (§7.1, §8.1, §8.2, §10.5, T-24, EXT-16) | Each accepted trust domain now has exactly one authoritative bundle source (its own zone's socket, or a declared `via_zone` for federated domains), closing a path by which a lower-assurance SPIRE server could inject a bundle for another trust domain. `binding` registers on every zone's agent, because SPIRE releases bundles only to registered callers (verified in SPIRE's source, EXT-16). New `federated_trust_domains` setting and Topology C document how to verify additional trust domains through federation with a single agent. |
 
-### 0.18 Changelog from 2.3.0 (editorial patch 2.3.1)
+### 0.19 Changelog from 2.3.0 (editorial patch 2.3.1)
 | Area | Change |
 | :--- | :--- |
 | Editorial | Removed stray `[cite: 1]` tags throughout the prose. |
@@ -195,7 +203,7 @@ No behavioral change.
 
 No behavioral change. Design issues raised in the 2.3.0 review are addressed separately.
 
-### 0.19 Changelog from 2.2.0 (introduced in 2.3.0)
+### 0.20 Changelog from 2.2.0 (introduced in 2.3.0)
 | Area | Change |
 | :--- | :--- |
 | Regex AST (Appendix A) | Forbade `OpAnyCharNotNL` (normal `.`), any `OpCharClass` containing `'/'` (`0x2F`), and `OpEmptyMatch` inside `OpAlternate`, preventing wildcards from crossing SPIFFE path segment boundaries (`/`) or matching empty alternation branches. |
@@ -208,13 +216,13 @@ No behavioral change. Design issues raised in the 2.3.0 review are addressed sep
 | Naming (Appendix B) | Shortened `derived_principal_name` from 23 characters to 20 characters (`"bnd-"` + 16 Base32 chars = 80 bits of entropy) so it satisfies Active Directory's 20-char `sAMAccountName` limit out of the box without plugin-specific truncation. |
 | Pagination & CLI (§7.2.3, §8.4) | Standardized keyset pagination cursors across all list endpoints. Added normative `github.com/jessevdk/go-flags` CLI command/subcommand structure (`serve`, `apply`, `get`, `list`, `delete`, `retry`, `rotate`, `cr`, `target`, `audit`). |
 
-### 0.20 Changelog from 2.1.0 (introduced in 2.2.0)
+### 0.21 Changelog from 2.1.0 (introduced in 2.2.0)
 | Area | Change |
 | :--- | :--- |
 | Naming | Application renamed from `bindd` to `binding`. Every derived identifier was renamed accordingly (§0.4). |
 | Config | `service.application_version` set to `2.2.0` (now `3.0.2`). |
 
-### 0.21 Changelog from 2.0.0 (introduced in 2.1.0)
+### 0.22 Changelog from 2.0.0 (introduced in 2.1.0)
 | Area | Change |
 | :--- | :--- |
 | Regex security | SVID regex validated on the parsed AST (alternation/flag bypass closed); matching moved from PostgreSQL ARE to Go RE2 (ADR-06, Appendix A). |
@@ -1317,7 +1325,7 @@ erDiagram
 
 ### 4.2 Migration `migrations/001_init_schema.sql`
 
-4.0 replaces the 3.x schema. There is no in-place migration from 3.x: §8.4 describes the export and import path (`ligo migrate-v3`).
+4.0 replaces the 3.x schema. There is no migration from 3.x: 4.0 is installed on an empty database.
 
 **Normative.**
 ```sql
@@ -3909,7 +3917,6 @@ ligo/
 │   ├── propagation/                     # propagation queue and propagator (§6.8)
 │   ├── reconcile/                       # scheduled reapply/rotation
 │   ├── regexpolicy/                     # Appendix A validator, narrowing check (§3.10, App. D.3)
-│   ├── migratev3/                       # export of 3.x bindings into 4.0 resources (§8.5)
 │   ├── resolution/                      # workload resolution cache (§4.5)
 │   ├── sealing/                         # Vault Transit / local-kek sealers (ADR-07)
 │   ├── server/{adminhttp,workloadsrv}/
@@ -3972,7 +3979,6 @@ type Options struct {
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
 	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
-	Migrate MigrateV3Command    `command:"migrate-v3" description:"Export 3.x bindings as 4.0 manifests (§8.5)."`
 }
 
 // ResourceArgs names one resource: `ligo get binding payments-ledger-workers-ledger`.
@@ -4332,14 +4338,6 @@ type GovCheckCommand struct {
 	File string `short:"f" long:"file" required:"true" description:"Manifest to evaluate (YAML or JSON, or '-' for stdin)."`
 }
 
-// ---------------------------------------------------------------------------
-// Migration from 3.x: `ligo migrate-v3` (§8.5). Reads a 3.x database directly.
-// ---------------------------------------------------------------------------
-type MigrateV3Command struct {
-	ConfigFile string `short:"c" long:"config" env:"LIGO_CONFIG" default:"/etc/ligo/server.yaml" description:"4.0 server.yaml (platforms, scopes, prefixes)."`
-	V3DSNEnv   string `long:"v3-dsn-env" default:"LIGO_V3_PG_DSN" description:"Environment variable holding the read-only DSN of the 3.x database."`
-	OutDir     string `long:"out" required:"true" description:"Directory for the generated manifests and the report."`
-}
 ```
 
 **Manifests (Normative).** A manifest document has `apiVersion: ligo.dihedron.org/v1alpha2`, `kind` (`Source`, `Target` or `Binding`) and the create or update body of that kind (§3.2, §3.3, §7.2.3). A file may contain several documents (YAML `---` or a JSON array); `ligo apply` submits sources first, then targets, then bindings, and a binding whose source is created in the same file is filed with that source as its inline dependency (§7.2.4).
@@ -4352,17 +4350,6 @@ type MigrateV3Command struct {
   `ligo cr approve <cr-id> --sha256 <payloadSha256> --side <side> -m "<comment>"`.
 - When the interconnection policy denies the request, the CLI prints the source and target scopes and the rule that denied it; `ligo governance check` shows the same evaluation before anything is submitted.
 - When a source or grants update is not a narrowing, the CLI prints the witness (`422 widening-not-allowed`) and suggests registering a new source or adding a new access level.
-
-### 8.5 Migration from 3.x
-
-4.0 changes the resource model, so a 3.x database is not upgraded in place. `ligo migrate-v3` reads a 3.x database (read-only DSN) and the 4.0 `server.yaml`, and writes manifests plus a report:
-1. **Platforms.** Every 3.x target instance must exist as a platform of the same name, type and zone in the 4.0 configuration; otherwise the command stops.
-2. **Sources.** Bindings are grouped by (trust domain, active regex); each group becomes one `Source`, named from the first binding's name with the suffix `-src` (adjusted to the name prefix), with the group's regex and up to 5 sample IDs taken from the audit log of successful resolutions where available.
-3. **Targets.** Bindings are grouped by (platform, normalized spec without grants, for example the schema); each group becomes one `Target` with the scope of the 3.x target instance. Each distinct grant set used in the group becomes an access level, named `level-1`, `level-2`… in ascending privilege count, for the target owner to rename before applying.
-4. **Bindings.** Each 3.x binding becomes a `Binding` linking its source and target at the level of its grants. Two 3.x bindings that map to the same pair are reported as conflicts to resolve by hand.
-5. **Report.** Lists the mapping, conflicts, regexes that no longer pass the validator, and the governance outcome (sides, rules) each generated binding would have.
-
-The generated manifests are applied to the 4.0 instance through the normal change requests, so owners consent to the new resources. Provisioning then converges the platforms: the external principals of a migrated binding are re-created under its new `id` (Appendix B), and the old principals are removed by deleting the 3.x bindings in the 3.x instance after cut-over. Running both versions against the same platforms during the transition is supported because their principal names never collide.
 
 ---
 
@@ -4680,7 +4667,6 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-77 | An approved binding `CREATE` and the retirement of its target | Both are applied concurrently on different replicas | Exactly one wins: either the binding exists and the retirement fails with `409 resource-in-use`, or the target is `RETIRED` and the binding request fails with `409 resource-deprecated`. |
 | AC-78 | `LEDGER_RW_ROLE` is removed from `oracle-prod`'s `grantable_roles` | Restart; then reconciliation of a `write` binding; then a new binding at `write` | `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` lists level `write`; the re-apply fails in `EnsureTarget` and the binding keeps its last active snapshot; the new binding gets `422 validation-failed`. |
 | AC-79 | Source S of `cloud/fin-01/payments` has bindings to three targets of `dc/corp-prod/ledger` | A ledger operator calls bulk revocation for S | Three `DELETE` change requests with consent `ANY`, each with a `TARGET` side, are filed and applied after approval; S's other bindings are untouched. |
-| AC-80 | A 3.x lab database with bindings sharing regexes and schemas, and two bindings that map to the same pair | `ligo migrate-v3` | Manifests with one source per regex, one target per schema with levels per grant set, one binding per 3.x binding; the conflicting pair is reported; applying the manifests through change requests reproduces the 3.x access under new principal names. |
 | AC-81 | Appendix D.3 | The reference vectors run | Every inclusion result and witness matches; results agree with brute-force enumeration over short strings. |
 | AC-82 | A fragment is altered in transit by a test proxy to include `<button hx-post="/ui/bindings/x/rotate">` without `hx-nonce`, and one with a copy of the page's nonce | The fragment is swapped and the buttons are clicked | `hx-csp` strips the htmx attributes (`htmx:security:strip`) and no request is sent; the copied page nonce is scrubbed. Removing `trusted-types htmx` from the CSP blocks all htmx processing (fail closed). No CSP violation is reported during normal use of every page. |
 | AC-83 | A form submission returns `409`, `422`, `403` and `500` in turn | The browser receives each response | `409` and `422` appear in the form's error container; `403` in the global error container; `500` replaces nothing and shows the generic banner with the `request_id`. |
