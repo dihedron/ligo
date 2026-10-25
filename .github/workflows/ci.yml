@@ -102,6 +102,48 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  integration:
+    name: Integration tests
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # the lab (test/lab) runs these tests over TLS on a VM; CI runs them
+    # against a container, without TLS
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      LIGO_TEST_PG_MIGRATOR_DSN: postgres://ligo_migrator:migrator@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_APP_DSN: postgres://ligo_app:app@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_READER_DSN: postgres://ligo_reader:reader@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_DBOS_DSN: postgres://ligo_dbos:dbos@localhost:5432/ligo?sslmode=disable
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go compiler
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+
+      # the roles and the database of §4.1, as operations create them
+      - name: Create the database roles
+        run: >-
+          psql -v migrator_password=migrator -v app_password=app
+          -v reader_password=reader -v dbos_password=dbos
+          -f test/lab/sql/roles.sql
+
+      - name: Run the integration tests
+        run: go test -count=1 -tags integration ./...
+
   secrets:
     name: Secret scans
     if: github.event_name != 'pull_request'

@@ -74,7 +74,7 @@ Everything lives in an LXD **project** `ligo-lab` (`features.images=false`, `fea
 
 ## Integration tests
 
-Integration tests are Go tests behind the build tag `integration`, next to the code they test (for example `internal/store/migrate`). They read the `LIGO_TEST_PG_*` variables and fail, rather than skip, when the variables are missing, so that a run that tests nothing cannot pass. Each test that changes data runs against a database of its own, created from the migrated `ligo` database as template, or inside a transaction that it rolls back. The tests that §11.1 calls acceptance scenarios and invariant suites (`test/acceptance`, `test/invariants`) use the same variables.
+Integration tests are Go tests behind the build tag `integration`, next to the code they test (for example `internal/store/migrate`). They read the `LIGO_TEST_PG_*` variables and fail, rather than skip, when the variables are missing, so that a run that tests nothing cannot pass. The tests share the `ligo` database: they apply the migrations themselves (idempotent), and a test that changes data either rolls its transaction back or uses names of its own, so that it never depends on what an earlier test left. `lab.sh reset` returns to an empty database between sessions; CI starts from one on every run. The tests that §11.1 calls acceptance scenarios and invariant suites (`test/acceptance`, `test/invariants`) use the same variables.
 
 ## Implementation plan for chunk 2.1
 

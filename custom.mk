@@ -13,12 +13,13 @@ GOLANGCI_LINT_VERSION := 2.14
 .PHONY: lint
 lint: ## check that the code is clean (gofmt, go vet, golangci-lint); every build runs it first
 	@echo "Checking the code..."
-	@unformatted="$$(gofmt -l cmd internal pkg)"; \
+	@unformatted="$$(gofmt -l cmd internal pkg migrations)"; \
 		if [ -n "$$unformatted" ]; then echo "not formatted with gofmt (run gofmt -w):" >&2; echo "$$unformatted" >&2; exit 1; fi
 	@go vet ./...
+	@go vet -tags integration ./...
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is not installed: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION).0" >&2; exit 1; }
 	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION)\." || echo "warning: golangci-lint is not v$(GOLANGCI_LINT_VERSION), which CI runs: its findings may differ" >&2
-	@golangci-lint run ./...
+	@golangci-lint run --build-tags integration ./...
 
 .PHONY: compile
 compile: lint go-dev ## build for the default linux/amd64 platform
