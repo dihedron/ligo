@@ -83,6 +83,24 @@ func isRepeat(n *syntax.Regexp) bool {
 
 // walkForbidden applies rule 7 to every node of the AST.
 func walkForbidden(n *syntax.Regexp, isRoot, inRepeat bool) error {
+	if err := checkNode(n, isRoot, inRepeat); err != nil {
+		return err
+	}
+	childInRepeat := inRepeat || isRepeat(n)
+	for i, sub := range n.Sub {
+		anchorAllowed := isRoot && (i == 0 || i == len(n.Sub)-1)
+		if !anchorAllowed && (sub.Op == syntax.OpBeginText || sub.Op == syntax.OpEndText) {
+			return invalid("7e", "text anchors are allowed only at the start and the end")
+		}
+		if err := walkForbidden(sub, false, childInRepeat); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkNode applies rules 7a to 7d and 7f to one node.
+func checkNode(n *syntax.Regexp, isRoot, inRepeat bool) error {
 	if n.Flags&syntax.FoldCase != 0 {
 		return invalid("7a", "case-insensitive matching is forbidden")
 	}
@@ -90,10 +108,8 @@ func walkForbidden(n *syntax.Regexp, isRoot, inRepeat bool) error {
 	case syntax.OpBeginLine, syntax.OpEndLine, syntax.OpAnyChar, syntax.OpAnyCharNotNL:
 		return invalid("7b", "'.' and line anchors are forbidden; use a character class that excludes '/'")
 	case syntax.OpCharClass:
-		for i := 0; i < len(n.Rune); i += 2 {
-			if n.Rune[i] <= '/' && '/' <= n.Rune[i+1] {
-				return invalid("7c", "a character class must not match '/'")
-			}
+		if classMatchesSlash(n.Rune) {
+			return invalid("7c", "a character class must not match '/'")
 		}
 	case syntax.OpLiteral:
 		if inRepeat && strings.ContainsRune(string(n.Rune), '/') {
@@ -104,16 +120,15 @@ func walkForbidden(n *syntax.Regexp, isRoot, inRepeat bool) error {
 			return invalid("7f", "top-level alternation is forbidden")
 		}
 	}
-	childInRepeat := inRepeat || isRepeat(n)
-	for i, sub := range n.Sub {
-		if !isRoot || (i != 0 && i != len(n.Sub)-1) {
-			if sub.Op == syntax.OpBeginText || sub.Op == syntax.OpEndText {
-				return invalid("7e", "text anchors are allowed only at the start and the end")
-			}
-		}
-		if err := walkForbidden(sub, false, childInRepeat); err != nil {
-			return err
+	return nil
+}
+
+// classMatchesSlash reports whether the rune ranges of a class contain '/'.
+func classMatchesSlash(ranges []rune) bool {
+	for i := 0; i+1 < len(ranges); i += 2 {
+		if ranges[i] <= '/' && '/' <= ranges[i+1] {
+			return true
 		}
 	}
-	return nil
+	return false
 }

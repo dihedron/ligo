@@ -52,38 +52,56 @@ func NewPathTemplateExtractor(pathRegex, template string) (*Extractor, error) {
 	if last.Op != syntax.OpLiteral || !strings.HasSuffix(string(last.Rune), "/") {
 		return nil, errors.New("path_regex must end with a literal /")
 	}
-	groups := 0
-	for _, s := range ast.Sub[1:] {
-		if s.Flags&syntax.FoldCase != 0 {
-			return nil, errors.New("path_regex: case folding is forbidden")
-		}
-		switch s.Op {
-		case syntax.OpLiteral:
-		case syntax.OpCapture:
-			groups++
-			if err := checkGroup(s.Sub[0]); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, errors.New("path_regex may contain only literals and capture groups")
-		}
+	groups, err := countGroups(ast.Sub[1:])
+	if err != nil {
+		return nil, err
 	}
-	if groups == 0 || groups > 9 {
-		return nil, errors.New("path_regex must have 1 to 9 capture groups")
-	}
-	if !templateRE.MatchString(template) {
-		return nil, errors.New("scope_template may contain only [a-z0-9/-] and ${1}..${9}")
-	}
-	for _, m := range placeholderRE.FindAllStringSubmatch(template, -1) {
-		if n, _ := strconv.Atoi(m[1]); n > groups {
-			return nil, fmt.Errorf("scope_template references ${%d} but path_regex has %d groups", n, groups)
-		}
+	if err := checkTemplate(template, groups); err != nil {
+		return nil, err
 	}
 	re, err := regexp.Compile(pathRegex)
 	if err != nil {
 		return nil, fmt.Errorf("path_regex: %w", err)
 	}
 	return &Extractor{re: re, template: template}, nil
+}
+
+// countGroups checks that the parts of path_regex are literals and capture
+// groups, and returns the number of groups (1 to 9).
+func countGroups(parts []*syntax.Regexp) (int, error) {
+	groups := 0
+	for _, s := range parts {
+		if s.Flags&syntax.FoldCase != 0 {
+			return 0, errors.New("path_regex: case folding is forbidden")
+		}
+		switch s.Op {
+		case syntax.OpLiteral:
+		case syntax.OpCapture:
+			groups++
+			if err := checkGroup(s.Sub[0]); err != nil {
+				return 0, err
+			}
+		default:
+			return 0, errors.New("path_regex may contain only literals and capture groups")
+		}
+	}
+	if groups == 0 || groups > 9 {
+		return 0, errors.New("path_regex must have 1 to 9 capture groups")
+	}
+	return groups, nil
+}
+
+// checkTemplate checks scope_template against the groups of path_regex.
+func checkTemplate(template string, groups int) error {
+	if !templateRE.MatchString(template) {
+		return errors.New("scope_template may contain only [a-z0-9/-] and ${1}..${9}")
+	}
+	for _, m := range placeholderRE.FindAllStringSubmatch(template, -1) {
+		if n, _ := strconv.Atoi(m[1]); n > groups {
+			return fmt.Errorf("scope_template references ${%d} but path_regex has %d groups", n, groups)
+		}
+	}
+	return nil
 }
 
 // checkGroup accepts only a character class excluding '/', repeated with +.

@@ -147,9 +147,9 @@ func TestLoosening(t *testing.T) {
 		}, `deny rule "no-test-to-prod" now below allow rule "cloud-to-dc"`},
 		{"max_ttl lowered", func(p *Policy) { p.BreakGlassPolicies[0].MaxTTL = 5 * time.Hour }, ""},
 	} {
-		old, new := examplePolicy(), examplePolicy()
-		v.change(new)
-		got := Loosening(old, new)
+		current, proposed := examplePolicy(), examplePolicy()
+		v.change(proposed)
+		got := Loosening(current, proposed)
 		switch {
 		case v.want == "" && len(got) > 0:
 			t.Errorf("%s: reported %q", v.name, got)

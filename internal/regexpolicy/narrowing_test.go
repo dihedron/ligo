@@ -67,31 +67,43 @@ func TestAC81BruteForce(t *testing.T) {
 	tails := enumerate("ab0-/", 6)
 	for _, cur := range pool {
 		for _, prop := range pool {
-			current, proposed := p+`sa/`+cur, p+`sa/`+prop
-			got, err := CheckNarrowing(current, proposed, DefaultPolicy().NarrowingStateLimit)
-			if err != nil {
-				t.Errorf("(%s, %s): %v", cur, prop, err)
-				continue
-			}
-			rc, rp := regexp.MustCompile(current), regexp.MustCompile(proposed)
-			shortest := ""
-			for _, tail := range tails {
-				if id := witnessPrefix + "sa/" + tail; rp.MatchString(id) && !rc.MatchString(id) {
-					shortest = tail
-					break
-				}
-			}
-			switch {
-			case got.Narrower && shortest != "":
-				t.Errorf("(%s, %s): narrowing, but %q is matched only by the new regex", cur, prop, shortest)
-			case !got.Narrower:
-				checkWitness(t, current, proposed, got.Witness)
-				if shortest != "" && len([]rune(got.Witness)) > len([]rune(witnessPrefix+"sa/"+shortest)) {
-					t.Errorf("(%s, %s): witness %q is longer than %q", cur, prop, got.Witness, shortest)
-				}
-			}
+			checkAgainstEnumeration(t, p+`sa/`+cur, p+`sa/`+prop, tails)
 		}
 	}
+}
+
+// checkAgainstEnumeration compares CheckNarrowing with the first tail
+// matched by the proposed regex only.
+func checkAgainstEnumeration(t *testing.T, current, proposed string, tails []string) {
+	t.Helper()
+	got, err := CheckNarrowing(current, proposed, DefaultPolicy().NarrowingStateLimit)
+	if err != nil {
+		t.Errorf("(%s, %s): %v", current, proposed, err)
+		return
+	}
+	shortest := firstOnlyMatched(current, proposed, tails)
+	if got.Narrower {
+		if shortest != "" {
+			t.Errorf("(%s, %s): narrowing, but %q is matched only by the new regex", current, proposed, shortest)
+		}
+		return
+	}
+	checkWitness(t, current, proposed, got.Witness)
+	if shortest != "" && len([]rune(got.Witness)) > len([]rune(shortest)) {
+		t.Errorf("(%s, %s): witness %q is longer than %q", current, proposed, got.Witness, shortest)
+	}
+}
+
+// firstOnlyMatched returns the first identity, over the tails, matched by
+// proposed and not by current, or "".
+func firstOnlyMatched(current, proposed string, tails []string) string {
+	rc, rp := regexp.MustCompile(current), regexp.MustCompile(proposed)
+	for _, tail := range tails {
+		if id := witnessPrefix + "sa/" + tail; rp.MatchString(id) && !rc.MatchString(id) {
+			return id
+		}
+	}
+	return ""
 }
 
 // TestEXT19 re-verifies assumption EXT-19 on the Go version in use: the
