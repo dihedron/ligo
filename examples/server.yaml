@@ -1,0 +1,354 @@
+service:
+  application_version: "4.0.1"          # passed to DBOS (EXT-09)
+  instance_id_env: "LIGO_INSTANCE_ID"  # unique per replica
+  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16)
+    destination: "ligo.prod.internal"
+    port: 8443
+    server_name: "ligo.prod.internal"
+
+zones:
+  - name: prod
+    trust_domain: prod.internal
+    spiffe_workload_socket: "unix:///run/spire/prod/agent.sock"
+  - name: test
+    trust_domain: test.internal
+    spiffe_workload_socket: "unix:///run/spire/test/agent.sock"
+
+core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)
+  zone: prod
+  svid_selector:
+    match_expr: 'path == "/ns/sys/sa/ligo"'
+    jwt_audience: ["https://vault.prod.internal"]
+
+server:
+  workload_listener:
+    listen_address: "0.0.0.0:8443"
+    tls_source: spiffe                   # spiffe | file
+    auth_modes: [x509_svid, jwt_svid]
+    accepted_trust_domains: [prod.internal, test.internal, cloud.internal]
+    federated_trust_domains:              # §7.1, §10.5 Topology C
+      - { trust_domain: cloud.internal, via_zone: prod }   # multi-tenant cloud platform, verified through federation
+    expected_jwt_audience: "spiffe://prod.internal/ns/sys/sa/ligo"
+    max_token_ttl: 15m
+    clock_skew: 30s
+    rate_limit: { per_svid_rps: 5, burst: 20 }
+    resolution_cache: { full_reload_interval: 30s, max_staleness: 5m }
+
+  admin_listener:
+    listen_address: "0.0.0.0:9443"
+    external_origin: "https://ligo-admin.corp.internal:9443"
+    tls_source: file
+    tls_cert_file: "/etc/ligo/tls/admin.crt"
+    tls_key_file: "/etc/ligo/tls/admin.key"
+    client_svid_auth: { enabled: true, accepted_trust_domains: [prod.internal] }
+    allow_basic_auth: false
+    session: { idle_timeout: 30m, absolute_timeout: 8h, authz_recheck_interval: 5m }
+    rate_limit: { login_per_ip_per_min: 10, login_per_user_per_min: 5, api_per_principal_rps: 10 }
+
+admin_auth:
+  ldap:
+    url: "ldaps://ldap.corp.internal:636"
+    ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
+    service_bind_dn: "cn=ligo-admin-auth,ou=services,dc=corp,dc=internal"
+    service_bind_password_env: "LIGO_LDAP_BIND_PASS"
+    user_base_dn: "ou=users,dc=corp,dc=internal"
+    user_filter: "(&(objectClass=inetOrgPerson)(uid=%s))"
+    group_membership_filter: "(member=%s)"
+    nested_groups: false
+
+authorization:                            # roles are granted on governance scope patterns (§3.9, §7.2.2)
+  bindings:
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",          role: viewer,      scopes: ["*"] }
+    # Central data centre teams: own the platforms (platform scope dc/corp-prod)
+    - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,dc=corp,dc=internal",   role: operator,    scopes: ["dc/corp-prod"] }
+    - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,dc=corp,dc=internal",   role: approver,    scopes: ["dc/corp-prod"] }
+    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass, scopes: ["dc/corp-prod/*"] }
+    # An application team owning targets on the shared platforms (target scope dc/corp-prod/ledger)
+    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,dc=corp,dc=internal",           role: operator,    scopes: ["dc/corp-prod/ledger"] }
+    - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal",          role: approver,    scopes: ["dc/corp-prod/ledger"] }
+    - { ldap_group_dn: "cn=ligo-operators-test,ou=groups,dc=corp,dc=internal",   role: operator,    scopes: ["dc/corp-test"] }
+    - { spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer",              role: operator,    scopes: ["dc/corp-test"] }
+    # A cloud tenancy: self-service developers and their leads
+    - { ldap_group_dn: "cn=cloud-fin01-payments-devs,ou=groups,dc=corp,dc=internal",  role: operator,    scopes: ["cloud/fin-01/payments"] }
+    - { ldap_group_dn: "cn=cloud-fin01-payments-leads,ou=groups,dc=corp,dc=internal", role: approver,    scopes: ["cloud/fin-01/payments"] }
+    - { ldap_group_dn: "cn=cloud-fin01-breakglass,ou=groups,dc=corp,dc=internal",     role: break_glass, scopes: ["cloud/fin-01/*"] }
+    # Information Security, an additional party for cloud-to-data-centre connections (ADR-14)
+    - { ldap_group_dn: "cn=infosec-approvers,ou=groups,dc=corp,dc=internal",     role: approver,    scopes: ["sec/infosec"] }
+    # Delegated approval (ADR-11): SPIFFE principals only; see §10.6 for identity requirements.
+    - spiffe_id: "spiffe://prod.internal/ns/automation-prod/sa/awx-runner-db-team"
+      role: trusted_automation
+      scopes: ["dc/corp-prod/*"]
+      platforms: ["oracle-prod"]                   # optional; omit to cover every platform in the scopes
+      approval_reference_pattern: '^CHG[0-9]{7}$'  # optional; RE2, fully anchored
+      rate_limit: { api_rps: 50, burst: 200 }      # optional; overrides admin_listener.rate_limit.api_per_principal_rps
+  approval:
+    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"] # scopes whose sides need an approver (ADR-09)
+    require_distinct_approvers_across_scopes: true        # ADR-13 rule 7 (default true)
+    change_request_ttl: 72h
+
+governance:                               # ADR-13, ADR-14, §3.9
+  source_scopes:                          # exactly one entry per trust domain listed in any allowed_source_trust_domains
+    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
+    - { trust_domain: test.internal, mode: static, scope: "dc/corp-test" }
+    - trust_domain: cloud.internal
+      mode: path_template
+      path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/'   # matched against the regex's fixed prefix only
+      scope_template: 'cloud/${1}/${2}'
+  name_prefixes:                          # §3.8; first matching entry wins; {n} = n-th segment of the owner scope
+    - { scopes: ["cloud/*"], prefix: "{2}-{3}-", resources: [source, target, binding] }  # cloud/fin-01/payments -> "fin-01-payments-"
+  interconnects:                          # ADR-14; evaluated in order for binding changes with consent ALL across scopes
+    default_cross_scope: deny             # deny | allow, for cross-scope pairs no rule matches
+    rules:
+      - name: no-test-to-prod
+        from: ["dc/corp-test/*", "cloud/fin-01-test/*"]   # patterns match whole segments only (§3.9)
+        to:   ["dc/corp-prod/*"]
+        action: deny
+      - name: within-dc-prod              # data centre workloads (dc/corp-prod) to application-owned targets below it
+        from: ["dc/corp-prod/*"]
+        to:   ["dc/corp-prod/*"]
+        action: allow
+      - name: cloud-to-dc
+        from: ["cloud/*"]
+        to:   ["dc/corp-prod/*"]
+        action: allow
+        additional_approvals:
+          - { name: security, scope: "sec/infosec" }
+      - name: dc-to-cloud
+        from: ["dc/corp-prod/*"]
+        to:   ["cloud/*"]
+        action: allow
+      - name: cloud-within-account
+        from: ["cloud/fin-01/*"]
+        to:   ["cloud/fin-01/*"]
+        action: allow
+        distinct_approvers: false           # one lead may approve both tenancies of the same account (R-09)
+
+regex_policy:
+  max_length: 512
+  min_literal_path_segments: 2            # Appendix A.2, rule 6
+  narrowing_state_limit: 20000            # §3.10, Appendix D.3; undecided => not narrowing
+
+bindings:                                 # §3.5, §6.3
+  max_expiry: 8760h                       # longest allowed expiresAt from now (365 days)
+  expiry_warning: 168h                    # BINDING_EXPIRING this long before expiry
+
+propagation:                              # §6.8
+  interval: 5s
+  max_concurrent: 8
+
+storage:
+  postgres:
+    app_dsn_env: "LIGO_PG_APP_DSN"
+    reader_dsn_env: "LIGO_PG_READER_DSN"
+    dbos_dsn_env: "LIGO_PG_DBOS_DSN"
+    max_conns: 25
+    app_statement_timeout: 5s
+    reader_statement_timeout: 500ms
+    sslmode: verify-full
+  dbos:
+    workflow_retention: 168h
+
+secret_sealing:
+  provider: vault-transit                 # vault-transit | local-kek (requires --insecure-dev)
+  vault_transit:
+    address: "https://vault.prod.internal:8200"
+    namespace: "prod"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-sealer"
+    jwt_audience: "https://vault.prod.internal"
+    mount: "transit"
+    key_name: "ligo-interstage"
+  # local_kek_file: "/etc/ligo/dev/kek"   # local-kek only: 32-byte key, not group- or world-readable
+
+plugins:
+  directory: "/usr/lib/ligo/plugins"
+  rpc_timeout: 60s
+  retry: { max_attempts: 5, initial_backoff: 2s, max_backoff: 60s }
+  max_concurrent_rpcs_per_instance: 4
+  restart_backoff: { initial: 1s, max: 60s }
+
+ui:                                       # §7.6
+  theme:
+    default_mode: system                  # system | light | dark
+    product_name: "ligo"
+    directory: "/etc/ligo/theme"       # conventional files: theme.css, logo.svg|png, logo-dark.svg|png, favicon.*, fonts/*.woff2
+    # Explicit paths override the conventional files (all optional):
+    # css_file: "/etc/ligo/theme/corp.css"
+    # logo_file: "/etc/ligo/theme/corp-logo.svg"
+    # logo_dark_file: "/etc/ligo/theme/corp-logo-white.svg"
+    # favicon_file: "/etc/ligo/theme/corp.ico"
+    # fonts_dir: "/etc/ligo/theme/fonts"
+    colors:                               # optional token overrides, served as /ui/theme/tokens.css
+      light: { primary: "#1f4e8c", primary-contrast: "#ffffff" }
+      dark:  { primary: "#8fb4e8", primary-contrast: "#0b1a2e" }
+
+break_glass:                              # ADR-12; role holders are set in authorization.bindings (role: break_glass)
+  min_justification_length: 20
+  incident_reference_pattern: '^INC[0-9]{7}$'   # optional; RE2, fully anchored
+  policies:                               # first entry whose pattern matches a side's scope applies to that side
+    - { scopes: ["dc/corp-prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
+    - { scopes: ["cloud/fin-01/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+
+notifications:                            # §7.5
+  webhooks:
+    - name: oncall
+      url: "https://oncall.corp.internal/hooks/ligo"
+      ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
+      hmac_secret_env: "LIGO_WEBHOOK_ONCALL_SECRET"
+      timeout: 5s
+      events: [BREAK_GLASS_USED, BREAK_GLASS_EXPIRING, BREAK_GLASS_REVERTED, BREAK_GLASS_REVERT_FAILED,
+               BREAK_GLASS_RATIFIED, BREAK_GLASS_REVIEW_OVERDUE, CONFIG_APPROVAL_POLICY_WEAKENED,
+               CONFIG_GOVERNANCE_POLICY_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
+    - name: dba-queue                     # the data centre DBAs' ticket queue: only their own decisions
+      url: "https://tickets.corp.internal/hooks/ligo-dba"
+      ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
+      hmac_secret_env: "LIGO_WEBHOOK_DBA_SECRET"
+      timeout: 5s
+      scopes: ["dc/corp-prod/*"]          # §7.5 scope filter
+      events: [CR_AWAITING_APPROVAL]
+
+reconciliation:
+  enabled: true
+  interval: 6h
+  jitter: 30m
+  max_concurrent: 4
+
+identity_providers:
+  - type: "svid.v1"
+    builtin: true
+    instances:
+      - { name: "svid-passthrough-prod", zone: prod, config: {} }
+  - type: "target-local.v1"
+    builtin: true
+    instances:
+      - { name: "local-account-prod", zone: prod, config: { password_length: 32 } }
+  - type: "delegated-dynamic.v1"
+    builtin: true
+    instances:
+      - { name: "vault-dynamic-db-test", zone: test, config: {} }
+  - type: "openldap.v1"
+    builtin: false
+    binary: "id-openldap"                 # relative to plugins.directory
+    sha256: "<64-hex-sha256-of-id-openldap>"
+    instances:
+      - name: "ldap-prod"
+        zone: prod
+        svid_selector:
+          match_expr: 'path == "/ligo/plugin/id-openldap"'
+          jwt_audience: ["https://vault.prod.internal"]
+        config:
+          url: "ldaps://openldap.prod.internal:636"
+          service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
+          principal_prefix: "svc_"        # <= 4 chars; replaces default "bnd_" (Appendix B)
+          allowed_endpoints: ["openldap.prod.internal:636"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.prod.internal:8200"
+            namespace: "prod"
+            auth_mount: "jwt-spiffe"
+            role: "ligo-plugin-ldap-prod"
+            jwt_audience: "https://vault.prod.internal"
+            kv_path: "kv/data/ligo/bootstrap/ldap-prod"
+
+secret_stores:
+  - type: "none.v1"
+    builtin: true
+    instances:
+      - { name: "no-store-prod", zone: prod, config: {} }
+  - type: "vault.v1"
+    builtin: false
+    binary: "store-vault"
+    sha256: "<64-hex-sha256-of-store-vault>"
+    instances:
+      - name: "vault-prod"
+        zone: prod
+        svid_selector:
+          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'
+          jwt_audience: ["https://vault.prod.internal"]
+        config:
+          address: "https://vault.prod.internal:8200"
+          namespace: "prod"
+          spiffe_auth_mount: "jwt-spiffe"
+          kv_mount: "kv"
+          db_mount: "database"
+          allowed_endpoints: ["vault.prod.internal:8200"]
+        network_flows:                    # ADR-16; added to every binding whose credential is in this store
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }
+      - name: "vault-test"
+        zone: test
+        svid_selector:
+          match_expr: 'path == "/ligo/plugin/store-vault"'
+          jwt_audience: ["https://vault.test.internal"]
+        config:
+          address: "https://vault.test.internal:8200"
+          namespace: "test"
+          spiffe_auth_mount: "jwt-spiffe"
+          kv_mount: "kv"
+          db_mount: "database"
+          allowed_endpoints: ["vault.test.internal:8200"]
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.test.internal", ports: [8200], tls: true, server_name: "vault.test.internal" }
+
+target_providers:                         # plugin types and the platforms that use them (§3.4)
+  - type: "oracle.v1"
+    builtin: false
+    binary: "target-oracle"
+    sha256: "<64-hex-sha256-of-target-oracle>"
+    platforms:
+      - name: "oracle-prod"
+        zone: prod
+        scope: "dc/corp-prod"            # platform owner scope (§3.9); REQUIRED
+        target_scopes: ["dc/corp-prod/*"] # scopes that may own targets here (default: scope and below)
+        display_name: "Oracle production cluster"
+        description: "Shared RAC cluster for production schemas."
+        contacts: [ { name: "DBA on call", email: "dba@example.org" } ]
+        check_existence: true             # ValidateTarget checks, read-only, that the resource exists (§5.8 rule 7)
+        network_flows:                    # flows shared by every target of the platform (ADR-16)
+          - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
+        identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
+        secret_store: { type: "vault.v1", instance: "vault-prod" }
+        allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
+        rotation_interval: 720h
+        svid_selector:
+          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          jwt_audience: ["https://vault.prod.internal"]
+        config:
+          host: "ora-scan.prod.internal"
+          port: 1521
+          service_name: "ORCLPROD.prod.internal"
+          grantable_roles: ["ORDERS_RO_ROLE", "ORDERS_RW_ROLE", "LEDGER_RO_ROLE", "LEDGER_RW_ROLE"]   # privilege bounds
+          allowed_endpoints: ["ora-scan.prod.internal:1521", "ledger-db.prod.internal:1522"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.prod.internal:8200"
+            namespace: "prod"
+            auth_mount: "jwt-spiffe"
+            role: "ligo-plugin-oracle-prod"
+            jwt_audience: "https://vault.prod.internal"
+            db_static_role: "oracle-prod-ligo-admin"
+      - name: "oracle-test-dynamic"
+        zone: test
+        scope: "dc/corp-test"
+        network_flows:
+          - { name: listener, purpose: DATA, protocol: TCP, destination: "ora-test.test.internal", ports: [1521], tls: false }
+        identity_provider: { type: "delegated-dynamic.v1", instance: "vault-dynamic-db-test" }
+        secret_store: { type: "vault.v1", instance: "vault-test" }
+        allowed_source_trust_domains: [test.internal]
+        svid_selector:
+          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          jwt_audience: ["https://vault.test.internal"]
+        config:
+          host: "ora-test.test.internal"
+          port: 1521
+          service_name: "ORCLTEST.test.internal"
+          vault_db_connection_name: "oracle-test-conn"
+          grantable_roles: ["ORDERS_RO_ROLE", "ORDERS_RW_ROLE"]
+          allowed_endpoints: ["ora-test.test.internal:1521"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.test.internal:8200"
+            namespace: "test"
+            auth_mount: "jwt-spiffe"
+            role: "ligo-plugin-oracle-test"
+            jwt_audience: "https://vault.test.internal"
+            db_static_role: "oracle-test-ligo-admin"

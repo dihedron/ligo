@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func decode(t *testing.T, doc string) Flow {
@@ -181,5 +183,19 @@ func TestEffectiveCatalog(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "target:t/a target:t/b platform:p/c ligo/ligo-workload-api" {
 		t.Errorf("got %v", names)
+	}
+}
+
+func TestPortsYAML(t *testing.T) {
+	var f Flow
+	doc := `{ name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200, "9000-9010"], tls: true, server_name: "vault.prod.internal" }`
+	if err := yaml.Unmarshal([]byte(doc), &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := json.Marshal(f.Ports); string(out) != `[8200,"9000-9010"]` || f.ServerName != "vault.prod.internal" {
+		t.Errorf("got ports %s, serverName %q", out, f.ServerName)
 	}
 }

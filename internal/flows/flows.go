@@ -14,6 +14,7 @@ import (
 
 	"github.com/dihedron/ligo/api/schemas"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"go.yaml.in/yaml/v3"
 )
 
 // ErrInvalidFlow is returned for a flow that breaks the schema of §3.3.
@@ -76,6 +77,22 @@ func (p *Port) UnmarshalJSON(data []byte) error {
 	}
 	*p = Port{Low: l, High: h, isRange: true}
 	return nil
+}
+
+// UnmarshalYAML reads a port of server.yaml: a number or a "low-high"
+// string.
+func (p *Port) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: port must be a number or a \"low-high\" string", n.Line)
+	}
+	if n.Tag == "!!int" {
+		return p.UnmarshalJSON([]byte(n.Value))
+	}
+	data, err := json.Marshal(n.Value)
+	if err != nil {
+		return err
+	}
+	return p.UnmarshalJSON(data)
 }
 
 var flowSchema = func() *jsonschema.Schema {
