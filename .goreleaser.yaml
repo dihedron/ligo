@@ -1,0 +1,189 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: ligo
+
+env:
+  - CGO_ENABLED=0
+#  - _GO_MK_VARS_NAME={{ .Env._GO_MK_VARS_NAME}}
+#  - _GO_MK_VARS_METADATA_PACKAGE={{ .Env._GO_MK_VARS_METADATA_PACKAGE }}
+before:
+  hooks:
+    - go mod download
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: ligo
+    main: ./cmd/ligo
+    binary: ligo
+    goos:
+      - linux
+#      - windows
+#      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # v1 runs on any x86-64 CPU; v2 and v3 are optimized variants
+    goamd64:
+      - v1
+      - v2
+      - v3
+    tags:
+      - osusergo
+      - netgo
+      - static_build
+    flags:
+      - -trimpath  
+    ldflags:
+      - -s -w 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Name={{.ArtifactName}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Description={{.Env._GO_MK_VARS_DESCRIPTION}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Copyright={{.Env._GO_MK_VARS_COPYRIGHT}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.License={{.Env._GO_MK_VARS_LICENSE}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.LicenseURL={{.Env._GO_MK_VARS_LICENSE_URL}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMajor={{.Major}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMinor={{.Minor}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionPatch={{.Patch}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Vendor={{.Env._GO_MK_VARS_VENDOR}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Maintainer={{.Env._GO_MK_VARS_MAINTAINER}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.DotEnvVarName={{.Env._GO_MK_VARS_DOTENV_VAR_NAME}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.BuildTime={{.Now}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTag={{.Tag}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitCommit={{.Commit}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTime={{.CommitDate}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTreeState={{.GitTreeState}}' 
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitBranch={{.Branch}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GoReleaserVersion={{.Env._GORELEASER_VERSION}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
+# one archive per application
+archives:
+  - id: ligo
+    ids:
+      - ligo
+    formats:
+      - tar.gz
+    name_template: >-
+      ligo_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}{{ .Arm }}{{ end }}
+      {{- if and .Amd64 (ne .Amd64 "v1") }}{{ .Amd64 }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+upx:
+  - # Whether to enable it or not.
+    #
+    # Templates: allowed.
+    enabled: false
+
+    # Filter by build ID.
+    ids: [ligo]
+
+    # Filter by GOOS.
+    goos: [linux, windows]
+
+    # Filter by GOARCH.
+    goarch: [amd64, arm64]
+
+    # Filter by GOAMD64.
+    goamd64: [v1, v2, v3]
+
+    # Compress argument.
+    # Valid options are from '1' (faster) to '9' (better), and 'best'.
+    compress: "9"
+
+    # Whether to try LZMA (slower).
+    lzma: true
+
+    # Whether to try all methods and filters (slow).
+    #brute: true
+
+nfpms:
+  - id: ligo
+    package_name: ligo
+    ids:
+      - ligo
+    description: |
+      ligo, the SPIFFE binding lifecycle service.
+    homepage: "https://github.com/dihedron/ligo"
+    maintainer: "Andrea Funtò <dihedron.dev@gmail.com>"
+    vendor: "Andrea Funtò"
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    epoch: "1"
+    release: "1"
+    section: default
+    priority: "optional"
+    # signed with the packaging key when GPG_KEY_FILE names its armored
+    # private key (passphrase in NFPM_PASSPHRASE); unsigned otherwise (T-7)
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+        # verified by debsig-verify (see the README)
+        type: origin
+source:
+  enabled: true
+  # the archive extension is appended by goreleaser
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+sboms:
+  - cmd: syft
+    documents:
+      - "${artifact}.cdx.json"
+    args: ["$artifact", "--output", "cyclonedx-json=$document", "-vvv"]
+    artifacts: package
+    disable: false
+    
+    
+checksum:
+  name_template: "checksums.txt"
+
+# the checksums file covers every archive, package and SBOM: its detached
+# signature, made with the packaging key whose fingerprint is in
+# GPG_FINGERPRINT, vouches for all of them (T-7). make snapshot skips it when
+# GPG_FINGERPRINT is unset; make release requires it.
+signs:
+  - id: checksums
+    artifacts: checksum
+    signature: "${artifact}.asc"
+    args:
+      - --batch
+      - --yes
+      - --local-user
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - --armor
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+
+release:
+  footer: |
+    ---
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

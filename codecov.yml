@@ -1,0 +1,4 @@
+# Codecov: generated protobuf code is left out of the coverage figures, as in
+# sonar-project.properties.
+ignore:
+  - "**/*.pb.go"
