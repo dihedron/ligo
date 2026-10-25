@@ -21,7 +21,7 @@ spire() {
 inner_container() {
 	local name="$1" memory="$2"
 	if ! inner_exists "$name"; then
-		inner init "$LAB_IMAGE" "$name" -c limits.memory="$memory" -c boot.autostart=true \
+		inner_init "$name" -c limits.memory="$memory" -c boot.autostart=true \
 			-d eth0,ipv4.address="$(inner_ip "$name")" >/dev/null
 		info "container $name created"
 	fi
@@ -37,13 +37,13 @@ inner_lxd_fingerprint() { inner query /1.0 | jq -r .environment.certificate_fing
 # and can_view and can_access_files on ligo1 (file_pull).
 spire_identity() {
 	local zone="$1" group="spire-$1"
-	pki_client "spire-$zone"
+	pki_client "spire-$zone-lxd"
 	if ! inner query /1.0/auth/groups | jq -e --arg g "/1.0/auth/groups/$group" 'index($g)' >/dev/null; then
 		inner auth group create "$group" >/dev/null
 	fi
 	if ! inner auth identity list -f csv | grep -q "^tls,[^,]*,$group,"; then
 		inner query -X POST /1.0/auth/identities/tls --data "$(jq -n --arg name "$group" --arg group "$group" \
-			--rawfile cert "$LAB_STATE_DIR/pki/spire-$zone.crt" '{name: $name, certificate: $cert, groups: [$group]}')" >/dev/null ||
+			--rawfile cert "$LAB_STATE_DIR/pki/spire-$zone-lxd.crt" '{name: $name, certificate: $cert, groups: [$group]}')" >/dev/null ||
 			die "cannot trust identity $group on the inner LXD"
 	fi
 	local entitlement
@@ -167,8 +167,8 @@ spire_server_up() {
 		info "$name: SPIRE $LAB_SPIRE_VERSION and lxd-server-plugin $LAB_LXD_SPIFFE_VERSION installed"
 	fi
 	checksum="$(inner_exec "$name" sha256sum /usr/bin/lxd-server-plugin | cut -d' ' -f1)"
-	inner_push "$LAB_STATE_DIR/pki/spire-$zone.crt" "$name" /etc/spire/lxd/client.crt 0444
-	inner_push "$LAB_STATE_DIR/pki/spire-$zone.key" "$name" /etc/spire/lxd/client.key 0400
+	inner_push "$LAB_STATE_DIR/pki/spire-$zone-lxd.crt" "$name" /etc/spire/lxd/client.crt 0444
+	inner_push "$LAB_STATE_DIR/pki/spire-$zone-lxd.key" "$name" /etc/spire/lxd/client.key 0400
 	inner_push "$LAB_STATE_DIR/pki/$name.crt" "$name" /etc/spire/oidc/server.crt 0444
 	inner_push "$LAB_STATE_DIR/pki/$name.key" "$name" /etc/spire/oidc/server.key 0400
 	tmp="$(mktemp -d)"
@@ -237,13 +237,14 @@ CONF
 # plugin installed (the agents are configured by spire_agents_up).
 ligo1_up() {
 	if ! inner_exists ligo1; then
-		inner init "$LAB_IMAGE" ligo1 --vm -c limits.cpu="$LAB_LIGO1_CPUS" -c limits.memory="$LAB_LIGO1_MEMORY" \
+		inner_init ligo1 --vm -c limits.cpu="$LAB_LIGO1_CPUS" -c limits.memory="$LAB_LIGO1_MEMORY" \
 			-c boot.autostart=true -d root,size="$LAB_LIGO1_DISK" -d eth0,ipv4.address="$(inner_ip ligo1)" >/dev/null
 		info "VM ligo1 created (nested)"
 	fi
 	inner_running ligo1 || inner start ligo1
 	inner_wait ligo1
 	inner_exec ligo1 sh -c 'id ligo >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ligo'
+	inner_exec ligo1 sh -c 'command -v jq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null'
 	if ! inner_exec ligo1 test -x /usr/bin/lxd-agent-plugin; then
 		inner_push "$(spire_release spire)" ligo1 /root/spire.tar.gz 0644
 		inner_push "$(lxd_spiffe_package lxd-agent-plugin)" ligo1 /root/lxd-agent-plugin.deb 0644

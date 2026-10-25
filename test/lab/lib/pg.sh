@@ -13,7 +13,7 @@ YAML
 pg_up() {
 	section "PostgreSQL (pg)"
 	if ! inner_exists pg; then
-		inner init "$LAB_IMAGE" pg -c limits.memory="$LAB_PG_MEMORY" -c boot.autostart=true \
+		inner_init pg -c limits.memory="$LAB_PG_MEMORY" -c boot.autostart=true \
 			-c cloud-init.user-data="$(pg_cloud_init)" -d eth0,ipv4.address="$(pg_ip)" >/dev/null
 		info "container pg created from $LAB_IMAGE"
 	fi

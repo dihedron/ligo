@@ -20,6 +20,8 @@ source "$LAB_DIR/lib/inner.sh"
 source "$LAB_DIR/lib/fetch.sh"
 # shellcheck source=lib/spire.sh
 source "$LAB_DIR/lib/spire.sh"
+# shellcheck source=lib/bao.sh
+source "$LAB_DIR/lib/bao.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -41,6 +43,7 @@ commands:
                             run "go test -tags integration" (default ./...)
                             with that environment
   spire <prod|test> [args]  spire-server on that zone's server
+  bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
   psql [--as ROLE | --superuser] [args]
                             psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
@@ -82,11 +85,11 @@ cmd_up() {
 	pg_record
 	if selected identity; then
 		identity_spire_up
+		identity_bao_up
 	fi
-	# a new snapshot when there is none, or when it lacks a scenario just built
-	if ! has_snapshot || [[ "$(env_get '.snapshot_scenarios // ""')" != "${LAB_SELECTED[*]}" ]]; then
+	# a new snapshot when there is none, or when up added inner instances
+	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then
 		lab_snapshot
-		env_set .snapshot_scenarios "$(jq -n --arg s "${LAB_SELECTED[*]}" '$s')"
 	fi
 	section "Done"
 	info "the lab is up: eval \"\$(test/lab/lab.sh env)\", or lab.sh test"
@@ -187,6 +190,7 @@ main() {
 	test) cmd_test "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
+	bao) require_lab && bao "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;
 	stop) require_lab && lab_stop ;;

@@ -60,6 +60,49 @@ inner_push() {
 	lxd exec lxd -- rm -f "$tmp"
 }
 
+# inner_images: the lab image, container and VM, under local aliases of the
+# inner LXD (lab-container, lab-vm), copied once: creating an instance from
+# the "ubuntu:" remote makes the lxc client query it first, and that query
+# has hung on this lab.
+inner_images() {
+	local kind alias args fingerprint
+	for kind in container vm; do
+		alias="lab-$kind"
+		inner image info "$alias" >/dev/null 2>&1 && continue
+		# an image of that kind already in the cache (from earlier instances)
+		# gets the alias without a download
+		fingerprint="$(inner image list -f json | jq -r --arg t "$([[ $kind == vm ]] && echo virtual-machine || echo container)" \
+			'[.[] | select(.type == $t and ((.properties.os // "") | ascii_downcase) == "ubuntu")] | .[0].fingerprint // empty')"
+		if [[ -n "$fingerprint" ]]; then
+			inner image alias create "$alias" "$fingerprint" >/dev/null
+			info "inner LXD: cached $kind image ${fingerprint:0:12} aliased as $alias"
+			continue
+		fi
+		args=(image copy "$LAB_IMAGE" local: --alias "$alias")
+		[[ "$kind" == vm ]] && args+=(--vm)
+		lxd exec lxd -- timeout 900 lxc "${args[@]}" </dev/null >/dev/null ||
+			lxd exec lxd -- timeout 900 lxc "${args[@]}" </dev/null >/dev/null ||
+			die "cannot copy $LAB_IMAGE ($kind) into the inner LXD"
+		info "inner LXD: $LAB_IMAGE ($kind) cached as $alias"
+	done
+}
+
+# inner_init NAME ARGS: creates an inner instance from the local lab image
+# (lab-vm with --vm among ARGS, lab-container otherwise), with an empty stdin
+# (lxc init reads YAML from a stdin that is not a terminal), a timeout and
+# one retry.
+inner_init() {
+	local name="$1" image=lab-container arg
+	shift
+	for arg in "$@"; do
+		[[ "$arg" == --vm ]] && image=lab-vm
+	done
+	lxd exec lxd -- timeout 300 lxc init "$image" "$name" "$@" </dev/null >/dev/null && return
+	warn "creating $name timed out: retrying once"
+	inner delete "$name" --force >/dev/null 2>&1 || true
+	lxd exec lxd -- timeout 300 lxc init "$image" "$name" "$@" </dev/null >/dev/null || die "cannot create $name"
+}
+
 # inner_exists NAME / inner_running NAME
 inner_exists() { inner info "$1" >/dev/null 2>&1; }
 inner_running() { [[ "$(inner list "$1" -c s -f csv 2>/dev/null)" == RUNNING ]]; }
@@ -79,7 +122,7 @@ inner_wait() {
 lxd_vm_up() {
 	section "Lab VM (lxd) and its inner LXD"
 	if ! vm_exists lxd; then
-		lxd init "$LAB_IMAGE" lxd --vm \
+		lxd init "$LAB_IMAGE" lxd --vm </dev/null \
 			-c limits.cpu="$LAB_LXD_CPUS" -c limits.memory="$LAB_LXD_MEMORY" \
 			-c cloud-init.user-data="$(lxd_vm_cloud_init)" \
 			-d root,size="$LAB_LXD_DISK" \
@@ -101,6 +144,7 @@ lxd_vm_up() {
 		inner config set core.https_address "$(inner_gateway):8443"
 		info "inner LXD API on $(inner_gateway):8443 (the inner bridge only)"
 	fi
+	inner_images
 }
 
 # lxd_vm_check_size warns when the lab VM differs from the size settings.

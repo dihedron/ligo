@@ -5,16 +5,22 @@
 
 SNAPSHOT=baseline
 
+# inner_names: the inner instances, sorted, space separated.
+inner_names() { inner list -c n -f csv 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//'; }
+
 # has_snapshot: true when the lab VM has its baseline snapshot.
 has_snapshot() { lxc query "/1.0/instances/lxd/snapshots/$SNAPSHOT?project=$LAB_PROJECT" >/dev/null 2>&1; }
 
 lab_snapshot() {
 	section "Snapshot"
+	local names
+	names="$(inner_names)"
 	lab_stop
 	lxd_once 120 delete lxd/"$SNAPSHOT" >/dev/null 2>&1 || true
 	lxd_once 300 snapshot lxd "$SNAPSHOT" || die "cannot snapshot the lab VM"
 	jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.snapshot_at = $at' "$LAB_STATE_DIR/env.json" >"$LAB_STATE_DIR/env.json.new" &&
 		mv "$LAB_STATE_DIR/env.json.new" "$LAB_STATE_DIR/env.json"
+	env_set .snapshot_instances "$(jq -n --arg s "$names" '$s')"
 	info "lxd: snapshot $SNAPSHOT taken"
 	lab_start
 }
@@ -57,4 +63,11 @@ lab_start() {
 		inner_wait ligo1
 		spire_check
 	fi
+	local zone
+	for zone in "${ZONES[@]}"; do
+		if inner_exists "bao-$zone"; then
+			bao_wait "$zone"
+			bao_unseal "$zone"
+		fi
+	done
 }

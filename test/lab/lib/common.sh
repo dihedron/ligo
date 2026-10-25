@@ -122,18 +122,17 @@ inner_ip() {
 # lxd: lxc in the lab's project.
 lxd() { lxc --project "$LAB_PROJECT" "$@"; }
 
-# lxd_once SECONDS ARGS: lxc in the lab's project, retried once after a
-# timeout. On this host the lxc client has twice hung, with no operation on
-# the daemon, during a storage pool creation and a snapshot; a second call
-# returned at once.
+# lxd_once SECONDS ARGS: lxc in the lab's project, with an empty stdin (some
+# lxc commands read YAML from stdin when it is not a terminal, and wait on a
+# pipe that never closes), retried once after a timeout.
 lxd_once() {
 	local seconds="$1"
 	shift
-	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@" && return 0
+	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@" </dev/null && return 0
 	local status=$?
 	((status == 124)) || return "$status"
 	warn "lxc $* timed out after ${seconds}s: retrying once"
-	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@"
+	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@" </dev/null
 }
 
 # lxd_reachable: true when this session can talk to the LXD daemon.
