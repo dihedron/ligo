@@ -13,12 +13,13 @@ GOLANGCI_LINT_VERSION := 2.14
 .PHONY: lint
 lint: ## check that the code is clean (gofmt, go vet, golangci-lint); every build runs it first
 	@echo "Checking the code..."
-	@unformatted="$$(gofmt -l cmd internal pkg)"; \
+	@unformatted="$$(gofmt -l cmd internal pkg migrations)"; \
 		if [ -n "$$unformatted" ]; then echo "not formatted with gofmt (run gofmt -w):" >&2; echo "$$unformatted" >&2; exit 1; fi
 	@go vet ./...
+	@go vet -tags integration ./...
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is not installed: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION).0" >&2; exit 1; }
 	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION)\." || echo "warning: golangci-lint is not v$(GOLANGCI_LINT_VERSION), which CI runs: its findings may differ" >&2
-	@golangci-lint run ./...
+	@golangci-lint run --build-tags integration ./...
 
 .PHONY: compile
 compile: lint go-dev ## build for the default linux/amd64 platform
@@ -55,3 +56,17 @@ fuzz: ## run every fuzz target for FUZZTIME each (default 30s); go test runs the
 			go test "$$pkg" -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME) || exit 1; \
 		done; \
 	done
+
+# CONTAINER runs the secret scanners; podman works as well
+CONTAINER ?= docker
+
+.PHONY: secrets
+secrets: ## scan the history and the working tree for secrets with gitleaks and TruffleHog, as CI does (run before every commit)
+	@echo "gitleaks: history..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest git /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@echo "gitleaks: working tree..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest dir /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@echo "TruffleHog: history..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest git file:///repo --results=verified,unknown --fail --no-update
+	@echo "TruffleHog: working tree..."
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest filesystem /repo --exclude-paths=/repo/.trufflehog-exclude --results=verified,unknown --fail --no-update

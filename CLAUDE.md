@@ -12,6 +12,7 @@
 2. **Plan first:** Always use Claude's `/plan` mode to review requirements against the codebase before editing files.
 3. **Test-Driven Implementation:** Write unit or integration tests matching the acceptance criteria in the spec *before* writing the implementation code.
 4. **Compliance Audit:** Before finishing a task, verify that the implementation matches the API contracts, data models, and edge cases defined in the active spec.
+5. **No Secrets in Commits:** Before committing anything, check with all available local tools (e.g. gitleaks, trufflehog) that no secrets are in the sources being committed. 
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers or gin, Gophercloud / database/sql where applicable.
