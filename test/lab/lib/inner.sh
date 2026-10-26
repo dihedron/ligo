@@ -103,6 +103,13 @@ inner_init() {
 	lxd exec lxd -- timeout 300 lxc init "$image" "$name" "$@" </dev/null >/dev/null || die "cannot create $name"
 }
 
+# inner_start NAME: starts an inner instance unless it is running; instances
+# have boot.autostart, so one may start by itself meanwhile.
+inner_start() {
+	inner_running "$1" && return
+	inner start "$1" >/dev/null 2>&1 || inner_running "$1" || die "cannot start $1"
+}
+
 # inner_exists NAME / inner_running NAME
 inner_exists() { inner info "$1" >/dev/null 2>&1; }
 inner_running() { [[ "$(inner list "$1" -c s -f csv 2>/dev/null)" == RUNNING ]]; }

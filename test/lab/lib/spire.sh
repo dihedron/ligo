@@ -25,7 +25,7 @@ inner_container() {
 			-d eth0,ipv4.address="$(inner_ip "$name")" >/dev/null
 		info "container $name created"
 	fi
-	inner_running "$name" || inner start "$name"
+	inner_start "$name"
 	inner_wait "$name"
 }
 
@@ -241,7 +241,7 @@ ligo1_up() {
 			-c boot.autostart=true -d root,size="$LAB_LIGO1_DISK" -d eth0,ipv4.address="$(inner_ip ligo1)" >/dev/null
 		info "VM ligo1 created (nested)"
 	fi
-	inner_running ligo1 || inner start ligo1
+	inner_start ligo1
 	inner_wait ligo1
 	inner_exec ligo1 sh -c 'id ligo >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ligo'
 	inner_exec ligo1 sh -c 'command -v jq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null'

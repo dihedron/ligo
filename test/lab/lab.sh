@@ -24,6 +24,8 @@ source "$LAB_DIR/lib/spire.sh"
 source "$LAB_DIR/lib/bao.sh"
 # shellcheck source=lib/ldap.sh
 source "$LAB_DIR/lib/ldap.sh"
+# shellcheck source=lib/deploy.sh
+source "$LAB_DIR/lib/deploy.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -41,6 +43,11 @@ commands:
   status                    show the lab's VMs and what was recorded
   env                       print the integration tests' environment, as
                             export lines: eval "\$(test/lab/lab.sh env)"
+  env --on ligo1            the environment of the tests on ligo1, one
+                            VAR=value per line
+  deploy                    build the lab-tagged tests and copy them to ligo1
+  test --on ligo1 [-run REGEX]
+                            deploy, then run them on ligo1 as the user ligo
   test [-run REGEX] [pkg...]
                             run "go test -tags integration" (default ./...)
                             with that environment
@@ -125,6 +132,11 @@ cmd_status() {
 
 cmd_env() {
 	require_lab
+	if [[ "${1:-}" == --on ]]; then
+		[[ "${2:-}" == ligo1 ]] || die "env --on: only ligo1"
+		env_ligo1
+		return
+	fi
 	local role upper
 	for role in migrator app reader dbos; do
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
@@ -134,6 +146,12 @@ cmd_env() {
 
 cmd_test() {
 	require_lab
+	if [[ "${1:-}" == --on ]]; then
+		[[ "${2:-}" == ligo1 ]] || die "test --on: only ligo1"
+		shift 2
+		test_ligo1 "$@"
+		return
+	fi
 	local args=() pkgs=()
 	while (($#)); do
 		case "$1" in
@@ -190,7 +208,8 @@ main() {
 	up) cmd_up "$@" ;;
 	down) cmd_down ;;
 	status) cmd_status ;;
-	env) cmd_env ;;
+	env) cmd_env "$@" ;;
+	deploy) cmd_deploy ;;
 	test) cmd_test "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;

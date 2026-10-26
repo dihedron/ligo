@@ -55,7 +55,7 @@ lab_start() {
 	vm_wait lxd
 	local name
 	for name in $(inner list -c n -f csv); do
-		inner_running "$name" || inner start "$name"
+		inner_start "$name"
 	done
 	inner_wait pg
 	pg_wait_ready

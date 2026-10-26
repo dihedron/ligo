@@ -17,7 +17,7 @@ pg_up() {
 			-c cloud-init.user-data="$(pg_cloud_init)" -d eth0,ipv4.address="$(pg_ip)" >/dev/null
 		info "container pg created from $LAB_IMAGE"
 	fi
-	inner_running pg || inner start pg
+	inner_start pg
 	info "waiting for cloud-init (packages)..."
 	inner_wait pg
 	pg_configure
