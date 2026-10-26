@@ -9,6 +9,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spiffe/go-spiffe/v2 v2.9.0
 	go.yaml.in/yaml/v3 v3.0.5
+	google.golang.org/grpc v1.84.0
 )
 
 require (
@@ -22,6 +23,5 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261026165753-2ffab32bce7e // indirect
-	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
