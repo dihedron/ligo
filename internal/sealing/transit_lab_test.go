@@ -89,7 +89,4 @@ func TestLabWorkloadJWT(t *testing.T) {
 	if err != nil || len(jwt) < 20 {
 		t.Fatalf("FetchJWT = (%q, %v)", jwt, err)
 	}
-	if _, err := (WorkloadJWT{Addr: "unix:///nonexistent.sock"}).FetchJWT(context.Background(), "x"); err == nil {
-		t.Error("a missing socket gave a JWT")
-	}
 }

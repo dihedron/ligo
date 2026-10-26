@@ -5,7 +5,7 @@
 * **Run Specific Test:** `go test -v ./internal/auth -run TestTokenExchange`
 * **Build Binary:** `make`
 * **Release:** `make release-[major|minor|patch]` depending on whether we are increasing the major, minor or revision level in semantic versioning (e.g. v1.2.3)
-* **Other arguments:** run m̀ake help`to get a list of available command line switches.
+* **Other arguments:** run `make help` to get a list of available command line switches.
 
 ## Spec-Driven Development (SDD) Workflow
 1. **Never code blind:** All new features or non-trivial bug fixes must have an approved specification file in the `.specs/` directory before writing implementation code.
@@ -13,6 +13,7 @@
 3. **Test-Driven Implementation:** Write unit or integration tests matching the acceptance criteria in the spec *before* writing the implementation code.
 4. **Compliance Audit:** Before finishing a task, verify that the implementation matches the API contracts, data models, and edge cases defined in the active spec.
 5. **No Secrets in Commits:** Before committing anything, check with all available local tools (e.g. gitleaks, trufflehog) that no secrets are in the sources being committed. 
+6. **No vulnerable dependencies in Commits:** Before committing, run govulncheck and check that there are no vulnerable dependencies in `go.mod`.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers or gin, Gophercloud / database/sql where applicable.
