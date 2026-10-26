@@ -3,6 +3,7 @@ module github.com/dihedron/ligo
 go 1.27.3
 
 require (
+	github.com/expr-lang/expr v1.17.8
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/joho/godotenv v1.5.1

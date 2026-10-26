@@ -202,6 +202,8 @@ func TestPluginRules(t *testing.T) {
     binary: "x"`},
 		{"binary path", `binary: "store-vault"`, `binary: "../store-vault"`},
 		{"no selector", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: ''`},
+		{"selector not boolean", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'hint'`},
+		{"selector unknown field", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'spiffeID == "x"'`},
 		{"config not a mapping", `          host: "ora-scan.prod.internal"`, `          allowed_endpoints: 7
           host: "ora-scan.prod.internal"`},
 		{"identity provider flows", `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"`, `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"

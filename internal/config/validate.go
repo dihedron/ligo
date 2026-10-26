@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"go.yaml.in/yaml/v3"
 )
@@ -177,10 +178,15 @@ func (c *checker) binary(kind, typ string, builtin bool, binary, sum string) {
 	}
 }
 
-// plugin checks rule 5, and that external instances have a selector.
+// plugin checks rule 5, and that external instances have a selector that
+// compiles (§5.4).
 func (c *checker) plugin(what string, builtin bool, sel *SVIDSelector, in *Instance) {
 	if !builtin && (sel == nil || sel.MatchExpr == "") {
 		c.failf(4, "%s: svid_selector.match_expr is required", what)
+	} else if sel != nil && sel.MatchExpr != "" {
+		if _, err := pluginsdk.CompileSelector(sel.MatchExpr); err != nil {
+			c.failf(4, "%s: svid_selector.match_expr: %v", what, err)
+		}
 	}
 	pc, err := hostKeys(&in.Config)
 	if err != nil {
