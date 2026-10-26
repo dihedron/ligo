@@ -252,8 +252,58 @@ func TestManagerLogs(t *testing.T) {
 	}
 }
 
-// TestSpecs: the example configuration gives one process per external
-// (type, zone), with its zone's instances; builtin types run in ligo.
+// TestManagerBuiltins: builtin plugins are served in-process over the same
+// contract: no binary, no SVID, the same Call (§5.1).
+func TestManagerBuiltins(t *testing.T) {
+	identity := pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
+	store := pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER
+	m := New([]Spec{
+		{Builtin: true, Type: "svid.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
+		{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: test, Instances: []*pluginv2.InstanceDescriptor{{Name: "local-test", ConfigJson: `{"password_length":40}`}}},
+		{Builtin: true, Type: "none.v1", Kind: store, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "no-store-prod", ConfigJson: "{}"}}},
+	}, Options{RPCTimeout: 5 * time.Second, MaxConcurrentRPCsPerInstance: 1, Logger: slog.New(slog.DiscardHandler)})
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Stop()
+	ctx := context.Background()
+	binding := &pluginv2.BindingContext{DerivedPrincipalName: "bnd_abcdefghijklmnop"}
+	var artifact *pluginv2.IdentityArtifact
+	err := m.Call(ctx, identity, "local-test", true, func(ctx context.Context, c *Client) error {
+		r, err := c.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "local-test", Binding: binding})
+		artifact = r.GetArtifact()
+		return err
+	})
+	if err != nil || artifact.GetMode() != pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL || artifact.GetMetadata()["password_length"] != "40" {
+		t.Errorf("EnsureIdentity = (%v, %v)", artifact, err)
+	}
+	err = m.Call(ctx, store, "no-store-prod", true, func(ctx context.Context, c *Client) error {
+		_, err := c.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{Instance: "no-store-prod", Binding: binding,
+			SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID}})
+		return err
+	})
+	if err != nil {
+		t.Errorf("EnsureSecretStore: %v", err)
+	}
+	if m.Resolved(identity, "svid-prod") != "" {
+		t.Error("a builtin resolved an SVID")
+	}
+
+	for name, spec := range map[string]Spec{
+		"not a builtin": {Builtin: true, Type: "oracle.v1", Kind: target, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "x"}}},
+		"wrong kind":    {Builtin: true, Type: "none.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "x"}}},
+		"bad config":    {Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "x", ConfigJson: `{"password_length":8}`}}},
+	} {
+		m := New([]Spec{spec}, Options{RPCTimeout: 5 * time.Second, Logger: slog.New(slog.DiscardHandler)})
+		if err := m.Start(ctx); err == nil {
+			m.Stop()
+			t.Errorf("%s: started", name)
+		}
+	}
+}
+
+// TestSpecs: the example configuration gives one process per (type, zone),
+// with its zone's instances; builtin types are served in ligo.
 func TestSpecs(t *testing.T) {
 	data, err := os.ReadFile("../../examples/server.yaml")
 	if err != nil {
@@ -277,16 +327,20 @@ func TestSpecs(t *testing.T) {
 				t.Errorf("%s: config_json %q", in.GetName(), in.GetConfigJson())
 			}
 		}
-		if hex.EncodeToString(s.SHA256) != strings.Repeat("ab", 32) || s.Binary == "" {
-			t.Errorf("%s: binary %q sha256 %x", key, s.Binary, s.SHA256)
+		if s.Builtin != (s.Binary == "") || (!s.Builtin && hex.EncodeToString(s.SHA256) != strings.Repeat("ab", 32)) {
+			t.Errorf("%s: builtin %t, binary %q, sha256 %x", key, s.Builtin, s.Binary, s.SHA256)
 		}
 	}
 	want := map[string][]string{
-		"openldap.v1/prod": {"ldap-prod"},
-		"vault.v1/prod":    {"vault-prod"},
-		"vault.v1/test":    {"vault-test"},
-		"oracle.v1/prod":   {"oracle-prod"},
-		"oracle.v1/test":   {"oracle-test-dynamic"},
+		"svid.v1/prod":              {"svid-passthrough-prod"},
+		"target-local.v1/prod":      {"local-account-prod"},
+		"delegated-dynamic.v1/test": {"vault-dynamic-db-test"},
+		"none.v1/prod":              {"no-store-prod"},
+		"openldap.v1/prod":          {"ldap-prod"},
+		"vault.v1/prod":             {"vault-prod"},
+		"vault.v1/test":             {"vault-test"},
+		"oracle.v1/prod":            {"oracle-prod"},
+		"oracle.v1/test":            {"oracle-test-dynamic"},
 	}
 	if len(got) != len(want) {
 		t.Errorf("processes %v, want %v", got, want)

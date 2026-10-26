@@ -16,12 +16,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Spec is one plugin process: an external plugin type in one zone, with
-// that zone's instances (ADR-03).
+// Spec is one plugin process: a plugin type in one zone, with that zone's
+// instances (ADR-03). A builtin is served in-process instead (§5.1).
 type Spec struct {
 	Type      string
 	Kind      pluginv2.PluginKind
-	Binary    string // a file name in plugins.directory
+	Builtin   bool
+	Binary    string // a file name in plugins.directory; not for a builtin
 	SHA256    []byte
 	Zone      config.Zone
 	Instances []*pluginv2.InstanceDescriptor
@@ -104,7 +105,9 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		}
 		p.client, p.resolved = c, resolved
 		for _, in := range p.spec.Instances {
-			owners[resolved[in.GetName()]] = append(owners[resolved[in.GetName()]], in)
+			if !p.spec.Builtin { // builtins hold no SVID
+				owners[resolved[in.GetName()]] = append(owners[resolved[in.GetName()]], in)
+			}
 		}
 	}
 	for id, ins := range owners {
@@ -115,7 +118,9 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		}
 	}
 	for _, p := range m.procs {
-		m.wg.Go(func() { m.supervise(p) })
+		if !p.spec.Builtin { // builtins cannot crash apart from ligo
+			m.wg.Go(func() { m.supervise(p) })
+		}
 	}
 	return nil
 }
@@ -124,6 +129,18 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 // describes, and configures its instances.
 func (m *Manager) launch(ctx context.Context, s Spec) (*Client, map[string]string, error) {
 	what := fmt.Sprintf("plugin %s in zone %s", s.Type, s.Zone.Name)
+	if s.Builtin {
+		c, err := startBuiltin(s.Type, s.Kind)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", what, err)
+		}
+		resolved, err := m.configure(ctx, c, s)
+		if err != nil {
+			c.Kill()
+			return nil, nil, fmt.Errorf("%s: %w", what, err)
+		}
+		return c, resolved, nil
+	}
 	b, err := OpenBinary(m.opts.Directory, s.Binary, s.SHA256, m.opts.Owner)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", what, err)
@@ -165,6 +182,9 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 	for _, ri := range r.GetResolved() {
 		resolved[ri.GetInstance()] = ri.GetSpiffeId()
 	}
+	if s.Builtin {
+		return resolved, nil
+	}
 	for _, in := range s.Instances {
 		id, err := spiffeid.FromString(resolved[in.GetName()])
 		if err != nil {
@@ -189,7 +209,7 @@ func (m *Manager) supervise(p *process) {
 		case <-time.After(exitPoll):
 		}
 		p.mu.RLock()
-		down := p.client == nil || p.client.process.Exited()
+		down := p.client == nil || p.client.exited()
 		p.mu.RUnlock()
 		if !down {
 			continue

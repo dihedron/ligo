@@ -10,8 +10,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Specs groups the configuration's external plugin instances into one
-// process per (type, zone) (ADR-03); builtin types run inside ligo.
+// Specs groups the configuration's plugin instances into one process per
+// (type, zone) (ADR-03); builtin types are served inside ligo.
 func Specs(cfg *config.Config) ([]Spec, error) {
 	zones := map[string]config.Zone{}
 	for _, z := range cfg.Zones {
@@ -19,7 +19,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 	}
 	var specs []Spec
 	index := map[string]int{}
-	add := func(kind pluginv2.PluginKind, typ, binary, sum, zone string, in *pluginv2.InstanceDescriptor) error {
+	add := func(kind pluginv2.PluginKind, typ string, builtin bool, binary, sum, zone string, in *pluginv2.InstanceDescriptor) error {
 		z, ok := zones[zone]
 		if !ok {
 			return fmt.Errorf("instance %q: unknown zone %q", in.GetName(), zone)
@@ -29,12 +29,16 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 			specs[i].Instances = append(specs[i].Instances, in)
 			return nil
 		}
-		checksum, err := hex.DecodeString(sum)
-		if err != nil || len(checksum) != 32 {
-			return fmt.Errorf("plugin %s: sha256 %q", typ, sum)
+		spec := Spec{Type: typ, Kind: kind, Builtin: builtin, Zone: z, Instances: []*pluginv2.InstanceDescriptor{in}}
+		if !builtin {
+			checksum, err := hex.DecodeString(sum)
+			if err != nil || len(checksum) != 32 {
+				return fmt.Errorf("plugin %s: sha256 %q", typ, sum)
+			}
+			spec.Binary, spec.SHA256 = binary, checksum
 		}
 		index[k] = len(specs)
-		specs = append(specs, Spec{Type: typ, Kind: kind, Binary: binary, SHA256: checksum, Zone: z, Instances: []*pluginv2.InstanceDescriptor{in}})
+		specs = append(specs, spec)
 		return nil
 	}
 	for kind, providers := range map[pluginv2.PluginKind][]config.InstanceProvider{
@@ -42,24 +46,18 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 		pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER: cfg.SecretStores,
 	} {
 		for _, p := range providers {
-			if p.Builtin {
-				continue
-			}
 			for _, inst := range p.Instances {
 				in, err := descriptor(inst.Name, inst.SVIDSelector, &inst.Config)
 				if err != nil {
 					return nil, err
 				}
-				if err := add(kind, p.Type, p.Binary, p.SHA256, inst.Zone, in); err != nil {
+				if err := add(kind, p.Type, p.Builtin, p.Binary, p.SHA256, inst.Zone, in); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
 	for _, p := range cfg.TargetProviders {
-		if p.Builtin {
-			continue
-		}
 		for _, pl := range p.Platforms {
 			in, err := descriptor(pl.Name, pl.SVIDSelector, &pl.Config)
 			if err != nil {
@@ -67,7 +65,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 			}
 			in.IdentityProviderType, in.IdentityProviderInstance = pl.IdentityProvider.Type, pl.IdentityProvider.Instance
 			in.SecretStoreType, in.SecretStoreInstance = pl.SecretStore.Type, pl.SecretStore.Instance
-			if err := add(pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, p.Type, p.Binary, p.SHA256, pl.Zone, in); err != nil {
+			if err := add(pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Zone, in); err != nil {
 				return nil, err
 			}
 		}

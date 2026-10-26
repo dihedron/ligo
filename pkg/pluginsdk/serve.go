@@ -55,6 +55,19 @@ func (p Plugins) Set() (plugin.PluginSet, error) {
 	return set, nil
 }
 
+// Register registers p's services on srv: how ligo serves its builtin
+// plugins in-process.
+func (p Plugins) Register(srv *grpc.Server) error {
+	set, err := p.Set()
+	if err != nil {
+		return err
+	}
+	for _, s := range set {
+		s.(service).register(srv)
+	}
+	return nil
+}
+
 // Serve runs a plugin binary until the host stops it; it panics on a set
 // that is not one kind's.
 func Serve(p Plugins) {

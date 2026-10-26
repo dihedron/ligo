@@ -44,6 +44,10 @@ func TestPluginsSet(t *testing.T) {
 		if len(srv.GetServiceInfo()) != 2 {
 			t.Errorf("%s: services %v", name, srv.GetServiceInfo())
 		}
+		direct := grpc.NewServer()
+		if err := p.Register(direct); err != nil || len(direct.GetServiceInfo()) != 2 {
+			t.Errorf("%s: Register: %v %v", name, err, direct.GetServiceInfo())
+		}
 	}
 	for name, p := range map[string]Plugins{
 		"no control": {Target: target{}},
@@ -52,6 +56,9 @@ func TestPluginsSet(t *testing.T) {
 	} {
 		if _, err := p.Set(); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+		if err := p.Register(grpc.NewServer()); err == nil {
+			t.Errorf("%s: registered", name)
 		}
 	}
 }

@@ -1,0 +1,204 @@
+package builtinplugins
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"google.golang.org/grpc/codes"
+)
+
+func binding() *pluginv2.BindingContext {
+	return &pluginv2.BindingContext{
+		BindingId: "0190c1b2-0000-7000-8000-000000000001", DerivedPrincipalName: "bnd_abcdefghijklmnop",
+		SourceTrustDomain: "prod.internal", SourceSvidRegex: "^spiffe://prod\\.internal/ns/pay/sa/api$",
+	}
+}
+
+// compile compiles a schema a plugin describes.
+func compile(t *testing.T, schema string) *jsonschema.Schema {
+	t.Helper()
+	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("schema.json", doc); err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Compile("schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func valid(t *testing.T, s *jsonschema.Schema, doc string) bool {
+	t.Helper()
+	v, err := jsonschema.UnmarshalJSON(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.Validate(v) == nil
+}
+
+// TestLookup: the four builtin types of §5.1, and nothing else.
+func TestLookup(t *testing.T) {
+	for typ, kind := range map[string]pluginv2.PluginKind{
+		"svid.v1":              pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
+		"target-local.v1":      pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
+		"delegated-dynamic.v1": pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
+		"none.v1":              pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER,
+	} {
+		p, ok := Lookup(typ)
+		if !ok {
+			t.Fatalf("%s: not a builtin", typ)
+		}
+		if _, err := p.Set(); err != nil {
+			t.Errorf("%s: %v", typ, err)
+		}
+		d, err := p.Control.Describe(context.Background(), &pluginv2.DescribeRequest{})
+		if err != nil || d.GetPluginType() != typ || d.GetKind() != kind || d.GetPluginProtocolVersion() != 1 {
+			t.Errorf("%s: Describe = (%v, %v)", typ, d, err)
+		}
+		r, err := p.Control.ConfigureInstances(context.Background(), &pluginv2.ConfigureInstancesRequest{Instances: []*pluginv2.InstanceDescriptor{{Name: "i"}}})
+		if err != nil || len(r.GetResolved()) != 0 {
+			t.Errorf("%s: builtins hold no SVID: (%v, %v)", typ, r, err)
+		}
+		if h, err := p.Control.Health(context.Background(), &pluginv2.HealthRequest{Instance: "i"}); err != nil || !h.GetServing() {
+			t.Errorf("%s: Health = (%v, %v)", typ, h, err)
+		}
+	}
+	for _, typ := range []string{"oracle.v1", "vault.v1", ""} {
+		if _, ok := Lookup(typ); ok {
+			t.Errorf("%s: a builtin", typ)
+		}
+	}
+}
+
+// TestInstanceConfig: each builtin's instance_config_schema_json accepts the
+// example configuration and nothing unknown (§8.2 rule 8).
+func TestInstanceConfig(t *testing.T) {
+	for typ, cases := range map[string]map[string]bool{
+		"svid.v1":              {`{}`: true, `{"x":1}`: false},
+		"delegated-dynamic.v1": {`{}`: true, `{"x":1}`: false},
+		"none.v1":              {`{}`: true, `{"x":1}`: false},
+		"target-local.v1":      {`{}`: true, `{"password_length":32}`: true, `{"password_length":64}`: true, `{"password_length":31}`: false, `{"password_length":"32"}`: false, `{"x":1}`: false},
+	} {
+		p, _ := Lookup(typ)
+		d, _ := p.Control.Describe(context.Background(), &pluginv2.DescribeRequest{})
+		s := compile(t, d.GetInstanceConfigSchemaJson())
+		for doc, want := range cases {
+			if got := valid(t, s, doc); got != want {
+				t.Errorf("%s: %s valid = %t, want %t", typ, doc, got, want)
+			}
+		}
+	}
+}
+
+// TestIdentityMarkers: the identity markers create nothing; their artifact
+// names the binding's derived principal in their mode, never with a secret,
+// and the same request gives the same artifact (ADR-01, §5.8 rules 1-2).
+func TestIdentityMarkers(t *testing.T) {
+	ctx := context.Background()
+	for typ, mode := range map[string]pluginv2.IdentityMode{
+		"svid.v1":              pluginv2.IdentityMode_IDENTITY_MODE_SVID,
+		"target-local.v1":      pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL,
+		"delegated-dynamic.v1": pluginv2.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC,
+	} {
+		p, _ := Lookup(typ)
+		if _, err := p.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{Instances: []*pluginv2.InstanceDescriptor{
+			{Name: "i", ConfigJson: `{"password_length":40}`},
+		}}); err != nil && typ == "target-local.v1" {
+			t.Fatal(err)
+		}
+		d, _ := p.Control.Describe(ctx, &pluginv2.DescribeRequest{})
+		if m := d.GetSupportedIdentityModes(); len(m) != 1 || m[0] != mode {
+			t.Errorf("%s: supported modes %v", typ, m)
+		}
+		req := &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()}
+		r, err := p.Identity.EnsureIdentity(ctx, req)
+		if err != nil {
+			t.Fatalf("%s: %v", typ, err)
+		}
+		a := r.GetArtifact()
+		if a.GetMode() != mode || a.GetPrincipalId() != "bnd_abcdefghijklmnop" || a.GetStaticSecret() != nil {
+			t.Errorf("%s: artifact %+v", typ, a)
+		}
+		again, _ := p.Identity.EnsureIdentity(ctx, req)
+		if again.GetArtifact().String() != a.String() {
+			t.Errorf("%s: not idempotent", typ)
+		}
+		if c, err := p.Identity.CleanupIdentity(ctx, &pluginv2.CleanupIdentityRequest{Instance: "i", Binding: binding()}); err != nil || c.GetSkippedNotOwner() {
+			t.Errorf("%s: Cleanup = (%v, %v)", typ, c, err)
+		}
+		_, err = p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: &pluginv2.BindingContext{}})
+		if code, d := pluginsdk.FromError(err); code != codes.InvalidArgument || d.GetCode() != "MISSING_PRINCIPAL_NAME" {
+			t.Errorf("%s: no derived name: %v", typ, err)
+		}
+	}
+
+	// svid.v1 tells the target which SVIDs the principal stands for;
+	// target-local.v1 the length of the password the target generates
+	p, _ := Lookup("svid.v1")
+	r, _ := p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()})
+	if md := r.GetArtifact().GetMetadata(); md["source_svid_regex"] != binding().GetSourceSvidRegex() || md["source_trust_domain"] != "prod.internal" {
+		t.Errorf("svid.v1 metadata %v", md)
+	}
+	p, _ = Lookup("target-local.v1")
+	if _, err := p.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{Instances: []*pluginv2.InstanceDescriptor{
+		{Name: "i", ConfigJson: `{"password_length":40}`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()})
+	if md := r.GetArtifact().GetMetadata(); md["password_length"] != "40" {
+		t.Errorf("target-local.v1 metadata %v", md)
+	}
+	r, _ = p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "unconfigured", Binding: binding()})
+	if md := r.GetArtifact().GetMetadata(); md["password_length"] != "32" {
+		t.Errorf("target-local.v1 default metadata %v", md)
+	}
+	if _, err := p.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{Instances: []*pluginv2.InstanceDescriptor{
+		{Name: "i", ConfigJson: `{"password_length":8}`},
+	}}); err == nil {
+		t.Error("a password_length below 32 was accepted")
+	}
+}
+
+// TestNoneStore: none.v1 stores nothing and only serves SVID mode (§5.6);
+// its output is valid against its own client output schema (INV-13).
+func TestNoneStore(t *testing.T) {
+	ctx := context.Background()
+	p, _ := Lookup("none.v1")
+	d, _ := p.Control.Describe(ctx, &pluginv2.DescribeRequest{})
+	out := compile(t, d.GetClientOutputSchemaJson())
+
+	r, err := p.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{
+		Instance: "i", Binding: binding(), SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID},
+	})
+	if err != nil || !json.Valid(r.GetFinalizedClientAuthJson()) || !valid(t, out, string(r.GetFinalizedClientAuthJson())) || len(r.GetDeclaredEndpoints()) != 0 {
+		t.Fatalf("EnsureSecretStore = (%v, %v)", r, err)
+	}
+	if valid(t, out, `{"mode":"TARGET_LOCAL"}`) {
+		t.Error("the output schema accepts another mode")
+	}
+	for name, payload := range map[string]*pluginv2.SecretProvisioningPayload{
+		"no payload":   nil,
+		"target-local": {Mode: pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL},
+		"a secret": {Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID,
+			Payload: &pluginv2.SecretProvisioningPayload_StaticSecret{StaticSecret: &pluginv2.StaticSecret{Password: "x"}}},
+	} {
+		_, err := p.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{Instance: "i", Binding: binding(), SecretPayload: payload})
+		if code, d := pluginsdk.FromError(err); code != codes.FailedPrecondition || d.GetCode() != "INCOMPATIBLE_IDENTITY_MODE" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if c, err := p.Store.CleanupSecretStore(ctx, &pluginv2.CleanupSecretStoreRequest{Instance: "i", Binding: binding()}); err != nil || c.GetSkippedNotOwner() {
+		t.Errorf("Cleanup = (%v, %v)", c, err)
+	}
+}
