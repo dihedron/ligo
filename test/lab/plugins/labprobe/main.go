@@ -2,7 +2,8 @@
 // store whose instances select their SVID from the zone's SPIRE agent and
 // whose Health reads the instance's bootstrap credential from Vault with it,
 // answering with the user name only (.specs/ligo-test-environment.md,
-// "Plugins on ligo1").
+// "Plugins on ligo1"). "labprobe -svids SOCKET" prints the SPIFFE IDs the
+// agent issues to this binary, run as this user: what lab.sh deploy waits on.
 package main
 
 import (
@@ -110,5 +111,22 @@ type store struct {
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "-svids" {
+		os.Exit(printSVIDs(os.Args[2]))
+	}
 	pluginsdk.Serve(pluginsdk.Plugins{Control: &probe{}, Store: store{}})
+}
+
+func printSVIDs(socket string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	svids, err := workloadapi.FetchX509SVIDs(ctx, workloadapi.WithAddr(socket))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	for _, s := range svids {
+		fmt.Println(s.ID)
+	}
+	return 0
 }

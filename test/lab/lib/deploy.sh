@@ -67,7 +67,7 @@ cmd_deploy() {
 # plugin's SPIRE entry, which selects on its hash, and its OpenBao objects.
 # Both change with every build, so every deploy applies them.
 deploy_plugins() {
-	local out="$LAB_STATE_DIR/plugins" uid name sum changed=0
+	local out="$LAB_STATE_DIR/plugins" uid name sum
 	rm -rf "${out:?}" && mkdir -p "$out"
 	uid="$(env_get .ligo1.ligo_uid)"
 	inner_exec ligo1 install -d -o root -g root -m 0755 /usr/lib/ligo "$LIGO1_PLUGINS"
@@ -76,22 +76,29 @@ deploy_plugins() {
 			die "cannot build the plugin $name"
 		inner_push "$out/$name" ligo1 "$LIGO1_PLUGINS/$name" 0755
 		sum="$(sha256sum "$out/$name" | cut -d' ' -f1)"
-		plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum" || changed=1
-		info "plugin $name installed in ligo1:$LIGO1_PLUGINS (sha256 ${sum:0:12}…), its SPIRE entry selects on that hash"
+		plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum"
+		plugin_svid_wait prod "$name" "$uid"
+		info "plugin $name installed in ligo1:$LIGO1_PLUGINS (sha256 ${sum:0:12}…); the agent issues its SVID, selected by that hash"
 	done
 	labprobe_bao
-	if ((changed)); then
-		# shortcut: the agents fetch new entries every 5s (SPIRE's default); poll the agent instead if this ever proves flaky
-		info "waiting for the agents to sync the new plugin entries..."
-		sleep "$AGENT_SYNC_WAIT"
-	fi
 }
 
-# AGENT_SYNC_WAIT is how long a new entry takes to reach the agents.
-AGENT_SYNC_WAIT=6
+# plugin_svid_wait ZONE NAME UID: waits until the zone's agent issues the
+# plugin's SVID to the plugin's binary run as the user ligo (a new entry
+# reaches the agents at their next sync); the binary asks the agent itself,
+# so the agent attests exactly what it will attest for the plugin.
+plugin_svid_wait() {
+	local zone="$1" name="$2" uid="$3"
+	for _ in $(seq 1 30); do
+		lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$LIGO1_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
+			grep -qx "spiffe://$zone.lab/ligo/plugin/$name" && return
+		sleep 1
+	done
+	die "the $zone agent does not issue the SVID of the plugin $name after 30s (uid $uid)"
+}
 
 # plugin_entry ZONE PATH HINT UID SHA256: the plugin's entry under ligo1's
-# node alias, replaced when the binary's hash changed; fails when it did.
+# node alias, replaced when the binary's hash changed.
 plugin_entry() {
 	local zone="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" entry
 	spire "$zone" entry show -spiffeID "$id" 2>/dev/null | grep -q "unix:sha256:$sum" && return
@@ -100,7 +107,6 @@ plugin_entry() {
 	done
 	spire "$zone" entry create -parentID "spiffe://$zone.lab/node/ligo1" -spiffeID "$id" -hint "$hint" \
 		-selector "unix:uid:$uid" -selector "unix:sha256:$sum" >/dev/null || die "cannot register $id"
-	return 1
 }
 
 # labprobe_bao: on bao-prod, labprobe's bootstrap credential, the policy that
