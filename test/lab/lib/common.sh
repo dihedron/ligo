@@ -21,6 +21,16 @@ load_settings() {
 	[[ "$LAB_STATE_DIR" = /* ]] || LAB_STATE_DIR="$LAB_DIR/$LAB_STATE_DIR"
 }
 
+# env_set PATH JSON: sets a value in env.json (jq path, JSON value).
+env_set() {
+	local file="$LAB_STATE_DIR/env.json"
+	[[ -f "$file" ]] || echo '{}' >"$file"
+	jq --argjson v "$2" "$1 = \$v" "$file" >"$file.new" && mv "$file.new" "$file"
+}
+
+# env_get PATH: reads a value from env.json (raw).
+env_get() { jq -r "$1" "$LAB_STATE_DIR/env.json"; }
+
 # --- Output -------------------------------------------------------------------
 
 if [[ -t 1 ]]; then
@@ -59,28 +69,71 @@ confirm() {
 
 # --- Scenarios ----------------------------------------------------------------
 
-# select_scenarios VALUE: checks a --scenario value (empty: LAB_SCENARIOS).
+# The scenarios this command works on, set by select_scenarios.
+LAB_SELECTED=()
+
+# select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
+# identity or all) or, when VALUE is empty, from LAB_SCENARIOS.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
-	[[ "$value" == all ]] && value="storage"
+	[[ "$value" == all ]] && value="storage identity"
+	LAB_SELECTED=()
 	for scenario in $value; do
-		[[ "$scenario" == storage ]] || die "unknown scenario \"$scenario\": only storage exists"
+		case "$scenario" in
+		storage | identity) LAB_SELECTED+=("$scenario") ;;
+		*) die "unknown scenario \"$scenario\": storage, identity or all" ;;
+		esac
 	done
 }
 
+# selected SCENARIO: true when the command works on SCENARIO.
+selected() { [[ " ${LAB_SELECTED[*]} " == *" $1 "* ]]; }
+
 # --- Addresses ----------------------------------------------------------------
 
-# subnet_prefix: the first three octets of LAB_SUBNET (a /24).
-subnet_prefix() { printf '%s' "${LAB_SUBNET%.*}"; }
-# lab_gateway: the bridge's address on the lab subnet.
-lab_gateway() { printf '%s.1' "$(subnet_prefix)"; }
-# pg_ip: the PostgreSQL VM's address.
-pg_ip() { printf '%s.%s' "$(subnet_prefix)" "$LAB_PG_HOST"; }
+# prefix24 CIDR: the first three octets of a /24.
+prefix24() { printf '%s' "${1%.*}"; }
+# lab_gateway: the outer bridge's address on the lab subnet.
+lab_gateway() { printf '%s.1' "$(prefix24 "$LAB_SUBNET")"; }
+# lxd_ip: the lab VM's address on the lab subnet.
+lxd_ip() { printf '%s.%s' "$(prefix24 "$LAB_SUBNET")" "$LAB_LXD_HOST"; }
+# inner_gateway: the inner bridge's address.
+inner_gateway() { printf '%s.1' "$(prefix24 "$LAB_INNER_SUBNET")"; }
+# pg_ip: the PostgreSQL container's inner address.
+pg_ip() { printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$LAB_PG_HOST"; }
+# inner_ip NAME: an inner instance's address.
+inner_ip() {
+	local host
+	case "$1" in
+	pg) host="$LAB_PG_HOST" ;;
+	spire-prod) host=20 ;;
+	spire-test) host=21 ;;
+	bao-prod) host=30 ;;
+	bao-test) host=31 ;;
+	ldap) host=40 ;;
+	ligo1) host=50 ;;
+	*) die "no address for $1" ;;
+	esac
+	printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$host"
+}
 
 # --- LXD ----------------------------------------------------------------------
 
 # lxd: lxc in the lab's project.
 lxd() { lxc --project "$LAB_PROJECT" "$@"; }
+
+# lxd_once SECONDS ARGS: lxc in the lab's project, with an empty stdin (some
+# lxc commands read YAML from stdin when it is not a terminal, and wait on a
+# pipe that never closes), retried once after a timeout.
+lxd_once() {
+	local seconds="$1"
+	shift
+	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@" </dev/null && return 0
+	local status=$?
+	((status == 124)) || return "$status"
+	warn "lxc $* timed out after ${seconds}s: retrying once"
+	timeout "$seconds" lxc --project "$LAB_PROJECT" "$@" </dev/null
+}
 
 # lxd_reachable: true when this session can talk to the LXD daemon.
 lxd_reachable() { lxc query /1.0 >/dev/null 2>&1; }

@@ -70,3 +70,14 @@ secrets: ## scan the history and the working tree for secrets with gitleaks and 
 	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest git file:///repo --results=verified,unknown --fail --no-update
 	@echo "TruffleHog: working tree..."
 	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest filesystem /repo --exclude-paths=/repo/.trufflehog-exclude --results=verified,unknown --fail --no-update
+
+# govulncheck runs through "go run" so that it is always built with the
+# current toolchain (a binary built with an older Go cannot read newer sources);
+# "-scan module" flags every vulnerable module in go.mod, called or not, as
+# CI's dependency review does (-C: module scans fail in a directory without
+# Go files, such as the root)
+.PHONY: vuln
+vuln: ## check go.mod and the code for known vulnerabilities with govulncheck, lab-tagged tests included (run before every commit)
+	@go run golang.org/x/vuln/cmd/govulncheck@latest -C cmd/ligo -scan module
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	@go run golang.org/x/vuln/cmd/govulncheck@latest -tags 'integration lab' ./...

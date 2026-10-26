@@ -8,7 +8,7 @@ lxd_up() {
 	if ! lxc storage show "$LAB_STORAGE_POOL" >/dev/null 2>&1; then
 		local args=("$LAB_STORAGE_POOL" "$LAB_STORAGE_DRIVER")
 		[[ "$LAB_STORAGE_DRIVER" == dir ]] || args+=("size=$LAB_STORAGE_SIZE")
-		lxc storage create "${args[@]}" user.ligo-lab=yes >/dev/null
+		lxd_once 300 storage create "${args[@]}" user.ligo-lab=yes >/dev/null || die "cannot create the storage pool $LAB_STORAGE_POOL"
 		info "storage pool $LAB_STORAGE_POOL created ($LAB_STORAGE_DRIVER)"
 	else
 		info "storage pool $LAB_STORAGE_POOL exists"

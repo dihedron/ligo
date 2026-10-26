@@ -14,6 +14,18 @@ source "$LAB_DIR/lib/preflight.sh"
 source "$LAB_DIR/lib/lxd.sh"
 # shellcheck source=lib/pki.sh
 source "$LAB_DIR/lib/pki.sh"
+# shellcheck source=lib/inner.sh
+source "$LAB_DIR/lib/inner.sh"
+# shellcheck source=lib/fetch.sh
+source "$LAB_DIR/lib/fetch.sh"
+# shellcheck source=lib/spire.sh
+source "$LAB_DIR/lib/spire.sh"
+# shellcheck source=lib/bao.sh
+source "$LAB_DIR/lib/bao.sh"
+# shellcheck source=lib/ldap.sh
+source "$LAB_DIR/lib/ldap.sh"
+# shellcheck source=lib/deploy.sh
+source "$LAB_DIR/lib/deploy.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -31,19 +43,28 @@ commands:
   status                    show the lab's VMs and what was recorded
   env                       print the integration tests' environment, as
                             export lines: eval "\$(test/lab/lab.sh env)"
+  env --on ligo1            the environment of the tests on ligo1, one
+                            VAR=value per line
+  deploy                    build the lab-tagged tests and copy them to ligo1
+  test --on ligo1 [-run REGEX]
+                            deploy, then run them on ligo1 as the user ligo
   test [-run REGEX] [pkg...]
                             run "go test -tags integration" (default ./...)
                             with that environment
+  spire <prod|test> [args]  spire-server on that zone's server
+  bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
+  ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
   psql [--as ROLE | --superuser] [args]
-                            psql in the pg VM as ligo_ROLE (migrator, app,
+                            psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
                             postgres over the Unix socket
   snapshot                  save the VMs as the lab's baseline
   reset                     return the VMs to the baseline (an empty
                             database), and wait until it answers
   stop / start              stop the VMs cleanly / start them as they were
-  ssh <vm> [command]        a root shell, or a command, in a VM
-  logs <vm> [unit]          a VM's cloud-init log, or a unit's journal
+  ssh <name> [command]      a root shell, or a command, in the lab VM (lxd)
+                            or an inner instance (pg, ...)
+  logs <name> [unit]        its cloud-init log, or a unit's journal
   help                      this text
 
 settings: lab.env, overridden by lab.local.env and the environment
@@ -52,7 +73,7 @@ USAGE
 
 # require_lab fails unless "up" has built the lab.
 require_lab() {
-	if [[ ! -f "$LAB_STATE_DIR/env.json" ]] || ! vm_exists pg; then
+	if [[ ! -f "$LAB_STATE_DIR/env.json" ]] || ! vm_exists lxd; then
 		die "the lab is not built: run lab.sh up"
 	fi
 }
@@ -69,32 +90,53 @@ cmd_up() {
 	preflight
 	pki_up
 	lxd_up
+	lxd_vm_up
 	pg_up
 	pg_record
-	has_snapshot || lab_snapshot
+	if selected identity; then
+		identity_spire_up
+		identity_bao_up
+		ldap_up
+	fi
+	# a new snapshot when there is none, or when up added inner instances
+	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then
+		lab_snapshot
+	fi
 	section "Done"
 	info "the lab is up: eval \"\$(test/lab/lab.sh env)\", or lab.sh test"
 }
 
 cmd_down() {
 	confirm "Destroy the ligo lab (VMs, snapshots, network, project, pool, state)?" || die "cancelled"
-	if vm_exists pg; then
-		lxd delete pg --force && info "VM pg deleted"
-	fi
+	local vm
+	for vm in lxd pg; do # pg: the VM of the lab's first layout
+		if vm_exists "$vm"; then
+			lxd delete "$vm" --force && info "VM $vm deleted"
+		fi
+	done
 	lxd_down
 	rm -rf "$LAB_STATE_DIR"
 	info "state directory removed"
 }
 
 cmd_status() {
-	section "VMs ($LAB_PROJECT)"
+	section "VM ($LAB_PROJECT)"
 	lxd list -c nsN4 -f compact 2>/dev/null || info "no project $LAB_PROJECT"
+	if vm_running lxd; then
+		section "Inner instances"
+		inner list -c ntsN4 -f compact
+	fi
 	section "Recorded (env.json)"
 	if [[ -f "$LAB_STATE_DIR/env.json" ]]; then jq . "$LAB_STATE_DIR/env.json"; else info "nothing recorded"; fi
 }
 
 cmd_env() {
 	require_lab
+	if [[ "${1:-}" == --on ]]; then
+		[[ "${2:-}" == ligo1 ]] || die "env --on: only ligo1"
+		env_ligo1
+		return
+	fi
 	local role upper
 	for role in migrator app reader dbos; do
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
@@ -104,6 +146,12 @@ cmd_env() {
 
 cmd_test() {
 	require_lab
+	if [[ "${1:-}" == --on ]]; then
+		[[ "${2:-}" == ligo1 ]] || die "test --on: only ligo1"
+		shift 2
+		test_ligo1 "$@"
+		return
+	fi
 	local args=() pkgs=()
 	while (($#)); do
 		case "$1" in
@@ -126,15 +174,28 @@ cmd_psql() {
 	esac
 }
 
-cmd_ssh() {
-	local vm="${1:?ssh: which VM?}"
+# on NAME ARGS: runs ARGS in the lab VM ("lxd") or in an inner instance.
+on() {
+	local name="$1"
 	shift
-	if (($#)); then lxd exec "$vm" -- "$@"; else lxd exec "$vm" -- bash -l; fi
+	if [[ "$name" == lxd ]]; then lxd exec lxd -- "$@"; else inner_exec "$name" "$@"; fi
+}
+
+cmd_ssh() {
+	local name="${1:?ssh: lxd or an inner instance?}"
+	shift
+	if (($#)); then
+		on "$name" "$@"
+	elif [[ "$name" == lxd ]]; then
+		lxd exec lxd -- bash -l
+	else
+		lxd exec lxd -t -- lxc exec "$name" -- bash -l
+	fi
 }
 
 cmd_logs() {
-	local vm="${1:?logs: which VM?}"
-	if (($# > 1)); then lxd exec "$vm" -- journalctl --no-pager -u "$2"; else lxd exec "$vm" -- cat /var/log/cloud-init-output.log; fi
+	local name="${1:?logs: lxd or an inner instance?}"
+	if (($# > 1)); then on "$name" journalctl --no-pager -u "$2"; else on "$name" cat /var/log/cloud-init-output.log; fi
 }
 
 main() {
@@ -147,9 +208,13 @@ main() {
 	up) cmd_up "$@" ;;
 	down) cmd_down ;;
 	status) cmd_status ;;
-	env) cmd_env ;;
+	env) cmd_env "$@" ;;
+	deploy) cmd_deploy ;;
 	test) cmd_test "$@" ;;
 	psql) cmd_psql "$@" ;;
+	spire) require_lab && spire "$@" ;;
+	bao) require_lab && bao "$@" ;;
+	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;
 	stop) require_lab && lab_stop ;;

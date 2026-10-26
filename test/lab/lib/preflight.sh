@@ -35,6 +35,13 @@ preflight_host() {
 	else
 		fail "/dev/kvm missing or not usable: enable virtualization, and join the kvm group"
 	fi
+	local nested
+	nested="$(cat /sys/module/kvm_amd/parameters/nested /sys/module/kvm_intel/parameters/nested 2>/dev/null | head -1 || true)"
+	if [[ "$nested" == 1 || "$nested" == Y ]]; then
+		ok "KVM nesting enabled (the lab's VMs run inside the lab VM)"
+	else
+		fail "KVM nesting is off: enable it (options kvm_amd nested=1, or kvm_intel nested=1) and reload the module"
+	fi
 }
 
 preflight_lxd() {
@@ -81,14 +88,14 @@ preflight_lxd() {
 preflight_resources() {
 	local cpus mem_avail_mib need_mib disk_mib need_disk_mib
 	cpus="$(nproc)"
-	if ((LAB_PG_CPUS <= cpus)); then
-		ok "$LAB_PG_CPUS vCPU(s) of $cpus"
+	if ((LAB_LXD_CPUS <= cpus)); then
+		ok "$LAB_LXD_CPUS vCPU(s) of $cpus"
 	else
-		warn "$LAB_PG_CPUS vCPUs on a host with $cpus"
+		warn "$LAB_LXD_CPUS vCPUs on a host with $cpus"
 	fi
 	mem_avail_mib=$(($(awk '/MemAvailable/ {print $2}' /proc/meminfo) / 1024))
-	need_mib=$(($(size_mib "$LAB_PG_MEMORY") + 2048))
-	if lxd_reachable && lxd info pg 2>/dev/null | grep -q '^Status: RUNNING'; then
+	need_mib=$(($(size_mib "$LAB_LXD_MEMORY") + 2048))
+	if lxd_reachable && vm_running lxd; then
 		need_mib=2048
 	fi
 	if ((need_mib <= mem_avail_mib)); then
@@ -98,9 +105,11 @@ preflight_resources() {
 	fi
 	disk_mib=$(($(df -Pk /var/snap/lxd/common/lxd 2>/dev/null | awk 'NR==2 {print $4}') / 1024))
 	if [[ "$LAB_STORAGE_DRIVER" == dir ]]; then
-		need_disk_mib=$(($(size_mib "$LAB_PG_DISK") * 2))
+		need_disk_mib=$(($(size_mib "$LAB_LXD_DISK") * 2))
 	else
 		need_disk_mib=$(size_mib "$LAB_STORAGE_SIZE")
+		((need_disk_mib > $(size_mib "$LAB_LXD_DISK"))) ||
+			fail "LAB_STORAGE_SIZE ($LAB_STORAGE_SIZE) must exceed the lab VM's disk (LAB_LXD_DISK, $LAB_LXD_DISK), with room for its snapshot"
 	fi
 	if ((need_disk_mib <= disk_mib)); then
 		ok "disk: ${need_disk_mib} MiB needed, ${disk_mib} MiB free under /var/snap/lxd/common/lxd"
@@ -132,6 +141,8 @@ preflight_software() {
 
 preflight_network() {
 	[[ "$LAB_SUBNET" =~ ^([0-9]+\.){3}0/24$ ]] || fail "LAB_SUBNET must be a /24 such as 10.252.0.0/24, not $LAB_SUBNET"
+	[[ "$LAB_INNER_SUBNET" =~ ^([0-9]+\.){3}0/24$ && "$LAB_INNER_SUBNET" != "$LAB_SUBNET" ]] ||
+		fail "LAB_INNER_SUBNET must be a /24 other than LAB_SUBNET, not $LAB_INNER_SUBNET"
 	local net
 	if net="$(lxc query "/1.0/networks/$LAB_NETWORK" 2>/dev/null)" && [[ "$(jq -r .managed <<<"$net")" == true ]]; then
 		if [[ "$(jq -r '.config["user.ligo-lab"] // ""' <<<"$net")" == yes ]]; then
