@@ -77,6 +77,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
 | Configuration (§8.1, §8.2 rule 9) | New key `secret_sealing.local_kek_file`: the 32-byte key file of the `local-kek` sealer, which must not be readable by group or others. Required with `local-kek`, which still requires `--insecure-dev`. |
 | Lab (§8.3, §11.1) | The lab moves from `deploy/lab/` to `test/lab/`, as in the openstack-spiffe and lxd-spiffe projects, and is specified in `.specs/ligo-test-environment.md`. |
+| Plugin handshake (§5.3 rule 1) | `ProtocolVersion: 1` instead of 2. The 4.0 plugin SDK is the first one released and no 3.x plugin exists (see the first row), so the handshake starts at 1, as `DescribeResponse.plugin_protocol_version` does. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 No change to the API, the data model or the workflows.
@@ -2200,7 +2201,7 @@ FROM v_active_bindings WHERE id = $1;
 - Crashed processes are restarted with exponential backoff (`plugins.restart_backoff`). Any in-flight RPC fails with a retryable error.
 
 ### 5.3 go-plugin hosting requirements
-1. **Handshake.** `ProtocolVersion: 2` (4.0 plugins; 3.x plugins use 1 and are refused), `MagicCookieKey: "LIGO_PLUGIN"`, `MagicCookieValue: "l1g0-pl7g-v1"`. `AllowedProtocols: [gRPC]` only.
+1. **Handshake.** `ProtocolVersion: 1` (the first plugin SDK; a plugin with another version is refused), `MagicCookieKey: "LIGO_PLUGIN"`, `MagicCookieValue: "l1g0-pl7g-v1"`. `AllowedProtocols: [gRPC]` only.
 2. **Transport security.** `AutoMTLS: true`.
 3. **Binary location and permissions.**
    - Binaries MUST reside in `plugins.directory`. That directory and every binary in it MUST be owned by `root:root`, MUST NOT be writable by group, others or the `ligo` user (binaries `0755`), and MUST NOT be symlinks.
