@@ -16,10 +16,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// testPlugin is the test plugin's binary, built once by TestMain.
+// testPlugin is the test plugin's binary, built once by TestMain where the
+// Go toolchain is (not on ligo1, which runs only the lab tests).
 var testPlugin string
 
 func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("go"); err != nil {
+		os.Exit(m.Run())
+	}
 	dir, err := os.MkdirTemp("", "pluginmgr")
 	if err != nil {
 		panic(err)
