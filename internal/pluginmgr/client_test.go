@@ -52,7 +52,7 @@ func quiet() hclog.Logger { return hclog.NewNullLogger() }
 // TestStart: one binary serves PluginControl and its kind's service over
 // gRPC with AutoMTLS (§5.3 rules 1-2, EXT-10).
 func TestStart(t *testing.T) {
-	c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet())
+	c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestStartKinds(t *testing.T) {
 	} {
 		cmd := exec.Command(testPlugin)
 		cmd.Env = append(os.Environ(), "TESTPLUGIN_KIND="+env)
-		c, err := Start(cmd, kind, checksum(t, testPlugin), quiet())
+		c, err := Start(cmd, kind, checksum(t, testPlugin), quiet(), nil)
 		if err != nil {
 			t.Fatalf("%s: %v", env, err)
 		}
@@ -107,7 +107,7 @@ func TestStartKinds(t *testing.T) {
 	// a plugin of another kind than the host expects has no such service
 	cmd := exec.Command(testPlugin)
 	cmd.Env = append(os.Environ(), "TESTPLUGIN_KIND=store")
-	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet())
+	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestStartRefusals(t *testing.T) {
 	sum := checksum(t, testPlugin)
 	v2 := exec.Command(testPlugin)
 	v2.Env = append(os.Environ(), "TESTPLUGIN_PROTOCOL=2")
-	if c, err := Start(v2, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, sum, quiet()); err == nil || !strings.Contains(err.Error(), "incompatible API version") {
+	if c, err := Start(v2, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, sum, quiet(), nil); err == nil || !strings.Contains(err.Error(), "incompatible API version") {
 		if c != nil {
 			c.Kill()
 		}
@@ -131,13 +131,13 @@ func TestStartRefusals(t *testing.T) {
 	}
 	bad := append([]byte{}, sum...)
 	bad[0] ^= 0xff
-	if c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, bad, quiet()); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, bad, quiet(), nil); err == nil || !strings.Contains(err.Error(), "checksum") {
 		if c != nil {
 			c.Kill()
 		}
 		t.Errorf("wrong checksum: %v", err)
 	}
-	if _, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_UNSPECIFIED, sum, quiet()); err == nil {
+	if _, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_UNSPECIFIED, sum, quiet(), nil); err == nil {
 		t.Error("an unspecified kind was accepted")
 	}
 }

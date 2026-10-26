@@ -4,6 +4,7 @@ package pluginmgr
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os/exec"
 
 	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
@@ -31,11 +32,15 @@ type Client struct {
 
 // Start launches cmd as a plugin of kind, over gRPC with AutoMTLS, after
 // go-plugin checks the binary's SHA-256 against checksum (§5.3 rules 1, 2
-// and 4; EXT-10, EXT-11).
-func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclog.Logger) (*Client, error) {
+// and 4; EXT-10, EXT-11). go-plugin's messages go to logger; what the plugin
+// writes to its stdout and stderr once it serves goes to stdio (nil: dropped).
+func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclog.Logger, stdio io.Writer) (*Client, error) {
 	name, ok := kindServices[kind]
 	if !ok {
 		return nil, fmt.Errorf("plugin kind %v", kind)
+	}
+	if stdio == nil {
+		stdio = io.Discard
 	}
 	process := plugin.NewClient(&plugin.ClientConfig{
 		HandshakeConfig:  pluginsdk.Handshake,
@@ -43,6 +48,9 @@ func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclo
 		Cmd:              cmd,
 		AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC},
 		AutoMTLS:         true,
+		SkipHostEnv:      true, // a plugin gets cmd.Env only, never ligo's environment
+		SyncStdout:       stdio,
+		SyncStderr:       stdio,
 		SecureConfig:     &plugin.SecureConfig{Checksum: checksum, Hash: sha256.New()},
 		Logger:           logger,
 	})

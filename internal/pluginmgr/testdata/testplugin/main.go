@@ -1,7 +1,14 @@
 // Command testplugin is the plugin the pluginmgr tests launch: a target
 // provider that serves PluginControl. TESTPLUGIN_PROTOCOL=2 makes it a
 // plugin of another handshake protocol, which the host must refuse;
-// TESTPLUGIN_KIND=identity or store makes it a plugin of that kind.
+// TESTPLUGIN_KIND=identity or store makes it a plugin of that kind, and
+// TESTPLUGIN_TYPE sets the type it describes (default test.v1).
+//
+// ConfigureInstances resolves an instance by its match_expr: "shared" to one
+// SPIFFE ID for all, "foreign" to another trust domain, "skip" to nothing,
+// "two" to the SDK's error for a selector matching two SVIDs (AC-15), and
+// anything else to spiffe://<trust domain>/plugin/<instance>. Health of the
+// instance "crash" exits; of "log", logs secrets the host must redact.
 package main
 
 import (
@@ -11,26 +18,58 @@ import (
 
 	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
+	"google.golang.org/grpc/codes"
 )
+
+var kinds = map[string]pluginv2.PluginKind{
+	"":         pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER,
+	"identity": pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
+	"store":    pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER,
+}
 
 type control struct {
 	pluginv2.UnimplementedPluginControlServer
 }
 
 func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
-	return &pluginv2.DescribeResponse{PluginType: "test.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, PluginProtocolVersion: 1}, nil
+	typ := os.Getenv("TESTPLUGIN_TYPE")
+	if typ == "" {
+		typ = "test.v1"
+	}
+	return &pluginv2.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1}, nil
 }
 
 func (control) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {
 	out := &pluginv2.ConfigureInstancesResponse{}
 	for _, in := range r.GetInstances() {
-		out.Resolved = append(out.Resolved, &pluginv2.ResolvedInstance{Instance: in.GetName(), SpiffeId: "spiffe://" + in.GetTrustDomain() + "/plugin/" + in.GetName()})
+		id := "spiffe://" + in.GetTrustDomain() + "/plugin/" + in.GetName()
+		switch in.GetSvidSelector().GetMatchExpr() {
+		case "shared":
+			id = "spiffe://" + in.GetTrustDomain() + "/plugin/shared"
+		case "foreign":
+			id = "spiffe://other.lab/plugin/" + in.GetName()
+		case "skip":
+			continue
+		case "two":
+			return nil, pluginsdk.Error(codes.FailedPrecondition, "SVID_SELECTION_FAILED",
+				fmt.Sprintf("selector for %q matched more than one SVID", in.GetName()), false)
+		}
+		out.Resolved = append(out.Resolved, &pluginv2.ResolvedInstance{Instance: in.GetName(), SpiffeId: id})
 	}
 	return out, nil
 }
 
 func (control) Health(_ context.Context, r *pluginv2.HealthRequest) (*pluginv2.HealthResponse, error) {
+	switch r.GetInstance() {
+	case "crash":
+		os.Exit(3)
+	case "log":
+		hclog.New(&hclog.LoggerOptions{Output: os.Stderr, JSONFormat: true}).
+			Info("connecting", "password", "pw-leak", "user", "admin")
+		fmt.Fprintln(os.Stderr, "ALTER USER x IDENTIFIED BY raw-leak")
+	}
 	// go-plugin hands the host's client certificate over only with AutoMTLS
 	mtls := os.Getenv("PLUGIN_CLIENT_CERT") != ""
 	return &pluginv2.HealthResponse{Serving: true, PublicMessage: fmt.Sprintf("ok %s mtls=%t", r.GetInstance(), mtls)}, nil
