@@ -1,0 +1,346 @@
+syntax = "proto3";
+package ligo.plugin.v2;
+option go_package = "github.com/dihedron/ligo/api/gen/plugin/v2;pluginv2";
+
+// ============================================================================
+// Enums & common types
+// ============================================================================
+
+enum IdentityMode {
+  IDENTITY_MODE_UNSPECIFIED = 0;
+  IDENTITY_MODE_SVID = 1;              // Client authenticates directly with its SVID
+  IDENTITY_MODE_EXTERNAL_DIR = 2;      // Directory account created in Stage 1
+  IDENTITY_MODE_TARGET_LOCAL = 3;      // Local user created on the target in Stage 2
+  IDENTITY_MODE_DELEGATED_DYNAMIC = 4; // Secret store creates ephemeral target users
+}
+
+enum PluginKind {
+  PLUGIN_KIND_UNSPECIFIED = 0;
+  PLUGIN_KIND_IDENTITY_PROVIDER = 1;
+  PLUGIN_KIND_TARGET_PROVIDER = 2;
+  PLUGIN_KIND_SECRET_STORE_PROVIDER = 3;
+}
+
+enum Operation {
+  OPERATION_UNSPECIFIED = 0;
+  OPERATION_APPLY = 1;
+  OPERATION_REAPPLY = 2;
+  OPERATION_DELETE = 3;
+}
+
+message Endpoint {
+  string host = 1;
+  uint32 port = 2;
+  string scheme = 3;      // e.g. "tcp", "https", "ldaps"
+}
+
+// Attached to non-OK gRPC statuses via status details.
+message PluginErrorDetail {
+  bool retryable = 1;
+  string code = 2;            // UPPER_SNAKE_CASE, e.g. RESOURCE_OWNED_BY_OTHER_BINDING
+  string public_message = 3;  // <= 512 chars, no secrets, no SQL text
+}
+
+message SVIDSelectorConfig {
+  string match_expr = 1;
+  repeated string jwt_audience = 2;
+}
+
+message InstanceDescriptor {
+  string name = 1;
+  string zone = 2;
+  string trust_domain = 3;
+  string config_json = 4;               // validated against Describe.instance_config_schema_json
+  SVIDSelectorConfig svid_selector = 5;
+  bool allow_shared_svid = 6;
+  // TargetProvider instances (platforms) only:
+  string identity_provider_type = 7;
+  string identity_provider_instance = 8;
+  IdentityMode identity_mode = 9;
+  string secret_store_type = 10;
+  string secret_store_instance = 11;
+}
+
+message BindingContext {
+  string binding_id = 1;
+  string binding_name = 2;
+  int64 revision = 3;
+  int64 attempt = 4;
+  Operation operation = 5;
+  string zone = 6;
+  string source_trust_domain = 7;
+  string source_svid_regex = 8;          // validated regex of `revision`
+  bool rotate_static_secrets = 9;
+  string derived_principal_name = 10;    // 20 chars: Appendix B
+  string source_name = 11;               // the binding's source (informative; never used to name resources)
+  string target_id = 12;
+  string target_name = 13;
+  string access_level = 14;              // name of the access level of `revision`
+  int64 source_revision = 15;
+  int64 target_revision = 16;
+}
+
+message StaticSecret {
+  string username = 1;
+  string password = 2;
+  bytes private_key_pem = 3;
+  bytes certificate_pem = 4;
+  map<string, string> extra_fields = 5;
+}
+
+// Produced by Stage 1; static_secret is stripped by the host before Stage 2 and Stage 3.
+message IdentityArtifact {
+  IdentityMode mode = 1;
+  string principal_id = 2;
+  string distinguished_name = 3;
+  repeated string groups = 4;
+  map<string, string> metadata = 5;
+  StaticSecret static_secret = 6;
+  bool secret_unchanged = 7;
+}
+
+message DelegatedRoleSpec {
+  string role_type = 1;                     // "database-dynamic" | "database-static-rotated"
+  string target_connection_ref = 2;
+  string target_username = 3;
+  repeated string creation_statements = 4;
+  repeated string revocation_statements = 5;
+  repeated string rollback_statements = 6;
+  repeated string rotation_statements = 7;
+  int32 default_ttl_seconds = 8;
+  int32 max_ttl_seconds = 9;
+}
+
+// Composed by the ENGINE for Stage 3 (ADR-01). Unset payload for SVID mode
+// or when secret_unchanged is true.
+message SecretProvisioningPayload {
+  IdentityMode mode = 1;
+  oneof payload {
+    StaticSecret static_secret = 2;
+    DelegatedRoleSpec delegated_role = 3;
+  }
+  bool secret_unchanged = 4;
+}
+
+// ============================================================================
+// Control service (implemented by every plugin binary)
+// ============================================================================
+
+service PluginControl {
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc ConfigureInstances(ConfigureInstancesRequest) returns (ConfigureInstancesResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message DescribeRequest {}
+message DescribeResponse {
+  string plugin_type = 1;                 // e.g. "oracle.v1"
+  PluginKind kind = 2;
+  uint32 plugin_protocol_version = 3;     // MUST be 1
+  string plugin_version = 4;              // semver of the binary
+  repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
+  string instance_config_schema_json = 6; // JSON Schema 2020-12
+  string client_output_schema_json = 7;   // targets/stores; empty for identity providers
+}
+
+message ConfigureInstancesRequest {
+  string zone = 1;
+  string spiffe_workload_socket = 2;
+  repeated InstanceDescriptor instances = 3;
+}
+message ResolvedInstance {
+  string instance = 1;
+  string spiffe_id = 2;
+}
+message ConfigureInstancesResponse {
+  repeated ResolvedInstance resolved = 1;
+}
+
+message HealthRequest { string instance = 1; }
+message HealthResponse {
+  bool serving = 1;
+  string public_message = 2;
+}
+
+// ============================================================================
+// Declarative UI schema
+// ============================================================================
+
+enum UIFieldType {
+  UI_FIELD_TYPE_UNSPECIFIED = 0;
+  UI_FIELD_TYPE_TEXT = 1;
+  UI_FIELD_TYPE_NUMBER = 2;
+  UI_FIELD_TYPE_BOOLEAN = 3;
+  UI_FIELD_TYPE_SELECT = 4;
+  UI_FIELD_TYPE_MULTISELECT = 5;
+  UI_FIELD_TYPE_TEXTAREA = 6;
+}
+
+message UIFieldOption { string label = 1; string value = 2; }
+
+message UIFieldDescriptor {
+  string json_key = 1;           // MUST match ^[a-zA-Z][a-zA-Z0-9_]{0,63}$
+  string label = 2;
+  UIFieldType field_type = 3;
+  bool required = 4;
+  string default_value = 5;
+  string placeholder = 6;
+  string help_text = 7;
+  string validation_regex = 8;   // RE2; authoritative check is server-side (ValidateTarget, ValidateBinding)
+  repeated UIFieldOption options = 9;
+}
+
+message UIForm { repeated UIFieldDescriptor fields = 1; }   // max 64 fields
+
+message GetUISchemasRequest { string instance = 1; }
+message GetUISchemasResponse {
+  string plugin_type = 1;
+  string instance = 2;
+  UIForm target_definition = 3;     // Target.definition
+  UIForm access_level_grants = 4;   // Target.accessLevels[].grants
+  UIForm binding_parameters = 5;    // Binding.parameters (MAY be empty)
+}
+
+// ============================================================================
+// Network flows (ADR-16)
+// ============================================================================
+
+enum FlowPurpose { FLOW_PURPOSE_UNSPECIFIED = 0; FLOW_PURPOSE_DATA = 1; FLOW_PURPOSE_CREDENTIALS = 2; FLOW_PURPOSE_DISCOVERY = 3; }
+enum FlowProtocol { FLOW_PROTOCOL_UNSPECIFIED = 0; FLOW_PROTOCOL_TCP = 1; FLOW_PROTOCOL_UDP = 2; }
+message PortRange { uint32 low = 1; uint32 high = 2; }     // inclusive; low == high for one port
+message NetworkFlow {
+  string name = 1;
+  FlowPurpose purpose = 2;
+  FlowProtocol protocol = 3;
+  string destination = 4;
+  repeated PortRange ports = 5;
+  bool tls = 6;
+  string server_name = 7;
+}
+
+// ============================================================================
+// Stage 1: IdentityProviderPlugin
+// ============================================================================
+
+service IdentityProviderPlugin {
+  rpc EnsureIdentity(EnsureIdentityRequest) returns (EnsureIdentityResponse);
+  rpc CleanupIdentity(CleanupIdentityRequest) returns (CleanupIdentityResponse);
+}
+
+message EnsureIdentityRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  IdentityArtifact previous_artifact = 3;  // non-secret; empty on first apply
+}
+message EnsureIdentityResponse { IdentityArtifact artifact = 1; }
+
+message CleanupIdentityRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  IdentityArtifact previous_artifact = 3;  // non-secret; MAY be empty after partial failure
+}
+message CleanupIdentityResponse { bool skipped_not_owner = 1; }
+
+// ============================================================================
+// Stage 2: TargetProviderPlugin
+// ============================================================================
+
+service TargetProviderPlugin {
+  rpc GetUISchemas(GetUISchemasRequest) returns (GetUISchemasResponse);
+  rpc ValidateTarget(ValidateTargetRequest) returns (ValidateTargetResponse);
+  rpc ValidateBinding(ValidateBindingRequest) returns (ValidateBindingResponse);
+  rpc EnsureTarget(EnsureTargetRequest) returns (EnsureTargetResponse);
+  rpc CleanupTarget(CleanupTargetRequest) returns (CleanupTargetResponse);
+}
+
+// Publication or change of a Target (register-only: MUST NOT modify the platform, §5.8 rule 7).
+message AccessLevelInput {
+  string name = 1;
+  bytes grants_json = 2;
+}
+message ValidateTargetRequest {
+  string instance = 1;                     // the platform
+  bytes definition_json = 2;
+  repeated AccessLevelInput access_levels = 3;
+  repeated NetworkFlow network_flows = 4;  // already checked by the host against allowed_endpoints; for plugin-specific checks
+  bool check_existence = 5;                // read-only existence check of the resource and the granted privileges
+}
+message NormalizedAccessLevel {
+  string name = 1;
+  bytes grants_json = 2;
+  repeated string privileges = 3;          // canonical, sorted, duplicate-free (§5.8 rule 9)
+}
+message ValidateTargetResponse {
+  bool valid = 1;
+  repeated string errors = 2;              // field-scoped, no secrets
+  bytes normalized_definition_json = 3;
+  repeated NormalizedAccessLevel access_levels = 4;   // same order as the request
+}
+
+// Creation or change of a Binding: composes the requested spec of a revision.
+message ValidateBindingRequest {
+  string instance = 1;                     // the platform
+  bytes definition_json = 2;               // normalized target definition
+  string access_level = 3;
+  bytes access_level_grants_json = 4;      // normalized grants of that level
+  bytes parameters_json = 5;
+  string source_trust_domain = 6;
+}
+message ValidateBindingResponse {
+  bool valid = 1;
+  repeated string errors = 2;
+  bytes normalized_parameters_json = 3;
+  bytes requested_spec_json = 4;           // composition passed to EnsureTarget; stored as bindings.requested_spec
+  repeated string privileges = 5;          // MUST equal the access level's privileges (§5.8 rule 8)
+}
+
+message EnsureTargetRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  IdentityArtifact identity = 3;           // static_secret ALWAYS stripped
+  bytes requested_spec_json = 4;
+  bytes previous_finalized_client_spec_json = 5; // TARGET stage row's last ENSURED artifact (§6.4); empty if none
+}
+message EnsureTargetResponse {
+  bytes finalized_client_spec_json = 1;
+  SecretProvisioningPayload secret_payload = 2;
+  repeated Endpoint declared_endpoints = 3;
+}
+
+message CleanupTargetRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  IdentityArtifact identity = 3;           // non-secret; MAY be empty
+  bytes requested_spec_json = 4;
+  bytes finalized_client_spec_json = 5;    // MAY be empty after partial failure
+}
+message CleanupTargetResponse { bool skipped_not_owner = 1; }
+
+// ============================================================================
+// Stage 3: SecretStoreProviderPlugin
+// ============================================================================
+
+service SecretStoreProviderPlugin {
+  rpc EnsureSecretStore(EnsureSecretStoreRequest) returns (EnsureSecretStoreResponse);
+  rpc CleanupSecretStore(CleanupSecretStoreRequest) returns (CleanupSecretStoreResponse);
+}
+
+message EnsureSecretStoreRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  SecretProvisioningPayload secret_payload = 3;
+  IdentityArtifact identity = 4;                    // static_secret ALWAYS stripped
+  bytes previous_finalized_client_auth_json = 5;    // SECRET_STORE stage row's last ENSURED artifact (§6.4); empty if none
+}
+message EnsureSecretStoreResponse {
+  bytes finalized_client_auth_json = 1;
+  repeated Endpoint declared_endpoints = 2;
+}
+
+message CleanupSecretStoreRequest {
+  string instance = 1;
+  BindingContext binding = 2;
+  bytes finalized_client_auth_json = 3;    // MAY be empty after partial failure
+  IdentityArtifact identity = 4;           // non-secret; MAY be empty
+}
+message CleanupSecretStoreResponse { bool skipped_not_owner = 1; }

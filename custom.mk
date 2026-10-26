@@ -81,3 +81,14 @@ vuln: ## check go.mod and the code for known vulnerabilities with govulncheck, l
 	@go run golang.org/x/vuln/cmd/govulncheck@latest -C cmd/ligo -scan module
 	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 	@go run golang.org/x/vuln/cmd/govulncheck@latest -tags 'integration lab' ./...
+
+# PROTOS are the protobuf contracts; the generated Go code is committed
+PROTOS := api/proto/plugin/v2/plugin.proto
+
+.PHONY: proto
+proto: ## regenerate the Go code of the protobuf contracts into api/gen (needs protoc; protoc-gen-go and protoc-gen-go-grpc are the tools of go.mod)
+	@command -v protoc >/dev/null 2>&1 || { echo "protoc is not installed" >&2; exit 1; }
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+		go build -o "$$tmp/" tool && \
+		PATH="$$tmp:$$PATH" protoc --go_out=. --go_opt=module=github.com/dihedron/ligo \
+			--go-grpc_out=. --go-grpc_opt=module=github.com/dihedron/ligo $(PROTOS)
