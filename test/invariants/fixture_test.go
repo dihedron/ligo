@@ -107,10 +107,10 @@ func (f *fixture) insertBinding(t *testing.T, id uuid.UUID, name string, source,
 
 func (f *fixture) bindingSQL() string {
 	return `insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
-		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance,
+		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, derived_principal_name,
 		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
 		source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
-		values ($1, $2, $3, $4, $5, 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod',
+		values ($1, $2, $3, $4, $5, 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'bnd_' || left(md5($1::uuid::text), 16),
 		$6, $7, $8, $9, 1, 1, 'cloud.internal', $10, '{}', 'alice', 'alice')`
 }
 

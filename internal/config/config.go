@@ -334,6 +334,7 @@ type Platform struct {
 	NetworkFlows              []flows.Flow  `yaml:"network_flows"`
 	IdentityProvider          Wiring        `yaml:"identity_provider"`
 	SecretStore               Wiring        `yaml:"secret_store"`
+	PrincipalPrefix           string        `yaml:"principal_prefix"`
 	AllowedSourceTrustDomains []string      `yaml:"allowed_source_trust_domains"`
 	RotationInterval          time.Duration `yaml:"rotation_interval"`
 	SVIDSelector              *SVIDSelector `yaml:"svid_selector"`

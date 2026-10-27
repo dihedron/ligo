@@ -239,7 +239,6 @@ identity_providers:
         config:
           url: "ldaps://openldap.prod.internal:636"
           service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
-          principal_prefix: "svc_"        # <= 4 chars; replaces default "bnd_" (Appendix B)
           allowed_endpoints: ["openldap.prod.internal:636"]
           bootstrap_credential:
             source: vault
@@ -307,6 +306,7 @@ target_providers:                         # plugin types and the platforms that 
           - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
         identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
         secret_store: { type: "vault.v1", instance: "vault-prod" }
+        principal_prefix: "svc_"          # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:

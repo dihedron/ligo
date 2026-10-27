@@ -42,7 +42,7 @@ func TestExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := cfg.TargetProviders[0].Platforms[0]
-	if p.Name != "oracle-prod" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
+	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
 		t.Errorf("platform not decoded: %+v", p)
 	}
 	if got := cfg.TargetProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
@@ -85,6 +85,7 @@ func TestRules(t *testing.T) {
             jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-ldap-prod"
             jwt_audience: "https://other"`, 5, nil},
 		{"trust domain not accepted", "allowed_source_trust_domains: [test.internal]", "allowed_source_trust_domains: [test.internal, other.internal]", 6, []int{16}},
+		{"bad principal prefix", `principal_prefix: "svc_"`, `principal_prefix: "svc-"`, 6, nil},
 		{"bad sha256", `binary: "store-vault"
     sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "store-vault"
     sha256: "ABC"`, 7, nil},

@@ -78,9 +78,12 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Configuration (§8.1, §8.2 rule 9) | New key `secret_sealing.local_kek_file`: the 32-byte key file of the `local-kek` sealer, which must not be readable by group or others. Required with `local-kek`, which still requires `--insecure-dev`. |
 | Lab (§8.3, §11.1) | The lab moves from `deploy/lab/` to `test/lab/`, as in the openstack-spiffe and lxd-spiffe projects, and is specified in `.specs/ligo-test-environment.md`. |
 | Plugin handshake (§5.3 rule 1) | `ProtocolVersion: 1` instead of 2. The 4.0 plugin SDK is the first one released and no 3.x plugin exists (see the first row), so the handshake starts at 1, as `DescribeResponse.plugin_protocol_version` does. |
+| Principal names (§3.8, §4.2, §5.8 rule 2, §8.1, §8.2 rule 6, Appendix B, INV-08, AC-86) | `principal_prefix` moves from plugin instance configuration to the platform. The engine computes `derived_principal_name` once, when a binding is created, and stores it in the new immutable, unique column `bindings.derived_principal_name`; plugins never apply a prefix. With a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change would orphan principals still holding grants. |
+| Built-in markers (§5.8 rule 2) | `svid.v1` returns no metadata: the target already receives `source_svid_regex` and `source_trust_domain` in `BindingContext`. |
+| Open issues (§13) | New OI-4: targets cannot map an X.509-SVID, whose SPIFFE ID is in the URI SAN, to a principal. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
-No change to the API, the data model or the workflows.
+No change to the API or the workflows. The data model gains one column, `bindings.derived_principal_name`.
 
 ### 0.6 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
@@ -871,7 +874,7 @@ When the target scope equals the platform scope, "owner and platform" is a singl
 | :--- | :--- | :--- | :--- | :--- |
 | `metadata.name` | Yes | **No** | | §3.8. |
 | `source`, `target` | Yes | **No** | | A different pair is a different binding. |
-| `metadata.zone`, `platform*`, `wiring`, scopes | Derived at creation | **No** | | Snapshotted (INV-08). |
+| `metadata.zone`, `platform*`, `wiring`, scopes, `derivedPrincipalName` | Derived at creation | **No** | | Snapshotted (INV-08). |
 | `accessLevel` | Yes | Yes | `ALL`, or `ANY` if the new level's privileges are a subset of the current one's | The new level MUST be `ACTIVE`. |
 | `parameters` | Yes | Yes | `ALL` | Validated by `ValidateBinding`. |
 | `expiresAt` | Yes | Yes | `ANY` if brought forward or set where there was none, `ALL` if extended or removed | |
@@ -884,8 +887,8 @@ An update with several changes uses consent `ANY` only if **every** change in it
 - **Name prefixes.** `governance.name_prefixes` entries apply per resource type (`resources`, default all three). The first entry whose `scopes` match the resource's **owner scope** wins: the source's scope for a source, the target's scope for a target, and the **source scope** for a binding. The name MUST start with that entry's resolved prefix and be longer than it. A prefix may contain `{n}`, the n-th segment of the scope (counting from 1): with `prefix: "{2}-{3}-"`, a source whose scope is `cloud/fin-01/payments` must be named `fin-01-payments-…`. The rule is checked on create; names are immutable.
   - **Rationale.** Names are unique across the whole system. Without prefixes any operator could take a name another team needs, and a `409` on create would reveal that a resource the caller cannot see exists. A prefix gives each owner its own part of the name space, so a conflict can only arise among the owner's own resources. Bindings use the source scope because most bindings are requested by source owners and every binding of a source is visible to them.
 - **Suggested binding names.** The UI and CLI propose `<source>-<target>` (truncated to 63 characters with a 6-character hash suffix when needed), adjusted to the prefix.
-- External resource names (directory principals, database users and roles, Vault roles, Vault paths) MUST be derived from the binding `id` and never from a name. The engine computes the 20-character `derived_principal_name` (Appendix B) and passes it in `BindingContext`.
-- A plugin MAY replace the default 4-character `"bnd_"` prefix with a configured prefix of up to 4 characters and/or apply a deterministic case transformation, guaranteeing the resulting identifier never exceeds 20 characters (Appendix B).
+- External resource names (directory principals, database users and roles, Vault roles, Vault paths) MUST be derived from the binding `id` and never from a name. The engine computes the 20-character `derived_principal_name` (Appendix B) once, when the binding is created, with the platform's `principal_prefix`; stores it in `bindings.derived_principal_name`, which never changes (INV-08); and passes the stored value in `BindingContext`. It is never recomputed, so a later change of `principal_prefix` affects only new bindings.
+- Plugins never apply a prefix of their own; they MAY apply a deterministic case transformation (§5.8 rule 2).
 
 ### 3.9 Governance scopes (Normative)
 
@@ -988,7 +991,7 @@ Any other trigger in any other phase MUST be rejected with `409 binding-busy`, o
 | INV-05 | Before any `Ensure*` RPC is invoked, a `binding_stage_state` row with status `STARTED` exists for that stage, carrying the provider wiring. |
 | INV-06 | At most one workflow mutates a binding at any time. All workflow writes are fenced by `workflow_id`. |
 | INV-07 | Every `Ensure*` and `Cleanup*` implementation is idempotent and convergent. |
-| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
+| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
 | INV-09 | A workflow ID is never reused. |
 | INV-10 | Each logical plugin instance authenticates with exactly one SVID, from its own zone's trust domain. |
 | INV-11 | Every state-changing admin action, propagation and workflow outcome produces an audit record. The audit hash chain verifies end to end. |
@@ -1508,6 +1511,7 @@ CREATE TABLE bindings (
     identity_provider_instance  VARCHAR(128) NOT NULL,
     secret_store_type           VARCHAR(128) NOT NULL,
     secret_store_instance       VARCHAR(128) NOT NULL,
+    derived_principal_name      VARCHAR(20) NOT NULL UNIQUE,    -- Appendix B, with the platform's principal_prefix at creation; immutable
     source_scope                scope_path NOT NULL,            -- copied from the source; immutable (re-scoping only)
     target_scope                scope_path NOT NULL,            -- copied from the target
     platform_scope              scope_path NOT NULL,            -- copied from the target's platform
@@ -1595,6 +1599,7 @@ BEGIN
      OR NEW.identity_provider_instance <> OLD.identity_provider_instance
      OR NEW.secret_store_type <> OLD.secret_store_type
      OR NEW.secret_store_instance <> OLD.secret_store_instance
+     OR NEW.derived_principal_name <> OLD.derived_principal_name
      OR NEW.source_trust_domain <> OLD.source_trust_domain THEN
     RAISE EXCEPTION 'immutable binding column modified';
   END IF;
@@ -2321,7 +2326,8 @@ bootstrap_credential:
    - `Ensure*` converges: it creates what is missing, updates what differs, and revokes what the revision no longer requests.
    - `Cleanup*` returns success when the resource is absent.
 2. **Ownership.**
-   - Resources MUST be named from `BindingContext.derived_principal_name` (Appendix B).
+   - Resources MUST be named from `BindingContext.derived_principal_name` (Appendix B). A plugin MUST NOT apply a prefix of its own; it MAY apply a deterministic case transformation (Oracle's unquoted identifiers are upper case).
+   - Identity providers set `IdentityArtifact.principal_id` to `derived_principal_name` (case-transformed if needed); a backend-specific form, such as an LDAP DN, goes in `distinguished_name`. The built-in markers return no metadata, except `target-local.v1`'s `password_length` (§8.1), the length of the password the target generates.
    - Where the backend supports metadata (LDAP `description`, Vault role metadata, PostgreSQL `COMMENT ON ROLE`), resources MUST be tagged with `ligo:binding_id=<uuid>`.
    - `Ensure*` finding an existing resource tagged with a *different* binding id MUST fail with `FAILED_PRECONDITION` and code `RESOURCE_OWNED_BY_OTHER_BINDING`.
    - `Cleanup*` finding a foreign-owned resource MUST skip it and report `skipped_not_owner=true`; the engine audits `CLEANUP_SKIPPED_NOT_OWNER`.
@@ -2759,7 +2765,7 @@ Applying a binding change request whose consent rule is satisfied, a propagation
        - **Request complete at creation** (every side was approved automatically or by delegation when the request was filed, ADR-13 rule 6): in the same transaction that creates the change request and its sides, record it as `FAILED_TO_APPLY` with `apply_error = "binding busy"` and `decided_by` = the system identity that decided its last side (`'system:auto-approve'` or `'system:delegated-approval'`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit, and return `409 binding-busy`. The caller retries with a new request.
        - **Rationale.** A `PENDING` change request holds the binding's name (`uq_cr_one_pending_per_resource`) until it is decided or expires. When a person approved, that person is there to retry, so keeping the request pending is useful. When the request was complete at creation, nobody will ever approve it, so leaving it `PENDING` would block every further change to the binding for the whole `change_request_ttl` (72h by default). Recording the attempt as `FAILED_TO_APPLY` releases the name immediately while keeping the attempt in the audit trail, consistent with how revision conflicts are handled below.
      - For change requests (`UPDATE` or `DELETE`), check `expected_revision` against `bindings.revision`. If `expected_revision <> bindings.revision`, move the change request to `FAILED_TO_APPLY` with the compare-and-set of §4.3 (`apply_error = "revision conflict"`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit that status change, and return `409 revision-conflict`.
-   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields. For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
+   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields; on create, also `derived_principal_name` (Appendix B, with the platform's `principal_prefix`). For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
    - For `DELETE`, also set `active_revision`, `active_source_svid_regex`, `active_auth_config` and `active_spec` to `NULL` (T-10).
    - **Break-glass bookkeeping (ADR-12).** For a `BREAK_GLASS` `CREATE` or `UPDATE`, set `bindings.break_glass_cr_id` and `break_glass_expires_at = now() + ttl`. For a `SYSTEM_REVERT`, and for any `DELETE` of the binding, clear `break_glass_cr_id`, `break_glass_expires_at` and `break_glass_warned_at`, so that the same change is never reverted twice. An unratified break-glass change whose binding is deleted is not reverted; it falls under the overdue-review rule of §6.3. Insert the corresponding `notification_outbox` rows (§7.5) before the audit insert.
    - Close the change request, if any, with the request-decision compare-and-set of §4.3: `status = 'APPLIED'`, `decided_by` = the principal whose decision completed it, `decided_at`. If it updates zero rows, the request was withdrawn, rejected or expired concurrently: roll back the whole transaction and return `409 change-request-not-pending`.
@@ -3728,7 +3734,6 @@ identity_providers:
         config:
           url: "ldaps://openldap.prod.internal:636"
           service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
-          principal_prefix: "svc_"        # <= 4 chars; replaces default "bnd_" (Appendix B)
           allowed_endpoints: ["openldap.prod.internal:636"]
           bootstrap_credential:
             source: vault
@@ -3796,6 +3801,7 @@ target_providers:                         # plugin types and the platforms that 
           - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
         identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
         secret_store: { type: "vault.v1", instance: "vault-prod" }
+        principal_prefix: "svc_"          # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:
@@ -3851,7 +3857,7 @@ target_providers:                         # plugin types and the platforms that 
 3. The wiring satisfies the §5.6 matrix and the plugins' `Describe.supported_identity_modes`.
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
 5. Every `bootstrap_credential.jwt_audience` appears in the instance's `svid_selector.jwt_audience`.
-6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`.
+6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`.
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`.
@@ -4676,6 +4682,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-83 | A form submission returns `409`, `422`, `403` and `500` in turn | The browser receives each response | `409` and `422` appear in the form's error container; `403` in the global error container; `500` replaces nothing and shows the generic banner with the `request_id`. |
 | AC-84 | A binding is `PROVISIONING`, its status row is polling | The workflow completes | The final row is shown and no further `status-row` request is made. An approval that waits 70 s on a slow plugin (fault-injected) is not cut off by the browser. |
 | AC-85 | The UI has been used for creates, approvals and navigation, including back navigation | Browser storage is inspected | `localStorage` and `sessionStorage` contain no page content; `htmx.min.js` and `hx-csp.min.js` match the SHA-256 values in `web/static/VERSIONS`; `npx htmx.org@4.0.0 upgrade-check` reports nothing on `web/templates/`. |
+| AC-86 | Platform `oracle-prod` has `principal_prefix: "svc_"`; binding B is created, then the prefix is changed to `app_` and `ligo` restarted | B is reconciled, a binding C is created, B is deleted, and an `UPDATE` of B's `derived_principal_name` is attempted | B keeps `svc_…` in every `BindingContext`, in its principal and through cleanup, which removes it; C gets `app_…`; the `UPDATE` fails (INV-08). Every stage of one workflow receives the same name. |
 
 ---
 
@@ -4712,6 +4719,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `store-vault`. |
 | OI-2 | **The example configuration wires the `oracle-prod` platform to `openldap.v1`.** Oracle cannot authenticate database users against a generic OpenLDAP directory; `EXTERNAL_DIR` on Oracle needs Centrally Managed Users with Active Directory, or Enterprise User Security. | Change the example to `target-local.v1` (or to an Active Directory identity provider once one is bundled), and make the config validator reject `oracle.v1` + `EXTERNAL_DIR` unless the platform declares `directory_integration`. |
 | OI-3 | **Privilege identifiers of existing plugins.** Narrowing of access levels (§3.10) relies on each plugin's canonical `privileges` (§5.8 rule 9). For roles this is the role name, but plugins that grant object privileges, Kafka ACLs or OpenStack roles with project scoping need a documented identifier scheme in which set inclusion really means containment. | Each plugin specification defines its scheme and its test vectors before 4.0 plugins are released; until then, a plugin emits one identifier per grant, so every grant change is treated as a widening. |
+| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `target-postgres` and `target-oracle`. |
 
 **Future work** (not part of this version):
 
@@ -4894,7 +4902,8 @@ derived_principal_name = "bnd_" + lower(base32_nopad_rfc4648(SHA-256(uuid_bytes(
 ```
 - **Architectural Rationale:** Active Directory enforces a strict 20-character maximum on `sAMAccountName`. By combining a 4-character prefix (`"bnd_"`) with 16 RFC 4648 Base32 characters (`[a-z2-7]`), `derived_principal_name` is **exactly 20 characters** out of the box.
 - **Collision Resistance:** 16 Base32 characters encode $16 \times 5 = 80$ bits of SHA-256 output. By the birthday bound, a 50% collision probability requires $2^{40} \approx 1.1 \times 10^{12}$ bindings; at $10^5$ bindings, the collision probability is $\approx 4 \times 10^{-15}$. Any hypothetical collision is further stopped by the mandatory ownership tag check (`RESOURCE_OWNED_BY_OTHER_BINDING`, §5.8 Rule 2).
-- **Custom Prefix Rule:** If a plugin instance configures a custom `principal_prefix` (e.g. `"svc_"` in §8.1), the custom prefix MUST be 1 to 4 characters matching `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` and **replaces** `"bnd_"` (so total length remains $\le 20$ characters across AD, Oracle, PostgreSQL, OpenLDAP, and Vault with zero per-plugin truncation).
+- **Custom Prefix Rule:** If a platform configures `principal_prefix` (e.g. `"svc_"` in §8.1), the prefix MUST be 1 to 4 characters matching `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` and **replaces** `"bnd_"` (so total length remains $\le 20$ characters across AD, Oracle, PostgreSQL, OpenLDAP, and Vault with zero per-plugin truncation).
+- **Computed once.** The engine computes the name when the binding is created, with the prefix of the binding's platform at that moment, and stores it in `bindings.derived_principal_name` (immutable, unique). Every stage of every later workflow receives the stored name, so all stages name the same principal, and cleanup finds what was created even after `principal_prefix` changed. Plugins never apply a prefix (§5.8 rule 2). **Rationale:** with a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change between apply and delete would orphan the principal with its grants.
 - **Why an underscore, not a hyphen.** The separator must be legal in an *unquoted* identifier on every supported target. Oracle allows only letters, digits, `_`, `$` and `#` in unquoted identifiers (§5.8), and PostgreSQL requires quoting for role names containing `-`. A quoted name becomes case-sensitive in Oracle and must then be quoted in every DBA query, script and audit report. `_` is accepted unquoted by Oracle, PostgreSQL, Active Directory, OpenLDAP and Vault, so one name works everywhere without per-plugin substitution. (Version 2.3.0 used `bnd-`.)
 - Vault KV paths use the binding UUID directly: `kv/data/bindings/<binding_id>`.
 

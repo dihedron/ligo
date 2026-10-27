@@ -47,8 +47,8 @@ const targetLocalConfig = `{"$schema":"https://json-schema.org/draft/2020-12/sch
 
 // marker is an identity strategy marker (ADR-01): it creates no principal.
 // Its artifact names the binding's derived principal in its mode; the target
-// (Stage 2) creates it. svid.v1 adds the SVIDs the principal stands for;
-// target-local.v1 the length of the password the target generates.
+// (Stage 2) creates it. target-local.v1 adds the length of the password the
+// target generates (§5.8 rule 2).
 type marker struct {
 	pluginv2.UnimplementedPluginControlServer
 	pluginv2.UnimplementedIdentityProviderPluginServer
@@ -107,10 +107,7 @@ func (m *marker) EnsureIdentity(_ context.Context, r *pluginv2.EnsureIdentityReq
 		return nil, pluginsdk.Error(codes.InvalidArgument, "MISSING_PRINCIPAL_NAME", "the binding context has no derived principal name", false)
 	}
 	a := &pluginv2.IdentityArtifact{Mode: m.mode, PrincipalId: b.GetDerivedPrincipalName()}
-	switch m.mode {
-	case pluginv2.IdentityMode_IDENTITY_MODE_SVID:
-		a.Metadata = map[string]string{"source_svid_regex": b.GetSourceSvidRegex(), "source_trust_domain": b.GetSourceTrustDomain()}
-	case pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL:
+	if m.mode == pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
 		m.mu.Lock()
 		n, ok := m.passwords[r.GetInstance()]
 		m.mu.Unlock()

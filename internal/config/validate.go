@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
@@ -226,6 +227,9 @@ func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
 			if !slices.Contains(wl.AcceptedTrustDomains, td) {
 				c.failf(6, "platform %q: allowed source trust domain %q is not in workload_listener.accepted_trust_domains", p.Name, td)
 			}
+		}
+		if _, err := engine.DerivedPrincipalName(uuid.UUID{}, p.PrincipalPrefix); err != nil {
+			c.failf(6, "platform %q: %v", p.Name, err)
 		}
 	}
 }

@@ -142,20 +142,22 @@ func TestIdentityMarkers(t *testing.T) {
 		}
 	}
 
-	// svid.v1 tells the target which SVIDs the principal stands for;
-	// target-local.v1 the length of the password the target generates
-	p, _ := Lookup("svid.v1")
-	r, _ := p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()})
-	if md := r.GetArtifact().GetMetadata(); md["source_svid_regex"] != binding().GetSourceSvidRegex() || md["source_trust_domain"] != "prod.internal" {
-		t.Errorf("svid.v1 metadata %v", md)
+	// only target-local.v1 has metadata: the length of the password the
+	// target generates; the target has the rest in the BindingContext
+	// (§5.8 rule 2)
+	for _, typ := range []string{"svid.v1", "delegated-dynamic.v1"} {
+		p, _ := Lookup(typ)
+		if r, _ := p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()}); len(r.GetArtifact().GetMetadata()) != 0 {
+			t.Errorf("%s metadata %v", typ, r.GetArtifact().GetMetadata())
+		}
 	}
-	p, _ = Lookup("target-local.v1")
+	p, _ := Lookup("target-local.v1")
 	if _, err := p.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{Instances: []*pluginv2.InstanceDescriptor{
 		{Name: "i", ConfigJson: `{"password_length":40}`},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	r, _ = p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()})
+	r, _ := p.Identity.EnsureIdentity(ctx, &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()})
 	if md := r.GetArtifact().GetMetadata(); md["password_length"] != "40" {
 		t.Errorf("target-local.v1 metadata %v", md)
 	}
