@@ -305,7 +305,7 @@ target_providers:                         # plugin types and the platforms that 
         network_flows:                    # flows shared by every target of the platform (ADR-16)
           - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
         identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
-        secret_store: { type: "vault.v1", instance: "vault-prod" }
+        secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy: "vault-static" }   # strategy optional when the mode allows only one (§5.6)
         principal_prefix: "svc_"          # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h

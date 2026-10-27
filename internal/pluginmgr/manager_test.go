@@ -279,7 +279,7 @@ func TestManagerBuiltins(t *testing.T) {
 	}
 	err = m.Call(ctx, store, "no-store-prod", true, func(ctx context.Context, c *Client) error {
 		_, err := c.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{Instance: "no-store-prod", Binding: binding,
-			SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID}})
+			SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID}, SecretStorageStrategy: "svid"})
 		return err
 	})
 	if err != nil {
@@ -353,7 +353,7 @@ func TestSpecs(t *testing.T) {
 	for _, s := range specs {
 		for _, in := range s.Instances {
 			if in.GetName() == "oracle-prod" && (in.GetIdentityProviderType() != "openldap.v1" || in.GetIdentityProviderInstance() != "ldap-prod" ||
-				in.GetSecretStoreType() != "vault.v1" || in.GetSecretStoreInstance() != "vault-prod" || in.GetSvidSelector().GetMatchExpr() == "") {
+				in.GetSecretStoreType() != "vault.v1" || in.GetSecretStoreInstance() != "vault-prod" || in.GetSecretStorageStrategy() != "vault-static" || in.GetSvidSelector().GetMatchExpr() == "") {
 				t.Errorf("oracle-prod wiring: %+v", in)
 			}
 		}

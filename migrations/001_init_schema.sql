@@ -175,6 +175,7 @@ CREATE TABLE bindings (
     identity_provider_instance  VARCHAR(128) NOT NULL,
     secret_store_type           VARCHAR(128) NOT NULL,
     secret_store_instance       VARCHAR(128) NOT NULL,
+    secret_storage_strategy       VARCHAR(64)  NOT NULL,          -- §5.6; from the platform's wiring at creation; immutable
     derived_principal_name      VARCHAR(20) NOT NULL UNIQUE,    -- Appendix B, with the platform's principal_prefix at creation; immutable
     source_scope                scope_path NOT NULL,            -- copied from the source; immutable (re-scoping only)
     target_scope                scope_path NOT NULL,            -- copied from the target
@@ -263,6 +264,7 @@ BEGIN
      OR NEW.identity_provider_instance <> OLD.identity_provider_instance
      OR NEW.secret_store_type <> OLD.secret_store_type
      OR NEW.secret_store_instance <> OLD.secret_store_instance
+     OR NEW.secret_storage_strategy <> OLD.secret_storage_strategy
      OR NEW.derived_principal_name <> OLD.derived_principal_name
      OR NEW.source_trust_domain <> OLD.source_trust_domain THEN
     RAISE EXCEPTION 'immutable binding column modified';

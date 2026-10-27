@@ -2,7 +2,6 @@ package builtinplugins
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -172,30 +171,39 @@ func TestIdentityMarkers(t *testing.T) {
 	}
 }
 
-// TestNoneStore: none.v1 stores nothing and only serves SVID mode (§5.6);
-// its output is valid against its own client output schema (INV-13).
+// TestNoneStore: none.v1 stores nothing and only serves the secret storage strategy svid in
+// SVID mode (§5.6); the client has nothing to configure, so its output is {}
+// and valid against its own client output schema (INV-13).
 func TestNoneStore(t *testing.T) {
 	ctx := context.Background()
 	p, _ := Lookup("none.v1")
 	d, _ := p.Control.Describe(ctx, &pluginv2.DescribeRequest{})
+	if s := d.GetSupportedSecretStorageStrategies(); len(s) != 1 || s[0].GetName() != "svid" ||
+		len(s[0].GetIdentityModes()) != 1 || s[0].GetIdentityModes()[0] != pluginv2.IdentityMode_IDENTITY_MODE_SVID {
+		t.Errorf("strategies %v", s)
+	}
 	out := compile(t, d.GetClientOutputSchemaJson())
 
+	svid := &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID}
 	r, err := p.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{
-		Instance: "i", Binding: binding(), SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID},
+		Instance: "i", Binding: binding(), SecretPayload: svid, SecretStorageStrategy: "svid",
 	})
-	if err != nil || !json.Valid(r.GetFinalizedClientAuthJson()) || !valid(t, out, string(r.GetFinalizedClientAuthJson())) || len(r.GetDeclaredEndpoints()) != 0 {
+	if err != nil || string(r.GetFinalizedClientAuthJson()) != "{}" || !valid(t, out, "{}") || len(r.GetDeclaredEndpoints()) != 0 {
 		t.Fatalf("EnsureSecretStore = (%v, %v)", r, err)
 	}
-	if valid(t, out, `{"mode":"TARGET_LOCAL"}`) {
-		t.Error("the output schema accepts another mode")
+	if valid(t, out, `{"mode":"SVID"}`) {
+		t.Error("the output schema accepts a property")
 	}
-	for name, payload := range map[string]*pluginv2.SecretProvisioningPayload{
-		"no payload":   nil,
-		"target-local": {Mode: pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL},
-		"a secret": {Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID,
-			Payload: &pluginv2.SecretProvisioningPayload_StaticSecret{StaticSecret: &pluginv2.StaticSecret{Password: "x"}}},
+	for name, req := range map[string]*pluginv2.EnsureSecretStoreRequest{
+		"no payload":     {SecretStorageStrategy: "svid"},
+		"target-local":   {SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL}, SecretStorageStrategy: "svid"},
+		"other strategy": {SecretPayload: svid, SecretStorageStrategy: "vault-static"},
+		"no strategy":    {SecretPayload: svid},
+		"a secret": {SecretPayload: &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID,
+			Payload: &pluginv2.SecretProvisioningPayload_StaticSecret{StaticSecret: &pluginv2.StaticSecret{Password: "x"}}}, SecretStorageStrategy: "svid"},
 	} {
-		_, err := p.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{Instance: "i", Binding: binding(), SecretPayload: payload})
+		req.Instance, req.Binding = "i", binding()
+		_, err := p.Store.EnsureSecretStore(ctx, req)
 		if code, d := pluginsdk.FromError(err); code != codes.FailedPrecondition || d.GetCode() != "INCOMPATIBLE_IDENTITY_MODE" {
 			t.Errorf("%s: %v", name, err)
 		}

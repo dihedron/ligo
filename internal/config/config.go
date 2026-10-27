@@ -348,8 +348,9 @@ type Contact struct {
 
 // Wiring names an instance of a plugin type.
 type Wiring struct {
-	Type     string `yaml:"type"`
-	Instance string `yaml:"instance"`
+	Type                  string `yaml:"type"`
+	Instance              string `yaml:"instance"`
+	SecretStorageStrategy string `yaml:"secret_storage_strategy"` // secret_store only (§5.6)
 }
 
 // pluginConfig holds the keys ligo itself reads from a plugin's config.

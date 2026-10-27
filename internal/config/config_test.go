@@ -42,7 +42,7 @@ func TestExample(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := cfg.TargetProviders[0].Platforms[0]
-	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
+	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.SecretStore.SecretStorageStrategy != "vault-static" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
 		t.Errorf("platform not decoded: %+v", p)
 	}
 	if got := cfg.TargetProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
@@ -79,7 +79,7 @@ func TestRules(t *testing.T) {
 		{"duplicate zone", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
 		{"duplicate instance", `name: "vault-test"`, `name: "vault-prod"`, 1, []int{2}},
 		{"unknown zone", `      - { name: "no-store-prod", zone: prod`, `      - { name: "no-store-prod", zone: nowhere`, 2, nil},
-		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod" }`, `secret_store: { type: "vault.v1", instance: "vault-test" }`, 2, nil},
+		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
 		{"missing instance", `identity_provider: { type: "openldap.v1", instance: "ldap-prod" }`, `identity_provider: { type: "openldap.v1", instance: "ldap-nope" }`, 2, nil},
 		{"bootstrap audience", `role: "ligo-plugin-ldap-prod"
             jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-ldap-prod"

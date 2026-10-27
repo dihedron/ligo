@@ -124,12 +124,9 @@ func (m *marker) CleanupIdentity(context.Context, *pluginv2.CleanupIdentityReque
 	return &pluginv2.CleanupIdentityResponse{}, nil
 }
 
-// noneOutput is none.v1's finalized_client_auth_json: the client
-// authenticates with its own SVID.
-const noneOutput = `{"mode":"SVID"}`
-
-const noneOutputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["mode"],"properties":{"mode":{"const":"SVID"}}}`
+// noneOutputSchema allows only none.v1's finalized_client_auth_json, {}: with
+// the secret storage strategy svid the client presents its own SVID and configures nothing.
+const noneOutputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false}`
 
 // none is the secret store of SVID mode (§5.6): there is no secret to store.
 type none struct {
@@ -142,6 +139,7 @@ func (*none) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.Des
 		PluginType: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER, PluginProtocolVersion: 1,
 		PluginVersion: "builtin", SupportedIdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID},
 		InstanceConfigSchemaJson: emptyConfig, ClientOutputSchemaJson: noneOutputSchema,
+		SupportedSecretStorageStrategies: []*pluginv2.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}}},
 	}, nil
 }
 
@@ -155,10 +153,10 @@ func (*none) Health(context.Context, *pluginv2.HealthRequest) (*pluginv2.HealthR
 
 func (*none) EnsureSecretStore(_ context.Context, r *pluginv2.EnsureSecretStoreRequest) (*pluginv2.EnsureSecretStoreResponse, error) {
 	p := r.GetSecretPayload()
-	if p.GetMode() != pluginv2.IdentityMode_IDENTITY_MODE_SVID || p.GetPayload() != nil {
-		return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "none.v1 serves SVID mode only, without a secret", false)
+	if p.GetMode() != pluginv2.IdentityMode_IDENTITY_MODE_SVID || p.GetPayload() != nil || r.GetSecretStorageStrategy() != "svid" {
+		return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "none.v1 serves the secret storage strategy svid in SVID mode only, without a secret", false)
 	}
-	return &pluginv2.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte(noneOutput)}, nil
+	return &pluginv2.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte("{}")}, nil
 }
 
 func (*none) CleanupSecretStore(context.Context, *pluginv2.CleanupSecretStoreRequest) (*pluginv2.CleanupSecretStoreResponse, error) {

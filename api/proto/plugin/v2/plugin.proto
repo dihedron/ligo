@@ -59,6 +59,7 @@ message InstanceDescriptor {
   IdentityMode identity_mode = 9;
   string secret_store_type = 10;
   string secret_store_instance = 11;
+  string secret_storage_strategy = 12;    // §5.6; the target emits a matching DelegatedRoleSpec.role_type
 }
 
 message BindingContext {
@@ -141,6 +142,12 @@ message DescribeResponse {
   repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
   string instance_config_schema_json = 6; // JSON Schema 2020-12
   string client_output_schema_json = 7;   // targets/stores; empty for identity providers
+  repeated SecretStorageStrategy supported_secret_storage_strategies = 8; // secret stores only (§5.6)
+}
+
+message SecretStorageStrategy {
+  string name = 1;                        // e.g. "svid", "vault-static", "vault-dynamic"
+  repeated IdentityMode identity_modes = 2;
 }
 
 message ConfigureInstancesRequest {
@@ -331,6 +338,7 @@ message EnsureSecretStoreRequest {
   SecretProvisioningPayload secret_payload = 3;
   IdentityArtifact identity = 4;                    // static_secret ALWAYS stripped
   bytes previous_finalized_client_auth_json = 5;    // SECRET_STORE stage row's last ENSURED artifact (§6.4); empty if none
+  string secret_storage_strategy = 6;                       // the binding's secret_storage_strategy (§5.6)
 }
 message EnsureSecretStoreResponse {
   bytes finalized_client_auth_json = 1;
@@ -342,5 +350,6 @@ message CleanupSecretStoreRequest {
   BindingContext binding = 2;
   bytes finalized_client_auth_json = 3;    // MAY be empty after partial failure
   IdentityArtifact identity = 4;           // non-secret; MAY be empty
+  string secret_storage_strategy = 5;              // the binding's secret_storage_strategy (§5.6)
 }
 message CleanupSecretStoreResponse { bool skipped_not_owner = 1; }

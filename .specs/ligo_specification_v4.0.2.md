@@ -80,10 +80,11 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Plugin handshake (§5.3 rule 1) | `ProtocolVersion: 1` instead of 2. The 4.0 plugin SDK is the first one released and no 3.x plugin exists (see the first row), so the handshake starts at 1, as `DescribeResponse.plugin_protocol_version` does. |
 | Principal names (§3.8, §4.2, §5.8 rule 2, §8.1, §8.2 rule 6, Appendix B, INV-08, AC-86) | `principal_prefix` moves from plugin instance configuration to the platform. The engine computes `derived_principal_name` once, when a binding is created, and stores it in the new immutable, unique column `bindings.derived_principal_name`; plugins never apply a prefix. With a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change would orphan principals still holding grants. |
 | Built-in markers (§5.8 rule 2) | `svid.v1` returns no metadata: the target already receives `source_svid_regex` and `source_trust_domain` in `BindingContext`. |
+| Secret storage strategies (§3.6, §4.2, §5.6, §5.9, §8.1, §8.2 rules 3 and 10, INV-08) | The workload `auth.strategy` had no defined source. A secret store now declares the strategies it serves (`Describe.supported_secret_storage_strategies`, each with its identity modes; one Vault store serves `vault-static`, `vault-dynamic` and `vault-static-rotated`); a platform chooses one in `secret_store.secret_storage_strategy`; a binding snapshots it in the new immutable column `bindings.secret_storage_strategy`, which is served as `auth.secretStorageStrategy`. The target and the store receive it (`InstanceDescriptor.secret_storage_strategy`, `secret_storage_strategy`). In the workload `auth` object, `strategy`, `providerType` and `providerInstance` become `secretStorageStrategy`, `secretStoreType` and `secretStoreInstance`. `none.v1`'s output is `{}`. |
 | Open issues (§13) | New OI-4: targets cannot map an X.509-SVID, whose SPIFFE ID is in the URI SAN, to a principal. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
-No change to the API or the workflows. The data model gains one column, `bindings.derived_principal_name`.
+The plugin contract gains secret storage strategies (`v2`, unreleased) and the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
 ### 0.6 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
@@ -747,9 +748,9 @@ Platforms are read-only through the API. Their representation is derived from `s
     "since": "2026-10-16T07:02:11Z"
   },
   "auth": {
-    "strategy": "vault",
-    "providerType": "vault.v1",
-    "providerInstance": "vault-prod",
+    "secretStorageStrategy": "vault-static",
+    "secretStoreType": "vault.v1",
+    "secretStoreInstance": "vault-prod",
     "config": {
       "vaultAddress": "https://vault.prod.internal:8200",
       "vaultNamespace": "prod",
@@ -779,6 +780,7 @@ Field rules:
 - `expiresAt` is optional, at least 1 hour and at most `bindings.max_expiry` (default 365 days) in the future. The binding stops being served at that time and is revoked by the sweeper (§6.3, INV-25). `BINDING_EXPIRING` is sent `bindings.expiry_warning` (default 7 days) before.
 - `requested` is the state of revision `revision`: the revisions of the source and target it was composed from, the source's identity at that time, and `spec`, the normalized composition of the target definition, the access level's grants and the parameters returned by `ValidateBinding`. It appears only in admin views.
 - `active` describes the served revision. `auth` and `spec` always reflect it. All three are `null` when no revision has ever become active.
+- `auth.secretStorageStrategy` tells the workload how to obtain its credential (for example `svid`: present its own SVID to the target, nothing to fetch; `vault-static`: read the secret at `config.secretPath`; `vault-dynamic`: request leased credentials and renew them). It is the binding's `secret_storage_strategy`, fixed at creation from the platform's wiring (§5.6). `secretStoreType` and `secretStoreInstance` are the binding's store wiring; `config` is the store's `finalized_client_auth_json`, whose shape depends on the strategy.
 - `status.propagationPending` is `true` while the binding waits in the propagation queue (§6.8).
 - `metadata.sourceScope`, `targetScope` and `platformScope` are the governance scopes (ADR-13). They appear only in admin views.
 - `status.breakGlass` is `null`, or, while an unratified break-glass change is open on the binding (ADR-12), `{"changeRequestId": "…", "requestedBy": "…", "incidentReference": "…", "expiresAt": "…"}`.
@@ -799,7 +801,7 @@ Field rules:
       "platformType": "oracle.v1",
       "platform": "oracle-prod",
       "revision": 4,
-      "auth": { "strategy": "vault", "providerType": "vault.v1", "providerInstance": "vault-prod", "config": { } },
+      "auth": { "secretStorageStrategy": "vault-static", "secretStoreType": "vault.v1", "secretStoreInstance": "vault-prod", "config": { } },
       "spec": { },
       "updatedAt": "2026-10-16T07:02:11Z"
     }
@@ -991,7 +993,7 @@ Any other trigger in any other phase MUST be rejected with `409 binding-busy`, o
 | INV-05 | Before any `Ensure*` RPC is invoked, a `binding_stage_state` row with status `STARTED` exists for that stage, carrying the provider wiring. |
 | INV-06 | At most one workflow mutates a binding at any time. All workflow writes are fenced by `workflow_id`. |
 | INV-07 | Every `Ensure*` and `Cleanup*` implementation is idempotent and convergent. |
-| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
+| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `secret_storage_strategy`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
 | INV-09 | A workflow ID is never reused. |
 | INV-10 | Each logical plugin instance authenticates with exactly one SVID, from its own zone's trust domain. |
 | INV-11 | Every state-changing admin action, propagation and workflow outcome produces an audit record. The audit hash chain verifies end to end. |
@@ -1511,6 +1513,7 @@ CREATE TABLE bindings (
     identity_provider_instance  VARCHAR(128) NOT NULL,
     secret_store_type           VARCHAR(128) NOT NULL,
     secret_store_instance       VARCHAR(128) NOT NULL,
+    secret_storage_strategy       VARCHAR(64)  NOT NULL,          -- §5.6; from the platform's wiring at creation; immutable
     derived_principal_name      VARCHAR(20) NOT NULL UNIQUE,    -- Appendix B, with the platform's principal_prefix at creation; immutable
     source_scope                scope_path NOT NULL,            -- copied from the source; immutable (re-scoping only)
     target_scope                scope_path NOT NULL,            -- copied from the target
@@ -1599,6 +1602,7 @@ BEGIN
      OR NEW.identity_provider_instance <> OLD.identity_provider_instance
      OR NEW.secret_store_type <> OLD.secret_store_type
      OR NEW.secret_store_instance <> OLD.secret_store_instance
+     OR NEW.secret_storage_strategy <> OLD.secret_storage_strategy
      OR NEW.derived_principal_name <> OLD.derived_principal_name
      OR NEW.source_trust_domain <> OLD.source_trust_domain THEN
     RAISE EXCEPTION 'immutable binding column modified';
@@ -2307,8 +2311,11 @@ bootstrap_credential:
 | `DELEGATED_DYNAMIC` | `delegated_role` | `vault.v1` | Stage 2 (statements only; Vault generates credentials) |
 
 - `s3-e2ee.v1` is a planned store specified with the external plugins; until it exists, only `vault.v1` and `none.v1` are available.
+- **Secret storage strategies.** A secret store declares in `Describe.supported_secret_storage_strategies` the strategies it serves, each with the identity modes it accepts. One store process MAY serve several strategies. `none.v1` declares `svid` (`SVID`). The Vault store declares `vault-static` (`EXTERNAL_DIR`, `TARGET_LOCAL`), `vault-dynamic` and `vault-static-rotated` (`DELEGATED_DYNAMIC`); its plugin specification defines their `config` shapes.
+- A platform chooses its strategy in `secret_store.secret_storage_strategy` (§8.1). When omitted, it is the store's only strategy that accepts the platform's identity mode; if there are several, the configuration is rejected. The engine passes the strategy to the platform (`InstanceDescriptor.secret_storage_strategy`), so the target emits a matching `DelegatedRoleSpec.role_type`, and to the store on every call (`secret_storage_strategy`). The store MUST reject a payload that does not match the strategy (`FAILED_PRECONDITION`, `INCOMPATIBLE_IDENTITY_MODE`).
+- A binding snapshots the strategy at creation (`bindings.secret_storage_strategy`, INV-08). A later change of the platform's strategy affects only new bindings.
 - The config validator MUST reject wiring that violates this matrix.
-- It MUST also reject a platform whose plugin's `Describe.supported_identity_modes` does not include the wired identity provider's mode.
+- It MUST also reject a platform whose plugin's `Describe.supported_identity_modes` does not include the wired identity provider's mode, and a secret storage strategy that the wired store does not declare for that mode.
 - `secret_unchanged = true` is valid only for `EXTERNAL_DIR` and `TARGET_LOCAL`. In that case no secret is forwarded, and Stage 3 MUST leave the stored secret in place while still converging policies and roles using the non-secret `IdentityArtifact` and `previous_finalized_client_auth_json`.
 
 ### 5.7 Output validation (INV-13)
@@ -2416,6 +2423,7 @@ message InstanceDescriptor {
   IdentityMode identity_mode = 9;
   string secret_store_type = 10;
   string secret_store_instance = 11;
+  string secret_storage_strategy = 12;    // §5.6; the target emits a matching DelegatedRoleSpec.role_type
 }
 
 message BindingContext {
@@ -2498,6 +2506,12 @@ message DescribeResponse {
   repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
   string instance_config_schema_json = 6; // JSON Schema 2020-12
   string client_output_schema_json = 7;   // targets/stores; empty for identity providers
+  repeated SecretStorageStrategy supported_secret_storage_strategies = 8; // secret stores only (§5.6)
+}
+
+message SecretStorageStrategy {
+  string name = 1;                        // e.g. "svid", "vault-static", "vault-dynamic"
+  repeated IdentityMode identity_modes = 2;
 }
 
 message ConfigureInstancesRequest {
@@ -2688,6 +2702,7 @@ message EnsureSecretStoreRequest {
   SecretProvisioningPayload secret_payload = 3;
   IdentityArtifact identity = 4;                    // static_secret ALWAYS stripped
   bytes previous_finalized_client_auth_json = 5;    // SECRET_STORE stage row's last ENSURED artifact (§6.4); empty if none
+  string secret_storage_strategy = 6;                       // the binding's secret_storage_strategy (§5.6)
 }
 message EnsureSecretStoreResponse {
   bytes finalized_client_auth_json = 1;
@@ -2699,6 +2714,7 @@ message CleanupSecretStoreRequest {
   BindingContext binding = 2;
   bytes finalized_client_auth_json = 3;    // MAY be empty after partial failure
   IdentityArtifact identity = 4;           // non-secret; MAY be empty
+  string secret_storage_strategy = 5;              // the binding's secret_storage_strategy (§5.6)
 }
 message CleanupSecretStoreResponse { bool skipped_not_owner = 1; }
 ```
@@ -2765,7 +2781,7 @@ Applying a binding change request whose consent rule is satisfied, a propagation
        - **Request complete at creation** (every side was approved automatically or by delegation when the request was filed, ADR-13 rule 6): in the same transaction that creates the change request and its sides, record it as `FAILED_TO_APPLY` with `apply_error = "binding busy"` and `decided_by` = the system identity that decided its last side (`'system:auto-approve'` or `'system:delegated-approval'`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit, and return `409 binding-busy`. The caller retries with a new request.
        - **Rationale.** A `PENDING` change request holds the binding's name (`uq_cr_one_pending_per_resource`) until it is decided or expires. When a person approved, that person is there to retry, so keeping the request pending is useful. When the request was complete at creation, nobody will ever approve it, so leaving it `PENDING` would block every further change to the binding for the whole `change_request_ttl` (72h by default). Recording the attempt as `FAILED_TO_APPLY` releases the name immediately while keeping the attempt in the audit trail, consistent with how revision conflicts are handled below.
      - For change requests (`UPDATE` or `DELETE`), check `expected_revision` against `bindings.revision`. If `expected_revision <> bindings.revision`, move the change request to `FAILED_TO_APPLY` with the compare-and-set of §4.3 (`apply_error = "revision conflict"`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit that status change, and return `409 revision-conflict`.
-   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields; on create, also `derived_principal_name` (Appendix B, with the platform's `principal_prefix`). For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
+   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields; on create, also `derived_principal_name` (Appendix B, with the platform's `principal_prefix`) and `secret_storage_strategy` (§5.6). For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
    - For `DELETE`, also set `active_revision`, `active_source_svid_regex`, `active_auth_config` and `active_spec` to `NULL` (T-10).
    - **Break-glass bookkeeping (ADR-12).** For a `BREAK_GLASS` `CREATE` or `UPDATE`, set `bindings.break_glass_cr_id` and `break_glass_expires_at = now() + ttl`. For a `SYSTEM_REVERT`, and for any `DELETE` of the binding, clear `break_glass_cr_id`, `break_glass_expires_at` and `break_glass_warned_at`, so that the same change is never reverted twice. An unratified break-glass change whose binding is deleted is not reverted; it falls under the overdue-review rule of §6.3. Insert the corresponding `notification_outbox` rows (§7.5) before the audit insert.
    - Close the change request, if any, with the request-decision compare-and-set of §4.3: `status = 'APPLIED'`, `decided_by` = the principal whose decision completed it, `decided_at`. If it updates zero rows, the request was withdrawn, rejected or expired concurrently: roll back the whole transaction and return `409 change-request-not-pending`.
@@ -3800,7 +3816,7 @@ target_providers:                         # plugin types and the platforms that 
         network_flows:                    # flows shared by every target of the platform (ADR-16)
           - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
         identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
-        secret_store: { type: "vault.v1", instance: "vault-prod" }
+        secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy: "vault-static" }   # strategy optional when the mode allows only one (§5.6)
         principal_prefix: "svc_"          # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
@@ -3854,14 +3870,14 @@ target_providers:                         # plugin types and the platforms that 
 **Validation rules (at startup; failures are fatal):**
 1. Instance names are unique within each provider kind; platform names are unique across all target providers. Zone names are unique.
 2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
-3. The wiring satisfies the §5.6 matrix and the plugins' `Describe.supported_identity_modes`.
+3. The wiring satisfies the §5.6 matrix and the plugins' `Describe.supported_identity_modes`; the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
 5. Every `bootstrap_credential.jwt_audience` appears in the instance's `svid_selector.jwt_audience`.
 6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`.
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`.
-10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited).
+10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited).
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
 12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone.
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
@@ -5806,7 +5822,7 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | SVID fetch | X.509-SVID and private key (**secret**), trust bundles | Local Unix socket, workload attestation |
 | `GET /v1/bindings` | Caller's SVID (mTLS) or JWT-SVID (**secret**, bearer), optional `target` filter, ETag | TLS 1.3; JWT checks on audience, `iat`, TTL (T-01); headers redacted from logs |
-| Response | For each matching binding: ID, name, source, target, access level, platform and its type, active revision, `auth` (strategy, provider, Vault address, role, secret path, CA) and `spec` (connection coordinates); ETag | No secret values; only bindings whose active regex and source's current regex fully match the caller (INV-01) |
+| Response | For each matching binding: ID, name, source, target, access level, platform and its type, active revision, `auth` (secret storage strategy, secret store, Vault address, role, secret path, CA) and `spec` (connection coordinates); ETag | No secret values; only bindings whose active regex and source's current regex fully match the caller (INV-01) |
 | Vault login and read | JWT-SVID (**secret**), Vault token (**secret**), credentials (**secret**) | Between workload and Vault only; Vault's role constrains the subject (see OI-1) |
 | Target connection | Credentials (**secret**) | Target's own TLS |
 | Cache refresh | Active binding rows | `reader` role limited to `v_active_bindings`; regex re-validated on load (INV-15) |
