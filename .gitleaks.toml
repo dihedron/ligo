@@ -21,3 +21,12 @@ description = "the pinned fingerprint of a public packaging key"
 condition = "AND"
 paths = ['''(^|/)test/lab/lab\.env$''']
 regexes = ['''^[0-9A-F]{40}$''']
+
+# pluginsdk's password alphabet, the 62 characters [A-Za-z0-9] in order:
+# gitleaks 8.24.3 (the default of gitleaks-action, still used by CI runs of
+# workflows older than the version pin) mistakes it for a key.
+[[rules.allowlists]]
+description = "the password alphabet [A-Za-z0-9]"
+condition = "AND"
+paths = ['''(^|/)pkg/pluginsdk/password\.go$''']
+regexes = ['''^ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$''']

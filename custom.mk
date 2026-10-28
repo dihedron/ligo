@@ -60,16 +60,29 @@ fuzz: ## run every fuzz target for FUZZTIME each (default 30s); go test runs the
 # CONTAINER runs the secret scanners; podman works as well
 CONTAINER ?= docker
 
+# the scanners run at their latest release; CI pins its versions
+# (.github/workflows/ci.yml), and "make scanners" shows when they fall behind:
+# versions that differ disagree on findings
+GITLEAKS_IMAGE := zricethezav/gitleaks:latest
+TRUFFLEHOG_IMAGE := ghcr.io/trufflesecurity/trufflehog:latest
+
+.PHONY: scanners
+scanners: ## pull the latest secret scanners and compare their versions with CI's pins (run before every commit)
+	@$(CONTAINER) pull -q $(GITLEAKS_IMAGE) >/dev/null
+	@$(CONTAINER) pull -q $(TRUFFLEHOG_IMAGE) >/dev/null
+	@echo "gitleaks:   latest $$($(CONTAINER) run --rm $(GITLEAKS_IMAGE) version | tr -d v), CI $$(sed -n 's/.*GITLEAKS_VERSION: *//p' .github/workflows/ci.yml)"
+	@echo "TruffleHog: latest $$($(CONTAINER) run --rm $(TRUFFLEHOG_IMAGE) --version 2>&1 | awk '{print $$2}'), CI $$(sed -n 's/.*trufflehog@.*# *v//p' .github/workflows/ci.yml)"
+
 .PHONY: secrets
-secrets: ## scan the history and the working tree for secrets with gitleaks and TruffleHog, as CI does (run before every commit)
+secrets: scanners ## scan the history and the working tree for secrets with gitleaks and TruffleHog, as CI does (run before every commit)
 	@echo "gitleaks: history..."
-	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest git /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro $(GITLEAKS_IMAGE) git /repo --config /repo/.gitleaks.toml --no-banner --redact
 	@echo "gitleaks: working tree..."
-	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro zricethezav/gitleaks:latest dir /repo --config /repo/.gitleaks.toml --no-banner --redact
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro $(GITLEAKS_IMAGE) dir /repo --config /repo/.gitleaks.toml --no-banner --redact
 	@echo "TruffleHog: history..."
-	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest git file:///repo --results=verified,unknown --fail --no-update
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro $(TRUFFLEHOG_IMAGE) git file:///repo --results=verified,unknown --fail --no-update
 	@echo "TruffleHog: working tree..."
-	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro ghcr.io/trufflesecurity/trufflehog:latest filesystem /repo --exclude-paths=/repo/.trufflehog-exclude --results=verified,unknown --fail --no-update
+	@$(CONTAINER) run --rm -v "$(CURDIR)":/repo:ro $(TRUFFLEHOG_IMAGE) filesystem /repo --exclude-paths=/repo/.trufflehog-exclude --results=verified,unknown --fail --no-update
 
 # govulncheck runs through "go run" so that it is always built with the
 # current toolchain (a binary built with an older Go cannot read newer sources);
