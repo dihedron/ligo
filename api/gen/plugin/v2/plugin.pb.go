@@ -1365,7 +1365,7 @@ func (*DescribeResponse_SecretStore) isDescribeResponse_Capabilities() {}
 
 type IdentityProviderCapabilities struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
-	ProducedIdentityMode IdentityMode           `protobuf:"varint,1,opt,name=produced_identity_mode,json=producedIdentityMode,proto3,enum=ligo.plugin.v2.IdentityMode" json:"produced_identity_mode,omitempty"` // exactly one; never UNSPECIFIED
+	ProducedIdentityMode IdentityMode           `protobuf:"varint,1,opt,name=produced_identity_mode,json=producedIdentityMode,proto3,enum=ligo.plugin.v2.IdentityMode" json:"produced_identity_mode,omitempty"` // exactly one; never UNSPECIFIED (refused at startup)
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }

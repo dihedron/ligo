@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -92,8 +93,8 @@ func New(specs []Spec, opts Options) *Manager {
 }
 
 // Start launches every process in two passes (§5.2): it spawns and
-// describes them all and checks every instance's config against its
-// plugin's schema (rule 8), then configures their instances and checks the SVIDs
+// describes them all, checks every instance's config against its plugin's
+// schema (rule 8) and every platform's wiring (rule 3), then configures their instances and checks the SVIDs
 // they resolved: one each, in the zone's trust domain (INV-10), distinct
 // unless every instance sharing one allows it (ADR-03). Any failure is fatal
 // and names the instance (AC-15).
@@ -114,6 +115,9 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		if err := checkConfigs(p.described, p.spec.Instances); err != nil {
 			return fmt.Errorf("%s: %w", what(p.spec), err)
 		}
+	}
+	if err := m.wire(); err != nil {
+		return err
 	}
 	owners := map[string][]*pluginv2.InstanceDescriptor{}
 	for _, p := range m.procs {
@@ -189,6 +193,9 @@ func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv2.De
 	if !capabilitiesOfKind(d) {
 		return nil, fmt.Errorf("describes capabilities %T for kind %v", d.GetCapabilities(), d.GetKind())
 	}
+	if d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER && d.GetIdentityProvider().GetProducedIdentityMode() == pluginv2.IdentityMode_IDENTITY_MODE_UNSPECIFIED {
+		return nil, errors.New("produces identity mode IDENTITY_MODE_UNSPECIFIED")
+	}
 	return d, nil
 }
 
@@ -220,6 +227,58 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 		m.log.Info("plugin instance resolved", "plugin", s.Type, "zone", s.Zone.Name, "instance", in.GetName(), "spiffe_id", id.String())
 	}
 	return resolved, nil
+}
+
+// wire checks every platform's wiring against what its plugins describe and
+// fills its descriptor's identity mode and secret storage strategy (§5.6,
+// §8.2 rule 3). Processes of one type describe the same, whatever the zone.
+func (m *Manager) wire() error {
+	described := map[key]*pluginv2.DescribeResponse{} // the instance field holds the type
+	for _, p := range m.procs {
+		described[key{p.spec.Kind, p.spec.Type}] = p.described
+	}
+	for _, p := range m.procs {
+		if p.spec.Kind != pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER {
+			continue
+		}
+		for _, in := range p.spec.Instances {
+			if err := wirePlatform(in, p.described.GetPlatformProvider(), described); err != nil {
+				return fmt.Errorf("platform %q: %w", in.GetName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+func wirePlatform(in *pluginv2.InstanceDescriptor, platform *pluginv2.PlatformProviderCapabilities, described map[key]*pluginv2.DescribeResponse) error {
+	idp, ok := described[key{pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, in.GetIdentityProviderType()}]
+	if !ok {
+		return fmt.Errorf("no identity provider of type %q", in.GetIdentityProviderType())
+	}
+	mode := idp.GetIdentityProvider().GetProducedIdentityMode()
+	if !slices.Contains(platform.GetAcceptedIdentityModes(), mode) {
+		return fmt.Errorf("identity provider %s produces %v, which the platform does not accept (%v)", in.GetIdentityProviderType(), mode, platform.GetAcceptedIdentityModes())
+	}
+	store, ok := described[key{pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, in.GetSecretStoreType()}]
+	if !ok {
+		return fmt.Errorf("no secret store of type %q", in.GetSecretStoreType())
+	}
+	var fit []string // the store's strategies for the mode
+	for _, st := range store.GetSecretStore().GetSecretStorageStrategies() {
+		if slices.Contains(st.GetIdentityModes(), mode) {
+			fit = append(fit, st.GetName())
+		}
+	}
+	switch strategy := in.GetSecretStorageStrategy(); {
+	case strategy == "" && len(fit) == 1:
+		in.SecretStorageStrategy = fit[0]
+	case strategy == "":
+		return fmt.Errorf("secret_storage_strategy omitted, and secret store %s declares %d for %v %v: set one", in.GetSecretStoreType(), len(fit), mode, fit)
+	case !slices.Contains(fit, strategy):
+		return fmt.Errorf("secret store %s does not declare secret_storage_strategy %q for %v %v", in.GetSecretStoreType(), strategy, mode, fit)
+	}
+	in.IdentityMode = mode
+	return nil
 }
 
 // checkConfigs validates every instance's config against the plugin's

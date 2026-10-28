@@ -7,6 +7,10 @@
 // (default: its kind's). TESTPLUGIN_VERSION_FILE names a file whose
 // content is the plugin version it describes. TESTPLUGIN_SCHEMA, when set,
 // replaces its instance configuration schema (default: any object).
+// TESTPLUGIN_PRODUCES (an identity provider's mode), TESTPLUGIN_ACCEPTS (a
+// platform provider's modes, comma-separated; default SVID) and TESTPLUGIN_STRATEGIES (a
+// store's name:MODE pairs, comma-separated) fill its capabilities; modes
+// are IdentityMode names without the IDENTITY_MODE_ prefix.
 //
 // ConfigureInstances resolves an instance by its match_expr: "shared" to one
 // SPIFFE ID for all, "foreign" to another trust domain, "skip" to nothing,
@@ -19,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
@@ -57,13 +62,39 @@ func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.D
 	}
 	switch caps {
 	case "identity":
-		d.Capabilities = &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{}}
+		d.Capabilities = &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{
+			ProducedIdentityMode: mode(os.Getenv("TESTPLUGIN_PRODUCES")),
+		}}
 	case "store":
-		d.Capabilities = &pluginv2.DescribeResponse_SecretStore{SecretStore: &pluginv2.SecretStoreCapabilities{}}
+		store := &pluginv2.SecretStoreCapabilities{}
+		for _, pair := range list("TESTPLUGIN_STRATEGIES") {
+			name, m, _ := strings.Cut(pair, ":")
+			store.SecretStorageStrategies = append(store.SecretStorageStrategies,
+				&pluginv2.SecretStorageStrategy{Name: name, IdentityModes: []pluginv2.IdentityMode{mode(m)}})
+		}
+		d.Capabilities = &pluginv2.DescribeResponse_SecretStore{SecretStore: store}
 	default:
-		d.Capabilities = &pluginv2.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv2.PlatformProviderCapabilities{}}
+		platform := &pluginv2.PlatformProviderCapabilities{}
+		if _, ok := os.LookupEnv("TESTPLUGIN_ACCEPTS"); !ok {
+			platform.AcceptedIdentityModes = []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}
+		}
+		for _, m := range list("TESTPLUGIN_ACCEPTS") {
+			platform.AcceptedIdentityModes = append(platform.AcceptedIdentityModes, mode(m))
+		}
+		d.Capabilities = &pluginv2.DescribeResponse_PlatformProvider{PlatformProvider: platform}
 	}
 	return d, nil
+}
+
+func mode(name string) pluginv2.IdentityMode {
+	return pluginv2.IdentityMode(pluginv2.IdentityMode_value["IDENTITY_MODE_"+name])
+}
+
+func list(env string) []string {
+	if v := os.Getenv(env); v != "" {
+		return strings.Split(v, ",")
+	}
+	return nil
 }
 
 func (control) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {

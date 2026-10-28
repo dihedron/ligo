@@ -51,10 +51,12 @@ func (s *syncBuffer) String() string {
 }
 
 // newManager runs a manager over the test plugin, one process per spec.
+// Platforms with no wiring are wired to the builtins svid.v1 and none.v1.
 func newManager(t *testing.T, specs ...Spec) (*Manager, *syncBuffer, error) {
 	t.Helper()
 	dir := pluginDir(t)
 	sum := checksum(t, testPlugin)
+	unwired := false
 	for i := range specs {
 		specs[i].Binary, specs[i].SHA256 = "testplugin", sum
 		if specs[i].Type == "" {
@@ -63,6 +65,18 @@ func newManager(t *testing.T, specs ...Spec) (*Manager, *syncBuffer, error) {
 		if specs[i].Kind == pluginv2.PluginKind_PLUGIN_KIND_UNSPECIFIED {
 			specs[i].Kind = target
 		}
+		for _, in := range specs[i].Instances {
+			if specs[i].Kind == target && in.GetIdentityProviderType() == "" {
+				in.IdentityProviderType, in.IdentityProviderInstance = "svid.v1", "svid-prod"
+				in.SecretStoreType, in.SecretStoreInstance = "none.v1", "none-prod"
+				unwired = true
+			}
+		}
+	}
+	if unwired {
+		specs = append(specs,
+			Spec{Builtin: true, Type: "svid.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
+			Spec{Builtin: true, Type: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}})
 	}
 	logs := &syncBuffer{}
 	m := New(specs, Options{
@@ -223,6 +237,55 @@ func TestManagerRule8(t *testing.T) {
 		t.Errorf("valid config: %v", err)
 	}
 }
+
+// TestManagerRule3: before any process is configured, each platform's
+// identity provider must produce a mode the platform accepts, and its store
+// must declare the platform's secret storage strategy for that mode; the
+// strategy defaults to the store's only one for the mode. The platform's
+// descriptor then carries the mode and the strategy (§5.6, §8.2 rule 3).
+func TestManagerRule3(t *testing.T) {
+	identity := pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
+	store := pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
+	svid := Spec{Builtin: true, Type: "svid.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}}
+	local := Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}}
+	none := Spec{Builtin: true, Type: "none.v1", Kind: store, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}}
+	two := Spec{Type: "twostore.v1", Kind: store, Zone: prod, Env: []string{"TESTPLUGIN_KIND=store", "TESTPLUGIN_TYPE=twostore.v1", "TESTPLUGIN_STRATEGIES=a:SVID,b:SVID"},
+		Instances: []*pluginv2.InstanceDescriptor{instance("two-prod", "a", false)}}
+	platform := func(accepts, idp, idpInstance, st, stInstance, strategy string) (Spec, *pluginv2.InstanceDescriptor) {
+		in := instance("pg-prod", "two", false) // "two" would fail ConfigureInstances: rule 3 must refuse first
+		in.IdentityProviderType, in.IdentityProviderInstance = idp, idpInstance
+		in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = st, stInstance, strategy
+		return Spec{Zone: prod, Env: []string{"TESTPLUGIN_ACCEPTS=" + accepts}, Instances: []*pluginv2.InstanceDescriptor{in}}, in
+	}
+	for name, tc := range map[string]struct {
+		specs []Spec
+		want  string
+	}{
+		"mode not accepted":        {[]Spec{svid, none, first(platform("TARGET_LOCAL", "svid.v1", "svid-prod", "none.v1", "none-prod", ""))}, "IDENTITY_MODE_SVID"},
+		"strategy not declared":    {[]Spec{svid, none, first(platform("SVID", "svid.v1", "svid-prod", "none.v1", "none-prod", "x"))}, `"x"`},
+		"no strategy for the mode": {[]Spec{local, none, first(platform("TARGET_LOCAL", "target-local.v1", "local-prod", "none.v1", "none-prod", ""))}, "secret_storage_strategy"},
+		"several strategies":       {[]Spec{svid, two, first(platform("SVID", "svid.v1", "svid-prod", "twostore.v1", "two-prod", ""))}, "secret_storage_strategy"},
+		"unspecified mode": {[]Spec{{Type: "noid.v1", Kind: identity, Zone: prod, Env: []string{"TESTPLUGIN_KIND=identity", "TESTPLUGIN_TYPE=noid.v1"},
+			Instances: []*pluginv2.InstanceDescriptor{instance("noid-prod", "c", false)}}}, "UNSPECIFIED"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := newManager(t, tc.specs...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "more than one") {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	spec, in := platform("SVID", "svid.v1", "svid-prod", "none.v1", "none-prod", "")
+	in.SvidSelector.MatchExpr = "b"
+	if _, _, err := newManager(t, svid, none, spec); err != nil {
+		t.Fatal(err)
+	}
+	if in.GetIdentityMode() != pluginv2.IdentityMode_IDENTITY_MODE_SVID || in.GetSecretStorageStrategy() != "svid" {
+		t.Errorf("descriptor: mode %v, strategy %q", in.GetIdentityMode(), in.GetSecretStorageStrategy())
+	}
+}
+
+func first(s Spec, _ *pluginv2.InstanceDescriptor) Spec { return s }
 
 // TestManagerRestartDescribeChanged: a restarted process that describes
 // itself differently is not used (§5.2).

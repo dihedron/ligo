@@ -148,7 +148,7 @@ message DescribeResponse {
 }
 
 message IdentityProviderCapabilities {
-  IdentityMode produced_identity_mode = 1; // exactly one; never UNSPECIFIED
+  IdentityMode produced_identity_mode = 1; // exactly one; never UNSPECIFIED (refused at startup)
 }
 
 message PlatformProviderCapabilities {
