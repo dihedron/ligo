@@ -56,14 +56,14 @@ func quiet() hclog.Logger { return hclog.NewNullLogger() }
 // TestStart: one binary serves PluginControl and its kind's service over
 // gRPC with AutoMTLS (§5.3 rules 1-2, EXT-10).
 func TestStart(t *testing.T) {
-	c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet(), nil)
+	c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, checksum(t, testPlugin), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(c.Kill)
 	ctx := context.Background()
 	d, err := c.Control.Describe(ctx, &pluginv2.DescribeRequest{})
-	if err != nil || d.GetPluginType() != "test.v1" || d.GetKind() != pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER {
+	if err != nil || d.GetPluginType() != "test.v1" || d.GetKind() != pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER {
 		t.Fatalf("Describe = (%v, %v)", d, err)
 	}
 	r, err := c.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{Zone: "prod", Instances: []*pluginv2.InstanceDescriptor{{Name: "pg-prod", TrustDomain: "prod.lab"}}})
@@ -75,7 +75,7 @@ func TestStart(t *testing.T) {
 	}
 	// the kind's service is on the same connection; the test plugin does
 	// not implement it
-	if _, err := c.Target.ValidateTarget(ctx, &pluginv2.ValidateTargetRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := c.Platform.ValidateTarget(ctx, &pluginv2.ValidateTargetRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ValidateTarget: %v", err)
 	}
 	if c.Identity != nil || c.Store != nil {
@@ -87,8 +87,8 @@ func TestStart(t *testing.T) {
 // kinds.
 func TestStartKinds(t *testing.T) {
 	for kind, env := range map[pluginv2.PluginKind]string{
-		pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:     "identity",
-		pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER: "store",
+		pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: "identity",
+		pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:      "store",
 	} {
 		cmd := exec.Command(testPlugin)
 		cmd.Env = append(os.Environ(), "TESTPLUGIN_KIND="+env)
@@ -103,7 +103,7 @@ func TestStartKinds(t *testing.T) {
 		case "store":
 			_, err = c.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{})
 		}
-		if status.Code(err) != codes.Unimplemented || c.Target != nil {
+		if status.Code(err) != codes.Unimplemented || c.Platform != nil {
 			t.Errorf("%s: %v", env, err)
 		}
 		c.Kill()
@@ -111,12 +111,12 @@ func TestStartKinds(t *testing.T) {
 	// a plugin of another kind than the host expects has no such service
 	cmd := exec.Command(testPlugin)
 	cmd.Env = append(os.Environ(), "TESTPLUGIN_KIND=store")
-	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, checksum(t, testPlugin), quiet(), nil)
+	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, checksum(t, testPlugin), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Kill()
-	if _, err := c.Target.ValidateTarget(context.Background(), &pluginv2.ValidateTargetRequest{}); status.Code(err) != codes.Unimplemented {
+	if _, err := c.Platform.ValidateTarget(context.Background(), &pluginv2.ValidateTargetRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("wrong kind: %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestStartRefusals(t *testing.T) {
 	sum := checksum(t, testPlugin)
 	v2 := exec.Command(testPlugin)
 	v2.Env = append(os.Environ(), "TESTPLUGIN_PROTOCOL=2")
-	if c, err := Start(v2, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, sum, quiet(), nil); err == nil || !strings.Contains(err.Error(), "incompatible API version") {
+	if c, err := Start(v2, pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, sum, quiet(), nil); err == nil || !strings.Contains(err.Error(), "incompatible API version") {
 		if c != nil {
 			c.Kill()
 		}
@@ -135,7 +135,7 @@ func TestStartRefusals(t *testing.T) {
 	}
 	bad := append([]byte{}, sum...)
 	bad[0] ^= 0xff
-	if c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, bad, quiet(), nil); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if c, err := Start(exec.Command(testPlugin), pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, bad, quiet(), nil); err == nil || !strings.Contains(err.Error(), "checksum") {
 		if c != nil {
 			c.Kill()
 		}

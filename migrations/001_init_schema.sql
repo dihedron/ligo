@@ -74,7 +74,7 @@ CREATE TABLE targets (
     zone               VARCHAR(63)  NOT NULL,               -- the platform's zone; immutable
     scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
     platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
-    definition         JSONB NOT NULL,                      -- normalized by TargetProvider.ValidateTarget
+    definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
     display_name       VARCHAR(128),
     description        TEXT CHECK (length(description) <= 4096),
     labels             JSONB NOT NULL DEFAULT '{}'::jsonb,

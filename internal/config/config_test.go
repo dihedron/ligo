@@ -41,11 +41,11 @@ func TestExample(t *testing.T) {
 	if err := Validate(cfg, Options{LookupEnv: lookupEnv}); err != nil {
 		t.Fatal(err)
 	}
-	p := cfg.TargetProviders[0].Platforms[0]
+	p := cfg.PlatformProviders[0].Platforms[0]
 	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.SecretStore.SecretStorageStrategy != "vault-static" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
 		t.Errorf("platform not decoded: %+v", p)
 	}
-	if got := cfg.TargetProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
+	if got := cfg.PlatformProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
 		t.Errorf("default target_scopes = %v", got)
 	}
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
@@ -182,10 +182,10 @@ func TestLoad(t *testing.T) {
 
 // TestDefaults checks the defaults of an almost empty file.
 func TestDefaults(t *testing.T) {
-	cfg := parse(t, "target_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
+	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
-		cfg.TargetProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
+		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
 		t.Errorf("defaults: %+v", cfg)
 	}
 	if err := Validate(cfg, Options{}); err == nil {

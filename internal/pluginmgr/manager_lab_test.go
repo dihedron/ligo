@@ -15,7 +15,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 )
 
-const store = pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER
+const store = pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
 
 // labEnv reads a variable of "lab.sh env --on ligo1"; these tests run only
 // on ligo1, as the user ligo.

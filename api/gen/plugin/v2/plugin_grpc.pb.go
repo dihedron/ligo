@@ -338,17 +338,17 @@ var IdentityProviderPlugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TargetProviderPlugin_GetUISchemas_FullMethodName    = "/ligo.plugin.v2.TargetProviderPlugin/GetUISchemas"
-	TargetProviderPlugin_ValidateTarget_FullMethodName  = "/ligo.plugin.v2.TargetProviderPlugin/ValidateTarget"
-	TargetProviderPlugin_ValidateBinding_FullMethodName = "/ligo.plugin.v2.TargetProviderPlugin/ValidateBinding"
-	TargetProviderPlugin_EnsureTarget_FullMethodName    = "/ligo.plugin.v2.TargetProviderPlugin/EnsureTarget"
-	TargetProviderPlugin_CleanupTarget_FullMethodName   = "/ligo.plugin.v2.TargetProviderPlugin/CleanupTarget"
+	PlatformProviderPlugin_GetUISchemas_FullMethodName    = "/ligo.plugin.v2.PlatformProviderPlugin/GetUISchemas"
+	PlatformProviderPlugin_ValidateTarget_FullMethodName  = "/ligo.plugin.v2.PlatformProviderPlugin/ValidateTarget"
+	PlatformProviderPlugin_ValidateBinding_FullMethodName = "/ligo.plugin.v2.PlatformProviderPlugin/ValidateBinding"
+	PlatformProviderPlugin_EnsureTarget_FullMethodName    = "/ligo.plugin.v2.PlatformProviderPlugin/EnsureTarget"
+	PlatformProviderPlugin_CleanupTarget_FullMethodName   = "/ligo.plugin.v2.PlatformProviderPlugin/CleanupTarget"
 )
 
-// TargetProviderPluginClient is the client API for TargetProviderPlugin service.
+// PlatformProviderPluginClient is the client API for PlatformProviderPlugin service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type TargetProviderPluginClient interface {
+type PlatformProviderPluginClient interface {
 	GetUISchemas(ctx context.Context, in *GetUISchemasRequest, opts ...grpc.CallOption) (*GetUISchemasResponse, error)
 	ValidateTarget(ctx context.Context, in *ValidateTargetRequest, opts ...grpc.CallOption) (*ValidateTargetResponse, error)
 	ValidateBinding(ctx context.Context, in *ValidateBindingRequest, opts ...grpc.CallOption) (*ValidateBindingResponse, error)
@@ -356,235 +356,236 @@ type TargetProviderPluginClient interface {
 	CleanupTarget(ctx context.Context, in *CleanupTargetRequest, opts ...grpc.CallOption) (*CleanupTargetResponse, error)
 }
 
-type targetProviderPluginClient struct {
+type platformProviderPluginClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewTargetProviderPluginClient(cc grpc.ClientConnInterface) TargetProviderPluginClient {
-	return &targetProviderPluginClient{cc}
+func NewPlatformProviderPluginClient(cc grpc.ClientConnInterface) PlatformProviderPluginClient {
+	return &platformProviderPluginClient{cc}
 }
 
-func (c *targetProviderPluginClient) GetUISchemas(ctx context.Context, in *GetUISchemasRequest, opts ...grpc.CallOption) (*GetUISchemasResponse, error) {
+func (c *platformProviderPluginClient) GetUISchemas(ctx context.Context, in *GetUISchemasRequest, opts ...grpc.CallOption) (*GetUISchemasResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUISchemasResponse)
-	err := c.cc.Invoke(ctx, TargetProviderPlugin_GetUISchemas_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, PlatformProviderPlugin_GetUISchemas_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *targetProviderPluginClient) ValidateTarget(ctx context.Context, in *ValidateTargetRequest, opts ...grpc.CallOption) (*ValidateTargetResponse, error) {
+func (c *platformProviderPluginClient) ValidateTarget(ctx context.Context, in *ValidateTargetRequest, opts ...grpc.CallOption) (*ValidateTargetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ValidateTargetResponse)
-	err := c.cc.Invoke(ctx, TargetProviderPlugin_ValidateTarget_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, PlatformProviderPlugin_ValidateTarget_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *targetProviderPluginClient) ValidateBinding(ctx context.Context, in *ValidateBindingRequest, opts ...grpc.CallOption) (*ValidateBindingResponse, error) {
+func (c *platformProviderPluginClient) ValidateBinding(ctx context.Context, in *ValidateBindingRequest, opts ...grpc.CallOption) (*ValidateBindingResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ValidateBindingResponse)
-	err := c.cc.Invoke(ctx, TargetProviderPlugin_ValidateBinding_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, PlatformProviderPlugin_ValidateBinding_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *targetProviderPluginClient) EnsureTarget(ctx context.Context, in *EnsureTargetRequest, opts ...grpc.CallOption) (*EnsureTargetResponse, error) {
+func (c *platformProviderPluginClient) EnsureTarget(ctx context.Context, in *EnsureTargetRequest, opts ...grpc.CallOption) (*EnsureTargetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EnsureTargetResponse)
-	err := c.cc.Invoke(ctx, TargetProviderPlugin_EnsureTarget_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, PlatformProviderPlugin_EnsureTarget_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *targetProviderPluginClient) CleanupTarget(ctx context.Context, in *CleanupTargetRequest, opts ...grpc.CallOption) (*CleanupTargetResponse, error) {
+func (c *platformProviderPluginClient) CleanupTarget(ctx context.Context, in *CleanupTargetRequest, opts ...grpc.CallOption) (*CleanupTargetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CleanupTargetResponse)
-	err := c.cc.Invoke(ctx, TargetProviderPlugin_CleanupTarget_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, PlatformProviderPlugin_CleanupTarget_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// TargetProviderPluginServer is the server API for TargetProviderPlugin service.
-// All implementations must embed UnimplementedTargetProviderPluginServer
+// PlatformProviderPluginServer is the server API for PlatformProviderPlugin service.
+// All implementations must embed UnimplementedPlatformProviderPluginServer
 // for forward compatibility.
-type TargetProviderPluginServer interface {
+type PlatformProviderPluginServer interface {
 	GetUISchemas(context.Context, *GetUISchemasRequest) (*GetUISchemasResponse, error)
 	ValidateTarget(context.Context, *ValidateTargetRequest) (*ValidateTargetResponse, error)
 	ValidateBinding(context.Context, *ValidateBindingRequest) (*ValidateBindingResponse, error)
 	EnsureTarget(context.Context, *EnsureTargetRequest) (*EnsureTargetResponse, error)
 	CleanupTarget(context.Context, *CleanupTargetRequest) (*CleanupTargetResponse, error)
-	mustEmbedUnimplementedTargetProviderPluginServer()
+	mustEmbedUnimplementedPlatformProviderPluginServer()
 }
 
-// UnimplementedTargetProviderPluginServer must be embedded to have
+// UnimplementedPlatformProviderPluginServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedTargetProviderPluginServer struct{}
+type UnimplementedPlatformProviderPluginServer struct{}
 
-func (UnimplementedTargetProviderPluginServer) GetUISchemas(context.Context, *GetUISchemasRequest) (*GetUISchemasResponse, error) {
+func (UnimplementedPlatformProviderPluginServer) GetUISchemas(context.Context, *GetUISchemasRequest) (*GetUISchemasResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUISchemas not implemented")
 }
-func (UnimplementedTargetProviderPluginServer) ValidateTarget(context.Context, *ValidateTargetRequest) (*ValidateTargetResponse, error) {
+func (UnimplementedPlatformProviderPluginServer) ValidateTarget(context.Context, *ValidateTargetRequest) (*ValidateTargetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ValidateTarget not implemented")
 }
-func (UnimplementedTargetProviderPluginServer) ValidateBinding(context.Context, *ValidateBindingRequest) (*ValidateBindingResponse, error) {
+func (UnimplementedPlatformProviderPluginServer) ValidateBinding(context.Context, *ValidateBindingRequest) (*ValidateBindingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ValidateBinding not implemented")
 }
-func (UnimplementedTargetProviderPluginServer) EnsureTarget(context.Context, *EnsureTargetRequest) (*EnsureTargetResponse, error) {
+func (UnimplementedPlatformProviderPluginServer) EnsureTarget(context.Context, *EnsureTargetRequest) (*EnsureTargetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnsureTarget not implemented")
 }
-func (UnimplementedTargetProviderPluginServer) CleanupTarget(context.Context, *CleanupTargetRequest) (*CleanupTargetResponse, error) {
+func (UnimplementedPlatformProviderPluginServer) CleanupTarget(context.Context, *CleanupTargetRequest) (*CleanupTargetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CleanupTarget not implemented")
 }
-func (UnimplementedTargetProviderPluginServer) mustEmbedUnimplementedTargetProviderPluginServer() {}
-func (UnimplementedTargetProviderPluginServer) testEmbeddedByValue()                              {}
+func (UnimplementedPlatformProviderPluginServer) mustEmbedUnimplementedPlatformProviderPluginServer() {
+}
+func (UnimplementedPlatformProviderPluginServer) testEmbeddedByValue() {}
 
-// UnsafeTargetProviderPluginServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to TargetProviderPluginServer will
+// UnsafePlatformProviderPluginServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to PlatformProviderPluginServer will
 // result in compilation errors.
-type UnsafeTargetProviderPluginServer interface {
-	mustEmbedUnimplementedTargetProviderPluginServer()
+type UnsafePlatformProviderPluginServer interface {
+	mustEmbedUnimplementedPlatformProviderPluginServer()
 }
 
-func RegisterTargetProviderPluginServer(s grpc.ServiceRegistrar, srv TargetProviderPluginServer) {
-	// If the following call panics, it indicates UnimplementedTargetProviderPluginServer was
+func RegisterPlatformProviderPluginServer(s grpc.ServiceRegistrar, srv PlatformProviderPluginServer) {
+	// If the following call panics, it indicates UnimplementedPlatformProviderPluginServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&TargetProviderPlugin_ServiceDesc, srv)
+	s.RegisterService(&PlatformProviderPlugin_ServiceDesc, srv)
 }
 
-func _TargetProviderPlugin_GetUISchemas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PlatformProviderPlugin_GetUISchemas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetUISchemasRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TargetProviderPluginServer).GetUISchemas(ctx, in)
+		return srv.(PlatformProviderPluginServer).GetUISchemas(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TargetProviderPlugin_GetUISchemas_FullMethodName,
+		FullMethod: PlatformProviderPlugin_GetUISchemas_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TargetProviderPluginServer).GetUISchemas(ctx, req.(*GetUISchemasRequest))
+		return srv.(PlatformProviderPluginServer).GetUISchemas(ctx, req.(*GetUISchemasRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TargetProviderPlugin_ValidateTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PlatformProviderPlugin_ValidateTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ValidateTargetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TargetProviderPluginServer).ValidateTarget(ctx, in)
+		return srv.(PlatformProviderPluginServer).ValidateTarget(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TargetProviderPlugin_ValidateTarget_FullMethodName,
+		FullMethod: PlatformProviderPlugin_ValidateTarget_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TargetProviderPluginServer).ValidateTarget(ctx, req.(*ValidateTargetRequest))
+		return srv.(PlatformProviderPluginServer).ValidateTarget(ctx, req.(*ValidateTargetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TargetProviderPlugin_ValidateBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PlatformProviderPlugin_ValidateBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ValidateBindingRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TargetProviderPluginServer).ValidateBinding(ctx, in)
+		return srv.(PlatformProviderPluginServer).ValidateBinding(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TargetProviderPlugin_ValidateBinding_FullMethodName,
+		FullMethod: PlatformProviderPlugin_ValidateBinding_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TargetProviderPluginServer).ValidateBinding(ctx, req.(*ValidateBindingRequest))
+		return srv.(PlatformProviderPluginServer).ValidateBinding(ctx, req.(*ValidateBindingRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TargetProviderPlugin_EnsureTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PlatformProviderPlugin_EnsureTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EnsureTargetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TargetProviderPluginServer).EnsureTarget(ctx, in)
+		return srv.(PlatformProviderPluginServer).EnsureTarget(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TargetProviderPlugin_EnsureTarget_FullMethodName,
+		FullMethod: PlatformProviderPlugin_EnsureTarget_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TargetProviderPluginServer).EnsureTarget(ctx, req.(*EnsureTargetRequest))
+		return srv.(PlatformProviderPluginServer).EnsureTarget(ctx, req.(*EnsureTargetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TargetProviderPlugin_CleanupTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PlatformProviderPlugin_CleanupTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CleanupTargetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TargetProviderPluginServer).CleanupTarget(ctx, in)
+		return srv.(PlatformProviderPluginServer).CleanupTarget(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TargetProviderPlugin_CleanupTarget_FullMethodName,
+		FullMethod: PlatformProviderPlugin_CleanupTarget_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TargetProviderPluginServer).CleanupTarget(ctx, req.(*CleanupTargetRequest))
+		return srv.(PlatformProviderPluginServer).CleanupTarget(ctx, req.(*CleanupTargetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// TargetProviderPlugin_ServiceDesc is the grpc.ServiceDesc for TargetProviderPlugin service.
+// PlatformProviderPlugin_ServiceDesc is the grpc.ServiceDesc for PlatformProviderPlugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var TargetProviderPlugin_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.TargetProviderPlugin",
-	HandlerType: (*TargetProviderPluginServer)(nil),
+var PlatformProviderPlugin_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "ligo.plugin.v2.PlatformProviderPlugin",
+	HandlerType: (*PlatformProviderPluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "GetUISchemas",
-			Handler:    _TargetProviderPlugin_GetUISchemas_Handler,
+			Handler:    _PlatformProviderPlugin_GetUISchemas_Handler,
 		},
 		{
 			MethodName: "ValidateTarget",
-			Handler:    _TargetProviderPlugin_ValidateTarget_Handler,
+			Handler:    _PlatformProviderPlugin_ValidateTarget_Handler,
 		},
 		{
 			MethodName: "ValidateBinding",
-			Handler:    _TargetProviderPlugin_ValidateBinding_Handler,
+			Handler:    _PlatformProviderPlugin_ValidateBinding_Handler,
 		},
 		{
 			MethodName: "EnsureTarget",
-			Handler:    _TargetProviderPlugin_EnsureTarget_Handler,
+			Handler:    _PlatformProviderPlugin_EnsureTarget_Handler,
 		},
 		{
 			MethodName: "CleanupTarget",
-			Handler:    _TargetProviderPlugin_CleanupTarget_Handler,
+			Handler:    _PlatformProviderPlugin_CleanupTarget_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -592,140 +593,139 @@ var TargetProviderPlugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	SecretStoreProviderPlugin_EnsureSecretStore_FullMethodName  = "/ligo.plugin.v2.SecretStoreProviderPlugin/EnsureSecretStore"
-	SecretStoreProviderPlugin_CleanupSecretStore_FullMethodName = "/ligo.plugin.v2.SecretStoreProviderPlugin/CleanupSecretStore"
+	SecretStorePlugin_EnsureSecretStore_FullMethodName  = "/ligo.plugin.v2.SecretStorePlugin/EnsureSecretStore"
+	SecretStorePlugin_CleanupSecretStore_FullMethodName = "/ligo.plugin.v2.SecretStorePlugin/CleanupSecretStore"
 )
 
-// SecretStoreProviderPluginClient is the client API for SecretStoreProviderPlugin service.
+// SecretStorePluginClient is the client API for SecretStorePlugin service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type SecretStoreProviderPluginClient interface {
+type SecretStorePluginClient interface {
 	EnsureSecretStore(ctx context.Context, in *EnsureSecretStoreRequest, opts ...grpc.CallOption) (*EnsureSecretStoreResponse, error)
 	CleanupSecretStore(ctx context.Context, in *CleanupSecretStoreRequest, opts ...grpc.CallOption) (*CleanupSecretStoreResponse, error)
 }
 
-type secretStoreProviderPluginClient struct {
+type secretStorePluginClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewSecretStoreProviderPluginClient(cc grpc.ClientConnInterface) SecretStoreProviderPluginClient {
-	return &secretStoreProviderPluginClient{cc}
+func NewSecretStorePluginClient(cc grpc.ClientConnInterface) SecretStorePluginClient {
+	return &secretStorePluginClient{cc}
 }
 
-func (c *secretStoreProviderPluginClient) EnsureSecretStore(ctx context.Context, in *EnsureSecretStoreRequest, opts ...grpc.CallOption) (*EnsureSecretStoreResponse, error) {
+func (c *secretStorePluginClient) EnsureSecretStore(ctx context.Context, in *EnsureSecretStoreRequest, opts ...grpc.CallOption) (*EnsureSecretStoreResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EnsureSecretStoreResponse)
-	err := c.cc.Invoke(ctx, SecretStoreProviderPlugin_EnsureSecretStore_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, SecretStorePlugin_EnsureSecretStore_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *secretStoreProviderPluginClient) CleanupSecretStore(ctx context.Context, in *CleanupSecretStoreRequest, opts ...grpc.CallOption) (*CleanupSecretStoreResponse, error) {
+func (c *secretStorePluginClient) CleanupSecretStore(ctx context.Context, in *CleanupSecretStoreRequest, opts ...grpc.CallOption) (*CleanupSecretStoreResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CleanupSecretStoreResponse)
-	err := c.cc.Invoke(ctx, SecretStoreProviderPlugin_CleanupSecretStore_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, SecretStorePlugin_CleanupSecretStore_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// SecretStoreProviderPluginServer is the server API for SecretStoreProviderPlugin service.
-// All implementations must embed UnimplementedSecretStoreProviderPluginServer
+// SecretStorePluginServer is the server API for SecretStorePlugin service.
+// All implementations must embed UnimplementedSecretStorePluginServer
 // for forward compatibility.
-type SecretStoreProviderPluginServer interface {
+type SecretStorePluginServer interface {
 	EnsureSecretStore(context.Context, *EnsureSecretStoreRequest) (*EnsureSecretStoreResponse, error)
 	CleanupSecretStore(context.Context, *CleanupSecretStoreRequest) (*CleanupSecretStoreResponse, error)
-	mustEmbedUnimplementedSecretStoreProviderPluginServer()
+	mustEmbedUnimplementedSecretStorePluginServer()
 }
 
-// UnimplementedSecretStoreProviderPluginServer must be embedded to have
+// UnimplementedSecretStorePluginServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedSecretStoreProviderPluginServer struct{}
+type UnimplementedSecretStorePluginServer struct{}
 
-func (UnimplementedSecretStoreProviderPluginServer) EnsureSecretStore(context.Context, *EnsureSecretStoreRequest) (*EnsureSecretStoreResponse, error) {
+func (UnimplementedSecretStorePluginServer) EnsureSecretStore(context.Context, *EnsureSecretStoreRequest) (*EnsureSecretStoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnsureSecretStore not implemented")
 }
-func (UnimplementedSecretStoreProviderPluginServer) CleanupSecretStore(context.Context, *CleanupSecretStoreRequest) (*CleanupSecretStoreResponse, error) {
+func (UnimplementedSecretStorePluginServer) CleanupSecretStore(context.Context, *CleanupSecretStoreRequest) (*CleanupSecretStoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CleanupSecretStore not implemented")
 }
-func (UnimplementedSecretStoreProviderPluginServer) mustEmbedUnimplementedSecretStoreProviderPluginServer() {
-}
-func (UnimplementedSecretStoreProviderPluginServer) testEmbeddedByValue() {}
+func (UnimplementedSecretStorePluginServer) mustEmbedUnimplementedSecretStorePluginServer() {}
+func (UnimplementedSecretStorePluginServer) testEmbeddedByValue()                           {}
 
-// UnsafeSecretStoreProviderPluginServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to SecretStoreProviderPluginServer will
+// UnsafeSecretStorePluginServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to SecretStorePluginServer will
 // result in compilation errors.
-type UnsafeSecretStoreProviderPluginServer interface {
-	mustEmbedUnimplementedSecretStoreProviderPluginServer()
+type UnsafeSecretStorePluginServer interface {
+	mustEmbedUnimplementedSecretStorePluginServer()
 }
 
-func RegisterSecretStoreProviderPluginServer(s grpc.ServiceRegistrar, srv SecretStoreProviderPluginServer) {
-	// If the following call panics, it indicates UnimplementedSecretStoreProviderPluginServer was
+func RegisterSecretStorePluginServer(s grpc.ServiceRegistrar, srv SecretStorePluginServer) {
+	// If the following call panics, it indicates UnimplementedSecretStorePluginServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&SecretStoreProviderPlugin_ServiceDesc, srv)
+	s.RegisterService(&SecretStorePlugin_ServiceDesc, srv)
 }
 
-func _SecretStoreProviderPlugin_EnsureSecretStore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _SecretStorePlugin_EnsureSecretStore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EnsureSecretStoreRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SecretStoreProviderPluginServer).EnsureSecretStore(ctx, in)
+		return srv.(SecretStorePluginServer).EnsureSecretStore(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SecretStoreProviderPlugin_EnsureSecretStore_FullMethodName,
+		FullMethod: SecretStorePlugin_EnsureSecretStore_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SecretStoreProviderPluginServer).EnsureSecretStore(ctx, req.(*EnsureSecretStoreRequest))
+		return srv.(SecretStorePluginServer).EnsureSecretStore(ctx, req.(*EnsureSecretStoreRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SecretStoreProviderPlugin_CleanupSecretStore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _SecretStorePlugin_CleanupSecretStore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CleanupSecretStoreRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SecretStoreProviderPluginServer).CleanupSecretStore(ctx, in)
+		return srv.(SecretStorePluginServer).CleanupSecretStore(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SecretStoreProviderPlugin_CleanupSecretStore_FullMethodName,
+		FullMethod: SecretStorePlugin_CleanupSecretStore_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SecretStoreProviderPluginServer).CleanupSecretStore(ctx, req.(*CleanupSecretStoreRequest))
+		return srv.(SecretStorePluginServer).CleanupSecretStore(ctx, req.(*CleanupSecretStoreRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// SecretStoreProviderPlugin_ServiceDesc is the grpc.ServiceDesc for SecretStoreProviderPlugin service.
+// SecretStorePlugin_ServiceDesc is the grpc.ServiceDesc for SecretStorePlugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var SecretStoreProviderPlugin_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.SecretStoreProviderPlugin",
-	HandlerType: (*SecretStoreProviderPluginServer)(nil),
+var SecretStorePlugin_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "ligo.plugin.v2.SecretStorePlugin",
+	HandlerType: (*SecretStorePluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "EnsureSecretStore",
-			Handler:    _SecretStoreProviderPlugin_EnsureSecretStore_Handler,
+			Handler:    _SecretStorePlugin_EnsureSecretStore_Handler,
 		},
 		{
 			MethodName: "CleanupSecretStore",
-			Handler:    _SecretStoreProviderPlugin_CleanupSecretStore_Handler,
+			Handler:    _SecretStorePlugin_CleanupSecretStore_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -1,5 +1,5 @@
 // Package builtinplugins are the plugins compiled into ligo (§5.1): the
-// identity strategy markers svid.v1, target-local.v1 and delegated-dynamic.v1,
+// identity mode markers svid.v1, target-local.v1 and delegated-dynamic.v1,
 // and the secret store none.v1. They implement the same services as external
 // plugins, and pluginmgr serves them in-process over the same gRPC contract.
 package builtinplugins
@@ -45,7 +45,7 @@ func identityPlugin(m *marker) pluginsdk.Plugins { return pluginsdk.Plugins{Cont
 const targetLocalConfig = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
 "properties":{"password_length":{"type":"integer","minimum":32,"maximum":128}}}`
 
-// marker is an identity strategy marker (ADR-01): it creates no principal.
+// marker is an identity mode marker (ADR-01): it creates no principal.
 // Its artifact names the binding's derived principal in its mode; the target
 // (Stage 2) creates it. target-local.v1 adds the length of the password the
 // target generates (§5.8 rule 2).
@@ -131,12 +131,12 @@ const noneOutputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/sche
 // none is the secret store of SVID mode (§5.6): there is no secret to store.
 type none struct {
 	pluginv2.UnimplementedPluginControlServer
-	pluginv2.UnimplementedSecretStoreProviderPluginServer
+	pluginv2.UnimplementedSecretStorePluginServer
 }
 
 func (*none) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
 	return &pluginv2.DescribeResponse{
-		PluginType: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER, PluginProtocolVersion: 1,
+		PluginType: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
 		PluginVersion: "builtin", SupportedIdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID},
 		InstanceConfigSchemaJson: emptyConfig, ClientOutputSchemaJson: noneOutputSchema,
 		SupportedSecretStorageStrategies: []*pluginv2.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}}},

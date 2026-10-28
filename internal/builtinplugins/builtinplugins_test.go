@@ -51,7 +51,7 @@ func TestLookup(t *testing.T) {
 		"svid.v1":              pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
 		"target-local.v1":      pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
 		"delegated-dynamic.v1": pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
-		"none.v1":              pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER,
+		"none.v1":              pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE,
 	} {
 		p, ok := Lookup(typ)
 		if !ok {

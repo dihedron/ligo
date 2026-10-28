@@ -89,11 +89,11 @@ const (
 	whatErr        = "%s: %v"
 )
 
-// allPlatforms returns the platforms of every target provider, with their
+// allPlatforms returns the platforms of every platform provider, with their
 // provider.
 func allPlatforms(cfg *Config) []providedPlatform {
 	var out []providedPlatform
-	for _, tp := range cfg.TargetProviders {
+	for _, tp := range cfg.PlatformProviders {
 		for _, p := range tp.Platforms {
 			out = append(out, providedPlatform{p, tp.Builtin})
 		}
@@ -113,8 +113,8 @@ func (c *checker) instances(cfg *Config, zones map[string]Zone) {
 	zoneOf := map[string]map[string]string{}
 	c.instanceProviders("identity provider", cfg.IdentityProviders, zones, zoneOf)
 	c.instanceProviders("secret store", cfg.SecretStores, zones, zoneOf)
-	for _, tp := range cfg.TargetProviders {
-		c.binary("target provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
+	for _, tp := range cfg.PlatformProviders {
+		c.binary("platform provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
 	}
 	names := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {

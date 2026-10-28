@@ -51,7 +51,7 @@ func TestOpenBinary(t *testing.T) {
 	if !strings.HasPrefix(cmd.Path, "/proc/self/fd/") {
 		t.Errorf("command path %s", cmd.Path)
 	}
-	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, b.Checksum(), quiet(), nil)
+	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestOpenBinarySwapped(t *testing.T) {
 	if err := os.Rename(impostor, filepath.Join(dir, "testplugin")); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Start(b.Command(), pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, b.Checksum(), quiet(), nil)
+	c, err := Start(b.Command(), pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
 	if err != nil {
 		t.Fatalf("the checked binary did not run: %v", err)
 	}

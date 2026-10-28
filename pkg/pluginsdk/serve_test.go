@@ -16,11 +16,11 @@ type (
 	identity struct {
 		pluginv2.UnimplementedIdentityProviderPluginServer
 	}
-	target struct {
-		pluginv2.UnimplementedTargetProviderPluginServer
+	platform struct {
+		pluginv2.UnimplementedPlatformProviderPluginServer
 	}
 	store struct {
-		pluginv2.UnimplementedSecretStoreProviderPluginServer
+		pluginv2.UnimplementedSecretStorePluginServer
 	}
 )
 
@@ -28,7 +28,7 @@ type (
 func TestPluginsSet(t *testing.T) {
 	for name, p := range map[string]Plugins{
 		"identity": {Control: control{}, Identity: identity{}},
-		"target":   {Control: control{}, Target: target{}},
+		"platform": {Control: control{}, Platform: platform{}},
 		"store":    {Control: control{}, Store: store{}},
 	} {
 		set, err := p.Set()
@@ -50,9 +50,9 @@ func TestPluginsSet(t *testing.T) {
 		}
 	}
 	for name, p := range map[string]Plugins{
-		"no control": {Target: target{}},
+		"no control": {Platform: platform{}},
 		"no kind":    {Control: control{}},
-		"two kinds":  {Control: control{}, Target: target{}, Store: store{}},
+		"two kinds":  {Control: control{}, Platform: platform{}, Store: store{}},
 	} {
 		if _, err := p.Set(); err == nil {
 			t.Errorf("%s: accepted", name)

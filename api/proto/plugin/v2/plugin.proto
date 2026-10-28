@@ -17,8 +17,8 @@ enum IdentityMode {
 enum PluginKind {
   PLUGIN_KIND_UNSPECIFIED = 0;
   PLUGIN_KIND_IDENTITY_PROVIDER = 1;
-  PLUGIN_KIND_TARGET_PROVIDER = 2;
-  PLUGIN_KIND_SECRET_STORE_PROVIDER = 3;
+  PLUGIN_KIND_PLATFORM_PROVIDER = 2;
+  PLUGIN_KIND_SECRET_STORE = 3;
 }
 
 enum Operation {
@@ -53,7 +53,7 @@ message InstanceDescriptor {
   string config_json = 4;               // validated against Describe.instance_config_schema_json
   SVIDSelectorConfig svid_selector = 5;
   bool allow_shared_svid = 6;
-  // TargetProvider instances (platforms) only:
+  // PlatformProvider instances (platforms) only:
   string identity_provider_type = 7;
   string identity_provider_instance = 8;
   IdentityMode identity_mode = 9;
@@ -249,10 +249,10 @@ message CleanupIdentityRequest {
 message CleanupIdentityResponse { bool skipped_not_owner = 1; }
 
 // ============================================================================
-// Stage 2: TargetProviderPlugin
+// Stage 2: PlatformProviderPlugin
 // ============================================================================
 
-service TargetProviderPlugin {
+service PlatformProviderPlugin {
   rpc GetUISchemas(GetUISchemasRequest) returns (GetUISchemasResponse);
   rpc ValidateTarget(ValidateTargetRequest) returns (ValidateTargetResponse);
   rpc ValidateBinding(ValidateBindingRequest) returns (ValidateBindingResponse);
@@ -324,10 +324,10 @@ message CleanupTargetRequest {
 message CleanupTargetResponse { bool skipped_not_owner = 1; }
 
 // ============================================================================
-// Stage 3: SecretStoreProviderPlugin
+// Stage 3: SecretStorePlugin
 // ============================================================================
 
-service SecretStoreProviderPlugin {
+service SecretStorePlugin {
   rpc EnsureSecretStore(EnsureSecretStoreRequest) returns (EnsureSecretStoreResponse);
   rpc CleanupSecretStore(CleanupSecretStoreRequest) returns (CleanupSecretStoreResponse);
 }

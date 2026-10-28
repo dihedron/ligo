@@ -21,9 +21,9 @@ import (
 
 // kindServices maps a plugin kind to the name of its service.
 var kindServices = map[pluginv2.PluginKind]string{
-	pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:     pluginsdk.IdentityService,
-	pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER:       pluginsdk.TargetService,
-	pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER: pluginsdk.StoreService,
+	pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: pluginsdk.IdentityService,
+	pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER: pluginsdk.PlatformService,
+	pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:      pluginsdk.StoreService,
 }
 
 // Client is one running plugin, a process or a builtin served in-process:
@@ -33,8 +33,8 @@ type Client struct {
 	stop     func()         // a builtin's server and connection
 	Control  pluginv2.PluginControlClient
 	Identity pluginv2.IdentityProviderPluginClient
-	Target   pluginv2.TargetProviderPluginClient
-	Store    pluginv2.SecretStoreProviderPluginClient
+	Platform pluginv2.PlatformProviderPluginClient
+	Store    pluginv2.SecretStorePluginClient
 }
 
 // Start launches cmd as a plugin of kind, over gRPC with AutoMTLS, after
@@ -81,9 +81,9 @@ func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclo
 	switch s := svc.(type) {
 	case pluginv2.IdentityProviderPluginClient:
 		c.Identity = s
-	case pluginv2.TargetProviderPluginClient:
-		c.Target = s
-	case pluginv2.SecretStoreProviderPluginClient:
+	case pluginv2.PlatformProviderPluginClient:
+		c.Platform = s
+	case pluginv2.SecretStorePluginClient:
 		c.Store = s
 	}
 	return c, nil
@@ -126,10 +126,10 @@ func startBuiltin(typ string, kind pluginv2.PluginKind) (*Client, error) {
 	switch kind {
 	case pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:
 		c.Identity = pluginv2.NewIdentityProviderPluginClient(conn)
-	case pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER:
-		c.Target = pluginv2.NewTargetProviderPluginClient(conn)
-	case pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER:
-		c.Store = pluginv2.NewSecretStoreProviderPluginClient(conn)
+	case pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER:
+		c.Platform = pluginv2.NewPlatformProviderPluginClient(conn)
+	case pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:
+		c.Store = pluginv2.NewSecretStorePluginClient(conn)
 	}
 	return c, nil
 }

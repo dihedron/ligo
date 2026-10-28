@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const target = pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER
+const target = pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
 
 var (
 	prod = config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: "unix:///run/spire/prod/agent.sock"}
@@ -256,7 +256,7 @@ func TestManagerLogs(t *testing.T) {
 // contract: no binary, no SVID, the same Call (§5.1).
 func TestManagerBuiltins(t *testing.T) {
 	identity := pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
-	store := pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER
+	store := pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
 	m := New([]Spec{
 		{Builtin: true, Type: "svid.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
 		{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: test, Instances: []*pluginv2.InstanceDescriptor{{Name: "local-test", ConfigJson: `{"password_length":40}`}}},

@@ -39,7 +39,7 @@ type Config struct {
 	Reconciliation    Reconciliation     `yaml:"reconciliation"`
 	IdentityProviders []InstanceProvider `yaml:"identity_providers"`
 	SecretStores      []InstanceProvider `yaml:"secret_stores"`
-	TargetProviders   []PlatformProvider `yaml:"target_providers"`
+	PlatformProviders []PlatformProvider `yaml:"platform_providers"`
 }
 
 type Service struct {
@@ -409,9 +409,9 @@ func (c *Config) applyDefaults() {
 	if c.Governance.Interconnects.DefaultCrossScope == "" {
 		c.Governance.Interconnects.DefaultCrossScope = "deny"
 	}
-	for i := range c.TargetProviders {
-		for j := range c.TargetProviders[i].Platforms {
-			if p := &c.TargetProviders[i].Platforms[j]; len(p.TargetScopes) == 0 && p.Scope != "" {
+	for i := range c.PlatformProviders {
+		for j := range c.PlatformProviders[i].Platforms {
+			if p := &c.PlatformProviders[i].Platforms[j]; len(p.TargetScopes) == 0 && p.Scope != "" {
 				p.TargetScopes = []string{p.Scope + "/*"}
 			}
 		}
@@ -434,7 +434,7 @@ func (c *Config) Policy() *governance.Policy {
 		Interconnects:            c.Governance.Interconnects,
 		BreakGlassPolicies:       c.BreakGlass.Policies,
 	}
-	for _, tp := range c.TargetProviders {
+	for _, tp := range c.PlatformProviders {
 		for _, pl := range tp.Platforms {
 			p.Platforms = append(p.Platforms, governance.PlatformScopes{Platform: pl.Name, Scope: pl.Scope, TargetScopes: pl.TargetScopes})
 		}

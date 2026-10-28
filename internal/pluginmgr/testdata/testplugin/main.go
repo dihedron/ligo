@@ -1,4 +1,4 @@
-// Command testplugin is the plugin the pluginmgr tests launch: a target
+// Command testplugin is the plugin the pluginmgr tests launch: a platform
 // provider that serves PluginControl. TESTPLUGIN_PROTOCOL=2 makes it a
 // plugin of another handshake protocol, which the host must refuse;
 // TESTPLUGIN_KIND=identity or store makes it a plugin of that kind, and
@@ -24,9 +24,9 @@ import (
 )
 
 var kinds = map[string]pluginv2.PluginKind{
-	"":         pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER,
+	"":         pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
 	"identity": pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
-	"store":    pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER,
+	"store":    pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE,
 }
 
 type control struct {
@@ -75,8 +75,8 @@ func (control) Health(_ context.Context, r *pluginv2.HealthRequest) (*pluginv2.H
 	return &pluginv2.HealthResponse{Serving: true, PublicMessage: fmt.Sprintf("ok %s mtls=%t", r.GetInstance(), mtls)}, nil
 }
 
-type target struct {
-	pluginv2.UnimplementedTargetProviderPluginServer
+type platform struct {
+	pluginv2.UnimplementedPlatformProviderPluginServer
 }
 
 type identity struct {
@@ -84,11 +84,11 @@ type identity struct {
 }
 
 type store struct {
-	pluginv2.UnimplementedSecretStoreProviderPluginServer
+	pluginv2.UnimplementedSecretStorePluginServer
 }
 
 func main() {
-	plugins := pluginsdk.Plugins{Control: control{}, Target: target{}}
+	plugins := pluginsdk.Plugins{Control: control{}, Platform: platform{}}
 	switch os.Getenv("TESTPLUGIN_KIND") {
 	case "identity":
 		plugins = pluginsdk.Plugins{Control: control{}, Identity: identity{}}

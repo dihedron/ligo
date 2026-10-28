@@ -42,8 +42,8 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 		return nil
 	}
 	for kind, providers := range map[pluginv2.PluginKind][]config.InstanceProvider{
-		pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:     cfg.IdentityProviders,
-		pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER: cfg.SecretStores,
+		pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: cfg.IdentityProviders,
+		pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:      cfg.SecretStores,
 	} {
 		for _, p := range providers {
 			for _, inst := range p.Instances {
@@ -57,7 +57,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 			}
 		}
 	}
-	for _, p := range cfg.TargetProviders {
+	for _, p := range cfg.PlatformProviders {
 		for _, pl := range p.Platforms {
 			in, err := descriptor(pl.Name, pl.SVIDSelector, &pl.Config)
 			if err != nil {
@@ -66,7 +66,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 			in.IdentityProviderType, in.IdentityProviderInstance = pl.IdentityProvider.Type, pl.IdentityProvider.Instance
 			// an omitted secret storage strategy stays empty here: startup defaults it from the store's Describe (§5.6)
 			in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = pl.SecretStore.Type, pl.SecretStore.Instance, pl.SecretStore.SecretStorageStrategy
-			if err := add(pluginv2.PluginKind_PLUGIN_KIND_TARGET_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Zone, in); err != nil {
+			if err := add(pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Zone, in); err != nil {
 				return nil, err
 			}
 		}

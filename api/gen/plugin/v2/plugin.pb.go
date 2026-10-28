@@ -79,10 +79,10 @@ func (IdentityMode) EnumDescriptor() ([]byte, []int) {
 type PluginKind int32
 
 const (
-	PluginKind_PLUGIN_KIND_UNSPECIFIED           PluginKind = 0
-	PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER     PluginKind = 1
-	PluginKind_PLUGIN_KIND_TARGET_PROVIDER       PluginKind = 2
-	PluginKind_PLUGIN_KIND_SECRET_STORE_PROVIDER PluginKind = 3
+	PluginKind_PLUGIN_KIND_UNSPECIFIED       PluginKind = 0
+	PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER PluginKind = 1
+	PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER PluginKind = 2
+	PluginKind_PLUGIN_KIND_SECRET_STORE      PluginKind = 3
 )
 
 // Enum value maps for PluginKind.
@@ -90,14 +90,14 @@ var (
 	PluginKind_name = map[int32]string{
 		0: "PLUGIN_KIND_UNSPECIFIED",
 		1: "PLUGIN_KIND_IDENTITY_PROVIDER",
-		2: "PLUGIN_KIND_TARGET_PROVIDER",
-		3: "PLUGIN_KIND_SECRET_STORE_PROVIDER",
+		2: "PLUGIN_KIND_PLATFORM_PROVIDER",
+		3: "PLUGIN_KIND_SECRET_STORE",
 	}
 	PluginKind_value = map[string]int32{
-		"PLUGIN_KIND_UNSPECIFIED":           0,
-		"PLUGIN_KIND_IDENTITY_PROVIDER":     1,
-		"PLUGIN_KIND_TARGET_PROVIDER":       2,
-		"PLUGIN_KIND_SECRET_STORE_PROVIDER": 3,
+		"PLUGIN_KIND_UNSPECIFIED":       0,
+		"PLUGIN_KIND_IDENTITY_PROVIDER": 1,
+		"PLUGIN_KIND_PLATFORM_PROVIDER": 2,
+		"PLUGIN_KIND_SECRET_STORE":      3,
 	}
 )
 
@@ -523,7 +523,7 @@ type InstanceDescriptor struct {
 	ConfigJson      string                 `protobuf:"bytes,4,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"` // validated against Describe.instance_config_schema_json
 	SvidSelector    *SVIDSelectorConfig    `protobuf:"bytes,5,opt,name=svid_selector,json=svidSelector,proto3" json:"svid_selector,omitempty"`
 	AllowSharedSvid bool                   `protobuf:"varint,6,opt,name=allow_shared_svid,json=allowSharedSvid,proto3" json:"allow_shared_svid,omitempty"`
-	// TargetProvider instances (platforms) only:
+	// PlatformProvider instances (platforms) only:
 	IdentityProviderType     string       `protobuf:"bytes,7,opt,name=identity_provider_type,json=identityProviderType,proto3" json:"identity_provider_type,omitempty"`
 	IdentityProviderInstance string       `protobuf:"bytes,8,opt,name=identity_provider_instance,json=identityProviderInstance,proto3" json:"identity_provider_instance,omitempty"`
 	IdentityMode             IdentityMode `protobuf:"varint,9,opt,name=identity_mode,json=identityMode,proto3,enum=ligo.plugin.v2.IdentityMode" json:"identity_mode,omitempty"`
@@ -3479,13 +3479,13 @@ const file_api_proto_plugin_v2_plugin_proto_rawDesc = "" +
 	"\x12IDENTITY_MODE_SVID\x10\x01\x12\x1e\n" +
 	"\x1aIDENTITY_MODE_EXTERNAL_DIR\x10\x02\x12\x1e\n" +
 	"\x1aIDENTITY_MODE_TARGET_LOCAL\x10\x03\x12#\n" +
-	"\x1fIDENTITY_MODE_DELEGATED_DYNAMIC\x10\x04*\x94\x01\n" +
+	"\x1fIDENTITY_MODE_DELEGATED_DYNAMIC\x10\x04*\x8d\x01\n" +
 	"\n" +
 	"PluginKind\x12\x1b\n" +
 	"\x17PLUGIN_KIND_UNSPECIFIED\x10\x00\x12!\n" +
-	"\x1dPLUGIN_KIND_IDENTITY_PROVIDER\x10\x01\x12\x1f\n" +
-	"\x1bPLUGIN_KIND_TARGET_PROVIDER\x10\x02\x12%\n" +
-	"!PLUGIN_KIND_SECRET_STORE_PROVIDER\x10\x03*h\n" +
+	"\x1dPLUGIN_KIND_IDENTITY_PROVIDER\x10\x01\x12!\n" +
+	"\x1dPLUGIN_KIND_PLATFORM_PROVIDER\x10\x02\x12\x1c\n" +
+	"\x18PLUGIN_KIND_SECRET_STORE\x10\x03*h\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_APPLY\x10\x01\x12\x15\n" +
@@ -3514,14 +3514,14 @@ const file_api_proto_plugin_v2_plugin_proto_rawDesc = "" +
 	"\x06Health\x12\x1d.ligo.plugin.v2.HealthRequest\x1a\x1e.ligo.plugin.v2.HealthResponse2\xdd\x01\n" +
 	"\x16IdentityProviderPlugin\x12_\n" +
 	"\x0eEnsureIdentity\x12%.ligo.plugin.v2.EnsureIdentityRequest\x1a&.ligo.plugin.v2.EnsureIdentityResponse\x12b\n" +
-	"\x0fCleanupIdentity\x12&.ligo.plugin.v2.CleanupIdentityRequest\x1a'.ligo.plugin.v2.CleanupIdentityResponse2\xef\x03\n" +
-	"\x14TargetProviderPlugin\x12Y\n" +
+	"\x0fCleanupIdentity\x12&.ligo.plugin.v2.CleanupIdentityRequest\x1a'.ligo.plugin.v2.CleanupIdentityResponse2\xf1\x03\n" +
+	"\x16PlatformProviderPlugin\x12Y\n" +
 	"\fGetUISchemas\x12#.ligo.plugin.v2.GetUISchemasRequest\x1a$.ligo.plugin.v2.GetUISchemasResponse\x12_\n" +
 	"\x0eValidateTarget\x12%.ligo.plugin.v2.ValidateTargetRequest\x1a&.ligo.plugin.v2.ValidateTargetResponse\x12b\n" +
 	"\x0fValidateBinding\x12&.ligo.plugin.v2.ValidateBindingRequest\x1a'.ligo.plugin.v2.ValidateBindingResponse\x12Y\n" +
 	"\fEnsureTarget\x12#.ligo.plugin.v2.EnsureTargetRequest\x1a$.ligo.plugin.v2.EnsureTargetResponse\x12\\\n" +
-	"\rCleanupTarget\x12$.ligo.plugin.v2.CleanupTargetRequest\x1a%.ligo.plugin.v2.CleanupTargetResponse2\xf2\x01\n" +
-	"\x19SecretStoreProviderPlugin\x12h\n" +
+	"\rCleanupTarget\x12$.ligo.plugin.v2.CleanupTargetRequest\x1a%.ligo.plugin.v2.CleanupTargetResponse2\xea\x01\n" +
+	"\x11SecretStorePlugin\x12h\n" +
 	"\x11EnsureSecretStore\x12(.ligo.plugin.v2.EnsureSecretStoreRequest\x1a).ligo.plugin.v2.EnsureSecretStoreResponse\x12k\n" +
 	"\x12CleanupSecretStore\x12).ligo.plugin.v2.CleanupSecretStoreRequest\x1a*.ligo.plugin.v2.CleanupSecretStoreResponseB5Z3github.com/dihedron/ligo/api/gen/plugin/v2;pluginv2b\x06proto3"
 
@@ -3642,25 +3642,25 @@ var file_api_proto_plugin_v2_plugin_proto_depIdxs = []int32{
 	21, // 47: ligo.plugin.v2.PluginControl.Health:input_type -> ligo.plugin.v2.HealthRequest
 	30, // 48: ligo.plugin.v2.IdentityProviderPlugin.EnsureIdentity:input_type -> ligo.plugin.v2.EnsureIdentityRequest
 	32, // 49: ligo.plugin.v2.IdentityProviderPlugin.CleanupIdentity:input_type -> ligo.plugin.v2.CleanupIdentityRequest
-	26, // 50: ligo.plugin.v2.TargetProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v2.GetUISchemasRequest
-	35, // 51: ligo.plugin.v2.TargetProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v2.ValidateTargetRequest
-	38, // 52: ligo.plugin.v2.TargetProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v2.ValidateBindingRequest
-	40, // 53: ligo.plugin.v2.TargetProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v2.EnsureTargetRequest
-	42, // 54: ligo.plugin.v2.TargetProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v2.CleanupTargetRequest
-	44, // 55: ligo.plugin.v2.SecretStoreProviderPlugin.EnsureSecretStore:input_type -> ligo.plugin.v2.EnsureSecretStoreRequest
-	46, // 56: ligo.plugin.v2.SecretStoreProviderPlugin.CleanupSecretStore:input_type -> ligo.plugin.v2.CleanupSecretStoreRequest
+	26, // 50: ligo.plugin.v2.PlatformProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v2.GetUISchemasRequest
+	35, // 51: ligo.plugin.v2.PlatformProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v2.ValidateTargetRequest
+	38, // 52: ligo.plugin.v2.PlatformProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v2.ValidateBindingRequest
+	40, // 53: ligo.plugin.v2.PlatformProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v2.EnsureTargetRequest
+	42, // 54: ligo.plugin.v2.PlatformProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v2.CleanupTargetRequest
+	44, // 55: ligo.plugin.v2.SecretStorePlugin.EnsureSecretStore:input_type -> ligo.plugin.v2.EnsureSecretStoreRequest
+	46, // 56: ligo.plugin.v2.SecretStorePlugin.CleanupSecretStore:input_type -> ligo.plugin.v2.CleanupSecretStoreRequest
 	16, // 57: ligo.plugin.v2.PluginControl.Describe:output_type -> ligo.plugin.v2.DescribeResponse
 	20, // 58: ligo.plugin.v2.PluginControl.ConfigureInstances:output_type -> ligo.plugin.v2.ConfigureInstancesResponse
 	22, // 59: ligo.plugin.v2.PluginControl.Health:output_type -> ligo.plugin.v2.HealthResponse
 	31, // 60: ligo.plugin.v2.IdentityProviderPlugin.EnsureIdentity:output_type -> ligo.plugin.v2.EnsureIdentityResponse
 	33, // 61: ligo.plugin.v2.IdentityProviderPlugin.CleanupIdentity:output_type -> ligo.plugin.v2.CleanupIdentityResponse
-	27, // 62: ligo.plugin.v2.TargetProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v2.GetUISchemasResponse
-	37, // 63: ligo.plugin.v2.TargetProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v2.ValidateTargetResponse
-	39, // 64: ligo.plugin.v2.TargetProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v2.ValidateBindingResponse
-	41, // 65: ligo.plugin.v2.TargetProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v2.EnsureTargetResponse
-	43, // 66: ligo.plugin.v2.TargetProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v2.CleanupTargetResponse
-	45, // 67: ligo.plugin.v2.SecretStoreProviderPlugin.EnsureSecretStore:output_type -> ligo.plugin.v2.EnsureSecretStoreResponse
-	47, // 68: ligo.plugin.v2.SecretStoreProviderPlugin.CleanupSecretStore:output_type -> ligo.plugin.v2.CleanupSecretStoreResponse
+	27, // 62: ligo.plugin.v2.PlatformProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v2.GetUISchemasResponse
+	37, // 63: ligo.plugin.v2.PlatformProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v2.ValidateTargetResponse
+	39, // 64: ligo.plugin.v2.PlatformProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v2.ValidateBindingResponse
+	41, // 65: ligo.plugin.v2.PlatformProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v2.EnsureTargetResponse
+	43, // 66: ligo.plugin.v2.PlatformProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v2.CleanupTargetResponse
+	45, // 67: ligo.plugin.v2.SecretStorePlugin.EnsureSecretStore:output_type -> ligo.plugin.v2.EnsureSecretStoreResponse
+	47, // 68: ligo.plugin.v2.SecretStorePlugin.CleanupSecretStore:output_type -> ligo.plugin.v2.CleanupSecretStoreResponse
 	57, // [57:69] is the sub-list for method output_type
 	45, // [45:57] is the sub-list for method input_type
 	45, // [45:45] is the sub-list for extension type_name

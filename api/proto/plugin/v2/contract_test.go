@@ -55,10 +55,10 @@ func TestContractShape(t *testing.T) {
 		t.Errorf("package %q", got)
 	}
 	want := map[string][]string{
-		"PluginControl":             {"Describe", "ConfigureInstances", "Health"},
-		"IdentityProviderPlugin":    {"EnsureIdentity", "CleanupIdentity"},
-		"TargetProviderPlugin":      {"GetUISchemas", "ValidateTarget", "ValidateBinding", "EnsureTarget", "CleanupTarget"},
-		"SecretStoreProviderPlugin": {"EnsureSecretStore", "CleanupSecretStore"},
+		"PluginControl":          {"Describe", "ConfigureInstances", "Health"},
+		"IdentityProviderPlugin": {"EnsureIdentity", "CleanupIdentity"},
+		"PlatformProviderPlugin": {"GetUISchemas", "ValidateTarget", "ValidateBinding", "EnsureTarget", "CleanupTarget"},
+		"SecretStorePlugin":      {"EnsureSecretStore", "CleanupSecretStore"},
 	}
 	services := fd.Services()
 	if services.Len() != len(want) {

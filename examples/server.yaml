@@ -288,7 +288,7 @@ secret_stores:
         network_flows:
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.test.internal", ports: [8200], tls: true, server_name: "vault.test.internal" }
 
-target_providers:                         # plugin types and the platforms that use them (§3.4)
+platform_providers:                       # plugin types and the platforms that use them (§3.4)
   - type: "oracle.v1"
     builtin: false
     binary: "target-oracle"
