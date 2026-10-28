@@ -154,8 +154,9 @@ jobs:
         with:
           fetch-depth: 0 # both scanners read the whole history
 
-      # with the repository's .gitleaks.toml (if present); the scanner
-      # versions here and in custom.mk ("make secrets") must be the same
+      # with the repository's .gitleaks.toml (if present); "make scanners"
+      # compares these pinned versions with the latest releases, which
+      # "make secrets" runs: bump the pins when they fall behind
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
