@@ -29,7 +29,7 @@ var (
 )
 
 func instance(name, expr string, shared bool) *pluginv2.InstanceDescriptor {
-	return &pluginv2.InstanceDescriptor{Name: name, SvidSelector: &pluginv2.SVIDSelectorConfig{MatchExpr: expr}, AllowSharedSvid: shared}
+	return &pluginv2.InstanceDescriptor{Name: name, ConfigJson: "{}", SvidSelector: &pluginv2.SVIDSelectorConfig{MatchExpr: expr}, AllowSharedSvid: shared}
 }
 
 // syncBuffer collects log output written from several goroutines.
@@ -193,6 +193,34 @@ func TestManagerTwoPasses(t *testing.T) {
 		Spec{Type: "oracle.v1", Zone: prod, Instances: []*pluginv2.InstanceDescriptor{instance("pg-prod", "a", false)}})
 	if err == nil || !strings.Contains(err.Error(), "oracle.v1") {
 		t.Errorf("err = %v, want the description refused", err)
+	}
+}
+
+// TestManagerRule8: every instance's config validates against its plugin's
+// schema before any process is configured; a plugin whose schema is empty
+// or does not compile is refused (§8.2 rule 8).
+func TestManagerRule8(t *testing.T) {
+	// "two" would fail ConfigureInstances: rule 8 must refuse first
+	bad := instance("pg-prod", "two", false)
+	for name, tc := range map[string]struct {
+		schema string
+		want   string
+	}{
+		"empty schema":   {"", "instance configuration schema"},
+		"invalid schema": {`{"type":7}`, "instance configuration schema"},
+		"config refused": {`{"type":"object","required":["dsn"]}`, `instance "pg-prod"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_SCHEMA=" + tc.schema}, Instances: []*pluginv2.InstanceDescriptor{bad}})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "more than one") {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	ok := instance("pg-prod", "a", false)
+	ok.ConfigJson = `{"dsn":"postgres://pg"}`
+	if _, _, err := newManager(t, Spec{Zone: prod, Env: []string{`TESTPLUGIN_SCHEMA={"type":"object","required":["dsn"]}`}, Instances: []*pluginv2.InstanceDescriptor{ok}}); err != nil {
+		t.Errorf("valid config: %v", err)
 	}
 }
 

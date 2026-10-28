@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -90,7 +92,8 @@ func New(specs []Spec, opts Options) *Manager {
 }
 
 // Start launches every process in two passes (§5.2): it spawns and
-// describes them all, then configures their instances and checks the SVIDs
+// describes them all and checks every instance's config against its
+// plugin's schema (rule 8), then configures their instances and checks the SVIDs
 // they resolved: one each, in the zone's trust domain (INV-10), distinct
 // unless every instance sharing one allows it (ADR-03). Any failure is fatal
 // and names the instance (AC-15).
@@ -106,6 +109,11 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 			return err
 		}
 		p.client, p.described = c, d
+	}
+	for _, p := range m.procs {
+		if err := checkConfigs(p.described, p.spec.Instances); err != nil {
+			return fmt.Errorf("%s: %w", what(p.spec), err)
+		}
 	}
 	owners := map[string][]*pluginv2.InstanceDescriptor{}
 	for _, p := range m.procs {
@@ -212,6 +220,38 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 		m.log.Info("plugin instance resolved", "plugin", s.Type, "zone", s.Zone.Name, "instance", in.GetName(), "spiffe_id", id.String())
 	}
 	return resolved, nil
+}
+
+// checkConfigs validates every instance's config against the plugin's
+// instance configuration schema (§8.2 rule 8).
+func checkConfigs(d *pluginv2.DescribeResponse, instances []*pluginv2.InstanceDescriptor) error {
+	schema, err := compileSchema(d.GetInstanceConfigSchemaJson())
+	if err != nil {
+		return fmt.Errorf("instance configuration schema: %w", err)
+	}
+	for _, in := range instances {
+		cfg, err := jsonschema.UnmarshalJSON(strings.NewReader(in.GetConfigJson()))
+		if err != nil {
+			return fmt.Errorf("instance %q: config: %w", in.GetName(), err)
+		}
+		if err := schema.Validate(cfg); err != nil {
+			return fmt.Errorf("instance %q: config: %w", in.GetName(), err)
+		}
+	}
+	return nil
+}
+
+// compileSchema compiles a JSON Schema, 2020-12 unless it says otherwise.
+func compileSchema(text string) (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(text))
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("schema.json", doc); err != nil {
+		return nil, err
+	}
+	return c.Compile("schema.json")
 }
 
 // capabilitiesOfKind: Describe carries exactly its kind's capabilities (§5.9).

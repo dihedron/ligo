@@ -5,7 +5,8 @@
 // TESTPLUGIN_TYPE sets the type it describes (default test.v1), and
 // TESTPLUGIN_CAPS=identity, platform or store the capabilities it describes
 // (default: its kind's). TESTPLUGIN_VERSION_FILE names a file whose
-// content is the plugin version it describes.
+// content is the plugin version it describes. TESTPLUGIN_SCHEMA, when set,
+// replaces its instance configuration schema (default: any object).
 //
 // ConfigureInstances resolves an instance by its match_expr: "shared" to one
 // SPIFFE ID for all, "foreign" to another trust domain, "skip" to nothing,
@@ -45,7 +46,11 @@ func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.D
 	if caps == "" {
 		caps = os.Getenv("TESTPLUGIN_KIND")
 	}
-	d := &pluginv2.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1}
+	d := &pluginv2.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1,
+		InstanceConfigSchemaJson: `{"type":"object"}`}
+	if schema, ok := os.LookupEnv("TESTPLUGIN_SCHEMA"); ok {
+		d.InstanceConfigSchemaJson = schema
+	}
 	if f := os.Getenv("TESTPLUGIN_VERSION_FILE"); f != "" {
 		v, _ := os.ReadFile(f)
 		d.PluginVersion = string(v)
