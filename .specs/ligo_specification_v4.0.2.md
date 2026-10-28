@@ -88,7 +88,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Secret storage strategies (§3.6, §4.2, §5.6, §5.9, §8.1, §8.2 rules 3 and 10, INV-08) | The workload `auth.strategy` had no defined source. A secret store now declares the strategies it serves (`Describe.secret_store.secret_storage_strategies`, each with its identity modes; one Vault store serves `vault-static`, `vault-dynamic` and `vault-static-rotated`); a platform chooses one in `secret_store.secret_storage_strategy`; a binding snapshots it in the new immutable column `bindings.secret_storage_strategy`, which is served as `auth.secretStorageStrategy`. The target and the store receive it (`InstanceDescriptor.secret_storage_strategy`, `secret_storage_strategy`). In the workload `auth` object, `strategy`, `providerType` and `providerInstance` become `secretStorageStrategy`, `secretStoreType` and `secretStoreInstance`. `none.v1`'s output is `{}`. |
 | Open issues (§13) | New OI-4: targets cannot map an X.509-SVID, whose SPIFFE ID is in the URI SAN, to a principal. |
 | Plugin kind names (§0.4, ADR-01, §5.9, §8.1) | The plugin kinds are named IdentityProvider, PlatformProvider and SecretStore everywhere. `TargetProvider` becomes `PlatformProvider` (its instances are platforms; "target" names only the API resource), `SecretStoreProvider` becomes `SecretStore`, `target_providers` becomes `platform_providers`, and the built-in identity providers are **mode markers** instead of strategy markers ("strategy" names only secret storage strategies). The stage names `IDENTITY`, `TARGET`, `SECRET_STORE` and the RPCs `ValidateTarget`, `EnsureTarget`, `CleanupTarget` are unchanged. |
-| Describe capabilities (§5.6, §5.9, §8.2 rule 3) | `DescribeResponse` carries its kind's capabilities in a `oneof`, so each kind declares only what applies to it: an identity provider its single `produced_identity_mode`, a platform provider its `accepted_identity_modes` and output schema, a secret store its `secret_storage_strategies` and output schema. `supported_identity_modes`, `client_output_schema_json` and `supported_secret_storage_strategies` are removed (fields 5, 7, 8 reserved). A store-level list of identity modes would only repeat its strategies' modes, and an identity provider with several modes had no way to choose one. A capabilities case that does not match `kind` is refused at startup. |
+| Describe capabilities (§5.6, §5.9, §8.2 rule 3) | `DescribeResponse` carries its kind's capabilities in a `oneof`, so each kind declares only what applies to it: an identity provider its single `produced_identity_mode`, a platform provider its `accepted_identity_modes` and output schema, a secret store its `secret_storage_strategies` and output schema. `supported_identity_modes`, `client_output_schema_json` and `supported_secret_storage_strategies` are removed; the fields are renumbered, since nothing is released. A store-level list of identity modes would only repeat its strategies' modes, and an identity provider with several modes had no way to choose one. A capabilities case that does not match `kind` is refused at startup. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v2`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -2510,12 +2510,11 @@ message DescribeResponse {
   PluginKind kind = 2;
   uint32 plugin_protocol_version = 3;     // MUST be 1
   string plugin_version = 4;              // semver of the binary
-  reserved 5, 7, 8;
-  string instance_config_schema_json = 6; // JSON Schema 2020-12
+  string instance_config_schema_json = 5; // JSON Schema 2020-12
   oneof capabilities {                    // exactly the one of the plugin's kind
-    IdentityProviderCapabilities identity_provider = 9;
-    PlatformProviderCapabilities platform_provider = 10;
-    SecretStoreCapabilities secret_store = 11;
+    IdentityProviderCapabilities identity_provider = 6;
+    PlatformProviderCapabilities platform_provider = 7;
+    SecretStoreCapabilities secret_store = 8;
   }
 }
 

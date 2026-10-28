@@ -1231,7 +1231,7 @@ type DescribeResponse struct {
 	Kind                     PluginKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=ligo.plugin.v2.PluginKind" json:"kind,omitempty"`
 	PluginProtocolVersion    uint32                 `protobuf:"varint,3,opt,name=plugin_protocol_version,json=pluginProtocolVersion,proto3" json:"plugin_protocol_version,omitempty"`           // MUST be 1
 	PluginVersion            string                 `protobuf:"bytes,4,opt,name=plugin_version,json=pluginVersion,proto3" json:"plugin_version,omitempty"`                                      // semver of the binary
-	InstanceConfigSchemaJson string                 `protobuf:"bytes,6,opt,name=instance_config_schema_json,json=instanceConfigSchemaJson,proto3" json:"instance_config_schema_json,omitempty"` // JSON Schema 2020-12
+	InstanceConfigSchemaJson string                 `protobuf:"bytes,5,opt,name=instance_config_schema_json,json=instanceConfigSchemaJson,proto3" json:"instance_config_schema_json,omitempty"` // JSON Schema 2020-12
 	// Types that are valid to be assigned to Capabilities:
 	//
 	//	*DescribeResponse_IdentityProvider
@@ -1346,15 +1346,15 @@ type isDescribeResponse_Capabilities interface {
 }
 
 type DescribeResponse_IdentityProvider struct {
-	IdentityProvider *IdentityProviderCapabilities `protobuf:"bytes,9,opt,name=identity_provider,json=identityProvider,proto3,oneof"`
+	IdentityProvider *IdentityProviderCapabilities `protobuf:"bytes,6,opt,name=identity_provider,json=identityProvider,proto3,oneof"`
 }
 
 type DescribeResponse_PlatformProvider struct {
-	PlatformProvider *PlatformProviderCapabilities `protobuf:"bytes,10,opt,name=platform_provider,json=platformProvider,proto3,oneof"`
+	PlatformProvider *PlatformProviderCapabilities `protobuf:"bytes,7,opt,name=platform_provider,json=platformProvider,proto3,oneof"`
 }
 
 type DescribeResponse_SecretStore struct {
-	SecretStore *SecretStoreCapabilities `protobuf:"bytes,11,opt,name=secret_store,json=secretStore,proto3,oneof"`
+	SecretStore *SecretStoreCapabilities `protobuf:"bytes,8,opt,name=secret_store,json=secretStore,proto3,oneof"`
 }
 
 func (*DescribeResponse_IdentityProvider) isDescribeResponse_Capabilities() {}
@@ -3510,19 +3510,18 @@ const file_api_proto_plugin_v2_plugin_proto_rawDesc = "" +
 	"\x0edelegated_role\x18\x03 \x01(\v2!.ligo.plugin.v2.DelegatedRoleSpecH\x00R\rdelegatedRole\x12)\n" +
 	"\x10secret_unchanged\x18\x04 \x01(\bR\x0fsecretUnchangedB\t\n" +
 	"\apayload\"\x11\n" +
-	"\x0fDescribeRequest\"\xab\x04\n" +
+	"\x0fDescribeRequest\"\x99\x04\n" +
 	"\x10DescribeResponse\x12\x1f\n" +
 	"\vplugin_type\x18\x01 \x01(\tR\n" +
 	"pluginType\x12.\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1a.ligo.plugin.v2.PluginKindR\x04kind\x126\n" +
 	"\x17plugin_protocol_version\x18\x03 \x01(\rR\x15pluginProtocolVersion\x12%\n" +
 	"\x0eplugin_version\x18\x04 \x01(\tR\rpluginVersion\x12=\n" +
-	"\x1binstance_config_schema_json\x18\x06 \x01(\tR\x18instanceConfigSchemaJson\x12[\n" +
-	"\x11identity_provider\x18\t \x01(\v2,.ligo.plugin.v2.IdentityProviderCapabilitiesH\x00R\x10identityProvider\x12[\n" +
-	"\x11platform_provider\x18\n" +
-	" \x01(\v2,.ligo.plugin.v2.PlatformProviderCapabilitiesH\x00R\x10platformProvider\x12L\n" +
-	"\fsecret_store\x18\v \x01(\v2'.ligo.plugin.v2.SecretStoreCapabilitiesH\x00R\vsecretStoreB\x0e\n" +
-	"\fcapabilitiesJ\x04\b\x05\x10\x06J\x04\b\a\x10\bJ\x04\b\b\x10\t\"r\n" +
+	"\x1binstance_config_schema_json\x18\x05 \x01(\tR\x18instanceConfigSchemaJson\x12[\n" +
+	"\x11identity_provider\x18\x06 \x01(\v2,.ligo.plugin.v2.IdentityProviderCapabilitiesH\x00R\x10identityProvider\x12[\n" +
+	"\x11platform_provider\x18\a \x01(\v2,.ligo.plugin.v2.PlatformProviderCapabilitiesH\x00R\x10platformProvider\x12L\n" +
+	"\fsecret_store\x18\b \x01(\v2'.ligo.plugin.v2.SecretStoreCapabilitiesH\x00R\vsecretStoreB\x0e\n" +
+	"\fcapabilities\"r\n" +
 	"\x1cIdentityProviderCapabilities\x12R\n" +
 	"\x16produced_identity_mode\x18\x01 \x01(\x0e2\x1c.ligo.plugin.v2.IdentityModeR\x14producedIdentityMode\"\xaf\x01\n" +
 	"\x1cPlatformProviderCapabilities\x12T\n" +
