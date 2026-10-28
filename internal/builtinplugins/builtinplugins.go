@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"sync"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 )
@@ -27,11 +27,11 @@ const minPasswordLength = 32
 func Lookup(typ string) (pluginsdk.Plugins, bool) {
 	switch typ {
 	case "svid.v1":
-		return identityPlugin(&marker{typ: typ, mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID, schema: emptyConfig}), true
+		return identityPlugin(&marker{typ: typ, mode: pluginv1.IdentityMode_IDENTITY_MODE_SVID, schema: emptyConfig}), true
 	case "target-local.v1":
-		return identityPlugin(&marker{typ: typ, mode: pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, schema: targetLocalConfig}), true
+		return identityPlugin(&marker{typ: typ, mode: pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, schema: targetLocalConfig}), true
 	case "delegated-dynamic.v1":
-		return identityPlugin(&marker{typ: typ, mode: pluginv2.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC, schema: emptyConfig}), true
+		return identityPlugin(&marker{typ: typ, mode: pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC, schema: emptyConfig}), true
 	case "none.v1":
 		n := &none{}
 		return pluginsdk.Plugins{Control: n, Store: n}, true
@@ -50,30 +50,30 @@ const targetLocalConfig = `{"$schema":"https://json-schema.org/draft/2020-12/sch
 // (Stage 2) creates it. target-local.v1 adds the length of the password the
 // target generates (§5.8 rule 2).
 type marker struct {
-	pluginv2.UnimplementedPluginControlServer
-	pluginv2.UnimplementedIdentityProviderPluginServer
+	pluginv1.UnimplementedPluginControlServer
+	pluginv1.UnimplementedIdentityProviderPluginServer
 	typ    string
-	mode   pluginv2.IdentityMode
+	mode   pluginv1.IdentityMode
 	schema string
 
 	mu        sync.Mutex
 	passwords map[string]int // target-local.v1: password_length per instance
 }
 
-func (m *marker) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
-	return &pluginv2.DescribeResponse{
-		PluginType: m.typ, Kind: pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 1,
+func (m *marker) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
+	return &pluginv1.DescribeResponse{
+		PluginType: m.typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 1,
 		PluginVersion: "builtin", InstanceConfigSchemaJson: m.schema,
-		Capabilities: &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{ProducedIdentityMode: m.mode}},
+		Capabilities: &pluginv1.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv1.IdentityProviderCapabilities{ProducedIdentityMode: m.mode}},
 	}, nil
 }
 
 // ConfigureInstances resolves no SVID: builtins run inside ligo and
 // authenticate to nothing.
-func (m *marker) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {
+func (m *marker) ConfigureInstances(_ context.Context, r *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
 	passwords := map[string]int{}
 	for _, in := range r.GetInstances() {
-		if m.mode != pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
+		if m.mode != pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
 			continue
 		}
 		var cfg struct {
@@ -95,20 +95,20 @@ func (m *marker) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInst
 	m.mu.Lock()
 	m.passwords = passwords
 	m.mu.Unlock()
-	return &pluginv2.ConfigureInstancesResponse{}, nil
+	return &pluginv1.ConfigureInstancesResponse{}, nil
 }
 
-func (m *marker) Health(context.Context, *pluginv2.HealthRequest) (*pluginv2.HealthResponse, error) {
-	return &pluginv2.HealthResponse{Serving: true}, nil
+func (m *marker) Health(context.Context, *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {
+	return &pluginv1.HealthResponse{Serving: true}, nil
 }
 
-func (m *marker) EnsureIdentity(_ context.Context, r *pluginv2.EnsureIdentityRequest) (*pluginv2.EnsureIdentityResponse, error) {
+func (m *marker) EnsureIdentity(_ context.Context, r *pluginv1.EnsureIdentityRequest) (*pluginv1.EnsureIdentityResponse, error) {
 	b := r.GetBinding()
 	if b.GetDerivedPrincipalName() == "" {
 		return nil, pluginsdk.Error(codes.InvalidArgument, "MISSING_PRINCIPAL_NAME", "the binding context has no derived principal name", false)
 	}
-	a := &pluginv2.IdentityArtifact{Mode: m.mode, PrincipalId: b.GetDerivedPrincipalName()}
-	if m.mode == pluginv2.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
+	a := &pluginv1.IdentityArtifact{Mode: m.mode, PrincipalId: b.GetDerivedPrincipalName()}
+	if m.mode == pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
 		m.mu.Lock()
 		n, ok := m.passwords[r.GetInstance()]
 		m.mu.Unlock()
@@ -117,12 +117,12 @@ func (m *marker) EnsureIdentity(_ context.Context, r *pluginv2.EnsureIdentityReq
 		}
 		a.Metadata = map[string]string{"password_length": strconv.Itoa(n)}
 	}
-	return &pluginv2.EnsureIdentityResponse{Artifact: a}, nil
+	return &pluginv1.EnsureIdentityResponse{Artifact: a}, nil
 }
 
 // CleanupIdentity: a marker created nothing, so there is nothing to remove.
-func (m *marker) CleanupIdentity(context.Context, *pluginv2.CleanupIdentityRequest) (*pluginv2.CleanupIdentityResponse, error) {
-	return &pluginv2.CleanupIdentityResponse{}, nil
+func (m *marker) CleanupIdentity(context.Context, *pluginv1.CleanupIdentityRequest) (*pluginv1.CleanupIdentityResponse, error) {
+	return &pluginv1.CleanupIdentityResponse{}, nil
 }
 
 // noneOutputSchema allows only none.v1's finalized_client_auth_json, {}: with
@@ -131,37 +131,37 @@ const noneOutputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/sche
 
 // none is the secret store of SVID mode (§5.6): there is no secret to store.
 type none struct {
-	pluginv2.UnimplementedPluginControlServer
-	pluginv2.UnimplementedSecretStorePluginServer
+	pluginv1.UnimplementedPluginControlServer
+	pluginv1.UnimplementedSecretStorePluginServer
 }
 
-func (*none) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
-	return &pluginv2.DescribeResponse{
-		PluginType: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+func (*none) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
+	return &pluginv1.DescribeResponse{
+		PluginType: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
 		PluginVersion: "builtin", InstanceConfigSchemaJson: emptyConfig,
-		Capabilities: &pluginv2.DescribeResponse_SecretStore{SecretStore: &pluginv2.SecretStoreCapabilities{
-			SecretStorageStrategies: []*pluginv2.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}}},
+		Capabilities: &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{
+			SecretStorageStrategies: []*pluginv1.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_SVID}}},
 			ClientOutputSchemaJson:  noneOutputSchema,
 		}},
 	}, nil
 }
 
-func (*none) ConfigureInstances(context.Context, *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {
-	return &pluginv2.ConfigureInstancesResponse{}, nil
+func (*none) ConfigureInstances(context.Context, *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
+	return &pluginv1.ConfigureInstancesResponse{}, nil
 }
 
-func (*none) Health(context.Context, *pluginv2.HealthRequest) (*pluginv2.HealthResponse, error) {
-	return &pluginv2.HealthResponse{Serving: true}, nil
+func (*none) Health(context.Context, *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {
+	return &pluginv1.HealthResponse{Serving: true}, nil
 }
 
-func (*none) EnsureSecretStore(_ context.Context, r *pluginv2.EnsureSecretStoreRequest) (*pluginv2.EnsureSecretStoreResponse, error) {
+func (*none) EnsureSecretStore(_ context.Context, r *pluginv1.EnsureSecretStoreRequest) (*pluginv1.EnsureSecretStoreResponse, error) {
 	p := r.GetSecretPayload()
-	if p.GetMode() != pluginv2.IdentityMode_IDENTITY_MODE_SVID || p.GetPayload() != nil || r.GetSecretStorageStrategy() != "svid" {
+	if p.GetMode() != pluginv1.IdentityMode_IDENTITY_MODE_SVID || p.GetPayload() != nil || r.GetSecretStorageStrategy() != "svid" {
 		return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "none.v1 serves the secret storage strategy svid in SVID mode only, without a secret", false)
 	}
-	return &pluginv2.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte("{}")}, nil
+	return &pluginv1.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte("{}")}, nil
 }
 
-func (*none) CleanupSecretStore(context.Context, *pluginv2.CleanupSecretStoreRequest) (*pluginv2.CleanupSecretStoreResponse, error) {
-	return &pluginv2.CleanupSecretStoreResponse{}, nil
+func (*none) CleanupSecretStore(context.Context, *pluginv1.CleanupSecretStoreRequest) (*pluginv1.CleanupSecretStoreResponse, error) {
+	return &pluginv1.CleanupSecretStoreResponse{}, nil
 }

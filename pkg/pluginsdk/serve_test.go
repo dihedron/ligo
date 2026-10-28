@@ -4,23 +4,23 @@ import (
 	"context"
 	"testing"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type (
 	control struct {
-		pluginv2.UnimplementedPluginControlServer
+		pluginv1.UnimplementedPluginControlServer
 	}
 	identity struct {
-		pluginv2.UnimplementedIdentityProviderPluginServer
+		pluginv1.UnimplementedIdentityProviderPluginServer
 	}
 	platform struct {
-		pluginv2.UnimplementedPlatformProviderPluginServer
+		pluginv1.UnimplementedPlatformProviderPluginServer
 	}
 	store struct {
-		pluginv2.UnimplementedSecretStorePluginServer
+		pluginv1.UnimplementedSecretStorePluginServer
 	}
 )
 

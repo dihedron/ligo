@@ -25,24 +25,24 @@ import (
 	"os"
 	"strings"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc/codes"
 )
 
-var kinds = map[string]pluginv2.PluginKind{
-	"":         pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
-	"identity": pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
-	"store":    pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE,
+var kinds = map[string]pluginv1.PluginKind{
+	"":         pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
+	"identity": pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER,
+	"store":    pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE,
 }
 
 type control struct {
-	pluginv2.UnimplementedPluginControlServer
+	pluginv1.UnimplementedPluginControlServer
 }
 
-func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
+func (control) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	typ := os.Getenv("TESTPLUGIN_TYPE")
 	if typ == "" {
 		typ = "test.v1"
@@ -51,7 +51,7 @@ func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.D
 	if caps == "" {
 		caps = os.Getenv("TESTPLUGIN_KIND")
 	}
-	d := &pluginv2.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1,
+	d := &pluginv1.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1,
 		InstanceConfigSchemaJson: `{"type":"object"}`}
 	if schema, ok := os.LookupEnv("TESTPLUGIN_SCHEMA"); ok {
 		d.InstanceConfigSchemaJson = schema
@@ -62,32 +62,32 @@ func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.D
 	}
 	switch caps {
 	case "identity":
-		d.Capabilities = &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{
+		d.Capabilities = &pluginv1.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv1.IdentityProviderCapabilities{
 			ProducedIdentityMode: mode(os.Getenv("TESTPLUGIN_PRODUCES")),
 		}}
 	case "store":
-		store := &pluginv2.SecretStoreCapabilities{}
+		store := &pluginv1.SecretStoreCapabilities{}
 		for _, pair := range list("TESTPLUGIN_STRATEGIES") {
 			name, m, _ := strings.Cut(pair, ":")
 			store.SecretStorageStrategies = append(store.SecretStorageStrategies,
-				&pluginv2.SecretStorageStrategy{Name: name, IdentityModes: []pluginv2.IdentityMode{mode(m)}})
+				&pluginv1.SecretStorageStrategy{Name: name, IdentityModes: []pluginv1.IdentityMode{mode(m)}})
 		}
-		d.Capabilities = &pluginv2.DescribeResponse_SecretStore{SecretStore: store}
+		d.Capabilities = &pluginv1.DescribeResponse_SecretStore{SecretStore: store}
 	default:
-		platform := &pluginv2.PlatformProviderCapabilities{}
+		platform := &pluginv1.PlatformProviderCapabilities{}
 		if _, ok := os.LookupEnv("TESTPLUGIN_ACCEPTS"); !ok {
-			platform.AcceptedIdentityModes = []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}
+			platform.AcceptedIdentityModes = []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_SVID}
 		}
 		for _, m := range list("TESTPLUGIN_ACCEPTS") {
 			platform.AcceptedIdentityModes = append(platform.AcceptedIdentityModes, mode(m))
 		}
-		d.Capabilities = &pluginv2.DescribeResponse_PlatformProvider{PlatformProvider: platform}
+		d.Capabilities = &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: platform}
 	}
 	return d, nil
 }
 
-func mode(name string) pluginv2.IdentityMode {
-	return pluginv2.IdentityMode(pluginv2.IdentityMode_value["IDENTITY_MODE_"+name])
+func mode(name string) pluginv1.IdentityMode {
+	return pluginv1.IdentityMode(pluginv1.IdentityMode_value["IDENTITY_MODE_"+name])
 }
 
 func list(env string) []string {
@@ -97,8 +97,8 @@ func list(env string) []string {
 	return nil
 }
 
-func (control) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {
-	out := &pluginv2.ConfigureInstancesResponse{}
+func (control) ConfigureInstances(_ context.Context, r *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
+	out := &pluginv1.ConfigureInstancesResponse{}
 	for _, in := range r.GetInstances() {
 		id := "spiffe://" + in.GetTrustDomain() + "/plugin/" + in.GetName()
 		switch in.GetSvidSelector().GetMatchExpr() {
@@ -112,12 +112,12 @@ func (control) ConfigureInstances(_ context.Context, r *pluginv2.ConfigureInstan
 			return nil, pluginsdk.Error(codes.FailedPrecondition, "SVID_SELECTION_FAILED",
 				fmt.Sprintf("selector for %q matched more than one SVID", in.GetName()), false)
 		}
-		out.Resolved = append(out.Resolved, &pluginv2.ResolvedInstance{Instance: in.GetName(), SpiffeId: id})
+		out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: id})
 	}
 	return out, nil
 }
 
-func (control) Health(_ context.Context, r *pluginv2.HealthRequest) (*pluginv2.HealthResponse, error) {
+func (control) Health(_ context.Context, r *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {
 	switch r.GetInstance() {
 	case "crash":
 		os.Exit(3)
@@ -128,19 +128,19 @@ func (control) Health(_ context.Context, r *pluginv2.HealthRequest) (*pluginv2.H
 	}
 	// go-plugin hands the host's client certificate over only with AutoMTLS
 	mtls := os.Getenv("PLUGIN_CLIENT_CERT") != ""
-	return &pluginv2.HealthResponse{Serving: true, PublicMessage: fmt.Sprintf("ok %s mtls=%t", r.GetInstance(), mtls)}, nil
+	return &pluginv1.HealthResponse{Serving: true, PublicMessage: fmt.Sprintf("ok %s mtls=%t", r.GetInstance(), mtls)}, nil
 }
 
 type platform struct {
-	pluginv2.UnimplementedPlatformProviderPluginServer
+	pluginv1.UnimplementedPlatformProviderPluginServer
 }
 
 type identity struct {
-	pluginv2.UnimplementedIdentityProviderPluginServer
+	pluginv1.UnimplementedIdentityProviderPluginServer
 }
 
 type store struct {
-	pluginv2.UnimplementedSecretStorePluginServer
+	pluginv1.UnimplementedSecretStorePluginServer
 }
 
 func main() {

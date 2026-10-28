@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 )
 
 // me is the owner of the files the tests create; production requires root.
@@ -51,12 +51,12 @@ func TestOpenBinary(t *testing.T) {
 	if !strings.HasPrefix(cmd.Path, "/proc/self/fd/") {
 		t.Errorf("command path %s", cmd.Path)
 	}
-	c, err := Start(cmd, pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
+	c, err := Start(cmd, pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Kill()
-	if d, err := c.Control.Describe(context.Background(), &pluginv2.DescribeRequest{}); err != nil || d.GetPluginType() != "test.v1" {
+	if d, err := c.Control.Describe(context.Background(), &pluginv1.DescribeRequest{}); err != nil || d.GetPluginType() != "test.v1" {
 		t.Errorf("Describe = (%v, %v)", d, err)
 	}
 }
@@ -77,7 +77,7 @@ func TestOpenBinarySwapped(t *testing.T) {
 	if err := os.Rename(impostor, filepath.Join(dir, "testplugin")); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Start(b.Command(), pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
+	c, err := Start(b.Command(), pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, b.Checksum(), quiet(), nil)
 	if err != nil {
 		t.Fatalf("the checked binary did not run: %v", err)
 	}

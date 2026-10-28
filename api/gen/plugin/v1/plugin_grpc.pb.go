@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v3.21.12
-// source: api/proto/plugin/v2/plugin.proto
+// source: api/proto/plugin/v1/plugin.proto
 
-package pluginv2
+package pluginv1
 
 import (
 	context "context"
@@ -19,9 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PluginControl_Describe_FullMethodName           = "/ligo.plugin.v2.PluginControl/Describe"
-	PluginControl_ConfigureInstances_FullMethodName = "/ligo.plugin.v2.PluginControl/ConfigureInstances"
-	PluginControl_Health_FullMethodName             = "/ligo.plugin.v2.PluginControl/Health"
+	PluginControl_Describe_FullMethodName           = "/ligo.plugin.v1.PluginControl/Describe"
+	PluginControl_ConfigureInstances_FullMethodName = "/ligo.plugin.v1.PluginControl/ConfigureInstances"
+	PluginControl_Health_FullMethodName             = "/ligo.plugin.v1.PluginControl/Health"
 )
 
 // PluginControlClient is the client API for PluginControl service.
@@ -176,7 +176,7 @@ func _PluginControl_Health_Handler(srv interface{}, ctx context.Context, dec fun
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var PluginControl_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.PluginControl",
+	ServiceName: "ligo.plugin.v1.PluginControl",
 	HandlerType: (*PluginControlServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -193,12 +193,12 @@ var PluginControl_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/proto/plugin/v2/plugin.proto",
+	Metadata: "api/proto/plugin/v1/plugin.proto",
 }
 
 const (
-	IdentityProviderPlugin_EnsureIdentity_FullMethodName  = "/ligo.plugin.v2.IdentityProviderPlugin/EnsureIdentity"
-	IdentityProviderPlugin_CleanupIdentity_FullMethodName = "/ligo.plugin.v2.IdentityProviderPlugin/CleanupIdentity"
+	IdentityProviderPlugin_EnsureIdentity_FullMethodName  = "/ligo.plugin.v1.IdentityProviderPlugin/EnsureIdentity"
+	IdentityProviderPlugin_CleanupIdentity_FullMethodName = "/ligo.plugin.v1.IdentityProviderPlugin/CleanupIdentity"
 )
 
 // IdentityProviderPluginClient is the client API for IdentityProviderPlugin service.
@@ -321,7 +321,7 @@ func _IdentityProviderPlugin_CleanupIdentity_Handler(srv interface{}, ctx contex
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var IdentityProviderPlugin_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.IdentityProviderPlugin",
+	ServiceName: "ligo.plugin.v1.IdentityProviderPlugin",
 	HandlerType: (*IdentityProviderPluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -334,15 +334,15 @@ var IdentityProviderPlugin_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/proto/plugin/v2/plugin.proto",
+	Metadata: "api/proto/plugin/v1/plugin.proto",
 }
 
 const (
-	PlatformProviderPlugin_GetUISchemas_FullMethodName    = "/ligo.plugin.v2.PlatformProviderPlugin/GetUISchemas"
-	PlatformProviderPlugin_ValidateTarget_FullMethodName  = "/ligo.plugin.v2.PlatformProviderPlugin/ValidateTarget"
-	PlatformProviderPlugin_ValidateBinding_FullMethodName = "/ligo.plugin.v2.PlatformProviderPlugin/ValidateBinding"
-	PlatformProviderPlugin_EnsureTarget_FullMethodName    = "/ligo.plugin.v2.PlatformProviderPlugin/EnsureTarget"
-	PlatformProviderPlugin_CleanupTarget_FullMethodName   = "/ligo.plugin.v2.PlatformProviderPlugin/CleanupTarget"
+	PlatformProviderPlugin_GetUISchemas_FullMethodName    = "/ligo.plugin.v1.PlatformProviderPlugin/GetUISchemas"
+	PlatformProviderPlugin_ValidateTarget_FullMethodName  = "/ligo.plugin.v1.PlatformProviderPlugin/ValidateTarget"
+	PlatformProviderPlugin_ValidateBinding_FullMethodName = "/ligo.plugin.v1.PlatformProviderPlugin/ValidateBinding"
+	PlatformProviderPlugin_EnsureTarget_FullMethodName    = "/ligo.plugin.v1.PlatformProviderPlugin/EnsureTarget"
+	PlatformProviderPlugin_CleanupTarget_FullMethodName   = "/ligo.plugin.v1.PlatformProviderPlugin/CleanupTarget"
 )
 
 // PlatformProviderPluginClient is the client API for PlatformProviderPlugin service.
@@ -564,7 +564,7 @@ func _PlatformProviderPlugin_CleanupTarget_Handler(srv interface{}, ctx context.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var PlatformProviderPlugin_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.PlatformProviderPlugin",
+	ServiceName: "ligo.plugin.v1.PlatformProviderPlugin",
 	HandlerType: (*PlatformProviderPluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -589,12 +589,12 @@ var PlatformProviderPlugin_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/proto/plugin/v2/plugin.proto",
+	Metadata: "api/proto/plugin/v1/plugin.proto",
 }
 
 const (
-	SecretStorePlugin_EnsureSecretStore_FullMethodName  = "/ligo.plugin.v2.SecretStorePlugin/EnsureSecretStore"
-	SecretStorePlugin_CleanupSecretStore_FullMethodName = "/ligo.plugin.v2.SecretStorePlugin/CleanupSecretStore"
+	SecretStorePlugin_EnsureSecretStore_FullMethodName  = "/ligo.plugin.v1.SecretStorePlugin/EnsureSecretStore"
+	SecretStorePlugin_CleanupSecretStore_FullMethodName = "/ligo.plugin.v1.SecretStorePlugin/CleanupSecretStore"
 )
 
 // SecretStorePluginClient is the client API for SecretStorePlugin service.
@@ -716,7 +716,7 @@ func _SecretStorePlugin_CleanupSecretStore_Handler(srv interface{}, ctx context.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var SecretStorePlugin_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ligo.plugin.v2.SecretStorePlugin",
+	ServiceName: "ligo.plugin.v1.SecretStorePlugin",
 	HandlerType: (*SecretStorePluginServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -729,5 +729,5 @@ var SecretStorePlugin_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/proto/plugin/v2/plugin.proto",
+	Metadata: "api/proto/plugin/v1/plugin.proto",
 }

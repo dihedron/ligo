@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -50,8 +50,8 @@ func TestContractMatchesSpec(t *testing.T) {
 
 // TestContractShape: the generated code has §5.9's package, services and RPCs.
 func TestContractShape(t *testing.T) {
-	fd := pluginv2.File_api_proto_plugin_v2_plugin_proto
-	if got := fd.Package(); got != "ligo.plugin.v2" {
+	fd := pluginv1.File_api_proto_plugin_v1_plugin_proto
+	if got := fd.Package(); got != "ligo.plugin.v1" {
 		t.Errorf("package %q", got)
 	}
 	want := map[string][]string{

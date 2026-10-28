@@ -9,7 +9,7 @@ import (
 	"net"
 	"os/exec"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/builtinplugins"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/hashicorp/go-hclog"
@@ -20,10 +20,10 @@ import (
 )
 
 // kindServices maps a plugin kind to the name of its service.
-var kindServices = map[pluginv2.PluginKind]string{
-	pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: pluginsdk.IdentityService,
-	pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER: pluginsdk.PlatformService,
-	pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:      pluginsdk.StoreService,
+var kindServices = map[pluginv1.PluginKind]string{
+	pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: pluginsdk.IdentityService,
+	pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER: pluginsdk.PlatformService,
+	pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE:      pluginsdk.StoreService,
 }
 
 // Client is one running plugin, a process or a builtin served in-process:
@@ -31,17 +31,17 @@ var kindServices = map[pluginv2.PluginKind]string{
 type Client struct {
 	process  *plugin.Client // nil for a builtin
 	stop     func()         // a builtin's server and connection
-	Control  pluginv2.PluginControlClient
-	Identity pluginv2.IdentityProviderPluginClient
-	Platform pluginv2.PlatformProviderPluginClient
-	Store    pluginv2.SecretStorePluginClient
+	Control  pluginv1.PluginControlClient
+	Identity pluginv1.IdentityProviderPluginClient
+	Platform pluginv1.PlatformProviderPluginClient
+	Store    pluginv1.SecretStorePluginClient
 }
 
 // Start launches cmd as a plugin of kind, over gRPC with AutoMTLS, after
 // go-plugin checks the binary's SHA-256 against checksum (§5.3 rules 1, 2
 // and 4; EXT-10, EXT-11). go-plugin's messages go to logger; what the plugin
 // writes to its stdout and stderr once it serves goes to stdio (nil: dropped).
-func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclog.Logger, stdio io.Writer) (*Client, error) {
+func Start(cmd *exec.Cmd, kind pluginv1.PluginKind, checksum []byte, logger hclog.Logger, stdio io.Writer) (*Client, error) {
 	name, ok := kindServices[kind]
 	if !ok {
 		return nil, fmt.Errorf("plugin kind %v", kind)
@@ -72,18 +72,18 @@ func Start(cmd *exec.Cmd, kind pluginv2.PluginKind, checksum []byte, logger hclo
 		process.Kill()
 		return nil, fmt.Errorf("plugin %s: %w", cmd.Path, err)
 	}
-	c.Control = control.(pluginv2.PluginControlClient)
+	c.Control = control.(pluginv1.PluginControlClient)
 	svc, err := rpc.Dispense(name)
 	if err != nil {
 		process.Kill()
 		return nil, fmt.Errorf("plugin %s: %w", cmd.Path, err)
 	}
 	switch s := svc.(type) {
-	case pluginv2.IdentityProviderPluginClient:
+	case pluginv1.IdentityProviderPluginClient:
 		c.Identity = s
-	case pluginv2.PlatformProviderPluginClient:
+	case pluginv1.PlatformProviderPluginClient:
 		c.Platform = s
-	case pluginv2.SecretStorePluginClient:
+	case pluginv1.SecretStorePluginClient:
 		c.Store = s
 	}
 	return c, nil
@@ -104,7 +104,7 @@ func (c *Client) exited() bool { return c.process != nil && c.process.Exited() }
 
 // startBuiltin serves the builtin plugin typ in-process, over an in-memory
 // gRPC connection, so that it is called as external plugins are (§5.1).
-func startBuiltin(typ string, kind pluginv2.PluginKind) (*Client, error) {
+func startBuiltin(typ string, kind pluginv1.PluginKind) (*Client, error) {
 	p, ok := builtinplugins.Lookup(typ)
 	if !ok {
 		return nil, fmt.Errorf("%s is not a builtin plugin type", typ)
@@ -122,14 +122,14 @@ func startBuiltin(typ string, kind pluginv2.PluginKind) (*Client, error) {
 		srv.Stop()
 		return nil, err
 	}
-	c := &Client{Control: pluginv2.NewPluginControlClient(conn), stop: func() { _ = conn.Close(); srv.Stop() }}
+	c := &Client{Control: pluginv1.NewPluginControlClient(conn), stop: func() { _ = conn.Close(); srv.Stop() }}
 	switch kind {
-	case pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:
-		c.Identity = pluginv2.NewIdentityProviderPluginClient(conn)
-	case pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER:
-		c.Platform = pluginv2.NewPlatformProviderPluginClient(conn)
-	case pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE:
-		c.Store = pluginv2.NewSecretStorePluginClient(conn)
+	case pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER:
+		c.Identity = pluginv1.NewIdentityProviderPluginClient(conn)
+	case pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER:
+		c.Platform = pluginv1.NewPlatformProviderPluginClient(conn)
+	case pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE:
+		c.Store = pluginv1.NewSecretStorePluginClient(conn)
 	}
 	return c, nil
 }

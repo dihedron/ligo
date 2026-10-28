@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"google.golang.org/grpc/codes"
@@ -31,27 +31,27 @@ type instanceConfig struct {
 }
 
 type probe struct {
-	pluginv2.UnimplementedPluginControlServer
+	pluginv1.UnimplementedPluginControlServer
 	mu    sync.Mutex
 	creds map[string]*pluginsdk.BootstrapCredential
 }
 
-func (*probe) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
-	return &pluginv2.DescribeResponse{
-		PluginType: "labprobe.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+func (*probe) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
+	return &pluginv1.DescribeResponse{
+		PluginType: "labprobe.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
 		InstanceConfigSchemaJson: `{"type":"object"}`, // the bootstrap settings, checked by the probe itself
-		Capabilities:             &pluginv2.DescribeResponse_SecretStore{SecretStore: &pluginv2.SecretStoreCapabilities{}},
+		Capabilities:             &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{}},
 	}, nil
 }
 
-func (p *probe) ConfigureInstances(ctx context.Context, r *pluginv2.ConfigureInstancesRequest) (*pluginv2.ConfigureInstancesResponse, error) {
+func (p *probe) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
 	// the client lives as long as the process
 	client, err := workloadapi.New(context.Background(), workloadapi.WithAddr(r.GetSpiffeWorkloadSocket()))
 	if err != nil {
 		return nil, pluginsdk.Error(codes.Unavailable, "WORKLOAD_API_UNAVAILABLE", "cannot reach the SPIRE agent", true)
 	}
 	creds := map[string]*pluginsdk.BootstrapCredential{}
-	out := &pluginv2.ConfigureInstancesResponse{}
+	out := &pluginv1.ConfigureInstancesResponse{}
 	for _, in := range r.GetInstances() {
 		sel, err := pluginsdk.NewInstanceSVIDSelector(client, in.GetName(), in.GetTrustDomain(), pluginsdk.SelectorConfig{
 			MatchExpr: in.GetSvidSelector().GetMatchExpr(), JWTAudience: in.GetSvidSelector().GetJwtAudience(),
@@ -68,7 +68,7 @@ func (p *probe) ConfigureInstances(ctx context.Context, r *pluginv2.ConfigureIns
 			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
 		}
 		creds[in.GetName()] = bc
-		out.Resolved = append(out.Resolved, &pluginv2.ResolvedInstance{Instance: in.GetName(), SpiffeId: svid.ID.String()})
+		out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: svid.ID.String()})
 	}
 	p.mu.Lock()
 	p.creds = creds
@@ -93,7 +93,7 @@ func bootstrap(configJSON string, jwt pluginsdk.JWTSource) (*pluginsdk.Bootstrap
 	return pluginsdk.NewBootstrapCredential(cfg.BootstrapCredential, jwt, client)
 }
 
-func (p *probe) Health(ctx context.Context, r *pluginv2.HealthRequest) (*pluginv2.HealthResponse, error) {
+func (p *probe) Health(ctx context.Context, r *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {
 	p.mu.Lock()
 	bc := p.creds[r.GetInstance()]
 	p.mu.Unlock()
@@ -105,11 +105,11 @@ func (p *probe) Health(ctx context.Context, r *pluginv2.HealthRequest) (*pluginv
 		fmt.Fprintln(os.Stderr, "bootstrap credential:", err) // statuses only: the host's log redacts the rest
 		return nil, pluginsdk.Error(codes.Unavailable, "BOOTSTRAP_CREDENTIAL_UNAVAILABLE", "cannot read the bootstrap credential", true)
 	}
-	return &pluginv2.HealthResponse{Serving: true, PublicMessage: "credential for " + cred.Username}, nil
+	return &pluginv1.HealthResponse{Serving: true, PublicMessage: "credential for " + cred.Username}, nil
 }
 
 type store struct {
-	pluginv2.UnimplementedSecretStorePluginServer
+	pluginv1.UnimplementedSecretStorePluginServer
 }
 
 func main() {

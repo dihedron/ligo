@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -24,12 +24,12 @@ import (
 // instances (ADR-03). A builtin is served in-process instead (§5.1).
 type Spec struct {
 	Type      string
-	Kind      pluginv2.PluginKind
+	Kind      pluginv1.PluginKind
 	Builtin   bool
 	Binary    string // a file name in plugins.directory; not for a builtin
 	SHA256    []byte
 	Zone      config.Zone
-	Instances []*pluginv2.InstanceDescriptor
+	Instances []*pluginv1.InstanceDescriptor
 	// Env is the plugin's whole environment: ligo's own is never passed on.
 	Env []string
 }
@@ -48,7 +48,7 @@ type Options struct {
 const exitPoll = 50 * time.Millisecond
 
 type key struct {
-	kind     pluginv2.PluginKind
+	kind     pluginv1.PluginKind
 	instance string
 }
 
@@ -66,7 +66,7 @@ type Manager struct {
 
 type process struct {
 	spec      Spec
-	described *pluginv2.DescribeResponse // at the first start; Describe is static (§5.2)
+	described *pluginv1.DescribeResponse // at the first start; Describe is static (§5.2)
 	mu        sync.RWMutex
 	client    *Client // nil while the process is down
 	resolved  map[string]string
@@ -119,7 +119,7 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 	if err := m.wire(); err != nil {
 		return err
 	}
-	owners := map[string][]*pluginv2.InstanceDescriptor{}
+	owners := map[string][]*pluginv1.InstanceDescriptor{}
 	for _, p := range m.procs {
 		resolved, err := m.configure(ctx, p.client, p.spec)
 		if err != nil {
@@ -151,7 +151,7 @@ func what(s Spec) string { return fmt.Sprintf("plugin %s in zone %s", s.Type, s.
 
 // spawn starts one process from its checked binary, or a builtin, and
 // checks what it describes.
-func (m *Manager) spawn(ctx context.Context, s Spec) (*Client, *pluginv2.DescribeResponse, error) {
+func (m *Manager) spawn(ctx context.Context, s Spec) (*Client, *pluginv1.DescribeResponse, error) {
 	var c *Client
 	if s.Builtin {
 		var err error
@@ -180,10 +180,10 @@ func (m *Manager) spawn(ctx context.Context, s Spec) (*Client, *pluginv2.Describ
 	return c, d, nil
 }
 
-func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv2.DescribeResponse, error) {
+func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv1.DescribeResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
 	defer cancel()
-	d, err := c.Control.Describe(ctx, &pluginv2.DescribeRequest{})
+	d, err := c.Control.Describe(ctx, &pluginv1.DescribeRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("describe: %w", err)
 	}
@@ -193,7 +193,7 @@ func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv2.De
 	if !capabilitiesOfKind(d) {
 		return nil, fmt.Errorf("describes capabilities %T for kind %v", d.GetCapabilities(), d.GetKind())
 	}
-	if d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER && d.GetIdentityProvider().GetProducedIdentityMode() == pluginv2.IdentityMode_IDENTITY_MODE_UNSPECIFIED {
+	if d.GetKind() == pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER && d.GetIdentityProvider().GetProducedIdentityMode() == pluginv1.IdentityMode_IDENTITY_MODE_UNSPECIFIED {
 		return nil, errors.New("produces identity mode IDENTITY_MODE_UNSPECIFIED")
 	}
 	return d, nil
@@ -202,7 +202,7 @@ func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv2.De
 func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
 	defer cancel()
-	r, err := c.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{
+	r, err := c.Control.ConfigureInstances(ctx, &pluginv1.ConfigureInstancesRequest{
 		Zone: s.Zone.Name, SpiffeWorkloadSocket: s.Zone.SPIFFEWorkloadSocket, Instances: s.Instances,
 	})
 	if err != nil {
@@ -233,12 +233,12 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 // fills its descriptor's identity mode and secret storage strategy (§5.6,
 // §8.2 rule 3). Processes of one type describe the same, whatever the zone.
 func (m *Manager) wire() error {
-	described := map[key]*pluginv2.DescribeResponse{} // the instance field holds the type
+	described := map[key]*pluginv1.DescribeResponse{} // the instance field holds the type
 	for _, p := range m.procs {
 		described[key{p.spec.Kind, p.spec.Type}] = p.described
 	}
 	for _, p := range m.procs {
-		if p.spec.Kind != pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER {
+		if p.spec.Kind != pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER {
 			continue
 		}
 		for _, in := range p.spec.Instances {
@@ -250,8 +250,8 @@ func (m *Manager) wire() error {
 	return nil
 }
 
-func wirePlatform(in *pluginv2.InstanceDescriptor, platform *pluginv2.PlatformProviderCapabilities, described map[key]*pluginv2.DescribeResponse) error {
-	idp, ok := described[key{pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, in.GetIdentityProviderType()}]
+func wirePlatform(in *pluginv1.InstanceDescriptor, platform *pluginv1.PlatformProviderCapabilities, described map[key]*pluginv1.DescribeResponse) error {
+	idp, ok := described[key{pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, in.GetIdentityProviderType()}]
 	if !ok {
 		return fmt.Errorf("no identity provider of type %q", in.GetIdentityProviderType())
 	}
@@ -259,7 +259,7 @@ func wirePlatform(in *pluginv2.InstanceDescriptor, platform *pluginv2.PlatformPr
 	if !slices.Contains(platform.GetAcceptedIdentityModes(), mode) {
 		return fmt.Errorf("identity provider %s produces %v, which the platform does not accept (%v)", in.GetIdentityProviderType(), mode, platform.GetAcceptedIdentityModes())
 	}
-	store, ok := described[key{pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, in.GetSecretStoreType()}]
+	store, ok := described[key{pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, in.GetSecretStoreType()}]
 	if !ok {
 		return fmt.Errorf("no secret store of type %q", in.GetSecretStoreType())
 	}
@@ -283,7 +283,7 @@ func wirePlatform(in *pluginv2.InstanceDescriptor, platform *pluginv2.PlatformPr
 
 // checkConfigs validates every instance's config against the plugin's
 // instance configuration schema (§8.2 rule 8).
-func checkConfigs(d *pluginv2.DescribeResponse, instances []*pluginv2.InstanceDescriptor) error {
+func checkConfigs(d *pluginv1.DescribeResponse, instances []*pluginv1.InstanceDescriptor) error {
 	schema, err := compileSchema(d.GetInstanceConfigSchemaJson())
 	if err != nil {
 		return fmt.Errorf("instance configuration schema: %w", err)
@@ -314,14 +314,14 @@ func compileSchema(text string) (*jsonschema.Schema, error) {
 }
 
 // capabilitiesOfKind: Describe carries exactly its kind's capabilities (§5.9).
-func capabilitiesOfKind(d *pluginv2.DescribeResponse) bool {
+func capabilitiesOfKind(d *pluginv1.DescribeResponse) bool {
 	switch d.GetCapabilities().(type) {
-	case *pluginv2.DescribeResponse_IdentityProvider:
-		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
-	case *pluginv2.DescribeResponse_PlatformProvider:
-		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
-	case *pluginv2.DescribeResponse_SecretStore:
-		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
+	case *pluginv1.DescribeResponse_IdentityProvider:
+		return d.GetKind() == pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
+	case *pluginv1.DescribeResponse_PlatformProvider:
+		return d.GetKind() == pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
+	case *pluginv1.DescribeResponse_SecretStore:
+		return d.GetKind() == pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE
 	}
 	return false
 }
@@ -374,7 +374,7 @@ func (m *Manager) supervise(p *process) {
 // reconfigure checks that a restarted process describes itself as at the
 // first start, configures it, and checks that it resolves the same SVIDs;
 // on failure it kills the process.
-func (m *Manager) reconfigure(c *Client, d *pluginv2.DescribeResponse, p *process) error {
+func (m *Manager) reconfigure(c *Client, d *pluginv1.DescribeResponse, p *process) error {
 	err := errors.New("the restarted process describes itself differently")
 	if proto.Equal(d, p.described) {
 		var resolved map[string]string
@@ -407,7 +407,7 @@ var errUnavailable = pluginsdk.Error(codes.Unavailable, "PLUGIN_UNAVAILABLE", "t
 // Call runs fn with the client of the process serving the instance of kind,
 // under the rpc_timeout deadline and, for mutating RPCs (Ensure*, Cleanup*),
 // the instance's concurrency limit (§5.3 rules 6-7).
-func (m *Manager) Call(ctx context.Context, kind pluginv2.PluginKind, instance string, mutating bool, fn func(context.Context, *Client) error) error {
+func (m *Manager) Call(ctx context.Context, kind pluginv1.PluginKind, instance string, mutating bool, fn func(context.Context, *Client) error) error {
 	k := key{kind, instance}
 	p, ok := m.byKey[k]
 	if !ok {
@@ -439,7 +439,7 @@ func (m *Manager) Call(ctx context.Context, kind pluginv2.PluginKind, instance s
 }
 
 // Resolved is the SPIFFE ID an instance resolved at startup.
-func (m *Manager) Resolved(kind pluginv2.PluginKind, instance string) string {
+func (m *Manager) Resolved(kind pluginv1.PluginKind, instance string) string {
 	p, ok := m.byKey[key{kind, instance}]
 	if !ok {
 		return ""

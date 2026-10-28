@@ -97,7 +97,7 @@ func (p *Port) UnmarshalYAML(n *yaml.Node) error {
 
 var flowSchema = func() *jsonschema.Schema {
 	const loc = "network-flow.json"
-	data, err := schemas.FS.ReadFile("v1alpha2/" + loc)
+	data, err := schemas.FS.ReadFile("v1alpha1/" + loc)
 	if err != nil {
 		panic(err)
 	}

@@ -1,6 +1,6 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.2` (`v1alpha2` API)
+- **Document Version:** `4.0.2` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
 - **Supersedes:** `4.0.1` (no migration from 3.x, Go 1.27.3, §0.5). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.6). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.7).
 - **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
@@ -52,8 +52,8 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Namespace | Form | Example |
 | :--- | :--- | :--- |
 | Binary and CLI | `ligo` | `cmd/ligo/`, `ligo serve` |
-| Go module | `github.com/dihedron/ligo` | `github.com/dihedron/ligo/api/gen/plugin/v2` |
-| Protobuf packages | `ligo.*` | `ligo.plugin.v2`, `ligo.workload.v1alpha2` |
+| Go module | `github.com/dihedron/ligo` | `github.com/dihedron/ligo/api/gen/plugin/v1` |
+| Protobuf packages | `ligo.*` | `ligo.plugin.v1`, `ligo.workload.v1alpha1` |
 | Environment variables | `LIGO_*` | `LIGO_PG_APP_DSN` |
 | Prometheus metrics | `ligo_*` | `ligo_workflow_duration_seconds` |
 | DBOS workflow IDs | `ligo:{op}:…` | `ligo:apply:<uuid>:r2:a3` |
@@ -66,7 +66,7 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Vault/OpenBao objects | `ligo-*`, `kv/data/ligo/…` | `ligo-sealer`, `ligo-interstage`, `kv/data/ligo/bootstrap/oracle-prod` |
 | URNs, annotations, ownership tags | `ligo` | `urn:ligo:problem:<slug>`, `x-ligo-endpoint`, `ligo:binding_id=<uuid>` |
 | go-plugin handshake | `LIGO_PLUGIN` | `MagicCookieKey: "LIGO_PLUGIN"` |
-| Resource API group | `ligo.dihedron.org` (a domain owned by the project) | `"apiVersion": "ligo.dihedron.org/v1alpha2"` |
+| Resource API group | `ligo.dihedron.org` (a domain owned by the project) | `"apiVersion": "ligo.dihedron.org/v1alpha1"` |
 
 Identifiers that name a **resource** use its name: the tables `sources`, `targets`, `target_access_levels`, `target_network_flows`, `bindings`, `binding_stage_state` and `binding_propagation_queue`; the types `binding_phase`, `binding_operation`, `binding_stage`; the API paths `/v1/admin/sources`, `/v1/admin/targets`, `/v1/admin/platforms`, `/v1/admin/bindings` and the workload paths `/v1/bindings` and `/v1/flows`; the Protobuf names `WorkloadBindingService`, `WorkloadBinding` and `BindingContext`; the workflows `ApplyBindingWorkflow` and `DeleteBindingWorkflow`; the error slug `binding-busy`; and the per-binding secret path `kv/data/bindings/<binding_id>`. The audit table, shared by every resource type, is `audit_log`.
 
@@ -90,9 +90,10 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Plugin kind names (§0.4, ADR-01, §5.9, §8.1) | The plugin kinds are named IdentityProvider, PlatformProvider and SecretStore everywhere. `TargetProvider` becomes `PlatformProvider` (its instances are platforms; "target" names only the API resource), `SecretStoreProvider` becomes `SecretStore`, `target_providers` becomes `platform_providers`, and the built-in identity providers are **mode markers** instead of strategy markers ("strategy" names only secret storage strategies). The stage names `IDENTITY`, `TARGET`, `SECRET_STORE` and the RPCs `ValidateTarget`, `EnsureTarget`, `CleanupTarget` are unchanged. |
 | Describe capabilities (§5.6, §5.9, §8.2 rule 3) | `DescribeResponse` carries its kind's capabilities in a `oneof`, so each kind declares only what applies to it: an identity provider its single `produced_identity_mode`, a platform provider its `accepted_identity_modes` and output schema, a secret store its `secret_storage_strategies` and output schema. `supported_identity_modes`, `client_output_schema_json` and `supported_secret_storage_strategies` are removed; the fields are renumbered, since nothing is released. A store-level list of identity modes would only repeat its strategies' modes, and an identity provider with several modes had no way to choose one. A capabilities case that does not match `kind` is refused at startup. |
 | Plugin startup (§5.2, §5.6, §8.2 rules 1, 3 and 8, startup step 5) | Startup runs in two passes: every process is spawned and described before any is configured, so the descriptions can be checked against each other first. `Describe` MUST be static; a restarted process that describes itself differently is not used. A plugin type is declared in one section only. Rules 3 and 8 run between the passes; rule 3 enforces the §5.6 matrix through the plugins' declarations instead of type names, and fills each platform's `identity_mode` and `secret_storage_strategy`. Rule 8, and refuses a plugin whose instance configuration schema is empty or does not compile. |
+| API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
-The plugin contract (`v2`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
+The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
 ### 0.6 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
@@ -539,7 +540,7 @@ Code generators and maintainers MUST preserve these decisions.
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Source",
   "metadata": {
     "id": "01928a10-55e1-7c3a-8f00-2a6b4c1d9e01",
@@ -582,7 +583,7 @@ Field rules:
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Target",
   "metadata": {
     "id": "01928a22-1b07-7d11-9a4e-0c3f5e6d7a02",
@@ -634,7 +635,7 @@ Field rules:
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ligo.dihedron.org/schemas/v1alpha2/network-flow.json",
+  "$id": "https://ligo.dihedron.org/schemas/v1alpha1/network-flow.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "purpose", "protocol", "destination", "ports", "tls"],
@@ -668,7 +669,7 @@ Platforms are read-only through the API. Their representation is derived from `s
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Platform",
   "name": "oracle-prod",
   "type": "oracle.v1",
@@ -697,7 +698,7 @@ Platforms are read-only through the API. Their representation is derived from `s
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Binding",
   "metadata": {
     "id": "019286f8-7c80-7b2e-9f1a-4b5a6c7d8e9f",
@@ -2366,15 +2367,15 @@ bootstrap_credential:
 8. **Parameters never add privilege.** `ValidateBinding` MUST reject parameters that would grant anything beyond the access level (for example extra roles, or a schema other than the target's). The privileges it returns MUST equal those of the access level.
 9. **Canonical privileges.** `ValidateTarget` returns, for each access level, `privileges`: a sorted, duplicate-free list of identifiers such that, for two levels of the same target, `privileges(A) ⊆ privileges(B)` implies that everything `A` grants is also granted by `B` (§3.10). Identifiers are stable across plugin versions; a plugin that changes them MUST bump its major type version (`oracle.v2`). Where containment cannot be guaranteed (for example a grant with conditions the plugin cannot compare), the plugin MUST emit an identifier unique to that grant.
 
-### 5.9 Plugin Protobuf contract (`api/proto/plugin/v2/plugin.proto`)
+### 5.9 Plugin Protobuf contract (`api/proto/plugin/v1/plugin.proto`)
 
-4.0 changes the target plugin contract: `ValidateSpec` is replaced by `ValidateTarget` (a target's definition and access levels, at publication) and `ValidateBinding` (a binding's parameters against its target and access level), and `GetUISchema` by `GetUISchemas` (one form per purpose). The package becomes `ligo.plugin.v2`.
+4.0 changes the target plugin contract: `ValidateSpec` is replaced by `ValidateTarget` (a target's definition and access levels, at publication) and `ValidateBinding` (a binding's parameters against its target and access level), and `GetUISchema` by `GetUISchemas` (one form per purpose). The package becomes `ligo.plugin.v1`.
 
 **Normative.**
 ```protobuf
 syntax = "proto3";
-package ligo.plugin.v2;
-option go_package = "github.com/dihedron/ligo/api/gen/plugin/v2;pluginv2";
+package ligo.plugin.v1;
+option go_package = "github.com/dihedron/ligo/api/gen/plugin/v1;pluginv1";
 
 // ============================================================================
 // Enums & common types
@@ -2973,13 +2974,13 @@ An applied change of a source or target that affects provisioning is carried int
 - Returns the effective network flows (§3.6, ADR-16) of every binding the caller would receive from `GET /v1/bindings` with the same filter. It is intended for the network verification tool running on the workload host with the host's or workload's SVID.
 - Same authentication, rate limit, ETag and error rules as `/v1/bindings`. The response contains no credential and no `auth` or `spec`.
 
-**gRPC (`api/proto/workload/v1alpha2/workload.proto`)**
+**gRPC (`api/proto/workload/v1alpha1/workload.proto`)**
 
 **Normative.**
 ```protobuf
 syntax = "proto3";
-package ligo.workload.v1alpha2;
-option go_package = "github.com/dihedron/ligo/api/gen/workload/v1alpha2;workloadv1alpha2";
+package ligo.workload.v1alpha1;
+option go_package = "github.com/dihedron/ligo/api/gen/workload/v1alpha1;workloadv1alpha1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -3945,11 +3946,11 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 ```text
 ligo/
 ├── api/
-│   ├── openapi/admin.v1alpha2.yaml      # MUST be kept consistent with §7.2
-│   ├── schemas/v1alpha2/network-flow.json   # §3.3
+│   ├── openapi/admin.v1alpha1.yaml      # MUST be kept consistent with §7.2
+│   ├── schemas/v1alpha1/network-flow.json   # §3.3
 │   └── proto/
-│       ├── plugin/v2/plugin.proto
-│       └── workload/v1alpha2/workload.proto
+│       ├── plugin/v1/plugin.proto
+│       └── workload/v1alpha1/workload.proto
 ├── cmd/
 │   ├── ligo/                            # jessevdk/go-flags CLI + daemon (Section 8.4)
 │   └── plugins/{id-openldap,target-oracle,target-postgres,store-vault}/   # external plugins: specified separately
@@ -4392,7 +4393,7 @@ type GovCheckCommand struct {
 
 ```
 
-**Manifests (Normative).** A manifest document has `apiVersion: ligo.dihedron.org/v1alpha2`, `kind` (`Source`, `Target` or `Binding`) and the create or update body of that kind (§3.2, §3.3, §7.2.3). A file may contain several documents (YAML `---` or a JSON array); `ligo apply` submits sources first, then targets, then bindings, and a binding whose source is created in the same file is filed with that source as its inline dependency (§7.2.4).
+**Manifests (Normative).** A manifest document has `apiVersion: ligo.dihedron.org/v1alpha1`, `kind` (`Source`, `Target` or `Binding`) and the create or update body of that kind (§3.2, §3.3, §7.2.3). A file may contain several documents (YAML `---` or a JSON array); `ligo apply` submits sources first, then targets, then bindings, and a binding whose source is created in the same file is filed with that source as its inline dependency (§7.2.4).
 
 **Create or update in `ligo apply` (Normative):** if a document contains `expectedRevision`, the CLI sends `PUT` to the resource (update); otherwise it sends `POST` (create). Replacing an existing resource therefore always requires stating which revision is being replaced. A create for a name that already exists fails with `409 invalid-transition` (`409 binding-exists` for a second binding of the same pair); the CLI then prints the current revision and tells the user to add `expectedRevision`.
 

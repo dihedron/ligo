@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -29,7 +29,7 @@ func Error(code codes.Code, ligoCode, publicMessage string, retryable bool) erro
 	if r := []rune(publicMessage); len(r) > maxPublicMessage {
 		publicMessage = string(r[:maxPublicMessage])
 	}
-	st, err := status.New(code, publicMessage).WithDetails(&pluginv2.PluginErrorDetail{
+	st, err := status.New(code, publicMessage).WithDetails(&pluginv1.PluginErrorDetail{
 		Retryable: retryable, Code: ligoCode, PublicMessage: publicMessage,
 	})
 	if err != nil { // only for an invalid code: there is nothing better to return
@@ -48,12 +48,12 @@ func ErrOwnedByOtherBinding(resource string) error {
 // FromError is the host's reading of a plugin error: its gRPC code and its
 // PluginErrorDetail, the only parts the host persists. An error without a
 // detail gets PLUGIN_ERROR and no message, since its text may hold anything.
-func FromError(err error) (codes.Code, *pluginv2.PluginErrorDetail) {
+func FromError(err error) (codes.Code, *pluginv1.PluginErrorDetail) {
 	st := status.Convert(err)
 	for _, d := range st.Details() {
-		if detail, ok := d.(*pluginv2.PluginErrorDetail); ok {
+		if detail, ok := d.(*pluginv1.PluginErrorDetail); ok {
 			return st.Code(), detail
 		}
 	}
-	return st.Code(), &pluginv2.PluginErrorDetail{Code: genericCode}
+	return st.Code(), &pluginv1.PluginErrorDetail{Code: genericCode}
 }

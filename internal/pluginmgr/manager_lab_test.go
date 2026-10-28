@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	pluginv2 "github.com/dihedron/ligo/api/gen/plugin/v2"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 )
 
-const store = pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
+const store = pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE
 
 // labEnv reads a variable of "lab.sh env --on ligo1"; these tests run only
 // on ligo1, as the user ligo.
@@ -42,9 +42,9 @@ func labprobe(t *testing.T, expr string) Spec {
 	return Spec{
 		Type: "labprobe.v1", Kind: store, Binary: "labprobe", SHA256: sum,
 		Zone: config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")},
-		Instances: []*pluginv2.InstanceDescriptor{{
+		Instances: []*pluginv1.InstanceDescriptor{{
 			Name: "labprobe-prod", ConfigJson: cfg,
-			SvidSelector: &pluginv2.SVIDSelectorConfig{MatchExpr: expr, JwtAudience: []string{labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}},
+			SvidSelector: &pluginv1.SVIDSelectorConfig{MatchExpr: expr, JwtAudience: []string{labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}},
 		}},
 	}
 }
@@ -73,7 +73,7 @@ func TestLabPlugin(t *testing.T) {
 	}
 	var msg string
 	err = m.Call(context.Background(), store, "labprobe-prod", false, func(ctx context.Context, c *Client) error {
-		h, err := c.Control.Health(ctx, &pluginv2.HealthRequest{Instance: "labprobe-prod"})
+		h, err := c.Control.Health(ctx, &pluginv1.HealthRequest{Instance: "labprobe-prod"})
 		msg = h.GetPublicMessage()
 		return err
 	})

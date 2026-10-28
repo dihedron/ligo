@@ -1,6 +1,6 @@
 syntax = "proto3";
-package ligo.plugin.v2;
-option go_package = "github.com/dihedron/ligo/api/gen/plugin/v2;pluginv2";
+package ligo.plugin.v1;
+option go_package = "github.com/dihedron/ligo/api/gen/plugin/v1;pluginv1";
 
 // ============================================================================
 // Enums & common types
