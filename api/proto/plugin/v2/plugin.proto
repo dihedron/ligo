@@ -139,10 +139,27 @@ message DescribeResponse {
   PluginKind kind = 2;
   uint32 plugin_protocol_version = 3;     // MUST be 1
   string plugin_version = 4;              // semver of the binary
-  repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
+  reserved 5, 7, 8;
   string instance_config_schema_json = 6; // JSON Schema 2020-12
-  string client_output_schema_json = 7;   // targets/stores; empty for identity providers
-  repeated SecretStorageStrategy supported_secret_storage_strategies = 8; // secret stores only (§5.6)
+  oneof capabilities {                    // exactly the one of the plugin's kind
+    IdentityProviderCapabilities identity_provider = 9;
+    PlatformProviderCapabilities platform_provider = 10;
+    SecretStoreCapabilities secret_store = 11;
+  }
+}
+
+message IdentityProviderCapabilities {
+  IdentityMode produced_identity_mode = 1; // exactly one; never UNSPECIFIED
+}
+
+message PlatformProviderCapabilities {
+  repeated IdentityMode accepted_identity_modes = 1;
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_spec_json
+}
+
+message SecretStoreCapabilities {
+  repeated SecretStorageStrategy secret_storage_strategies = 1; // §5.6
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_auth_json
 }
 
 message SecretStorageStrategy {

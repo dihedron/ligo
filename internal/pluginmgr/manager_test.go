@@ -134,6 +134,8 @@ func TestManagerStartRefusals(t *testing.T) {
 			"pg-dr"},
 		"wrong kind": {[]Spec{{Zone: prod, Env: []string{"TESTPLUGIN_KIND=store"}, Instances: []*pluginv2.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"kind"},
+		"capabilities of another kind (§5.9)": {[]Spec{{Zone: prod, Env: []string{"TESTPLUGIN_CAPS=store"}, Instances: []*pluginv2.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+			"capabilities"},
 		"wrong type": {[]Spec{{Type: "oracle.v1", Zone: prod, Instances: []*pluginv2.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"oracle.v1"},
 	} {

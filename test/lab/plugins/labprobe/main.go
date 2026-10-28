@@ -39,6 +39,7 @@ type probe struct {
 func (*probe) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
 	return &pluginv2.DescribeResponse{
 		PluginType: "labprobe.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+		Capabilities: &pluginv2.DescribeResponse_SecretStore{SecretStore: &pluginv2.SecretStoreCapabilities{}},
 	}, nil
 }
 

@@ -116,8 +116,8 @@ func TestIdentityMarkers(t *testing.T) {
 			t.Fatal(err)
 		}
 		d, _ := p.Control.Describe(ctx, &pluginv2.DescribeRequest{})
-		if m := d.GetSupportedIdentityModes(); len(m) != 1 || m[0] != mode {
-			t.Errorf("%s: supported modes %v", typ, m)
+		if m := d.GetIdentityProvider().GetProducedIdentityMode(); m != mode {
+			t.Errorf("%s: produced mode %v", typ, m)
 		}
 		req := &pluginv2.EnsureIdentityRequest{Instance: "i", Binding: binding()}
 		r, err := p.Identity.EnsureIdentity(ctx, req)
@@ -178,11 +178,11 @@ func TestNoneStore(t *testing.T) {
 	ctx := context.Background()
 	p, _ := Lookup("none.v1")
 	d, _ := p.Control.Describe(ctx, &pluginv2.DescribeRequest{})
-	if s := d.GetSupportedSecretStorageStrategies(); len(s) != 1 || s[0].GetName() != "svid" ||
+	if s := d.GetSecretStore().GetSecretStorageStrategies(); len(s) != 1 || s[0].GetName() != "svid" ||
 		len(s[0].GetIdentityModes()) != 1 || s[0].GetIdentityModes()[0] != pluginv2.IdentityMode_IDENTITY_MODE_SVID {
 		t.Errorf("strategies %v", s)
 	}
-	out := compile(t, d.GetClientOutputSchemaJson())
+	out := compile(t, d.GetSecretStore().GetClientOutputSchemaJson())
 
 	svid := &pluginv2.SecretProvisioningPayload{Mode: pluginv2.IdentityMode_IDENTITY_MODE_SVID}
 	r, err := p.Store.EnsureSecretStore(ctx, &pluginv2.EnsureSecretStoreRequest{

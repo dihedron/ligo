@@ -63,7 +63,8 @@ type marker struct {
 func (m *marker) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
 	return &pluginv2.DescribeResponse{
 		PluginType: m.typ, Kind: pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 1,
-		PluginVersion: "builtin", SupportedIdentityModes: []pluginv2.IdentityMode{m.mode}, InstanceConfigSchemaJson: m.schema,
+		PluginVersion: "builtin", InstanceConfigSchemaJson: m.schema,
+		Capabilities: &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{ProducedIdentityMode: m.mode}},
 	}, nil
 }
 
@@ -137,9 +138,11 @@ type none struct {
 func (*none) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.DescribeResponse, error) {
 	return &pluginv2.DescribeResponse{
 		PluginType: "none.v1", Kind: pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
-		PluginVersion: "builtin", SupportedIdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID},
-		InstanceConfigSchemaJson: emptyConfig, ClientOutputSchemaJson: noneOutputSchema,
-		SupportedSecretStorageStrategies: []*pluginv2.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}}},
+		PluginVersion: "builtin", InstanceConfigSchemaJson: emptyConfig,
+		Capabilities: &pluginv2.DescribeResponse_SecretStore{SecretStore: &pluginv2.SecretStoreCapabilities{
+			SecretStorageStrategies: []*pluginv2.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv2.IdentityMode{pluginv2.IdentityMode_IDENTITY_MODE_SVID}}},
+			ClientOutputSchemaJson:  noneOutputSchema,
+		}},
 	}, nil
 }
 

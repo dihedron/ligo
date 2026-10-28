@@ -171,6 +171,9 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 	if d.GetPluginType() != s.Type || d.GetKind() != s.Kind || d.GetPluginProtocolVersion() != 1 {
 		return nil, fmt.Errorf("describes itself as %s, kind %v, protocol %d", d.GetPluginType(), d.GetKind(), d.GetPluginProtocolVersion())
 	}
+	if !capabilitiesOfKind(d) {
+		return nil, fmt.Errorf("describes capabilities %T for kind %v", d.GetCapabilities(), d.GetKind())
+	}
 	r, err := c.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{
 		Zone: s.Zone.Name, SpiffeWorkloadSocket: s.Zone.SPIFFEWorkloadSocket, Instances: s.Instances,
 	})
@@ -196,6 +199,19 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 		m.log.Info("plugin instance resolved", "plugin", s.Type, "zone", s.Zone.Name, "instance", in.GetName(), "spiffe_id", id.String())
 	}
 	return resolved, nil
+}
+
+// capabilitiesOfKind: Describe carries exactly its kind's capabilities (§5.9).
+func capabilitiesOfKind(d *pluginv2.DescribeResponse) bool {
+	switch d.GetCapabilities().(type) {
+	case *pluginv2.DescribeResponse_IdentityProvider:
+		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
+	case *pluginv2.DescribeResponse_PlatformProvider:
+		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
+	case *pluginv2.DescribeResponse_SecretStore:
+		return d.GetKind() == pluginv2.PluginKind_PLUGIN_KIND_SECRET_STORE
+	}
+	return false
 }
 
 // supervise restarts the process when it exits, with exponential backoff;

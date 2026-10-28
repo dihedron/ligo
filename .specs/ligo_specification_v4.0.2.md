@@ -85,9 +85,10 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Plugin handshake (§5.3 rule 1) | `ProtocolVersion: 1` instead of 2. The 4.0 plugin SDK is the first one released and no 3.x plugin exists (see the first row), so the handshake starts at 1, as `DescribeResponse.plugin_protocol_version` does. |
 | Principal names (§3.8, §4.2, §5.8 rule 2, §8.1, §8.2 rule 6, Appendix B, INV-08, AC-86) | `principal_prefix` moves from plugin instance configuration to the platform. The engine computes `derived_principal_name` once, when a binding is created, and stores it in the new immutable, unique column `bindings.derived_principal_name`; plugins never apply a prefix. With a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change would orphan principals still holding grants. |
 | Built-in markers (§5.8 rule 2) | `svid.v1` returns no metadata: the target already receives `source_svid_regex` and `source_trust_domain` in `BindingContext`. |
-| Secret storage strategies (§3.6, §4.2, §5.6, §5.9, §8.1, §8.2 rules 3 and 10, INV-08) | The workload `auth.strategy` had no defined source. A secret store now declares the strategies it serves (`Describe.supported_secret_storage_strategies`, each with its identity modes; one Vault store serves `vault-static`, `vault-dynamic` and `vault-static-rotated`); a platform chooses one in `secret_store.secret_storage_strategy`; a binding snapshots it in the new immutable column `bindings.secret_storage_strategy`, which is served as `auth.secretStorageStrategy`. The target and the store receive it (`InstanceDescriptor.secret_storage_strategy`, `secret_storage_strategy`). In the workload `auth` object, `strategy`, `providerType` and `providerInstance` become `secretStorageStrategy`, `secretStoreType` and `secretStoreInstance`. `none.v1`'s output is `{}`. |
+| Secret storage strategies (§3.6, §4.2, §5.6, §5.9, §8.1, §8.2 rules 3 and 10, INV-08) | The workload `auth.strategy` had no defined source. A secret store now declares the strategies it serves (`Describe.secret_store.secret_storage_strategies`, each with its identity modes; one Vault store serves `vault-static`, `vault-dynamic` and `vault-static-rotated`); a platform chooses one in `secret_store.secret_storage_strategy`; a binding snapshots it in the new immutable column `bindings.secret_storage_strategy`, which is served as `auth.secretStorageStrategy`. The target and the store receive it (`InstanceDescriptor.secret_storage_strategy`, `secret_storage_strategy`). In the workload `auth` object, `strategy`, `providerType` and `providerInstance` become `secretStorageStrategy`, `secretStoreType` and `secretStoreInstance`. `none.v1`'s output is `{}`. |
 | Open issues (§13) | New OI-4: targets cannot map an X.509-SVID, whose SPIFFE ID is in the URI SAN, to a principal. |
 | Plugin kind names (§0.4, ADR-01, §5.9, §8.1) | The plugin kinds are named IdentityProvider, PlatformProvider and SecretStore everywhere. `TargetProvider` becomes `PlatformProvider` (its instances are platforms; "target" names only the API resource), `SecretStoreProvider` becomes `SecretStore`, `target_providers` becomes `platform_providers`, and the built-in identity providers are **mode markers** instead of strategy markers ("strategy" names only secret storage strategies). The stage names `IDENTITY`, `TARGET`, `SECRET_STORE` and the RPCs `ValidateTarget`, `EnsureTarget`, `CleanupTarget` are unchanged. |
+| Describe capabilities (§5.6, §5.9, §8.2 rule 3) | `DescribeResponse` carries its kind's capabilities in a `oneof`, so each kind declares only what applies to it: an identity provider its single `produced_identity_mode`, a platform provider its `accepted_identity_modes` and output schema, a secret store its `secret_storage_strategies` and output schema. `supported_identity_modes`, `client_output_schema_json` and `supported_secret_storage_strategies` are removed (fields 5, 7, 8 reserved). A store-level list of identity modes would only repeat its strategies' modes, and an identity provider with several modes had no way to choose one. A capabilities case that does not match `kind` is refused at startup. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v2`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -2317,11 +2318,11 @@ bootstrap_credential:
 | `DELEGATED_DYNAMIC` | `delegated_role` | `vault.v1` | Stage 2 (statements only; Vault generates credentials) |
 
 - `s3-e2ee.v1` is a planned store specified with the external plugins; until it exists, only `vault.v1` and `none.v1` are available.
-- **Secret storage strategies.** A secret store declares in `Describe.supported_secret_storage_strategies` the strategies it serves, each with the identity modes it accepts. One store process MAY serve several strategies. `none.v1` declares `svid` (`SVID`). The Vault store declares `vault-static` (`EXTERNAL_DIR`, `TARGET_LOCAL`), `vault-dynamic` and `vault-static-rotated` (`DELEGATED_DYNAMIC`); its plugin specification defines their `config` shapes.
+- **Secret storage strategies.** A secret store declares in `Describe.secret_store.secret_storage_strategies` the strategies it serves, each with the identity modes it accepts. One store process MAY serve several strategies. `none.v1` declares `svid` (`SVID`). The Vault store declares `vault-static` (`EXTERNAL_DIR`, `TARGET_LOCAL`), `vault-dynamic` and `vault-static-rotated` (`DELEGATED_DYNAMIC`); its plugin specification defines their `config` shapes.
 - A platform chooses its strategy in `secret_store.secret_storage_strategy` (§8.1). When omitted, it is the store's only strategy that accepts the platform's identity mode; if there are several, the configuration is rejected. The engine passes the strategy to the platform (`InstanceDescriptor.secret_storage_strategy`), so the target emits a matching `DelegatedRoleSpec.role_type`, and to the store on every call (`secret_storage_strategy`). The store MUST reject a payload that does not match the strategy (`FAILED_PRECONDITION`, `INCOMPATIBLE_IDENTITY_MODE`).
 - A binding snapshots the strategy at creation (`bindings.secret_storage_strategy`, INV-08). A later change of the platform's strategy affects only new bindings.
 - The config validator MUST reject wiring that violates this matrix.
-- It MUST also reject a platform whose plugin's `Describe.supported_identity_modes` does not include the wired identity provider's mode, and a secret storage strategy that the wired store does not declare for that mode.
+- It MUST also reject a platform whose plugin's `Describe.platform_provider.accepted_identity_modes` does not include the wired identity provider's `Describe.identity_provider.produced_identity_mode`, and a secret storage strategy that the wired store does not declare for that mode.
 - `secret_unchanged = true` is valid only for `EXTERNAL_DIR` and `TARGET_LOCAL`. In that case no secret is forwarded, and Stage 3 MUST leave the stored secret in place while still converging policies and roles using the non-secret `IdentityArtifact` and `previous_finalized_client_auth_json`.
 
 ### 5.7 Output validation (INV-13)
@@ -2509,10 +2510,27 @@ message DescribeResponse {
   PluginKind kind = 2;
   uint32 plugin_protocol_version = 3;     // MUST be 1
   string plugin_version = 4;              // semver of the binary
-  repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
+  reserved 5, 7, 8;
   string instance_config_schema_json = 6; // JSON Schema 2020-12
-  string client_output_schema_json = 7;   // targets/stores; empty for identity providers
-  repeated SecretStorageStrategy supported_secret_storage_strategies = 8; // secret stores only (§5.6)
+  oneof capabilities {                    // exactly the one of the plugin's kind
+    IdentityProviderCapabilities identity_provider = 9;
+    PlatformProviderCapabilities platform_provider = 10;
+    SecretStoreCapabilities secret_store = 11;
+  }
+}
+
+message IdentityProviderCapabilities {
+  IdentityMode produced_identity_mode = 1; // exactly one; never UNSPECIFIED
+}
+
+message PlatformProviderCapabilities {
+  repeated IdentityMode accepted_identity_modes = 1;
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_spec_json
+}
+
+message SecretStoreCapabilities {
+  repeated SecretStorageStrategy secret_storage_strategies = 1; // §5.6
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_auth_json
 }
 
 message SecretStorageStrategy {
@@ -3876,7 +3894,7 @@ platform_providers:                       # plugin types and the platforms that 
 **Validation rules (at startup; failures are fatal):**
 1. Instance names are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique.
 2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
-3. The wiring satisfies the §5.6 matrix and the plugins' `Describe.supported_identity_modes`; the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
+3. The wiring satisfies the §5.6 matrix and the plugins' Describe capabilities (§5.9: an identity provider produces exactly one mode, a platform provider lists the modes it accepts); the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
 5. Every `bootstrap_credential.jwt_audience` appears in the instance's `svid_selector.jwt_audience`.
 6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
