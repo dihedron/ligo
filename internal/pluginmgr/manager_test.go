@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -179,6 +180,47 @@ func TestManagerRestart(t *testing.T) {
 	}
 	if m.Resolved(target, "crash") != "spiffe://prod.lab/plugin/crash" {
 		t.Error("not reconfigured after the restart")
+	}
+}
+
+// TestManagerTwoPasses: every process is described before any is
+// configured (§5.2): a description refused in the second process wins over
+// the configuration the first would have refused.
+func TestManagerTwoPasses(t *testing.T) {
+	identity := pluginv2.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
+	_, _, err := newManager(t,
+		Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv2.InstanceDescriptor{{Name: "local", ConfigJson: `{"password_length":8}`}}},
+		Spec{Type: "oracle.v1", Zone: prod, Instances: []*pluginv2.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	if err == nil || !strings.Contains(err.Error(), "oracle.v1") {
+		t.Errorf("err = %v, want the description refused", err)
+	}
+}
+
+// TestManagerRestartDescribeChanged: a restarted process that describes
+// itself differently is not used (§5.2).
+func TestManagerRestartDescribeChanged(t *testing.T) {
+	version := filepath.Join(t.TempDir(), "version")
+	if err := os.WriteFile(version, []byte("1.0.0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, logs, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_VERSION_FILE=" + version}, Instances: []*pluginv2.InstanceDescriptor{instance("crash", "a", false)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(version, []byte("2.0.0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, _ = health(ctx, m, "crash")
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(logs.String(), "describes itself differently") {
+		if time.Now().After(deadline) {
+			t.Fatalf("restart not refused; logs: %s", logs)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := health(ctx, m, "crash"); err == nil {
+		t.Error("the changed process is in use")
 	}
 }
 

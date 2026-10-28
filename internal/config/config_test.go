@@ -77,6 +77,7 @@ func TestRules(t *testing.T) {
 		also           []int // rules that fail in consequence
 	}{
 		{"duplicate zone", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
+		{"type in two sections", `  - type: "oracle.v1"`, `  - type: "openldap.v1"`, 1, nil},
 		{"duplicate instance", `name: "vault-test"`, `name: "vault-prod"`, 1, []int{2}},
 		{"unknown zone", `      - { name: "no-store-prod", zone: prod`, `      - { name: "no-store-prod", zone: nowhere`, 2, nil},
 		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},

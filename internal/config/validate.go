@@ -115,6 +115,11 @@ func (c *checker) instances(cfg *Config, zones map[string]Zone) {
 	c.instanceProviders("secret store", cfg.SecretStores, zones, zoneOf)
 	for _, tp := range cfg.PlatformProviders {
 		c.binary("platform provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
+		if zoneOf[tp.Type] != nil {
+			c.failf(1, "platform provider type %q is declared twice", tp.Type)
+			continue
+		}
+		zoneOf[tp.Type] = map[string]string{} // a platform provider has no instances to wire
 	}
 	names := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {

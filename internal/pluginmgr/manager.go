@@ -14,6 +14,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Spec is one plugin process: a plugin type in one zone, with that zone's
@@ -61,10 +62,11 @@ type Manager struct {
 }
 
 type process struct {
-	spec     Spec
-	mu       sync.RWMutex
-	client   *Client // nil while the process is down
-	resolved map[string]string
+	spec      Spec
+	described *pluginv2.DescribeResponse // at the first start; Describe is static (§5.2)
+	mu        sync.RWMutex
+	client    *Client // nil while the process is down
+	resolved  map[string]string
 }
 
 // New prepares a manager; Start launches the processes.
@@ -87,23 +89,31 @@ func New(specs []Spec, opts Options) *Manager {
 	return m
 }
 
-// Start launches every process and checks the SVIDs its instances resolved:
-// one each, in the zone's trust domain (INV-10), distinct unless every
-// instance sharing one allows it (ADR-03). Any failure is fatal and names
-// the instance (AC-15).
+// Start launches every process in two passes (§5.2): it spawns and
+// describes them all, then configures their instances and checks the SVIDs
+// they resolved: one each, in the zone's trust domain (INV-10), distinct
+// unless every instance sharing one allows it (ADR-03). Any failure is fatal
+// and names the instance (AC-15).
 func (m *Manager) Start(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			m.Stop()
 		}
 	}()
-	owners := map[string][]*pluginv2.InstanceDescriptor{}
 	for _, p := range m.procs {
-		c, resolved, err := m.launch(ctx, p.spec)
+		c, d, err := m.spawn(ctx, p.spec)
 		if err != nil {
 			return err
 		}
-		p.client, p.resolved = c, resolved
+		p.client, p.described = c, d
+	}
+	owners := map[string][]*pluginv2.InstanceDescriptor{}
+	for _, p := range m.procs {
+		resolved, err := m.configure(ctx, p.client, p.spec)
+		if err != nil {
+			return fmt.Errorf("%s: %w", what(p.spec), err)
+		}
+		p.resolved = resolved
 		for _, in := range p.spec.Instances {
 			if !p.spec.Builtin { // builtins hold no SVID
 				owners[resolved[in.GetName()]] = append(owners[resolved[in.GetName()]], in)
@@ -125,43 +135,40 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-// launch starts one process from its checked binary, checks what it
-// describes, and configures its instances.
-func (m *Manager) launch(ctx context.Context, s Spec) (*Client, map[string]string, error) {
-	what := fmt.Sprintf("plugin %s in zone %s", s.Type, s.Zone.Name)
+func what(s Spec) string { return fmt.Sprintf("plugin %s in zone %s", s.Type, s.Zone.Name) }
+
+// spawn starts one process from its checked binary, or a builtin, and
+// checks what it describes.
+func (m *Manager) spawn(ctx context.Context, s Spec) (*Client, *pluginv2.DescribeResponse, error) {
+	var c *Client
 	if s.Builtin {
-		c, err := startBuiltin(s.Type, s.Kind)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", what, err)
+		var err error
+		if c, err = startBuiltin(s.Type, s.Kind); err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", what(s), err)
 		}
-		resolved, err := m.configure(ctx, c, s)
+	} else {
+		b, err := OpenBinary(m.opts.Directory, s.Binary, s.SHA256, m.opts.Owner)
 		if err != nil {
-			c.Kill()
-			return nil, nil, fmt.Errorf("%s: %w", what, err)
+			return nil, nil, fmt.Errorf("%s: %w", what(s), err)
 		}
-		return c, resolved, nil
+		cmd := b.Command()
+		cmd.Env = s.Env
+		w := &hclogWriter{log: m.log.With("plugin", s.Type, "zone", s.Zone.Name)}
+		c, err = Start(cmd, s.Kind, b.Checksum(), newHCLogger(w), w)
+		_ = b.Close() // the process holds the binary now
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", what(s), err)
+		}
 	}
-	b, err := OpenBinary(m.opts.Directory, s.Binary, s.SHA256, m.opts.Owner)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", what, err)
-	}
-	cmd := b.Command()
-	cmd.Env = s.Env
-	w := &hclogWriter{log: m.log.With("plugin", s.Type, "zone", s.Zone.Name)}
-	c, err := Start(cmd, s.Kind, b.Checksum(), newHCLogger(w), w)
-	_ = b.Close() // the process holds the binary now
-	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", what, err)
-	}
-	resolved, err := m.configure(ctx, c, s)
+	d, err := m.describe(ctx, c, s)
 	if err != nil {
 		c.Kill()
-		return nil, nil, fmt.Errorf("%s: %w", what, err)
+		return nil, nil, fmt.Errorf("%s: %w", what(s), err)
 	}
-	return c, resolved, nil
+	return c, d, nil
 }
 
-func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]string, error) {
+func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv2.DescribeResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
 	defer cancel()
 	d, err := c.Control.Describe(ctx, &pluginv2.DescribeRequest{})
@@ -174,6 +181,12 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 	if !capabilitiesOfKind(d) {
 		return nil, fmt.Errorf("describes capabilities %T for kind %v", d.GetCapabilities(), d.GetKind())
 	}
+	return d, nil
+}
+
+func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
+	defer cancel()
 	r, err := c.Control.ConfigureInstances(ctx, &pluginv2.ConfigureInstancesRequest{
 		Zone: s.Zone.Name, SpiffeWorkloadSocket: s.Zone.SPIFFEWorkloadSocket, Instances: s.Instances,
 	})
@@ -242,10 +255,9 @@ func (m *Manager) supervise(p *process) {
 			return
 		case <-time.After(backoff):
 		}
-		c, resolved, err := m.launch(context.Background(), p.spec)
-		if err == nil && !sameResolution(resolved, p.resolved) {
-			c.Kill()
-			err = errors.New("the restarted process resolved other SVIDs")
+		c, d, err := m.spawn(context.Background(), p.spec)
+		if err == nil {
+			err = m.reconfigure(c, d, p)
 		}
 		if err != nil {
 			m.log.Error("plugin restart failed", "plugin", p.spec.Type, "zone", p.spec.Zone.Name, "error", err, "retry_in", backoff)
@@ -258,6 +270,23 @@ func (m *Manager) supervise(p *process) {
 		backoff = m.opts.Backoff.Initial
 		m.log.Info("plugin process restarted", "plugin", p.spec.Type, "zone", p.spec.Zone.Name)
 	}
+}
+
+// reconfigure checks that a restarted process describes itself as at the
+// first start, configures it, and checks that it resolves the same SVIDs;
+// on failure it kills the process.
+func (m *Manager) reconfigure(c *Client, d *pluginv2.DescribeResponse, p *process) error {
+	err := errors.New("the restarted process describes itself differently")
+	if proto.Equal(d, p.described) {
+		var resolved map[string]string
+		if resolved, err = m.configure(context.Background(), c, p.spec); err == nil && !sameResolution(resolved, p.resolved) {
+			err = errors.New("the restarted process resolved other SVIDs")
+		}
+	}
+	if err != nil {
+		c.Kill()
+	}
+	return err
 }
 
 func sameResolution(a, b map[string]string) bool {

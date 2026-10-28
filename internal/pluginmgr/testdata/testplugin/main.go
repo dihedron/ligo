@@ -4,7 +4,8 @@
 // TESTPLUGIN_KIND=identity or store makes it a plugin of that kind, and
 // TESTPLUGIN_TYPE sets the type it describes (default test.v1), and
 // TESTPLUGIN_CAPS=identity, platform or store the capabilities it describes
-// (default: its kind's).
+// (default: its kind's). TESTPLUGIN_VERSION_FILE names a file whose
+// content is the plugin version it describes.
 //
 // ConfigureInstances resolves an instance by its match_expr: "shared" to one
 // SPIFFE ID for all, "foreign" to another trust domain, "skip" to nothing,
@@ -45,6 +46,10 @@ func (control) Describe(context.Context, *pluginv2.DescribeRequest) (*pluginv2.D
 		caps = os.Getenv("TESTPLUGIN_KIND")
 	}
 	d := &pluginv2.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1}
+	if f := os.Getenv("TESTPLUGIN_VERSION_FILE"); f != "" {
+		v, _ := os.ReadFile(f)
+		d.PluginVersion = string(v)
+	}
 	switch caps {
 	case "identity":
 		d.Capabilities = &pluginv2.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv2.IdentityProviderCapabilities{}}
