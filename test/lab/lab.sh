@@ -162,7 +162,8 @@ cmd_test() {
 	((${#pkgs[@]})) || pkgs=(./...)
 	eval "$(cmd_env)"
 	cd "$REPO_DIR"
-	go test -count=1 -tags integration "${args[@]}" "${pkgs[@]}"
+	# -p 1: the packages share one database, and the singletons act on all of it
+	go test -count=1 -p 1 -tags integration "${args[@]}" "${pkgs[@]}"
 }
 
 cmd_psql() {

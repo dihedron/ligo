@@ -29,9 +29,10 @@ const (
 
 // Bases: how a side is decided, fixed at creation (ADR-13 rule 6).
 const (
-	BasisAuto      = "AUTO"
-	BasisDelegated = "DELEGATED"
-	BasisHuman     = "HUMAN"
+	BasisAuto       = "AUTO"
+	BasisDelegated  = "DELEGATED"
+	BasisHuman      = "HUMAN"
+	BasisBreakGlass = "BREAK_GLASS"
 )
 
 // Side decisions.
@@ -42,8 +43,16 @@ const (
 
 // The system identities that decide sides at creation.
 const (
-	AutoApprover      = "system:auto-approve"
-	DelegatedApprover = "system:delegated-approval"
+	AutoApprover       = "system:auto-approve"
+	DelegatedApprover  = "system:delegated-approval"
+	BreakGlassApprover = "system:break-glass"
+	RevertApprover     = "system:break-glass-revert"
+)
+
+// Kinds of emergency changes and their reverts (ADR-12).
+const (
+	KindBreakGlass   = "BREAK_GLASS"
+	KindSystemRevert = "SYSTEM_REVERT"
 )
 
 // Error is a refusal with the problem slug and HTTP status of §7.2.3.
@@ -81,11 +90,21 @@ func (c Caller) ID() string {
 
 // Request is a change request (change_requests, §4.2) with its sides.
 type Request struct {
-	ID            uuid.UUID
-	ResourceType  string // SOURCE, TARGET, BINDING
-	ResourceName  string
-	ResourceID    *uuid.UUID
-	Operation     string // CREATE, UPDATE, DELETE
+	ID           uuid.UUID
+	ResourceType string // SOURCE, TARGET, BINDING
+	ResourceName string
+	ResourceID   *uuid.UUID
+	Operation    string // CREATE, UPDATE, DELETE
+	Kind         string // STANDARD when empty, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY
+	// Justification, TTL and RevertPayload are a BREAK_GLASS change's
+	// (ADR-12); its incident reference is the ApprovalReference.
+	Justification string
+	TTL           time.Duration
+	RevertPayload json.RawMessage
+	// DependsOn is the inline source's request a binding CREATE needs.
+	DependsOn *uuid.UUID
+	// RevertsID is the break-glass change a SYSTEM_REVERT reverts.
+	RevertsID     *uuid.UUID
 	Consent       string
 	Zone          string // TARGET, BINDING
 	OwnerScope    string // SOURCE, TARGET
@@ -130,6 +149,7 @@ type Side struct {
 	Basis            string
 	Decision         string // "", APPROVED, DECLINED
 	DecidedBy        string
+	RatifiedBy       string // BREAK_GLASS sides (ADR-12)
 }
 
 // Candidate is a side a request needs, before its basis is known; Platform
@@ -163,6 +183,57 @@ func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approval
 		sides = append(sides, s)
 	}
 	return sides, nil
+}
+
+// BreakGlassSides builds the sides of a break-glass change (§7.2.3): a side
+// the caller acts for that needs no approval is AUTO, every other side is
+// BREAK_GLASS, approved at once, and needs the break_glass role on its
+// scope.
+func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]Side, error) {
+	if c.Principal.SPIFFEID != "" {
+		return nil, refuse(403, "forbidden", "break-glass is for people only")
+	}
+	var sides []Side
+	for _, cand := range candidates {
+		s := Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisAuto, Decision: Approved, DecidedBy: AutoApprover}
+		if !c.Grants.ActsFor(cand.Scope, cand.Platform) || p.ApprovalRequired(cand.Scope) {
+			if !c.Grants.BreakGlass(cand.Scope) {
+				return nil, refuse(403, "forbidden", "%s holds no break_glass on %s (side %s)", c.ID(), cand.Scope, cand.Side)
+			}
+			s.Basis, s.ApprovalRequired, s.DecidedBy = BasisBreakGlass, true, BreakGlassApprover
+		}
+		sides = append(sides, s)
+	}
+	return sides, nil
+}
+
+// RatifiableSides selects the sides c ratifies, as for approval: BREAK_GLASS
+// sides not yet ratified whose scope c approves (§7.2.3 "Ratify").
+func RatifiableSides(r *Request, c Caller, side string) ([]string, error) {
+	if c.ID() == r.RequestedBy {
+		return nil, refuse(403, "four-eyes-violation", "the requester cannot ratify its own break-glass change")
+	}
+	var eligible []string
+	for _, s := range r.Sides {
+		if s.Basis == BasisBreakGlass && s.RatifiedBy == "" && c.Grants.CanApprove(s.Scope) {
+			eligible = append(eligible, s.Name)
+		}
+	}
+	if len(eligible) == 0 {
+		return nil, refuse(409, "break-glass-not-open", "no side of this break-glass change is left for %s to ratify", c.ID())
+	}
+	if r.DistinctApprovers && slices.ContainsFunc(r.Sides, func(s Side) bool { return s.RatifiedBy == c.ID() }) {
+		return nil, refuse(403, "distinct-approver-required", "%s already ratified another side of this change request", c.ID())
+	}
+	switch {
+	case side != "" && !slices.Contains(eligible, side):
+		return nil, refuse(403, "forbidden", "side %s cannot be ratified by %s", side, c.ID())
+	case side != "":
+		return []string{side}, nil
+	case r.DistinctApprovers && len(eligible) > 1:
+		return nil, refuse(400, "side-required", "choose one of the sides %v", eligible)
+	}
+	return eligible, nil
 }
 
 // Complete reports whether the consent rule is satisfied.

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -36,6 +39,19 @@ type Rechecker interface {
 	Recheck(r *Request, p *governance.Policy) error
 }
 
+// AfterApply is a Resource that acts once an applied request has
+// committed: bindings start their workflow (§6.2.2 step 2).
+type AfterApply interface {
+	Applied(ctx context.Context, r *Request)
+}
+
+// applied calls the resource's AfterApply once r's transaction committed.
+func applied(ctx context.Context, res Resource, r *Request) {
+	if a, ok := res.(AfterApply); ok && r.Status == "APPLIED" {
+		a.Applied(ctx, r)
+	}
+}
+
 // IsBusy reports a binding-busy refusal (§6.2.2).
 func IsBusy(err error) bool {
 	e := (*Error)(nil)
@@ -48,6 +64,9 @@ type Service struct {
 	Policy    *governance.Policy
 	TTL       time.Duration // change_request_ttl
 	Resources map[string]Resource
+	// BreakGlassRules are the request-level break-glass rules (ADR-12); the
+	// per-scope policies are the Policy's.
+	BreakGlassRules config.BreakGlass
 }
 
 func (s *Service) resource(r *Request) (Resource, error) {
@@ -69,6 +88,15 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 	if r.Sides, err = BuildSides(candidates, c, s.Policy, approvalReference); err != nil {
 		return err
 	}
+	if err := s.stamp(c, r, approvalReference); err != nil {
+		return err
+	}
+	return s.file(ctx, filed{res, r})
+}
+
+// stamp fills r's identity, requester, hashes and expiry.
+func (s *Service) stamp(c Caller, r *Request, approvalReference string) error {
+	var err error
 	if r.PayloadSHA256, err = Hash(r.Payload); err != nil {
 		return refuse(422, "validation-failed", "payload: %v", err)
 	}
@@ -78,32 +106,227 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 		r.DistinctApprovers = s.Policy.RequireDistinctApprovers
 	}
 	r.ExpiresAt = time.Now().Add(s.TTL)
-	var applyErr error
-	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return nil
+}
+
+// Filing is a request to file with the sides it needs.
+type Filing struct {
+	Request    *Request
+	Candidates []Candidate
+}
+
+// BreakGlass files the requests of a break-glass change and applies them
+// at once, in one transaction (ADR-12, §7.2.3 "Break-glass operations"):
+// an inline source first, then the binding, which depends on it. The last
+// request carries the justification and the TTL, 0 for the policies'
+// default; incident is the incident reference. At least one side must need
+// a decision.
+func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, filings ...Filing) error {
+	r := filings[len(filings)-1].Request
+	items := make([]filed, len(filings))
+	var sides []Side
+	for i, f := range filings {
+		res, err := s.resource(f.Request)
+		if err != nil {
+			return err
+		}
+		if f.Request.Sides, err = BreakGlassSides(f.Candidates, c, s.Policy); err != nil {
+			return err
+		}
+		items[i], sides = filed{res, f.Request}, append(sides, f.Request.Sides...)
+	}
+	if !slices.ContainsFunc(sides, func(sd Side) bool { return sd.Basis == BasisBreakGlass }) {
+		return refuse(422, "validation-failed", "no side needs a decision: file a normal change")
+	}
+	if n := max(s.BreakGlassRules.MinJustificationLength, 20); len([]rune(r.Justification)) < n {
+		return refuse(422, "validation-failed", "justification: at least %d characters", n)
+	}
+	if incident == "" {
+		return refuse(422, "validation-failed", "incidentReference is required")
+	}
+	if p := s.BreakGlassRules.IncidentReferencePattern; p != "" {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return err
+		}
+		if !re.MatchString(incident) {
+			return refuse(422, "validation-failed", "incidentReference %q does not match incident_reference_pattern", incident)
+		}
+	}
+	maxTTL, defaultTTL := 24*time.Hour, 24*time.Hour
+	var policies []*governance.BreakGlassPolicy
+	for _, sd := range sides {
+		if sd.Basis != BasisBreakGlass {
+			continue
+		}
+		p := s.Policy.BreakGlassPolicyFor(sd.Scope)
+		if p == nil {
+			return refuse(403, "forbidden", "no break-glass policy covers %s", sd.Scope)
+		}
+		maxTTL, defaultTTL = min(maxTTL, p.MaxTTL), min(defaultTTL, p.DefaultTTL)
+		if !slices.Contains(policies, p) {
+			policies = append(policies, p)
+		}
+	}
+	if r.TTL == 0 {
+		r.TTL = defaultTTL
+	}
+	if r.TTL < 5*time.Minute || r.TTL > maxTTL {
+		return refuse(422, "validation-failed", "ttl %s: between 5m and %s", r.TTL, maxTTL)
+	}
+	if err := s.checkOpen(ctx, policies); err != nil {
+		return err
+	}
+	for i, it := range items {
+		it.r.Kind, it.r.Justification, it.r.TTL = KindBreakGlass, r.Justification, r.TTL
+		if err := s.stamp(c, it.r, incident); err != nil {
+			return err
+		}
+		if i > 0 {
+			it.r.DependsOn = &items[0].r.ID
+		}
+	}
+	return s.file(ctx, items...)
+}
+
+// filed is a request and its resource.
+type filed struct {
+	res Resource
+	r   *Request
+}
+
+// checkOpen refuses a change that would exceed a policy's max_open
+// unratified break-glass changes, each counted once per policy.
+// shortcut: counted before the transaction, so two concurrent emergencies can exceed max_open by one; lock if that matters.
+func (s *Service) checkOpen(ctx context.Context, policies []*governance.BreakGlassPolicy) error {
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT r.id, s.scope FROM change_requests r
+		JOIN change_request_sides s ON s.change_request_id = r.id
+		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL
+		AND r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()`)
+	if err != nil {
+		return err
+	}
+	type open struct {
+		id    uuid.UUID
+		scope string
+	}
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (open, error) {
+		var o open
+		return o, row.Scan(&o.id, &o.scope)
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range policies {
+		ids := map[uuid.UUID]bool{}
+		for _, o := range list {
+			if s.Policy.BreakGlassPolicyFor(o.scope) == p {
+				ids[o.id] = true
+			}
+		}
+		if len(ids) >= p.MaxOpen {
+			return refuse(429, "break-glass-limit", "the break-glass policy of %v has %d open changes", p.Scopes, len(ids))
+		}
+	}
+	return nil
+}
+
+// System files and applies r, a request of a system kind whose sides were
+// all decided by the system (SYSTEM_EXPIRY, SYSTEM_REVERT, §6.3); r names
+// its requester. A failed apply closes it FAILED_TO_APPLY and is returned.
+func (s *Service) System(ctx context.Context, r *Request) error {
+	res, err := s.resource(r)
+	if err != nil {
+		return err
+	}
+	if r.PayloadSHA256, err = Hash(r.Payload); err != nil {
+		return err
+	}
+	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
+	return s.file(ctx, filed{res, r})
+}
+
+// SystemFailed records r, a system request whose validation failed before
+// it could apply, as FAILED_TO_APPLY, with extra audit entries (§6.3: a
+// revert that no longer validates is a failed revert).
+func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, extra ...audit.Entry) error {
+	var err error
+	if r.PayloadSHA256, err = Hash(r.Payload); err != nil {
+		return err
+	}
+	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
+	decider := r.Sides[0].DecidedBy
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if err := insert(ctx, tx, r); err != nil {
 			return err
 		}
-		sides := make([]map[string]any, 0, len(r.Sides))
-		for _, sd := range r.Sides {
-			sides = append(sides, map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis})
+		if err := store.CloseRequest(ctx, tx, r.ID, "FAILED_TO_APPLY", decider, "", limit(reason)); err != nil {
+			return err
 		}
-		entries := []audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", map[string]any{"consent": r.Consent, "sides": sides})}
-		decider := ""
-		for _, sd := range r.Sides {
-			if sd.Decision == Approved {
-				entries = append(entries, s.sideApproved(r, sd, r.RequestedBy))
-				decider = sd.DecidedBy
+		r.Status = "FAILED_TO_APPLY"
+		for i := range extra {
+			extra[i].ChangeRequestID = &r.ID
+		}
+		return appendAll(ctx, tx, append([]audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", nil),
+			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})}, extra...))
+	})
+}
+
+// file inserts each request in one transaction and applies it at once if
+// its consent rule is satisfied. With several, a failed apply rolls them all
+// back: a later request depends on the earlier ones.
+func (s *Service) file(ctx context.Context, items ...filed) error {
+	var applyErr error
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		if items[0].r.Kind == KindBreakGlass { // §6.2.2: refused in maintenance mode
+			var maintenance bool
+			if err := tx.QueryRow(ctx, "SELECT maintenance_mode FROM system_settings FOR SHARE").Scan(&maintenance); err != nil {
+				return err
+			}
+			if maintenance {
+				return refuse(503, "maintenance", "maintenance mode is on")
 			}
 		}
-		if Complete(r.Consent, r.Sides) {
-			if entries, applyErr, err = s.apply(ctx, tx, r, res, decider, entries); err != nil {
+		var entries []audit.Entry
+		for _, it := range items {
+			r := it.r
+			if err := insert(ctx, tx, r); err != nil {
 				return err
+			}
+			sides := make([]map[string]any, 0, len(r.Sides))
+			for _, sd := range r.Sides {
+				sides = append(sides, map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis})
+			}
+			entries = append(entries, entry(r, "CR_CREATED", r.RequestedBy, "", map[string]any{"consent": r.Consent, "sides": sides}))
+			decider := ""
+			for _, sd := range r.Sides {
+				if sd.Decision == Approved {
+					entries = append(entries, s.sideApproved(r, sd, r.RequestedBy))
+					decider = sd.DecidedBy
+				}
+			}
+			if !Complete(r.Consent, r.Sides) {
+				continue
+			}
+			var err error
+			if entries, applyErr, err = s.apply(ctx, tx, r, it.res, decider, entries); err != nil {
+				return err
+			}
+			if applyErr != nil && len(items) > 1 {
+				return applyErr
+			}
+			if r.Kind == KindBreakGlass && applyErr == nil {
+				entries = append(entries, entry(r, "BREAK_GLASS_USED", r.RequestedBy, "", map[string]any{"operation": r.Operation,
+					"incidentReference": r.ApprovalReference, "justification": r.Justification, "ttlSeconds": int64(r.TTL.Seconds())}))
 			}
 		}
 		return appendAll(ctx, tx, entries)
 	})
 	if err != nil {
 		return err
+	}
+	for _, it := range items {
+		applied(ctx, it.res, it.r)
 	}
 	return applyErr
 }
@@ -166,6 +389,7 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	if err != nil {
 		return nil, err
 	}
+	applied(ctx, res, r)
 	return r, applyErr
 }
 
@@ -233,6 +457,11 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 		return nil, refuse(404, "not-found", "change request %s", id)
 	}
 	return r, err
+}
+
+// Read reads a change request for the system, without visibility checks.
+func (s *Service) Read(ctx context.Context, id uuid.UUID) (*Request, error) {
+	return read(ctx, s.DB, id)
 }
 
 func (s *Service) pending(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
@@ -374,56 +603,71 @@ func null[T comparable](v T) any {
 }
 
 func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
-	var automation any
+	var automation, revert any
 	if r.AutomationContext != nil {
 		automation = r.AutomationContext
 	}
+	if r.RevertPayload != nil {
+		revert = r.RevertPayload
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
-		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule)
-		VALUES ($1, $2, $3, $4, $5, 'STANDARD', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
+		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id)
+		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
-		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule)); err != nil {
+		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
+		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
 		if _, err := tx.Exec(ctx, `INSERT INTO change_request_sides (change_request_id, side, scope, approval_required, basis,
 			requested_by, cr_kind, decision, decided_by, decided_at)
-			VALUES ($1, $2, $3, $4, $5, $6, 'STANDARD', $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END)`,
-			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy)); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END)`,
+			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind()); err != nil {
 			return fmt.Errorf("changerequests: insert side %s: %w", sd.Name, err)
 		}
 	}
 	return nil
 }
 
+func (r *Request) kind() string {
+	if r.Kind == "" {
+		return "STANDARD"
+	}
+	return r.Kind
+}
+
 func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) {
 	r := &Request{ID: id}
+	var ttl int64
 	err := q.QueryRow(ctx, `SELECT resource_type, resource_name, resource_id, operation, consent, coalesce(zone, ''),
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
-		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, '')
+		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
+		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id
 		FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID)
 	if err != nil {
 		return nil, err
 	}
+	r.TTL = time.Duration(ttl) * time.Second
 	r.Sides, err = loadSides(ctx, q, id)
 	return r, err
 }
 
 func loadSides(ctx context.Context, q store.Querier, id uuid.UUID) ([]Side, error) {
-	rows, err := q.Query(ctx, `SELECT side, scope, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, '')
-		FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
+	rows, err := q.Query(ctx, `SELECT side, scope, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, ''),
+		coalesce(ratified_by, '') FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Side, error) {
 		var s Side
-		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy)
+		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.RatifiedBy)
 		return s, err
 	})
 }

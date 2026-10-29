@@ -40,7 +40,10 @@ type fake struct {
 	payload    json.RawMessage // returned by Revalidate; nil: the stored one
 	apply      error
 	applied    int
+	after      []uuid.UUID // Applied calls, after commit
 }
+
+func (f *fake) Applied(_ context.Context, r *Request) { f.after = append(f.after, r.ID) }
 
 func (f *fake) Revalidate(_ context.Context, r *Request) (json.RawMessage, error) {
 	if f.payload != nil {
@@ -136,6 +139,9 @@ func TestAutoApplied(t *testing.T) {
 	if got := actions(t, owner, r.ID); !equal(got, []string{"CR_CREATED", "CR_SIDE_APPROVED", "CR_APPROVED", "SOURCE_TEST_APPLIED"}) {
 		t.Errorf("audit %v", got)
 	}
+	if len(f.after) != 1 || f.after[0] != r.ID {
+		t.Errorf("Applied after commit: %v", f.after)
+	}
 }
 
 // TestAC04AC05: in an approval-required scope the requester cannot approve,
@@ -164,6 +170,9 @@ func TestAC04AC05(t *testing.T) {
 	}
 	if st, by := statusOf(t, owner, r.ID); st != "APPLIED" || by != "bob" || f.applied != 1 {
 		t.Errorf("status %s by %s, applied %d", st, by, f.applied)
+	}
+	if len(f.after) != 1 { // not while pending, once when applied
+		t.Errorf("Applied calls %v", f.after)
 	}
 	if got := actions(t, owner, r.ID); !equal(got, []string{"CR_CREATED", "CR_SIDE_APPROVED", "CR_APPROVED", "SOURCE_TEST_APPLIED"}) {
 		t.Errorf("audit %v", got)
