@@ -22,6 +22,7 @@ pg_up() {
 	inner_wait pg
 	pg_configure
 	pg_roles
+	pg_target
 	pg_proxy
 	pg_wait_ready
 }
@@ -82,6 +83,23 @@ pg_roles() {
 	pg_superuser -q -v migrator_password="$(password migrator)" -v app_password="$(password app)" \
 		-v reader_password="$(password reader)" -v dbos_password="$(password dbos)" -f - <"$LAB_DIR/sql/roles.sql"
 	info "database ligo and roles ligo_migrator, ligo_app, ligo_reader, ligo_dbos created"
+}
+
+# pg_target creates the target database of the target-postgres stand-in
+# (sql/target.sql, idempotent) and lets any role reach that database, and
+# only it, over TLS from the inner network, as a workload would.
+pg_target() {
+	local file="$LAB_STATE_DIR/passwords/target-admin" v hba
+	[[ -f "$file" ]] || (umask 077 && openssl rand -hex 16 >"$file")
+	pg_superuser -q -v admin_password="$(cat "$file")" -f - <"$LAB_DIR/sql/target.sql" >/dev/null ||
+		die "pg: cannot create the target database ledger"
+	v="$(pg_version)"
+	hba="/etc/postgresql/$v/main/pg_hba.conf"
+	if ! inner_exec pg grep -q '^hostssl ledger' "$hba"; then
+		inner_exec pg sh -c "echo 'hostssl ledger all $LAB_INNER_SUBNET scram-sha-256' >>$hba"
+		inner_exec pg systemctl reload "postgresql@$v-main"
+	fi
+	info "target database ledger ready (target-postgres)"
 }
 
 # pg_dsn ROLE [HOST ROOTCERT]: the DSN of ligo_ROLE, verifying the server with
