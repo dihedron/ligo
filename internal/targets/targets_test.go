@@ -259,3 +259,28 @@ func TestCheckExistenceDefault(t *testing.T) {
 		t.Error("check_existence does not default to true")
 	}
 }
+
+// TestMetadata: the descriptive fields of a target are bounded, and its
+// documentation URL absolute (§3.3).
+func TestMetadata(t *testing.T) {
+	r := rules(t)
+	for name, edit := range map[string]func(*Target){
+		"display name":      func(t *Target) { t.DisplayName = strings.Repeat("x", 129) },
+		"description":       func(t *Target) { t.Description = strings.Repeat("x", 4097) },
+		"long URL":          func(t *Target) { t.DocumentationURL = "https://wiki.example.org/" + strings.Repeat("x", 500) },
+		"relative URL":      func(t *Target) { t.DocumentationURL = "wiki/ledger" },
+		"level description": func(t *Target) { t.AccessLevels[0].Description = strings.Repeat("x", 1025) },
+		"visibility":        func(t *Target) { t.Visibility.Mode = "SECRET" },
+	} {
+		tg := ledger()
+		edit(&tg)
+		if err := r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil); slug(err) != "validation-failed" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	tg := ledger()
+	tg.DocumentationURL = "https://wiki.example.org/ledger"
+	if err := r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil); err != nil {
+		t.Errorf("absolute URL: %v", err)
+	}
+}

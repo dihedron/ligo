@@ -144,3 +144,15 @@ func TestRecheck(t *testing.T) {
 		}
 	}
 }
+
+// TestDecode: a body cannot set what ligo derives (§7.2.3).
+func TestDecode(t *testing.T) {
+	for _, field := range []string{`"kind":"Binding"`, `"sourceRevision":3`, `"targetRevision":2`, `"requestedSpec":{}`} {
+		if _, err := decode([]byte(`{"name":"b","source":"s","target":"t","accessLevel":"read",` + field + `}`)); slug(err) != "validation-failed" {
+			t.Errorf("%s: %v", field, err)
+		}
+	}
+	if _, err := decode([]byte(`{"name":"b","source":"s","target":"t","accessLevel":"read","purpose":"p"}`)); err != nil {
+		t.Error(err)
+	}
+}

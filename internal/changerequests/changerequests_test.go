@@ -3,6 +3,7 @@ package changerequests
 import (
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/dihedron/ligo/internal/authz"
@@ -173,5 +174,30 @@ func TestHash(t *testing.T) {
 	c, _ := Hash([]byte(`{"a":[true,"x"],"b":1}`))
 	if len(a) != 64 || a != c || a == b {
 		t.Errorf("hashes %s %s %s", a, b, c)
+	}
+}
+
+// TestDecode: request bodies are strict, and their common fields bounded
+// (§7.2.3).
+func TestDecode(t *testing.T) {
+	type body struct {
+		Name string `json:"name"`
+		Common
+	}
+	for _, tc := range []struct {
+		body string
+		ok   bool
+	}{
+		{`{"name":"x","approvalReference":"CHG0012345","automationContext":{"jobId":1}}`, true},
+		{`{"name":"x","bogus":1}`, false},
+		{`{"name":"x"} {"name":"y"}`, false},
+		{`{"name":"x","approvalReference":"` + strings.Repeat("c", 129) + `"}`, false},
+		{`{"name":"x","automationContext":[1]}`, false},
+		{`{"name":"x","automationContext":{"pad":"` + strings.Repeat("p", 4096) + `"}}`, false},
+	} {
+		var b body
+		if err := Decode([]byte(tc.body), &b, &b.Common); (err == nil) != tc.ok || err != nil && status(err) != "validation-failed" {
+			t.Errorf("%.60s: %v", tc.body, err)
+		}
 	}
 }

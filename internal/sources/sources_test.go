@@ -147,3 +147,26 @@ func TestTransition(t *testing.T) {
 		}
 	}
 }
+
+// TestVisibility: LISTED needs scope patterns; visibleTo is only for
+// LISTED; the mode defaults to PRIVATE (§3.2).
+func TestVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		v  Visibility
+		ok bool
+	}{
+		{Visibility{}, true},
+		{Visibility{Mode: "PUBLIC"}, true},
+		{Visibility{Mode: "LISTED", VisibleTo: []string{"cloud/*"}}, true},
+		{Visibility{Mode: "LISTED", VisibleTo: []string{"Cloud!"}}, false},
+		{Visibility{Mode: "PRIVATE", VisibleTo: []string{"cloud/*"}}, false},
+		{Visibility{Mode: "SECRET"}, false},
+	} {
+		v := tc.v
+		if err := v.Normalize(); (err == nil) != tc.ok {
+			t.Errorf("%+v: %v", tc.v, err)
+		} else if err == nil && v.Mode == "" {
+			t.Errorf("%+v: mode not defaulted", tc.v)
+		}
+	}
+}
