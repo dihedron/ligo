@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -610,5 +611,111 @@ func TestAC50(t *testing.T) {
 		(select count(*) from bindings where name = $2)`, r.ID, name).Scan(&applied, &started, &bindings); err != nil ||
 		applied != 1 || started != 1 || bindings != 1 {
 		t.Errorf("applied %d, started %d, bindings %d (%v)", applied, started, bindings, err)
+	}
+}
+
+// automation is a SPIFFE principal with trusted_automation on dc/corp-prod
+// and its children, for oracle-prod only (ADR-11).
+var automation = changerequests.Caller{
+	Principal: authz.Principal{SPIFFEID: "spiffe://prod.internal/ns/automation-prod/sa/awx-runner"},
+	Grants: authz.Grants{{Role: config.RoleTrustedAutomation, Scopes: []string{"dc/corp-prod/*"}, Platforms: []string{"oracle-prod"},
+		ApprovalReference: regexp.MustCompile(`^CHG[0-9]{7}$`)}},
+}
+
+// ledgerWorld adds a source in dc/corp-prod/ledger, and a target of the
+// ledger on a second platform the automation is not bound to.
+func ledgerWorld(t *testing.T, s *Service, o *pgxpool.Pool, w *world) (source, other string) {
+	t.Helper()
+	ctx := context.Background()
+	source, other = "led-src-"+w.suffix, "other-"+w.suffix
+	p := s.Rules.Platforms["oracle-prod"]
+	p.Name = "oracle-prod-2"
+	s.Rules.Platforms[p.Name] = p
+	target := uuid.NewV7()
+	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+			values ($1, $2, 'dc/corp-prod/ledger', 'prod.internal', $3, 't', 't')`, uuid.NewV7(), source,
+			`^spiffe://prod\.internal/ns/ledger/sa/`+w.suffix+`$`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+			values ($1, $2, 'oracle-prod-2', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, target, other); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `insert into target_access_levels (target_id, name, grants, privileges)
+			values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}', '["role:LEDGER_RO_ROLE"]')`, target)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source, other
+}
+
+// TestAC27: a trusted automation files a same-scope binding with its change
+// reference: the side is decided by delegation and provisioning starts.
+func TestAC27(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	source, _ := ledgerWorld(t, s, o, w)
+	name := "auto-" + w.suffix
+	r, err := s.Create(ctx, automation, body(name, source, w.ledger, "read", `"approvalReference":"CHG0012345"`,
+		`"automationContext":{"platform":"awx","jobId":48213}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "APPLIED" || sides(r) != "TARGET=DELEGATED" || r.Sides[0].DecidedBy != "system:delegated-approval" {
+		t.Fatalf("request %s %s %+v", r.Status, sides(r), r.Sides)
+	}
+	var ref, job string
+	if err := o.QueryRow(ctx, `select snapshot->>'approvalReference', snapshot->'automationContext'->>'jobId' from audit_log
+		where change_request_id = $1 and action = 'CR_SIDE_APPROVED'`, r.ID).Scan(&ref, &job); err != nil || ref != "CHG0012345" || job != "48213" {
+		t.Errorf("CR_SIDE_APPROVED reference %q job %q (%v)", ref, job, err)
+	}
+	if phase, _, _, _, _ := bindingRow(t, o, name); phase != "PROVISIONING" {
+		t.Errorf("phase %s", phase)
+	}
+}
+
+// TestAC28: no reference, a reference outside the pattern, or a platform
+// outside the delegation is refused, and nothing is stored.
+func TestAC28(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	source, other := ledgerWorld(t, s, o, w)
+	for _, tc := range []struct {
+		target, extra, want string
+	}{
+		{w.ledger, "", "validation-failed"},
+		{w.ledger, `"approvalReference":"CHG12"`, "validation-failed"},
+		{other, `"approvalReference":"CHG0012345"`, "forbidden"},
+	} {
+		name := "auto-" + tc.target
+		var err error
+		if tc.extra == "" {
+			_, err = s.Create(ctx, automation, body(name, source, tc.target, "read"))
+		} else {
+			_, err = s.Create(ctx, automation, body(name, source, tc.target, "read", tc.extra))
+		}
+		if slug(err) != tc.want {
+			t.Errorf("%s %s: %v, want %s", tc.target, tc.extra, err, tc.want)
+		}
+		var n int
+		if err := o.QueryRow(ctx, "select count(*) from change_requests where resource_name = $1", name).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s: %d requests stored (%v)", name, n, err)
+		}
+	}
+}
+
+// TestAC30: the same change by a person is decided by a person.
+func TestAC30(t *testing.T) {
+	s, o, w, _ := setup(t)
+	source, _ := ledgerWorld(t, s, o, w)
+	r, err := s.Create(context.Background(), ledgerOp, body("person-"+w.suffix, source, w.ledger, "read", `"approvalReference":"CHG0012345"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || sides(r) != "TARGET=HUMAN" {
+		t.Errorf("request %s %s", r.Status, sides(r))
 	}
 }
