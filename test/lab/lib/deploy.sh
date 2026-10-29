@@ -8,7 +8,7 @@ LIGO1_TESTS=/home/ligo/tests
 # LIGO1_PLUGINS is ligo1's plugins.directory; LAB_PLUGINS are the lab's
 # plugins (test/lab/plugins), in the zone prod.
 LIGO1_PLUGINS=/usr/lib/ligo/plugins
-LAB_PLUGINS=(labprobe target-postgres)
+LAB_PLUGINS=(labprobe target-postgres store-vault)
 
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {
@@ -86,6 +86,57 @@ deploy_plugins() {
 	pg_target
 	plugin_bao labprobe lab-admin "$LAB_STATE_DIR/passwords/labprobe"
 	plugin_bao target-postgres lab_target_admin "$LAB_STATE_DIR/passwords/target-admin"
+	store_vault_bao
+}
+
+# store_vault_bao: on bao-prod, the database secrets engine and its
+# connection lab-pg to the database ledger, the store-vault plugin's role and
+# policy, and the lab-only role the tests check its work with
+# (.specs/ligo-test-environment.md, store-vault).
+store_vault_bao() {
+	bao prod secrets list -format=json | jq -e '."database/"' >/dev/null || bao prod secrets enable database >/dev/null
+	# the password goes through stdin, never on a command line
+	tr -d "\n" <"$LAB_STATE_DIR/passwords/target-admin" | bao prod write database/config/lab-pg \
+		plugin_name=postgresql-database-plugin allowed_roles="binding-*" username=lab_target_admin password=- \
+		connection_url="postgresql://{{username}}:{{password}}@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=/etc/openbao/lab-ca.crt" \
+		>/dev/null || die "bao-prod: cannot configure the database connection lab-pg"
+	inner_exec bao-prod sh -c 'cat >/root/ligo-plugin-store-vault.hcl' <<'HCL'
+# store-vault: the objects it keeps per binding, and nothing else
+path "kv/data/bindings/*" {
+  capabilities = ["create", "update", "read"]
+}
+path "kv/metadata/bindings/*" {
+  capabilities = ["create", "update", "read", "delete"]
+}
+path "sys/policies/acl/binding-*" {
+  capabilities = ["create", "update", "read", "delete"]
+}
+path "database/roles/binding-*" {
+  capabilities = ["create", "update", "read", "delete"]
+}
+path "sys/leases/revoke-prefix/database/creds/binding-*" {
+  capabilities = ["update", "sudo"]
+}
+HCL
+	bao prod policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null
+	bao prod write auth/jwt-spiffe/role/ligo-plugin-store-vault role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/store-vault" bound_audiences="https://bao-prod.ligo.lab" \
+		token_policies=ligo-plugin-store-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
+		die "bao-prod: cannot write the role ligo-plugin-store-vault"
+	inner_exec bao-prod sh -c 'cat >/root/lab-standins-check.hcl' <<'HCL'
+# lab only: the tests read what store-vault wrote
+path "kv/data/bindings/*" {
+  capabilities = ["read"]
+}
+path "database/creds/binding-*" {
+  capabilities = ["read"]
+}
+HCL
+	bao prod policy write lab-standins-check /root/lab-standins-check.hcl >/dev/null
+	bao prod write auth/jwt-spiffe/role/lab-standins-check role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ns/sys/sa/ligo" bound_audiences="https://bao-prod.ligo.lab" \
+		token_policies=lab-standins-check token_ttl=5m token_max_ttl=15m >/dev/null ||
+		die "bao-prod: cannot write the role lab-standins-check"
 }
 
 # plugin_svid_wait ZONE NAME UID: waits until the zone's agent issues the

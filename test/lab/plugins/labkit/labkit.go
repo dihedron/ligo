@@ -29,8 +29,9 @@ type Common struct {
 type Instance struct {
 	Name       string
 	ConfigJSON string
-	Credential *pluginsdk.BootstrapCredential
-	Roots      *x509.CertPool // the lab CA
+	Credential *pluginsdk.BootstrapCredential // nil without a bootstrap_credential
+	JWT        pluginsdk.JWTSource            // the instance's JWT-SVID for OpenBao
+	Roots      *x509.CertPool                 // the lab CA
 }
 
 // Configure selects each instance's SVID and prepares its bootstrap
@@ -77,11 +78,13 @@ func bootstrap(in *pluginv1.InstanceDescriptor, jwt pluginsdk.JWTSource) (*Insta
 	if !roots.AppendCertsFromPEM(pem) {
 		return nil, errors.New("no certificate in ca_file")
 	}
-	bc, err := pluginsdk.NewBootstrapCredential(cfg.BootstrapCredential, jwt, HTTPClient(roots))
-	if err != nil {
-		return nil, err
+	inst := &Instance{Name: in.GetName(), ConfigJSON: in.GetConfigJson(), JWT: jwt, Roots: roots}
+	if cfg.BootstrapCredential.Source != "" {
+		if inst.Credential, err = pluginsdk.NewBootstrapCredential(cfg.BootstrapCredential, jwt, HTTPClient(roots)); err != nil {
+			return nil, err
+		}
 	}
-	return &Instance{Name: in.GetName(), ConfigJSON: in.GetConfigJson(), Credential: bc, Roots: roots}, nil
+	return inst, nil
 }
 
 // HTTPClient is a client that trusts the lab CA only.
