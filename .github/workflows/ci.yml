@@ -1,9 +1,11 @@
 name: CI
 
 # One workflow, three parallel jobs: the build (gofmt, go vet,
-# golangci-lint with gosec, compile, tests and coverage, all through
-# "make", then the SonarQube Cloud analysis of the same checkout and
-# coverage), the secret scans, and, on pull requests, the dependency review.
+# golangci-lint with gosec and compile through "make"; the unit and
+# integration tests together, against a PostgreSQL container, so that one
+# coverage report counts both; then the SonarQube Cloud analysis of the
+# same checkout and coverage), the secret scans, and, on pull requests, the
+# dependency review.
 # Jobs run side by side on their own runners, so the run takes as long as
 # the slowest of them; CodeQL, the documents and releases keep workflows
 # of their own (other triggers and permissions).
@@ -43,6 +45,25 @@ jobs:
     permissions:
       contents: read
       id-token: write # Codecov upload via OIDC, no CODECOV_TOKEN secret
+    # the lab (test/lab) runs the integration tests over TLS on a VM; CI runs
+    # them against a container, without TLS
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      LIGO_TEST_PG_MIGRATOR_DSN: postgres://ligo_migrator:migrator@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_APP_DSN: postgres://ligo_app:app@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_READER_DSN: postgres://ligo_reader:reader@localhost:5432/ligo?sslmode=disable
+      LIGO_TEST_PG_DBOS_DSN: postgres://ligo_dbos:dbos@localhost:5432/ligo?sslmode=disable
     steps:
       - name: Checkout source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,10 +91,17 @@ jobs:
       - name: Lint and build
         run: make
 
+      # the roles and the database of §4.1, as operations create them
+      - name: Create the database roles
+        run: >-
+          psql -v migrator_password=migrator -v app_password=app
+          -v reader_password=reader -v dbos_password=dbos
+          -f test/lab/sql/roles.sql
+
       - name: Test with coverage
-        # -coverpkg credits code with the coverage of every package's tests,
-        # not only its own
-        run: go test ./... -coverpkg=./... -coverprofile=coverage.txt
+        # unit and integration tests in one run; -coverpkg credits code with
+        # the coverage of every package's tests, not only its own
+        run: go test -count=1 -tags integration ./... -coverpkg=./... -coverprofile=coverage.txt
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -101,48 +129,6 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-  integration:
-    name: Integration tests
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    # the lab (test/lab) runs these tests over TLS on a VM; CI runs them
-    # against a container, without TLS
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      PGHOST: localhost
-      PGUSER: postgres
-      PGPASSWORD: postgres
-      LIGO_TEST_PG_MIGRATOR_DSN: postgres://ligo_migrator:migrator@localhost:5432/ligo?sslmode=disable
-      LIGO_TEST_PG_APP_DSN: postgres://ligo_app:app@localhost:5432/ligo?sslmode=disable
-      LIGO_TEST_PG_READER_DSN: postgres://ligo_reader:reader@localhost:5432/ligo?sslmode=disable
-      LIGO_TEST_PG_DBOS_DSN: postgres://ligo_dbos:dbos@localhost:5432/ligo?sslmode=disable
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go compiler
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: "go.mod"
-
-      # the roles and the database of §4.1, as operations create them
-      - name: Create the database roles
-        run: >-
-          psql -v migrator_password=migrator -v app_password=app
-          -v reader_password=reader -v dbos_password=dbos
-          -f test/lab/sql/roles.sql
-
-      - name: Run the integration tests
-        run: go test -count=1 -tags integration ./...
 
   secrets:
     name: Secret scans
