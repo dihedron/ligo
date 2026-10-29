@@ -92,6 +92,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Plugin startup (§5.2, §5.6, §8.2 rules 1, 3 and 8, startup step 5) | Startup runs in two passes: every process is spawned and described before any is configured, so the descriptions can be checked against each other first. `Describe` MUST be static; a restarted process that describes itself differently is not used. A plugin type is declared in one section only. Rules 3 and 8 run between the passes; rule 3 enforces the §5.6 matrix through the plugins' declarations instead of type names, and fills each platform's `identity_mode` and `secret_storage_strategy`. Rule 8, and refuses a plugin whose instance configuration schema is empty or does not compile. |
 | API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
 | Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
+| Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -3154,7 +3155,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `GET` | `/v1/admin/change-requests` | viewer | Keyset-paginated list of the change requests visible to the caller. Filters: `status`, `resourceType`, `resourceName`, `zone`, `scope` (matched against every scope of the request), `awaitingMe=true` (requests with a pending side the caller may decide). |
 | `GET` | `/v1/admin/change-requests/{id}` | viewer | The change request representation below, including `payloadSha256`, its sides, `awaitingApproval` and a diff against the current revision of the resource (for a narrowing, the samples it drops or the privileges it removes). |
 | `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 governance-policy-changed`, `409 dependency-pending`, `422 validation-failed`, `409 binding-busy`, `409 change-request-not-pending`. |
-| `POST` | `/v1/admin/change-requests/{id}/reject` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
+| `POST` | `/v1/admin/change-requests/{id}/decline` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
 | `POST` | `/v1/admin/change-requests/{id}/withdraw` | requester | Allowed only while `PENDING`. Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. Withdrawing an inline source's `CREATE` fails the binding `CREATE` that depends on it. |
 | `GET` | `/v1/admin/governance` | viewer | The governance policy in force (source-scope extractors, approval-required scopes, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_scopes`) and its SHA-256 (§8.2). |
 | `POST` | `/v1/admin/governance/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the scopes, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. |
@@ -3272,7 +3273,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 5. **Governance re-check** (ADR-14 rule 5). It needs no remote call, so it runs inside the transaction of step 6, after the side-decision compare-and-set, whenever the request would be complete: compute the sides the request would need under the policy now in force. If the pair is now denied, if a required party is missing from the stored sides, or if a side stored as `AUTO` would now need a decision, move the request to `FAILED_TO_APPLY` (`apply_error = "governance policy changed"`), audit `CR_APPLY_FAILED`, and return `409 governance-policy-changed`.
 6. **Record and apply.** Record the side decision and, if the consent rule is now satisfied, apply (§6.2) in the same transaction. A busy binding leaves the change request `PENDING` and the side undecided (§6.2.2); a revision conflict moves it to `FAILED_TO_APPLY`.
 
-**Deciding sides (Normative)** (`/approve`, `/reject`):
+**Deciding sides (Normative)** (`/approve`, `/decline`):
 1. **Eligible sides.** The caller's eligible sides are the request's pending `HUMAN` sides whose scope the caller holds `approver` for (or `operator`, ADR-13 rule 6). If the caller is the requester, nothing is eligible: `403 four-eyes-violation`. If nothing else is eligible: `403 forbidden` (or `404` if the caller cannot see the request).
 2. **Distinct approvers.** If `distinct_approvers_required` is set and the caller has already approved another side of this request, the caller cannot approve a further side: `403 distinct-approver-required`. Declines are not limited.
 3. **Side selection.** If `side` is given, it MUST be one of the eligible sides (`403 forbidden` otherwise). If it is omitted: for an approval with distinct approvers required and more than one eligible side, `400 side-required`; otherwise all eligible sides are selected.
@@ -3410,7 +3411,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 
 **HTMX Navigation & Response Semantics (Normative):**
 - Full-page navigations triggered by mutating HTMX actions (`POST /ui/login`, `POST /ui/logout`, and `POST`, `PUT` and `DELETE` on `/ui/sources…`, `/ui/targets…` and `/ui/bindings…`) MUST respond with HTTP `200 OK` and an `HX-Redirect: <target-path>` header (never HTTP `301`/`302`/`303`, which cause inconsistent browser method repetition on `PUT`/`DELETE` or partial swap of full pages).
-- Inline partial mutations (`retry`, `rotate`, `approve`, `reject`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
+- Inline partial mutations (`retry`, `rotate`, `approve`, `decline`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
 - Validation or conflict errors on `/ui/*` endpoints respond with `422 Unprocessable Entity` or `409 Conflict` and an HTML error alert fragment swapped into the form's error target container.
 - When an approval returns `409 binding-busy`, the alert MUST state that the binding is currently being provisioned or reconciled, that the change request is still `PENDING`, and that approving again once the operation completes will apply it.
 - **Governance (ADR-13, ADR-14).** Every create and update form (source, target, binding wizard) shows, as soon as the relevant fields are entered, the resolved scopes, the name-prefix check, the consent rule, the interconnection outcome (allowed, denied by rule X, extra parties) and the sides that will need a decision, using the same code as `POST /v1/admin/governance/evaluate`. A source form shows the regex tester (matches, samples, overlaps with other sources of the scope, and for an update whether it narrows); a target form shows, for an update, which bindings will be re-applied. The change-request view shows every side with its scope, basis and state; approve and decline buttons appear only for sides the user may decide, with a side selector when the user is eligible for more than one. The dashboard has an "Awaiting my decision" queue (`awaitingMe`).
@@ -3452,7 +3453,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `GET` | `/ui/break-glass/new-form` | Break-glass form (visible only to `break_glass` members): operation, binding (with an optional inline source), justification, incident reference, TTL, and **password re-entry**. Styled as an emergency action with a confirmation step. |
 | `POST` | `/ui/break-glass` | Submit a break-glass change; `200 OK` with `HX-Redirect` to the binding. |
 | `POST` | `/ui/change-requests/{id}/ratify` · `/revert` | Ratify or revert a break-glass change (returns the updated fragment). |
-| `POST` | `/ui/change-requests/{id}/approve` · `/reject` · `/withdraw` | Decisions (approve submits the displayed `payloadSha256` and the selected `side`). |
+| `POST` | `/ui/change-requests/{id}/approve` · `/decline` · `/withdraw` | Decisions (approve submits the displayed `payloadSha256` and the selected `side`). |
 
 **UISchema rendering rules (INV-12):**
 - Every descriptor field is passed to templates as plain data.
@@ -4029,7 +4030,7 @@ type Options struct {
 	Platform PlatformCommand      `command:"platform" description:"Inspect configured platforms and their UI schemas."`
 	Catalog  CatalogCommand       `command:"catalog" description:"Search the catalog of targets and show their flows."`
 	Flows    FlowsCommand         `command:"flows" description:"Show the effective network flows of a binding (JSON for the verification tool)."`
-	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, reject, withdraw)."`
+	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
 	Audit    AuditCommand         `command:"audit" description:"Query and verify the cryptographic audit log."`
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
@@ -4111,13 +4112,13 @@ type RotateCommand struct {
 }
 
 // ---------------------------------------------------------------------------
-// Change Request subcommands: `ligo cr list|get|approve|reject|withdraw`
+// Change Request subcommands: `ligo cr list|get|approve|decline|withdraw`
 // ---------------------------------------------------------------------------
 type ChangeRequestCommand struct {
 	List     CRListCommand     `command:"list" alias:"ls" description:"List change requests."`
 	Get      CRGetCommand      `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
 	Approve  CRApproveCommand  `command:"approve" description:"Approve one or more sides of a PENDING change request; applies it when every required side is approved (four-eyes)." `
-	Reject   CRRejectCommand   `command:"reject" description:"Decline one or more sides of a PENDING change request."`
+	Decline  CRDeclineCommand  `command:"decline" description:"Decline one or more sides of a PENDING change request."`
 	Withdraw CRWithdrawCommand `command:"withdraw" description:"Withdraw own PENDING change request."`
 	Ratify   CRRatifyCommand   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
 	Revert   CRRevertCommand   `command:"revert" description:"Revert an open break-glass change now."`
@@ -4152,7 +4153,7 @@ type CRApproveCommand struct {
 	} `positional-args:"yes" required:"yes"`
 }
 
-type CRRejectCommand struct {
+type CRDeclineCommand struct {
 	ClientOptions
 	Comment string `short:"m" long:"comment" required:"true" description:"Rejection reason (required)."`
 	Side    string `long:"side" description:"Side to decline; default: every side you may decide."`
@@ -4661,7 +4662,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-19 | Process crash between the admin commit and workflow start | Sweeper runs | The workflow is started with the recorded ID; the binding converges. |
 | AC-20 | Two bindings would produce the same principal name | Second Ensure | `RESOURCE_OWNED_BY_OTHER_BINDING`; the first binding is unaffected. |
 | AC-21 | A `PENDING` change request in an approval-required scope | The requester withdraws it while an approver approves it concurrently | Exactly one decision is recorded. If the withdrawal commits first, the approval returns `409 change-request-not-pending` and nothing is provisioned; otherwise the withdrawal returns `409 change-request-not-pending`. |
-| AC-22 | A `PENDING` change request | Two approvers decide it concurrently (approve/approve, or approve/reject) | Exactly one decision is recorded and audited; the other caller gets `409 change-request-not-pending`; at most one workflow is started. |
+| AC-22 | A `PENDING` change request | Two approvers decide it concurrently (approve/approve, or approve/decline) | Exactly one decision is recorded and audited; the other caller gets `409 change-request-not-pending`; at most one workflow is started. |
 | AC-23 | A `PENDING` binding `CREATE` change request | Approval is attempted while a plugin `ValidateBinding` call is slow (fault-injected delay) | No row locks are held during the delay: concurrent admin actions on other change requests and workflow steps on other bindings are not blocked. |
 | AC-24 | A change request whose side is in an approval-required scope | The application (fault-injected) tries to record that side as approved by `system:auto-approve`, or to mark the request `APPLIED` while the side is pending | PostgreSQL rejects it (`chk_side_basis`, respectively `trg_change_requests_check` at commit); nothing is provisioned. |
 | AC-25 | `dc/corp-prod` is removed from `approval.required_scopes` while a change request with a pending `dc/corp-prod` side exists, and `ligo` restarts | Startup, then an attempt to apply the pending request without approval | Startup logs a `WARN` and audits `CONFIG_GOVERNANCE_POLICY_CHANGED` and `CONFIG_APPROVAL_POLICY_WEAKENED` naming the pattern; the pending side still requires a human approver other than the requester. |
@@ -5748,7 +5749,7 @@ sequenceDiagram
 **Variants.**
 - **Offer by the target owner.** A ledger operator offers the binding to the source instead (scenario 14): the `TARGET` side is then the automatic one and the `SOURCE` side waits for a tenancy lead (in an approval-required tenancy), which preserves the protection against credential injection (T-28).
 - **Inline source.** If the developer registers the source in the same wizard, a source `CREATE` and a binding `CREATE` depending on it are filed together; the binding cannot be approved before the source is registered (§7.2.4).
-- **Veto.** Any approver of a pending side can decline (`/reject`); a request with consent `ALL` is then `REJECTED` at once.
+- **Veto.** Any approver of a pending side can decline (`/decline`); a request with consent `ALL` is then `REJECTED` at once.
 - **One approver for several sides.** If the target owner approver were also an InfoSec approver, an approval without `side` would get `400 side-required`, and a second approval by the same person `403 distinct-approver-required` (INV-18), unless the rule sets `distinct_approvers: false`.
 - **Concurrent approvals.** If both approvers approve at the same moment, the `decision_seq` compare-and-set serializes them; the second sees the first's decision and applies the change (§4.3, AC-50).
 - **Policy tightened, or target changed, meanwhile.** The final approval moves the request to `FAILED_TO_APPLY` with `409 governance-policy-changed`, respectively `409 normalization-drift` (ADR-14 rule 5, §7.2.3).

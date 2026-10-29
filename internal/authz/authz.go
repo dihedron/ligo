@@ -126,6 +126,13 @@ func (gs Grants) ActsFor(scope, platform string) bool {
 	})
 }
 
+// Operator reports the operator role on scope, which lets its holder consent
+// to a side that needs a decision only because the requester does not act
+// for it (ADR-13 rule 6).
+func (gs Grants) Operator(scope string) bool {
+	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleOperator && g.covers(scope) })
+}
+
 // CanApprove reports whether the principal is an approver of scope. Four-eyes
 // and distinct approvers are checked by the change requests.
 func (gs Grants) CanApprove(scope string) bool {
