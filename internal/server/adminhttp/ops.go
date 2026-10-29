@@ -1,6 +1,7 @@
 package adminhttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -146,32 +147,41 @@ func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		size, err = page(r, &cursor)
 	}
-	var rows pgx.Rows
-	if err == nil {
-		rows, err = s.DB.Query(r.Context(), `SELECT id, action, actor, coalesce(approver, ''), change_request_id, revision, attempt,
-			coalesce(workflow_id, ''), coalesce(request_id, ''), snapshot, occurred_at FROM audit_log
-			WHERE resource_type = $1 AND resource_name = $2 AND ($3::bigint IS NULL OR id < $3) ORDER BY id DESC LIMIT $4`,
-			q.typ, name, cursor.BeforeID, size+1)
-	}
 	var items []auditDTO
+	var more bool
 	if err == nil {
-		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (auditDTO, error) {
-			var a auditDTO
-			return a, row.Scan(&a.ID, &a.Action, &a.Actor, &a.Approver, &a.ChangeRequestID, &a.Revision, &a.Attempt, &a.WorkflowID,
-				&a.RequestID, &a.Snapshot, &a.OccurredAt)
-		})
+		items, more, err = s.auditPage(r.Context(), q.typ, name, cursor.BeforeID, size)
 	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	if more {
+		cursor.BeforeID = &items[size-1].ID
+	}
+	reply(w, http.StatusOK, map[string]any{"items": items, "nextPageToken": token(more, cursor)})
+}
+
+// auditPage is a resource's audit entries before an id, newest first.
+func (s *Server) auditPage(ctx context.Context, typ, name string, before *int64, size int) ([]auditDTO, bool, error) {
+	rows, err := s.DB.Query(ctx, `SELECT id, action, actor, coalesce(approver, ''), change_request_id, revision, attempt,
+		coalesce(workflow_id, ''), coalesce(request_id, ''), snapshot, occurred_at FROM audit_log
+		WHERE resource_type = $1 AND resource_name = $2 AND ($3::bigint IS NULL OR id < $3) ORDER BY id DESC LIMIT $4`,
+		typ, name, before, size+1)
+	if err != nil {
+		return nil, false, err
+	}
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (auditDTO, error) {
+		var a auditDTO
+		return a, row.Scan(&a.ID, &a.Action, &a.Actor, &a.Approver, &a.ChangeRequestID, &a.Revision, &a.Attempt, &a.WorkflowID,
+			&a.RequestID, &a.Snapshot, &a.OccurredAt)
+	})
 	more := len(items) > size
 	if more {
 		items = items[:size]
-		cursor.BeforeID = &items[size-1].ID
 	}
 	if items == nil {
 		items = []auditDTO{}
 	}
-	reply(w, http.StatusOK, map[string]any{"items": items, "nextPageToken": token(more, cursor)})
+	return items, more, err
 }

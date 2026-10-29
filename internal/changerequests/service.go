@@ -39,6 +39,20 @@ type Rechecker interface {
 	Recheck(r *Request, p *governance.Policy) error
 }
 
+// Differ is a Resource that shows how a request changes the current
+// revision of its resource (§7.2.3).
+type Differ interface {
+	Diff(ctx context.Context, r *Request) (any, error)
+}
+
+// DiffOf is the diff of r against its resource, or nil.
+func (s *Service) DiffOf(ctx context.Context, r *Request) (any, error) {
+	if d, ok := s.Resources[r.ResourceType].(Differ); ok && r.Operation == "UPDATE" {
+		return d.Diff(ctx, r)
+	}
+	return nil, nil
+}
+
 // AfterApply is a Resource that acts once an applied request has
 // committed: bindings start their workflow (§6.2.2 step 2).
 type AfterApply interface {

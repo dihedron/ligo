@@ -59,6 +59,7 @@ type requestDTO struct {
 	ExpiresAt                 time.Time       `json:"expiresAt"`
 	Sides                     []sideDTO       `json:"sides"`
 	AwaitingApproval          []string        `json:"awaitingApproval"`
+	Diff                      any             `json:"diff,omitempty"` // against the resource's current revision
 }
 
 func dto(r *changerequests.Request, full bool) requestDTO {
@@ -124,8 +125,11 @@ func (s *Server) getRequest(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		var cr *changerequests.Request
 		if cr, err = s.Requests.Get(r.Context(), caller(r), id); err == nil {
-			reply(w, http.StatusOK, dto(cr, true))
-			return
+			d := dto(cr, true)
+			if d.Diff, err = s.Requests.DiffOf(r.Context(), cr); err == nil {
+				reply(w, http.StatusOK, d)
+				return
+			}
 		}
 	}
 	s.fail(w, r, err)

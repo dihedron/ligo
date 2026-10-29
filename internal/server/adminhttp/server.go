@@ -26,6 +26,7 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -42,6 +43,7 @@ type Server struct {
 	DB       *pgxpool.Pool     // the app pool
 	Requests *changerequests.Service
 	Bindings *bindings.Service
+	Sources  *sources.Service
 	Logger   *slog.Logger
 
 	limits limiter
@@ -57,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.requestRoutes(mux)
 	s.opsRoutes(mux)
+	s.sourceRoutes(mux)
 	return s.middleware(mux)
 }
 
@@ -313,6 +316,31 @@ func token(more bool, cursor any) *string {
 	raw, _ := json.Marshal(cursor)
 	t := base64.RawURLEncoding.EncodeToString(raw)
 	return &t
+}
+
+// body reads a request body of at most 1 MiB for a service to decode.
+func body(r *http.Request) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	if err == nil && len(b) > 1<<20 {
+		err = &changerequests.Error{Status: 422, Slug: "validation-failed", Detail: "body: larger than 1 MiB"}
+	}
+	return b, err
+}
+
+// filed answers a filed change: 202 with the request and, once applied,
+// the resource (§7.2.3 responses).
+func (s *Server) filed(w http.ResponseWriter, r *http.Request, cr *changerequests.Request, err error, resource func() (any, error)) {
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var res any
+	if cr.Status == "APPLIED" && resource != nil {
+		if res, err = resource(); err != nil {
+			res = nil // retired or deleted by the change
+		}
+	}
+	reply(w, http.StatusAccepted, map[string]any{"changeRequest": dto(cr, false), "resource": res})
 }
 
 func pathID(r *http.Request) (uuid.UUID, error) {

@@ -198,3 +198,30 @@ func enumerate(alphabet string, n int) []string {
 	}
 	return out
 }
+
+// TestOverlap: two regexes overlap when one identity matches both; the
+// witness is a shortest such identity (T-34).
+func TestOverlap(t *testing.T) {
+	const p = `^spiffe://prod\.internal/ns/payments/sa/`
+	for _, tc := range []struct {
+		a, b     string
+		overlaps bool
+		witness  string
+	}{
+		{p + `ledger-[0-9]+$`, p + `ledger-1[0-9]$`, true, "spiffe://prod.internal/ns/payments/sa/ledger-10"},
+		{p + `ledger-[0-9]+$`, p + `batch-[0-9]+$`, false, ""},
+		{p + `[a-z]+-1$`, p + `ledger-[0-9]$`, true, "spiffe://prod.internal/ns/payments/sa/ledger-1"},
+		{p + `x$`, p + `x$`, true, "spiffe://prod.internal/ns/payments/sa/x"},
+	} {
+		o, err := CheckOverlap(tc.a, tc.b, 10000)
+		if err != nil || o.Overlaps != tc.overlaps || o.Witness != tc.witness {
+			t.Errorf("%s ∩ %s: %+v, %v", tc.a, tc.b, o, err)
+		}
+		if o.Overlaps && (!regexp.MustCompile(tc.a).MatchString(o.Witness) || !regexp.MustCompile(tc.b).MatchString(o.Witness)) {
+			t.Errorf("witness %q does not match both", o.Witness)
+		}
+	}
+	if _, err := CheckOverlap(`^a`, `^a$`, 100); !errors.Is(err, ErrNotAnchored) {
+		t.Errorf("unanchored: %v", err)
+	}
+}

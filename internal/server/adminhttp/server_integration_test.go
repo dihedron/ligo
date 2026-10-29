@@ -31,6 +31,7 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -117,6 +118,7 @@ type env struct {
 	bs      *bindings.Service
 	name    string // a binding filed by olga, waiting for dora
 	request *changerequests.Request
+	suffix  string
 }
 
 func validate(_ context.Context, req *pluginv1.ValidateBindingRequest) (*pluginv1.ValidateBindingResponse, error) {
@@ -160,6 +162,12 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	bs := &bindings.Service{DB: pools.App, Rules: rules, Validate: validate}
 	bs.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": bs}}
+	srcRules, err := sources.NewRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: bs.Requests}
+	bs.Requests.Resources["SOURCE"] = ss
 	az, err := authz.New([]config.RoleBinding{
 		{SPIFFEID: opID, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
 		{SPIFFEID: appID, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
@@ -173,7 +181,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs,
+	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss,
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler)}
 	if listener.AllowBasicAuth {
@@ -216,7 +224,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		_, _ = owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
 		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id = $1", targetID)
 		_, _ = owner.Exec(ctx, "delete from targets where id = $1", targetID)
-		_, _ = owner.Exec(ctx, "delete from sources where name = $1", "src-"+x)
+		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
 	})
 	name := "api-" + x
 	olga := changerequests.Caller{Principal: authz.Principal{SPIFFEID: opID}, Grants: az.For(authz.Principal{SPIFFEID: opID})}
@@ -224,7 +232,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	if err != nil || r.Status != "PENDING" {
 		t.Fatalf("file the binding: %v", err)
 	}
-	return &env{srv: srv, s: s, owner: owner, ca: authority, bs: bs, name: name, request: r}
+	return &env{srv: srv, s: s, owner: owner, ca: authority, bs: bs, name: name, request: r, suffix: x}
 }
 
 // client presents the SVID of id ("" for none) and trusts the test CA.
@@ -414,5 +422,89 @@ func TestMaintenanceAPI(t *testing.T) {
 	if err := v.owner.QueryRow(context.Background(), `select count(*) from audit_log where actor = $1
 		and action in ('SYSTEM_MAINTENANCE_ENABLED', 'SYSTEM_MAINTENANCE_DISABLED') and occurred_at > $2`, adminID, start).Scan(&n); err != nil || n != 2 {
 		t.Errorf("audited %d (%v)", n, err)
+	}
+}
+
+// TestSourcesAPI: register a source through approval, show and list it,
+// narrow it with a diff of the samples it drops, test regexes; refusals
+// are problems (§7.2.3 sources).
+func TestSourcesAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)
+	name, re := "api-src-"+v.suffix, `^spiffe://prod\.internal/ns/api/sa/w-[0-9]+$`
+	sample := func(n string) string { return "spiffe://prod.internal/ns/api/sa/w-" + n }
+	created := v.do(t, olga, "POST", "/v1/admin/sources", map[string]any{"metadata": map[string]string{"name": name},
+		"identity":   map[string]any{"trustDomain": "prod.internal", "svidRegex": re, "sampleSpiffeIds": []string{sample("1"), sample("12")}},
+		"visibility": map[string]string{"mode": "PRIVATE"}})
+	cr, _ := created.body["changeRequest"].(map[string]any)
+	if created.code != 202 || cr["status"] != "PENDING" || created.body["resource"] != nil {
+		t.Fatalf("create: %+v", created)
+	}
+	ok := v.do(t, dora, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve", map[string]string{"payloadSha256": cr["payloadSha256"].(string)})
+	if ok.code != 200 {
+		t.Fatalf("approve: %+v", ok)
+	}
+	got := v.do(t, viewer, "GET", "/v1/admin/sources/"+name, nil)
+	md, _ := got.body["metadata"].(map[string]any)
+	if got.code != 200 || got.body["apiVersion"] != sources.APIVersion || md["scope"] != "dc/corp-prod" || md["revision"] != 1.0 ||
+		md["pendingChangeRequestId"] != nil || len(got.body["audit"].([]any)) == 0 {
+		t.Fatalf("get: %+v", got)
+	}
+
+	narrow := v.do(t, olga, "PUT", "/v1/admin/sources/"+name, map[string]any{"metadata": map[string]string{"name": name},
+		"identity":   map[string]any{"trustDomain": "prod.internal", "svidRegex": `^spiffe://prod\.internal/ns/api/sa/w-[0-9]$`, "sampleSpiffeIds": []string{sample("1")}},
+		"visibility": map[string]string{"mode": "PRIVATE"}, "expectedRevision": 1})
+	ncr, _ := narrow.body["changeRequest"].(map[string]any)
+	if narrow.code != 202 || ncr["status"] != "PENDING" {
+		t.Fatalf("narrow: %+v", narrow)
+	}
+	shown := v.do(t, dora, "GET", "/v1/admin/change-requests/"+ncr["id"].(string), nil)
+	diff, _ := shown.body["diff"].(map[string]any)
+	if fmt.Sprint(diff["droppedSamples"]) != "["+sample("12")+"]" || len(diff["changes"].([]any)) != 1 {
+		t.Errorf("diff: %v", shown.body["diff"])
+	}
+	if md := v.do(t, viewer, "GET", "/v1/admin/sources/"+name, nil).body["metadata"].(map[string]any); md["pendingChangeRequestId"] != ncr["id"] {
+		t.Errorf("pending: %v", md["pendingChangeRequestId"])
+	}
+	for _, tc := range []struct {
+		method, path string
+		body         any
+		code         int
+	}{
+		{"POST", "/v1/admin/sources/" + name + "/deprecate", map[string]any{}, 422},
+		{"POST", "/v1/admin/sources/" + name + "/deprecate", map[string]any{"expectedRevision": 1}, 409},
+		{"POST", "/v1/admin/sources/" + name + "/explode", map[string]any{"expectedRevision": 1}, 404},
+		{"GET", "/v1/admin/sources/nope-" + v.suffix, nil, 404},
+	} {
+		if r := v.do(t, olga, tc.method, tc.path, tc.body); r.code != tc.code {
+			t.Errorf("%s %s: %d %v", tc.method, tc.path, r.code, r.body)
+		}
+	}
+
+	tested := v.do(t, viewer, "POST", "/v1/admin/sources/test", map[string]any{"trustDomain": "prod.internal",
+		"svidRegex": `^spiffe://prod\.internal/ns/api/sa/w-1[0-9]$`, "spiffeIds": []string{sample("12"), sample("3")}, "currentSource": name})
+	n, _ := tested.body["narrowing"].(map[string]any)
+	if tested.code != 200 || tested.body["valid"] != true || tested.body["scope"] != "dc/corp-prod" ||
+		fmt.Sprint(tested.body["matches"]) != fmt.Sprintf("map[%s:true %s:false]", sample("12"), sample("3")) ||
+		n["narrower"] != true || fmt.Sprint(n["droppedSamples"]) != "["+sample("1")+"]" {
+		t.Errorf("test: %+v", tested.body)
+	}
+	overlap := v.do(t, viewer, "POST", "/v1/admin/sources/test", map[string]any{"trustDomain": "prod.internal", "svidRegex": `^spiffe://prod\.internal/ns/api/sa/w-7$`})
+	if o := overlap.body["overlaps"].([]any); len(o) != 1 || o[0].(map[string]any)["source"] != name || o[0].(map[string]any)["witness"] != sample("7") {
+		t.Errorf("overlaps: %v", overlap.body["overlaps"])
+	}
+	if r := v.do(t, viewer, "POST", "/v1/admin/sources/test", map[string]any{"trustDomain": "prod.internal", "svidRegex": "^spiffe://.*$"}); r.body["valid"] != false {
+		t.Errorf("invalid regex: %v", r.body)
+	}
+
+	first := v.do(t, viewer, "GET", "/v1/admin/sources?q="+v.suffix+"&pageSize=1", nil)
+	next, _ := first.body["nextPageToken"].(string)
+	if first.code != 200 || len(first.body["items"].([]any)) != 1 || next == "" {
+		t.Fatalf("list: %+v", first.body)
+	}
+	second := v.do(t, viewer, "GET", "/v1/admin/sources?q="+v.suffix+"&pageSize=1&pageToken="+next, nil)
+	if items := second.body["items"].([]any); len(items) != 1 || second.body["nextPageToken"] != nil ||
+		items[0].(map[string]any)["metadata"].(map[string]any)["name"] == first.body["items"].([]any)[0].(map[string]any)["metadata"].(map[string]any)["name"] {
+		t.Errorf("list page 2: %+v", second.body)
 	}
 }

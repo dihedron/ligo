@@ -257,9 +257,44 @@ type product struct {
 	seen   map[string]bool
 }
 
-// include explores the product of the two programs breadth first, so the
-// first state accepted by pn and not by pw gives a shortest witness.
+// include decides L(pn) ⊆ L(pw): a state accepted by pn and not by pw
+// gives a shortest witness against it.
 func include(pn, pw *syntax.Prog, limit int) (Narrowing, error) {
+	witness, found, states, err := search(pn, pw, limit, func(n, w bool) bool { return n && !w }, false)
+	return Narrowing{Narrower: err == nil && !found, Witness: witness, States: states}, err
+}
+
+// Overlap is the result of CheckOverlap.
+type Overlap struct {
+	// Overlaps reports whether some identity is matched by both regexes.
+	Overlaps bool
+	// Witness is then a shortest such identity.
+	Witness string
+	// States is the number of product states explored.
+	States int
+}
+
+// CheckOverlap decides whether two regexes that passed the Appendix A
+// validator match a common identity (T-34), exploring at most limit
+// product states.
+func CheckOverlap(a, b string, limit int) (Overlap, error) {
+	pa, err := compileForNarrowing(a)
+	if err != nil {
+		return Overlap{}, fmt.Errorf("first regex: %w", err)
+	}
+	pb, err := compileForNarrowing(b)
+	if err != nil {
+		return Overlap{}, fmt.Errorf("second regex: %w", err)
+	}
+	witness, found, states, err := search(pa, pb, limit, func(x, y bool) bool { return x && y }, true)
+	return Overlap{Overlaps: found, Witness: witness, States: states}, err
+}
+
+// search explores the product of the two programs breadth first, so the
+// first state where hit holds of their acceptance gives a shortest
+// witness. A state where pn is dead is not expanded, nor, with both, one
+// where pw is.
+func search(pn, pw *syntax.Prog, limit int, hit func(n, w bool) bool, both bool) (string, bool, int, error) {
 	start := productNode{
 		n:       frontierClose(pn, []uint32{startPC(pn)}, true),
 		w:       frontierClose(pw, []uint32{startPC(pw)}, true),
@@ -269,17 +304,17 @@ func include(pn, pw *syntax.Prog, limit int) (Narrowing, error) {
 	x := &product{pn: pn, pw: pw, reps: classes(pn, pw), nodes: []productNode{start}, seen: map[string]bool{key(start.n, start.w, true): true}}
 	for i := 0; i < len(x.nodes); i++ {
 		cur := x.nodes[i]
-		if acceptsAtEnd(pn, cur.n, cur.atStart) && !acceptsAtEnd(pw, cur.w, cur.atStart) {
-			return Narrowing{Witness: x.witness(i), States: len(x.nodes)}, nil
+		if hit(acceptsAtEnd(pn, cur.n, cur.atStart), acceptsAtEnd(pw, cur.w, cur.atStart)) {
+			return x.witness(i), true, len(x.nodes), nil
 		}
-		if len(cur.n) == 0 {
-			continue // the new regex is dead: nothing more it can accept
+		if len(cur.n) == 0 || both && len(cur.w) == 0 {
+			continue // nothing more can be accepted on this path
 		}
 		if !x.expand(i, limit) {
-			return Narrowing{States: len(x.nodes)}, ErrUndecided
+			return "", false, len(x.nodes), ErrUndecided
 		}
 	}
-	return Narrowing{Narrower: true, States: len(x.nodes)}, nil
+	return "", false, len(x.nodes), nil
 }
 
 // expand adds the unseen successors of node i on every representative rune;
