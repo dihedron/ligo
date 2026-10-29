@@ -210,7 +210,7 @@ func (s *Service) Decline(ctx context.Context, c Caller, id uuid.UUID, side, com
 
 // Withdraw closes a pending request at its requester's wish.
 func (s *Service) Withdraw(ctx context.Context, c Caller, id uuid.UUID, comment string) error {
-	r, err := s.load(ctx, c, id)
+	r, err := s.Get(ctx, c, id)
 	if err != nil {
 		return err
 	}
@@ -225,8 +225,9 @@ func (s *Service) Withdraw(ctx context.Context, c Caller, id uuid.UUID, comment 
 	})
 }
 
-// load reads a request the caller can see (404 otherwise).
-func (s *Service) load(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
+// Get reads a change request the caller can see (404 otherwise): every
+// scope of the request and of its sides counts (§7.2.4).
+func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
 	r, err := read(ctx, s.DB, id)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !c.Grants.Sees(r.scopes()...)) {
 		return nil, refuse(404, "not-found", "change request %s", id)
@@ -235,7 +236,7 @@ func (s *Service) load(ctx context.Context, c Caller, id uuid.UUID) (*Request, e
 }
 
 func (s *Service) pending(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
-	r, err := s.load(ctx, c, id)
+	r, err := s.Get(ctx, c, id)
 	if err == nil && r.Status != "PENDING" {
 		return nil, refuse(409, "change-request-not-pending", "the change request is %s", r.Status)
 	}
