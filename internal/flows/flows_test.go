@@ -135,6 +135,37 @@ func TestAllowlist(t *testing.T) {
 	}
 }
 
+// TestCheckEndpoint: an endpoint without a port is allowed only by an entry
+// without a port (§5.7).
+func TestCheckEndpoint(t *testing.T) {
+	al, err := ParseAllowlist([]string{"10.1.0.0/16", "db.internal", "pg.internal:5432", "[2001:db8::7]:5432"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []struct {
+		host string
+		port int
+		ok   bool
+	}{
+		{"db.internal", 0, true},
+		{"DB.internal", 8200, true},
+		{"pg.internal", 5432, true},
+		{"pg.internal", 5433, false},
+		{"pg.internal", 0, false}, // no port: only an entry without port allows it
+		{"10.1.2.3", 9000, true},
+		{"10.2.0.1", 9000, false},
+		{"2001:db8::7", 5432, true},
+		{"2001:db8::7", 0, false},
+		{"other.internal", 0, false},
+		{"", 0, false},
+	} {
+		err := al.CheckEndpoint(v.host, v.port)
+		if v.ok != (err == nil) || (err != nil && !errors.Is(err, ErrDestinationNotAllowed)) {
+			t.Errorf("%s:%d: %v", v.host, v.port, err)
+		}
+	}
+}
+
 func checkAllowed(t *testing.T, al Allowlist, dest, ports string, ok bool) {
 	t.Helper()
 	f := decode(t, `{"name":"f","purpose":"DATA","protocol":"TCP","destination":"`+dest+`","ports":`+ports+`,"tls":false}`)

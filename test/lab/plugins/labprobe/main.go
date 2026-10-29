@@ -40,7 +40,7 @@ func (*probe) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.De
 	return &pluginv1.DescribeResponse{
 		PluginType: "labprobe.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
 		InstanceConfigSchemaJson: `{"type":"object"}`, // the bootstrap settings, checked by the probe itself
-		Capabilities:             &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{}},
+		Capabilities:             &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{ClientOutputSchemaJson: `{"type":"object"}`}},
 	}, nil
 }
 

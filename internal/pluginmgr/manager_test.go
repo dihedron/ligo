@@ -287,6 +287,36 @@ func TestManagerRule3(t *testing.T) {
 
 func first(s Spec, _ *pluginv1.InstanceDescriptor) Spec { return s }
 
+// TestManagerOutputValidators: before any process is configured, a platform
+// or store whose output schema does not compile is refused; otherwise each
+// of their instances gets a validator with its allowed_endpoints (§5.7).
+func TestManagerOutputValidators(t *testing.T) {
+	for _, schema := range []string{"", `{"type":7}`} {
+		// "two" would fail ConfigureInstances: the schema must be refused first
+		_, _, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_OUTPUT_SCHEMA=" + schema}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "two", false)}})
+		if err == nil || !strings.Contains(err.Error(), "output schema") {
+			t.Errorf("schema %q: err = %v", schema, err)
+		}
+	}
+	in := instance("pg-prod", "a", false)
+	in.ConfigJson = `{"allowed_endpoints":["pg.prod.internal:5432"]}`
+	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{in}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := m.OutputValidator(target, "pg-prod")
+	if v == nil || v.Validate([]byte(`{}`), []*pluginv1.Endpoint{{Host: "pg.prod.internal", Port: 5432}}) != nil ||
+		v.Validate([]byte(`{}`), []*pluginv1.Endpoint{{Host: "evil.example", Port: 5432}}) == nil {
+		t.Error("platform validator does not use the instance's allowed_endpoints")
+	}
+	if m.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, "none-prod") == nil {
+		t.Error("no validator for the builtin store none.v1")
+	}
+	if m.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, "svid-prod") != nil {
+		t.Error("an identity provider has a validator")
+	}
+}
+
 // TestManagerRestartDescribeChanged: a restarted process that describes
 // itself differently is not used (§5.2).
 func TestManagerRestartDescribeChanged(t *testing.T) {

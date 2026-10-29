@@ -11,6 +11,8 @@
 // platform provider's modes, comma-separated; default SVID) and TESTPLUGIN_STRATEGIES (a
 // store's name:MODE pairs, comma-separated) fill its capabilities; modes
 // are IdentityMode names without the IDENTITY_MODE_ prefix.
+// TESTPLUGIN_OUTPUT_SCHEMA, when set, replaces a platform provider's or
+// store's output schema (default: any object).
 //
 // ConfigureInstances resolves an instance by its match_expr: "shared" to one
 // SPIFFE ID for all, "foreign" to another trust domain, "skip" to nothing,
@@ -66,7 +68,7 @@ func (control) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 			ProducedIdentityMode: mode(os.Getenv("TESTPLUGIN_PRODUCES")),
 		}}
 	case "store":
-		store := &pluginv1.SecretStoreCapabilities{}
+		store := &pluginv1.SecretStoreCapabilities{ClientOutputSchemaJson: outputSchema()}
 		for _, pair := range list("TESTPLUGIN_STRATEGIES") {
 			name, m, _ := strings.Cut(pair, ":")
 			store.SecretStorageStrategies = append(store.SecretStorageStrategies,
@@ -74,7 +76,7 @@ func (control) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 		}
 		d.Capabilities = &pluginv1.DescribeResponse_SecretStore{SecretStore: store}
 	default:
-		platform := &pluginv1.PlatformProviderCapabilities{}
+		platform := &pluginv1.PlatformProviderCapabilities{ClientOutputSchemaJson: outputSchema()}
 		if _, ok := os.LookupEnv("TESTPLUGIN_ACCEPTS"); !ok {
 			platform.AcceptedIdentityModes = []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_SVID}
 		}
@@ -84,6 +86,13 @@ func (control) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 		d.Capabilities = &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: platform}
 	}
 	return d, nil
+}
+
+func outputSchema() string {
+	if s, ok := os.LookupEnv("TESTPLUGIN_OUTPUT_SCHEMA"); ok {
+		return s
+	}
+	return `{"type":"object"}`
 }
 
 func mode(name string) pluginv1.IdentityMode {

@@ -2,6 +2,7 @@ package pluginmgr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/outputvalidation"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -60,8 +63,10 @@ type Manager struct {
 	procs []*process
 	byKey map[key]*process
 	sems  map[key]chan struct{}
-	stop  chan struct{}
-	wg    sync.WaitGroup
+	// validators check the outputs of platform and store instances (§5.7)
+	validators map[key]*outputvalidation.Validator
+	stop       chan struct{}
+	wg         sync.WaitGroup
 }
 
 type process struct {
@@ -77,7 +82,7 @@ func New(specs []Spec, opts Options) *Manager {
 	m := &Manager{
 		opts:  opts,
 		log:   slog.New(pluginsdk.NewRedactingHandler(opts.Logger.Handler())),
-		byKey: map[key]*process{}, sems: map[key]chan struct{}{}, stop: make(chan struct{}),
+		byKey: map[key]*process{}, sems: map[key]chan struct{}{}, validators: map[key]*outputvalidation.Validator{}, stop: make(chan struct{}),
 	}
 	for _, s := range specs {
 		p := &process{spec: s}
@@ -94,7 +99,8 @@ func New(specs []Spec, opts Options) *Manager {
 
 // Start launches every process in two passes (§5.2): it spawns and
 // describes them all, checks every instance's config against its plugin's
-// schema (rule 8) and every platform's wiring (rule 3), then configures their instances and checks the SVIDs
+// schema (rule 8) and every platform's wiring (rule 3), and compiles the
+// output validators of platforms and stores (§5.7), then configures their instances and checks the SVIDs
 // they resolved: one each, in the zone's trust domain (INV-10), distinct
 // unless every instance sharing one allows it (ADR-03). Any failure is fatal
 // and names the instance (AC-15).
@@ -117,6 +123,9 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		}
 	}
 	if err := m.wire(); err != nil {
+		return err
+	}
+	if err := m.buildValidators(); err != nil {
 		return err
 	}
 	owners := map[string][]*pluginv1.InstanceDescriptor{}
@@ -279,6 +288,46 @@ func wirePlatform(in *pluginv1.InstanceDescriptor, platform *pluginv1.PlatformPr
 	}
 	in.IdentityMode = mode
 	return nil
+}
+
+// buildValidators compiles, for each platform and store instance, its
+// plugin's output schema with the instance's allowed_endpoints (§5.7).
+func (m *Manager) buildValidators() error {
+	for _, p := range m.procs {
+		var schema string
+		switch c := p.described.GetCapabilities().(type) {
+		case *pluginv1.DescribeResponse_PlatformProvider:
+			schema = c.PlatformProvider.GetClientOutputSchemaJson()
+		case *pluginv1.DescribeResponse_SecretStore:
+			schema = c.SecretStore.GetClientOutputSchemaJson()
+		default:
+			continue
+		}
+		for _, in := range p.spec.Instances {
+			var cfg struct {
+				AllowedEndpoints []string `json:"allowed_endpoints"`
+			}
+			if err := json.Unmarshal([]byte(in.GetConfigJson()), &cfg); err != nil {
+				return fmt.Errorf("%s: instance %q: config: %w", what(p.spec), in.GetName(), err)
+			}
+			allow, err := flows.ParseAllowlist(cfg.AllowedEndpoints)
+			if err != nil {
+				return fmt.Errorf("%s: instance %q: %w", what(p.spec), in.GetName(), err)
+			}
+			v, err := outputvalidation.New(schema, allow)
+			if err != nil {
+				return fmt.Errorf("%s: output schema: %w", what(p.spec), err)
+			}
+			m.validators[key{p.spec.Kind, in.GetName()}] = v
+		}
+	}
+	return nil
+}
+
+// OutputValidator is the output validator of a platform or store
+// instance, or nil (§5.7).
+func (m *Manager) OutputValidator(kind pluginv1.PluginKind, instance string) *outputvalidation.Validator {
+	return m.validators[key{kind, instance}]
 }
 
 // checkConfigs validates every instance's config against the plugin's

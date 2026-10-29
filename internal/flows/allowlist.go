@@ -100,6 +100,24 @@ func (al Allowlist) CheckFlow(f Flow) error {
 	return nil
 }
 
+// CheckEndpoint checks that host (a DNS name or an address) on port lies
+// within the allowlist; port 0 (none given) is allowed only by an entry
+// without a port, which allows any (§5.7).
+func (al Allowlist) CheckEndpoint(host string, port int) error {
+	var prefix netip.Prefix
+	a, err := netip.ParseAddr(host)
+	isIP := err == nil
+	if isIP {
+		prefix = netip.PrefixFrom(a, a.BitLen())
+	}
+	for _, e := range al.entries {
+		if e.covers(prefix, isIP, host, Port{Low: port}) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: endpoint %s", ErrDestinationNotAllowed, net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
 func portString(p Port) string {
 	if !p.isRange {
 		return strconv.Itoa(p.Low)
