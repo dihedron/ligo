@@ -454,37 +454,24 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	if r.Operation == "DELETE" {
 		return s.applyDelete(ctx, tx, r, cur)
 	}
-	var sourceID, targetID uuid.UUID
-	var td, regex, platform, srcState, tgtState, levelState string
-	var srcRev, tgtRev int64
-	err := tx.QueryRow(ctx, `SELECT s.id, s.revision, s.state, s.trust_domain, s.svid_regex, t.id, t.revision, t.state, t.platform, l.state
-		FROM sources s, targets t JOIN target_access_levels l ON l.target_id = t.id AND l.name = $3
-		WHERE s.name = $1 AND s.state <> 'RETIRED' AND t.name = $2 AND t.state <> 'RETIRED'
-		FOR SHARE OF s, t, l`, b.Source, b.Target, b.AccessLevel).Scan(&sourceID, &srcRev, &srcState, &td, &regex, &targetID, &tgtRev,
-		&tgtState, &platform, &levelState)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, refuse(409, "resource-changed", "the source, the target or the access level is gone")
-	}
+	snap, err := lockSnapshot(ctx, tx, &b)
 	if err != nil {
 		return nil, err
 	}
 	if r.Consent == changerequests.ConsentAll && (cur == nil || b.AccessLevel != cur.accessLevel) &&
-		(srcState != "ACTIVE" || tgtState != "ACTIVE" || levelState != "ACTIVE") {
+		(snap.srcState != "ACTIVE" || snap.tgtState != "ACTIVE" || snap.levelState != "ACTIVE") {
 		return nil, refuse(409, "resource-deprecated", "the source, the target and the access level must be ACTIVE")
 	}
-	if srcRev != b.SourceRevision || tgtRev != b.TargetRevision {
+	if snap.srcRev != b.SourceRevision || snap.tgtRev != b.TargetRevision {
 		return nil, refuse(409, "normalization-drift", "the source or the target changed since validation: file the change again")
-	}
-	labels, _ := json.Marshal(b.Labels)
-	if b.Labels == nil {
-		labels = []byte("{}")
 	}
 	var id uuid.UUID
 	var revision, attempt int64
 	if cur == nil {
-		pl := s.Rules.Platforms[platform]
+		labels := labelsJSON(b.Labels)
+		pl := s.Rules.Platforms[snap.platform]
 		if pl.SecretStorageStrategy == "" {
-			return nil, fmt.Errorf("bindings: platform %s has no resolved secret_storage_strategy", platform)
+			return nil, fmt.Errorf("bindings: platform %s has no resolved secret_storage_strategy", snap.platform)
 		}
 		id, revision, attempt = uuid.NewV7(), 1, 1
 		principal, err := engine.DerivedPrincipalName(id, pl.PrincipalPrefix)
@@ -497,10 +484,10 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			source_revision, target_revision, source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20::jsonb, $21, $22,
 			$23, $24, $25, $26, $27::jsonb, $28, $28)`,
-			id, b.Name, sourceID, targetID, b.AccessLevel, pl.Zone, pl.Type, pl.Name, pl.IdentityProviderType, pl.IdentityProviderInstance,
+			id, b.Name, snap.sourceID, snap.targetID, b.AccessLevel, pl.Zone, pl.Type, pl.Name, pl.IdentityProviderType, pl.IdentityProviderInstance,
 			pl.SecretStoreType, pl.SecretStoreInstance, pl.SecretStorageStrategy, principal, r.SourceScope, r.TargetScope, r.PlatformScope,
-			string(b.Parameters), null(b.Purpose), string(labels), b.ExpiresAt, workflowID(id, revision, attempt), srcRev, tgtRev, td, regex,
-			string(b.RequestedSpec), r.RequestedBy)
+			string(b.Parameters), null(b.Purpose), labels, b.ExpiresAt, workflowID(id, revision, attempt), snap.srcRev, snap.tgtRev, snap.td,
+			snap.regex, string(b.RequestedSpec), r.RequestedBy)
 		if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) {
 			switch pe.ConstraintName {
 			case "uq_binding_source_target":
@@ -517,24 +504,63 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		}
 		r.ResourceID = &id
 	} else {
-		id, revision, attempt = cur.id, cur.revision+1, cur.attempt+1
-		if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, purpose = $4, labels = $5::jsonb,
-			expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
-			current_step = 'INIT', status_message = '', last_transition_at = now(), rotate_static_secrets = $16,
-			source_revision = $10, target_revision = $11, source_trust_domain = $12, source_svid_regex = $13, requested_spec = $14::jsonb,
-			updated_at = now(), updated_by = $15 WHERE id = $1`,
-			id, b.AccessLevel, string(b.Parameters), null(b.Purpose), string(labels), b.ExpiresAt, revision, attempt,
-			workflowID(id, revision, attempt), srcRev, tgtRev, td, regex, string(b.RequestedSpec), r.RequestedBy,
-			cur.phase == "FAILED"); err != nil { // §3.11: an update of a FAILED binding rotates
-			return nil, err
-		}
-		// the new revision includes every applied change (§6.2.2)
-		if _, err := tx.Exec(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1", id); err != nil {
+		id = cur.id
+		if revision, attempt, err = revise(ctx, tx, cur, &b, snap, r.RequestedBy); err != nil {
 			return nil, err
 		}
 	}
 	return []audit.Entry{{ResourceType: "BINDING", ResourceID: &id, ResourceName: b.Name, ChangeRequestID: &r.ID,
 		Action: "APPLY_STARTED", Revision: &revision, Attempt: &attempt, WorkflowID: workflowID(id, revision, attempt)}}, nil
+}
+
+// snapshot is the source, target and access level a revision is composed
+// from, read under FOR SHARE locks (§4.3).
+type snapshot struct {
+	sourceID, targetID             uuid.UUID
+	td, regex, platform            string
+	srcState, tgtState, levelState string
+	srcRev, tgtRev                 int64
+}
+
+func lockSnapshot(ctx context.Context, tx pgx.Tx, b *Binding) (*snapshot, error) {
+	sn := &snapshot{}
+	err := tx.QueryRow(ctx, `SELECT s.id, s.revision, s.state, s.trust_domain, s.svid_regex, t.id, t.revision, t.state, t.platform, l.state
+		FROM sources s, targets t JOIN target_access_levels l ON l.target_id = t.id AND l.name = $3
+		WHERE s.name = $1 AND s.state <> 'RETIRED' AND t.name = $2 AND t.state <> 'RETIRED'
+		FOR SHARE OF s, t, l`, b.Source, b.Target, b.AccessLevel).Scan(&sn.sourceID, &sn.srcRev, &sn.srcState, &sn.td, &sn.regex,
+		&sn.targetID, &sn.tgtRev, &sn.tgtState, &sn.platform, &sn.levelState)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, refuse(409, "resource-changed", "the source, the target or the access level is gone")
+	}
+	return sn, err
+}
+
+// revise starts the next revision of cur, composed from b and sn
+// (§6.2.2 step 3): PROVISIONING with a new attempt and workflow, rotating
+// for a FAILED binding or a changed regex (§6.4). The new revision
+// includes every applied change: its propagation row goes.
+func revise(ctx context.Context, tx pgx.Tx, cur *stored, b *Binding, sn *snapshot, actor string) (revision, attempt int64, err error) {
+	revision, attempt = cur.revision+1, cur.attempt+1
+	if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, purpose = $4, labels = $5::jsonb,
+		expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
+		current_step = 'INIT', status_message = '', last_transition_at = now(),
+		rotate_static_secrets = (phase = 'FAILED' OR source_svid_regex IS DISTINCT FROM $13),
+		source_revision = $10, target_revision = $11, source_trust_domain = $12, source_svid_regex = $13, requested_spec = $14::jsonb,
+		updated_at = now(), updated_by = $15 WHERE id = $1`,
+		cur.id, b.AccessLevel, string(b.Parameters), null(b.Purpose), labelsJSON(b.Labels), b.ExpiresAt, revision, attempt,
+		workflowID(cur.id, revision, attempt), sn.srcRev, sn.tgtRev, sn.td, sn.regex, string(b.RequestedSpec), actor); err != nil {
+		return 0, 0, err
+	}
+	_, err = tx.Exec(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1", cur.id)
+	return revision, attempt, err
+}
+
+func labelsJSON(l map[string]string) string {
+	if l == nil {
+		return "{}"
+	}
+	b, _ := json.Marshal(l)
+	return string(b)
 }
 
 // applyDelete starts the deletion of a binding (§6.2.2, §3.11): DELETING
