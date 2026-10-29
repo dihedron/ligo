@@ -64,7 +64,7 @@ func (v *Validator) Validate(output []byte, declared []*pluginv1.Endpoint) error
 		return fmt.Errorf("%w: not JSON: %w", ErrFailed, err)
 	}
 	if err := v.schema.Validate(doc); err != nil {
-		return fmt.Errorf("%w: %w", ErrFailed, err)
+		return fmt.Errorf("%w: %s", ErrFailed, brief(err))
 	}
 	for _, e := range declared {
 		if err := v.allow.CheckEndpoint(e.GetHost(), int(e.GetPort())); err != nil {
@@ -72,6 +72,27 @@ func (v *Validator) Validate(output []byte, declared []*pluginv1.Endpoint) error
 		}
 	}
 	return nil
+}
+
+// brief is a schema failure as the locations in the output and what failed
+// there, without the schema's own URL: it may reach status messages.
+func brief(err error) string {
+	ve := (*jsonschema.ValidationError)(nil)
+	if !errors.As(err, &ve) {
+		return err.Error()
+	}
+	var out []string
+	var walk func(u jsonschema.OutputUnit)
+	walk = func(u jsonschema.OutputUnit) {
+		if u.Error != nil {
+			out = append(out, fmt.Sprintf("at '%s': %s", u.InstanceLocation, u.Error))
+		}
+		for _, e := range u.Errors {
+			walk(e)
+		}
+	}
+	walk(*ve.BasicOutput())
+	return strings.Join(out, "; ")
 }
 
 // vocabulary checks the values of annotated properties against allow while
