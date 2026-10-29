@@ -124,8 +124,12 @@ HCL
 		token_policies=ligo-plugin-store-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
 		die "bao-prod: cannot write the role ligo-plugin-store-vault"
 	inner_exec bao-prod sh -c 'cat >/root/lab-standins-check.hcl' <<'HCL'
-# lab only: the tests read what store-vault wrote
+# lab only: the tests read what store-vault wrote, and the target admin's
+# credential, to cause drift that reconciliation repairs
 path "kv/data/bindings/*" {
+  capabilities = ["read"]
+}
+path "kv/data/ligo/bootstrap/target-postgres" {
   capabilities = ["read"]
 }
 path "database/creds/binding-*" {

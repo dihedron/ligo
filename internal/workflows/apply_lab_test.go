@@ -102,11 +102,22 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 	return m
 }
 
-// TestLabApply: a binding filed through the bindings service is applied at
-// once (a self-service scope), its workflow starts after the commit and
-// provisions the three stages with the lab's plugins, sealing with Transit;
-// the stored secret opens the ledger database (§6.2.2, §6.4, AC-01).
-func TestLabApply(t *testing.T) {
+// lab is an ACTIVE binding filed through the bindings service on the lab.
+type lab struct {
+	owner    *pgxpool.Pool
+	engine   *Engine
+	bs       *bindings.Service
+	operator changerequests.Caller
+	name     string
+	id       uuid.UUID
+	auth     []byte
+}
+
+// labBinding files a binding for a fresh source and target on pg-ledger as
+// an operator (a self-service scope, applied at once) and waits for its
+// workflow to make it ACTIVE; everything is removed at the end of the test.
+func labBinding(t *testing.T) *lab {
+	t.Helper()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, labEnv(t, "LIGO_TEST_PG_MIGRATOR_DSN"))
 	if err != nil {
@@ -229,6 +240,17 @@ func TestLabApply(t *testing.T) {
 	if phase != "ACTIVE" {
 		t.Fatalf("binding %s: %s", phase, message)
 	}
+	return &lab{owner: owner, engine: engine, bs: bs, operator: operator, name: name, id: id, auth: auth}
+}
+
+// TestLabApply: a binding filed through the bindings service is applied at
+// once (a self-service scope), its workflow starts after the commit and
+// provisions the three stages with the lab's plugins, sealing with Transit;
+// the stored secret opens the ledger database (§6.2.2, §6.4, AC-01).
+func TestLabApply(t *testing.T) {
+	ctx := context.Background()
+	l := labBinding(t)
+	owner, bs, operator, name, id, auth := l.owner, l.bs, l.operator, l.name, l.id, l.auth
 	var a struct {
 		Strategy string `json:"secretStorageStrategy"`
 		Config   struct {
@@ -276,6 +298,55 @@ func TestLabApply(t *testing.T) {
 	}
 	if st := checkStatus(t, a.Config.SecretPath); st != http.StatusNotFound {
 		t.Errorf("the deleted binding's secret: %d", st)
+	}
+}
+
+// TestLabReconcile: a role granted by hand to an ACTIVE binding's principal
+// is revoked when the reconciler re-applies the binding (§6.6).
+func TestLabReconcile(t *testing.T) {
+	ctx := context.Background()
+	l := labBinding(t)
+	var principal string
+	if err := l.owner.QueryRow(ctx, "select derived_principal_name from bindings where id = $1", l.id).Scan(&principal); err != nil {
+		t.Fatal(err)
+	}
+	admin := checkRead(t, "kv/data/ligo/bootstrap/target-postgres")
+	db, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=%s",
+		admin["username"], admin["password"], labEnv(t, "LIGO_TEST_CA")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close(ctx) }()
+	member := func() bool {
+		var ok bool
+		if err := db.QueryRow(ctx, "select pg_has_role($1, 'LEDGER_RW_ROLE', 'MEMBER')", principal).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if _, err := db.Exec(ctx, `GRANT "LEDGER_RW_ROLE" TO `+pgx.Identifier{principal}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	if !member() {
+		t.Fatal("the drift was not introduced")
+	}
+	if _, err := (&Reconciler{Engine: l.engine, MaxConcurrent: 1000}).Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var phase, message, wf string
+	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		if err := l.owner.QueryRow(ctx, "select phase, status_message, workflow_id from bindings where id = $1", l.id).Scan(&phase, &message, &wf); err != nil {
+			t.Fatal(err)
+		}
+		if phase != "PROVISIONING" || time.Now().After(deadline) {
+			break
+		}
+	}
+	if phase != "ACTIVE" || wf != "ligo:reapply:"+l.id.String()+":r1:a2" {
+		t.Fatalf("binding %s (%s): %s", phase, wf, message)
+	}
+	if member() {
+		t.Error("the re-apply left the hand-granted role")
 	}
 }
 

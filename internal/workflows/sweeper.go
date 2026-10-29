@@ -19,6 +19,9 @@ type Sweeper struct {
 	Engine   *Engine
 	Interval time.Duration // between sweeps; default 30s
 	Stale    time.Duration // a workflow quieter than this is checked; default 60s
+	// Retention is storage.dbos.workflow_retention: finished workflows older
+	// than it are purged (§6.7); default 168h.
+	Retention time.Duration
 }
 
 // Run sweeps every Interval until ctx ends; errors wait for the next tick.
@@ -52,7 +55,7 @@ func (s *Sweeper) Sweep(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_sweeper'))") }()
-	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx))
+	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx))
 }
 
 // workflows starts the workflow of a stale binding that DBOS does not know
@@ -160,6 +163,25 @@ func (s *Sweeper) dependencies(ctx context.Context) error {
 	return s.closeAll(ctx, `SELECT b.id FROM change_requests b JOIN change_requests d ON d.id = b.depends_on_cr_id
 		WHERE b.status = 'PENDING' AND d.status NOT IN ('PENDING', 'APPLIED')`,
 		"FAILED_TO_APPLY", "inline source not registered", "CR_DEPENDENCY_FAILED")
+}
+
+// retain purges the finished workflows older than Retention, their step
+// outputs (sealed ciphertexts only) included (§6.7, EXT-06).
+func (s *Sweeper) retain(ctx context.Context) error {
+	retention := s.Retention
+	if retention == 0 {
+		retention = 168 * time.Hour
+	}
+	old, err := dbos.ListWorkflows(s.Engine.DBOS, dbos.WithFilterCreatedBefore(time.Now().Add(-retention)), dbos.WithFilterLimit(1000),
+		dbos.WithFilterStatus(dbos.WorkflowStatusSuccess, dbos.WorkflowStatusError, dbos.WorkflowStatusCancelled))
+	if err != nil || len(old) == 0 {
+		return err
+	}
+	ids := make([]string, len(old))
+	for i, w := range old {
+		ids[i] = w.ID
+	}
+	return dbos.DeleteWorkflows(s.Engine.DBOS, ids)
 }
 
 // sessions deletes admin sessions expired or revoked over 7 days ago.
