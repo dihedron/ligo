@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -116,6 +117,28 @@ func (al Allowlist) CheckEndpoint(host string, port int) error {
 		}
 	}
 	return fmt.Errorf("%w: endpoint %s", ErrDestinationNotAllowed, net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+var multirangeRE = regexp.MustCompile(`^\{\[\d+,\d+\)(,\[\d+,\d+\))*\}$`)
+var rangeRE = regexp.MustCompile(`\[(\d+),(\d+)\)`)
+
+// ParseMultirange reads ports back from an int4multirange column, whose
+// ranges are half-open: single ports become numbers, wider ranges ranges.
+func ParseMultirange(s string) ([]Port, error) {
+	if !multirangeRE.MatchString(s) {
+		return nil, fmt.Errorf("%w: ports %q", ErrInvalidFlow, s)
+	}
+	var ports []Port
+	for _, m := range rangeRE.FindAllStringSubmatch(s, -1) {
+		low, _ := strconv.Atoi(m[1])
+		high, _ := strconv.Atoi(m[2])
+		high--
+		if low < 1 || high > 65535 || high < low {
+			return nil, fmt.Errorf("%w: ports %q", ErrInvalidFlow, s)
+		}
+		ports = append(ports, Port{Low: low, High: high, isRange: high != low})
+	}
+	return ports, nil
 }
 
 func portString(p Port) string {

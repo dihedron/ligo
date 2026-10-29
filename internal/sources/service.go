@@ -205,7 +205,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	if cur.Revision != *r.ExpectedRevision {
 		return nil, refuse(409, "revision-conflict", "the source is at revision %d", cur.Revision)
 	}
-	if err := transition(cur.Metadata.State, src.Metadata.State); err != nil {
+	if err := Transition(cur.Metadata.State, src.Metadata.State); err != nil {
 		return nil, err
 	}
 	if err := s.Rules.narrows(cur.Identity.SVIDRegex, src.Identity.SVIDRegex); err != nil {
@@ -234,15 +234,11 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	}
 	if src.Identity.SVIDRegex != cur.Identity.SVIDRegex {
 		// a regex can only narrow (§3.7): priority 0
-		tag, err := tx.Exec(ctx, `INSERT INTO binding_propagation_queue (binding_id, cause_change_request_id, cause, priority)
-			SELECT id, $2, 'SOURCE', 0 FROM bindings WHERE source_id = $1 AND phase NOT IN ('DELETING', 'DELETE_FAILED')
-			ON CONFLICT (binding_id) DO UPDATE SET cause_change_request_id = EXCLUDED.cause_change_request_id,
-				cause = EXCLUDED.cause, priority = least(binding_propagation_queue.priority, EXCLUDED.priority),
-				enqueued_at = now(), attempts = 0`, cur.ID, r.ID)
+		n, err := store.Enqueue(ctx, tx, "SOURCE", cur.ID, r.ID, 0, nil)
 		if err != nil {
-			return nil, fmt.Errorf("sources: enqueue propagation: %w", err)
+			return nil, err
 		}
-		if n := tag.RowsAffected(); n > 0 {
+		if n > 0 {
 			entries = append(entries, entry(r, "PROPAGATION_ENQUEUED", revision, map[string]any{"bindings": n, "priority": 0}))
 		}
 	}

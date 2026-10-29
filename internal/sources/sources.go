@@ -112,7 +112,7 @@ func (r *Rules) validate(s *Source, cur *Source) (string, error) {
 		if s.Metadata.State == "" {
 			s.Metadata.State = cur.Metadata.State
 		}
-		if err := transition(cur.Metadata.State, s.Metadata.State); err != nil {
+		if err := Transition(cur.Metadata.State, s.Metadata.State); err != nil {
 			return "", err
 		}
 		if s.Identity.TrustDomain != cur.Identity.TrustDomain {
@@ -215,15 +215,16 @@ func (v *Visibility) Normalize() error {
 	return nil
 }
 
-// transition checks a change of state (§7.2.3 step 9); no change is allowed.
-func transition(from, to string) error {
-	ok := from == to && from != "RETIRED"
+// Transition checks a change of the state of a source, a target or an
+// access level (§7.2.3 step 9); no change is allowed.
+func Transition(from, to string) error {
+	ok := from == to
 	switch from + ">" + to {
 	case "ACTIVE>DEPRECATED", "DEPRECATED>ACTIVE", "ACTIVE>RETIRED", "DEPRECATED>RETIRED":
 		ok = true
 	}
 	if !ok {
-		return refuse(409, "invalid-transition", "a source cannot go from %s to %s", from, to)
+		return refuse(409, "invalid-transition", "the state cannot go from %s to %s", from, to)
 	}
 	return nil
 }

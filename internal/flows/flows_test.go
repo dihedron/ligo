@@ -135,6 +135,24 @@ func TestAllowlist(t *testing.T) {
 	}
 }
 
+// TestParseMultirange reads the ports column back (target_network_flows):
+// single ports stay numbers, wider ranges stay ranges.
+func TestParseMultirange(t *testing.T) {
+	ports, err := ParseMultirange("{[1522,1523),[2000,2101)}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(ports)
+	if string(data) != `[1522,"2000-2100"]` {
+		t.Errorf("ports %s", data)
+	}
+	for _, bad := range []string{"", "{}", "{[0,1)}", "{(1,2]}", "1522"} {
+		if _, err := ParseMultirange(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
 // TestCheckEndpoint: an endpoint without a port is allowed only by an entry
 // without a port (§5.7).
 func TestCheckEndpoint(t *testing.T) {

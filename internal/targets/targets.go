@@ -4,6 +4,7 @@
 package targets
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,9 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/sources"
+	"google.golang.org/protobuf/proto"
 )
 
 // Target is the desired state of a target (§3.3) without the fields ligo
@@ -111,33 +114,40 @@ func invalid(format string, args ...any) *changerequests.Error {
 
 var levelNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-// validate runs the pipeline of a new target (§7.2.3 steps 1 to 3 and 5)
-// and normalizes t. authorize, if set, runs before the plugin is called
-// (step 4).
-func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, authorize func(*Target) error) error {
+// validate runs the pipeline of a new target, or of an update of cur
+// (§7.2.3 steps 1 to 3, 5 and 6), and normalizes t. authorize, if set, runs
+// before the plugin is called (step 4).
+func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cur *Target, authorize func(*Target) error) error {
 	if t.Kind != "" && t.Kind != "Target" {
 		return invalid("kind %q is not Target", t.Kind)
 	}
 	t.Kind = "Target"
 	m := &t.Metadata
-	if m.PlatformType != "" || m.PlatformScope != "" || m.Zone != "" || m.State != "" {
-		return invalid("metadata.platformType, platformScope, zone and state are set by ligo")
-	}
-	if !governance.ValidScopePath(m.Scope) {
-		return invalid("metadata.scope %q is not a scope", m.Scope)
-	}
-	if err := engine.CheckName(engine.KindTarget, m.Name, m.Scope, r.NamePrefixes); err != nil {
-		return invalid("metadata.name: %v", err)
+	if cur == nil {
+		if m.PlatformType != "" || m.PlatformScope != "" || m.Zone != "" || m.State != "" {
+			return invalid("metadata.platformType, platformScope, zone and state are set by ligo")
+		}
+		if !governance.ValidScopePath(m.Scope) {
+			return invalid("metadata.scope %q is not a scope", m.Scope)
+		}
+		if err := engine.CheckName(engine.KindTarget, m.Name, m.Scope, r.NamePrefixes); err != nil {
+			return invalid("metadata.name: %v", err)
+		}
+	} else if err := immutable(m, &cur.Metadata); err != nil {
+		return err
 	}
 	p, ok := r.Platforms[m.Platform]
 	if !ok {
 		return invalid("metadata.platform %q is not a configured platform", m.Platform)
 	}
-	if !slices.ContainsFunc(p.TargetScopes, func(pat string) bool { return governance.ScopeMatches(pat, m.Scope) }) {
+	if cur == nil && !slices.ContainsFunc(p.TargetScopes, func(pat string) bool { return governance.ScopeMatches(pat, m.Scope) }) {
 		return invalid("metadata.scope %s is not in the target_scopes of %s", m.Scope, p.Name)
 	}
-	m.PlatformType, m.PlatformScope, m.Zone, m.State = p.Type, p.Scope, p.Zone, "ACTIVE"
-	if err := checkLevels(t.AccessLevels); err != nil {
+	m.PlatformType, m.PlatformScope, m.Zone = p.Type, p.Scope, p.Zone
+	if cur == nil {
+		m.State = "ACTIVE"
+	}
+	if err := checkLevels(t.AccessLevels, cur); err != nil {
 		return err
 	}
 	if t.NetworkFlows == nil {
@@ -159,10 +169,52 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, au
 			return err
 		}
 	}
-	return normalize(ctx, call, p, t)
+	if err := normalize(ctx, call, p, t); err != nil || cur == nil {
+		return err
+	}
+	for _, l := range t.AccessLevels {
+		if c := level(cur, l.Name); c != nil && !engine.PrivilegesNarrower(c.Privileges, l.Privileges) {
+			return refuse(422, "widening-not-allowed", "wider: access level %s would add privileges to %v: %v", l.Name, c.Privileges, l.Privileges)
+		}
+	}
+	return nil
 }
 
-func checkLevels(levels []AccessLevel) error {
+// immutable checks the metadata of an update (§3.7) and takes the state of
+// cur when the update gives none.
+func immutable(m, cur *Metadata) error {
+	for _, f := range []struct{ name, got, want string }{
+		{"name", m.Name, cur.Name}, {"platform", m.Platform, cur.Platform}, {"scope", m.Scope, cur.Scope},
+		{"platformType", m.PlatformType, cur.PlatformType}, {"platformScope", m.PlatformScope, cur.PlatformScope},
+		{"zone", m.Zone, cur.Zone},
+	} {
+		if f.got != f.want && (f.got != "" || f.name == "name" || f.name == "platform" || f.name == "scope") {
+			return refuse(422, "immutable-field", "metadata.%s cannot change", f.name)
+		}
+	}
+	if m.State == "" {
+		m.State = cur.State
+	}
+	return sources.Transition(cur.State, m.State)
+}
+
+// level is the access level called name of t, or nil.
+func level(t *Target, name string) *AccessLevel {
+	if t == nil {
+		return nil
+	}
+	for i := range t.AccessLevels {
+		if t.AccessLevels[i].Name == name {
+			return &t.AccessLevels[i]
+		}
+	}
+	return nil
+}
+
+// checkLevels checks the levels of a new target, or of an update of cur:
+// existing levels are kept, change state as allowed, and new ones are
+// ACTIVE.
+func checkLevels(levels []AccessLevel, cur *Target) error {
 	if len(levels) < 1 || len(levels) > 16 {
 		return invalid("accessLevels: 1 to 16")
 	}
@@ -178,12 +230,51 @@ func checkLevels(levels []AccessLevel) error {
 			return invalid("accessLevels.%s.description: at most 1024 characters", l.Name)
 		case len(l.Privileges) > 0:
 			return invalid("accessLevels.%s.privileges is set by ligo", l.Name)
-		case l.State != "" && l.State != "ACTIVE":
+		}
+		seen[l.Name] = true
+		if c := level(cur, l.Name); c != nil {
+			if l.State == "" {
+				l.State = c.State
+			}
+			if err := sources.Transition(c.State, l.State); err != nil {
+				return err
+			}
+			continue
+		}
+		if l.State != "" && l.State != "ACTIVE" {
 			return invalid("accessLevels.%s: a new level is ACTIVE", l.Name)
 		}
-		seen[l.Name], l.State = true, "ACTIVE"
+		l.State = "ACTIVE"
+	}
+	if cur != nil {
+		for _, c := range cur.AccessLevels {
+			if !seen[c.Name] {
+				return invalid("accessLevels: %s cannot be removed; retire it instead", c.Name)
+			}
+		}
 	}
 	return nil
+}
+
+// material reports whether an update needs the platform's consent: a new
+// normalized definition, new flows, a new level, or new privileges of a
+// level (§3.7, §3.10 rule 3).
+func material(cur, t *Target) bool {
+	a, _ := jcs.Transform(cur.Definition)
+	b, _ := jcs.Transform(t.Definition)
+	if !bytes.Equal(a, b) || !slices.EqualFunc(cur.NetworkFlows, t.NetworkFlows, sameFlow) {
+		return true
+	}
+	for _, l := range t.AccessLevels {
+		if c := level(cur, l.Name); c == nil || !slices.Equal(c.Privileges, l.Privileges) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameFlow(a, b flows.Flow) bool {
+	return proto.Equal(toProto(a), toProto(b)) && a.Description == b.Description
 }
 
 func checkMetadata(t *Target) error {

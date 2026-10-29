@@ -144,7 +144,7 @@ func TestValidate(t *testing.T) {
 			p := &plugin{twist: tc.twist}
 			tg := ledger()
 			tc.edit(&tg)
-			err := r.validate(context.Background(), p.validate, &tg, nil)
+			err := r.validate(context.Background(), p.validate, &tg, nil, nil)
 			if slug(err) != tc.want {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
@@ -163,6 +163,73 @@ func TestValidate(t *testing.T) {
 				t.Errorf("plugin request %v", p.calls[0])
 			}
 		})
+	}
+}
+
+// published is ledger() as stored after its publication.
+func published(t *testing.T) Target {
+	t.Helper()
+	tg := ledger()
+	if err := rules(t).validate(context.Background(), (&plugin{}).validate, &tg, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	return tg
+}
+
+// TestValidateUpdate runs the update checks (§7.2.3 step 6, §3.7) and
+// decides whether the change needs the platform's consent.
+func TestValidateUpdate(t *testing.T) {
+	r := rules(t)
+	for name, tc := range map[string]struct {
+		edit     func(*Target)
+		want     string
+		material bool
+	}{
+		"description": {func(t *Target) { t.Description = "General ledger" }, "", false},
+		"definition":  {func(t *Target) { t.Definition = json.RawMessage(`{"schema":"LEDGER_APP2"}`) }, "", true},
+		"flows":       {func(t *Target) { t.NetworkFlows = nil }, "", true},
+		"level added": {func(t *Target) {
+			t.AccessLevels = append(t.AccessLevels, AccessLevel{Name: "admin", Grants: json.RawMessage(`{"roles":["LEDGER_RW_ROLE"]}`)})
+		}, "", true},
+		"grants narrowed (AC-65)": {func(t *Target) { t.AccessLevels[1].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE"]}`) }, "", true},
+		"same privileges (§3.10 rule 3)": {func(t *Target) {
+			t.AccessLevels[1].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE","LEDGER_RO_ROLE"]}`)
+		}, "", false},
+		"level description": {func(t *Target) { t.AccessLevels[0].Description = "Read entries" }, "", false},
+		"level deprecated":  {func(t *Target) { t.AccessLevels[0].State = "DEPRECATED" }, "", false},
+		"grants widened (AC-65)": {func(t *Target) {
+			t.AccessLevels[0].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"]}`)
+		}, "widening-not-allowed", false},
+		"level removed": {func(t *Target) { t.AccessLevels = t.AccessLevels[:1] }, "validation-failed", false},
+		"new level not ACTIVE": {func(t *Target) {
+			t.AccessLevels = append(t.AccessLevels, AccessLevel{Name: "admin", Grants: json.RawMessage(`{}`), State: "DEPRECATED"})
+		}, "validation-failed", false},
+		"platform changed": {func(t *Target) { t.Metadata.Platform = "oracle-test-dynamic" }, "immutable-field", false},
+		"scope changed":    {func(t *Target) { t.Metadata.Scope = "dc/corp-prod/orders" }, "immutable-field", false},
+		"target state":     {func(t *Target) { t.Metadata.State = "BOGUS" }, "invalid-transition", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cur := published(t)
+			tg := published(t)
+			for i := range tg.AccessLevels {
+				tg.AccessLevels[i].Privileges = nil // output only
+			}
+			tc.edit(&tg)
+			err := r.validate(context.Background(), (&plugin{}).validate, &tg, &cur, nil)
+			if slug(err) != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if err == nil && material(&cur, &tg) != tc.material {
+				t.Errorf("material = %t, want %t", !tc.material, tc.material)
+			}
+		})
+	}
+	cur := published(t)
+	cur.AccessLevels[0].State = "RETIRED"
+	tg := published(t)
+	tg.AccessLevels[0].Privileges, tg.AccessLevels[1].Privileges = nil, nil
+	if err := r.validate(context.Background(), (&plugin{}).validate, &tg, &cur, nil); slug(err) != "invalid-transition" {
+		t.Errorf("a retired level is final: %v", err)
 	}
 }
 

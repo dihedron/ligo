@@ -142,7 +142,7 @@ func TestTransition(t *testing.T) {
 		{"RETIRED", "ACTIVE", false},
 		{"ACTIVE", "BOGUS", false},
 	} {
-		if err := transition(tc.from, tc.to); (err == nil) != tc.ok {
+		if err := Transition(tc.from, tc.to); (err == nil) != tc.ok {
 			t.Errorf("%s -> %s: %v", tc.from, tc.to, err)
 		}
 	}

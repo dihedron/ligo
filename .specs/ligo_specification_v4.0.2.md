@@ -95,6 +95,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
 | Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
 | Target pipeline (§7.2.3) | `ValidateTarget` refusing a target, or returning non-canonical `privileges` or levels out of order, is `422 validation-failed`. |
+| Target updates (§3.7, §7.2.3, §4.3) | A target update names its errors as the source pipeline does; its `PLATFORM` side depends on the normalized definition, the flows and the levels' `privileges`, not on the grants as written. New audit action `ACCESS_LEVEL_REACTIVATED`, for the existing `/access-levels/{level}/reactivate`. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -2123,7 +2124,7 @@ GRANT SELECT ON v_active_bindings, v_active_binding_flows TO ligo_reader;
 
 The audit action vocabulary (**Normative**) is (`resource_type` and `resource_name` identify the resource; `SESSION_*`, `CONFIG_*` and `SYSTEM_*` actions may have none):
 - Change requests: `CR_CREATED` (snapshot includes the consent rule, the sides and their bases), `CR_SIDE_APPROVED` (snapshot: side, scope, basis; for `DELEGATED` also `approvalReference` and `automationContext`), `CR_SIDE_DECLINED`, `CR_APPROVED` (the consent rule is satisfied; the change is applied), `CR_REJECTED`, `CR_WITHDRAWN`, `CR_EXPIRED`, `CR_APPLY_FAILED`, `CR_INTERCONNECT_DENIED` (snapshot: scopes and rule; no change request is stored), `CR_DEPENDENCY_FAILED` (a binding create whose inline source was not registered)
-- Sources and targets: `SOURCE_REGISTERED`, `SOURCE_UPDATED` (snapshot: changed fields; for a narrowing, old and new regex), `SOURCE_DEPRECATED`, `SOURCE_REACTIVATED`, `SOURCE_RETIRED`, `TARGET_PUBLISHED`, `TARGET_UPDATED` (snapshot: changed fields, added levels, narrowed levels, flow changes), `TARGET_DEPRECATED`, `TARGET_REACTIVATED`, `TARGET_RETIRED`, `ACCESS_LEVEL_DEPRECATED`, `ACCESS_LEVEL_RETIRED`
+- Sources and targets: `SOURCE_REGISTERED`, `SOURCE_UPDATED` (snapshot: changed fields; for a narrowing, old and new regex), `SOURCE_DEPRECATED`, `SOURCE_REACTIVATED`, `SOURCE_RETIRED`, `TARGET_PUBLISHED`, `TARGET_UPDATED` (snapshot: changed fields, added levels, narrowed levels, flow changes), `TARGET_DEPRECATED`, `TARGET_REACTIVATED`, `TARGET_RETIRED`, `ACCESS_LEVEL_DEPRECATED`, `ACCESS_LEVEL_REACTIVATED`, `ACCESS_LEVEL_RETIRED`
 - Propagation: `PROPAGATION_ENQUEUED` (on the source or target: the cause and the number of bindings), `PROPAGATION_STARTED` (on each binding: cause and new revision), `PROPAGATION_DEFERRED` (binding busy; snapshot: attempts)
 - Workflow starts: `APPLY_STARTED`, `REAPPLY_STARTED`, `DELETE_STARTED`
 - Workflow outcomes: `PROVISION_SUCCESS`, `PROVISION_FAILURE`, `DELETE_COMPLETED`, `DELETE_FAILURE`
@@ -3118,7 +3119,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | Method | Path | Role | Description |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/v1/admin/targets` | operator (the target's scope or the platform's scope) | Change request `TARGET`/`CREATE`. Body as §3.3 without `metadata` except `name`, `platform` and `scope`. |
-| `PUT` | `/v1/admin/targets/{name}` | operator | Change request `TARGET`/`UPDATE` (`expectedRevision` required). Sides per §3.7: a `PLATFORM` side is added when the definition, the flows or the grants change, or a level is added. A grants change MUST narrow (`422 widening-not-allowed`). |
+| `PUT` | `/v1/admin/targets/{name}` | operator | Change request `TARGET`/`UPDATE` (`expectedRevision` required). Sides per §3.7: a `PLATFORM` side is added when the normalized definition, the flows or a level's `privileges` change, or a level is added (grants with equal `privileges` need only the owner, §3.10 rule 3). A grants change MUST narrow (`422 widening-not-allowed`). |
 | `POST` | `/v1/admin/targets/{name}/deprecate`, `/reactivate`, `/retire` | operator | As for sources. |
 | `POST` | `/v1/admin/targets/{name}/access-levels/{level}/deprecate`, `/reactivate`, `/retire` | operator | Change request `TARGET`/`UPDATE` of the level's state. `retire` refused while bindings use the level. |
 | `GET` | `/v1/admin/targets` | viewer | Keyset-paginated list of targets the caller owns or administers (role on the target or platform scope). Filters as for the catalog. |
@@ -3248,8 +3249,8 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 3. Flows: schema, unique names, destinations within the platform's `allowed_endpoints` (§5.7).
 4. RBAC: `operator` (or `trusted_automation`, with `platforms`) on the target's or the platform's scope.
 5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges. `valid = false` is `422 validation-failed` with the plugin's errors; so are `privileges` that are not sorted and free of duplicates (§5.8 rule 9), or levels returned in another order than requested.
-6. For `UPDATE`: immutable fields; every existing level is kept (removal is refused; retire instead); changed grants narrow (§3.10); retiring a level or the target finds no binding using it.
-7. `expectedRevision` matches; no `PENDING` change request exists for the target.
+6. For `UPDATE`: immutable fields (`422 immutable-field`); every existing level is kept (removal is `422 validation-failed`; retire instead); changed grants narrow (§3.10; otherwise `422 widening-not-allowed`, naming the level and the privileges it would add); the target and each level change state as a source does (step 9 of the source pipeline: `409 invalid-transition`, and `RETIRED` is final); retiring a level or the target finds no binding using it (`409 resource-in-use`).
+7. `expectedRevision` matches (`409 revision-conflict`); no `PENDING` change request exists for the target (`409 change-request-pending`).
 
 **Validation pipeline at creation** (`BINDING`, `CREATE` and `UPDATE` with consent `ALL`):
 1. JSON schema of the request body; name grammar and, for `CREATE`, the name prefix (§3.8).

@@ -171,3 +171,172 @@ func TestAC64Ports(t *testing.T) {
 		t.Error("a flow with port 0 was inserted")
 	}
 }
+
+// approved files tg and has bob and dora approve it.
+func approved(t *testing.T, s *Service, r *changerequests.Request, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []changerequests.Caller{bob, dora} {
+		if r.Status != "PENDING" {
+			break
+		}
+		got, err := s.Requests.Approve(context.Background(), c, r.ID, r.PayloadSHA256, "", "ok")
+		if err != nil {
+			t.Fatalf("%s approves: %v", c.ID(), err)
+		}
+		r = got
+	}
+	if r.Status != "APPLIED" {
+		t.Fatalf("request %s", r.Status)
+	}
+}
+
+// bindingAt commits a source and its binding to target at level, removed at
+// the end of the test.
+func bindingAt(t *testing.T, o *pgxpool.Pool, target uuid.UUID, level string) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	source, binding := uuid.NewV7(), uuid.NewV7()
+	suffix := binding.String()[24:]
+	regex := `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + suffix + `$`
+	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+			values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, source, "s-"+suffix, regex); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
+			source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+			source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
+			values ($1, $2, $3, $4, $5, 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
+			'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $6, 1, 1, 'cloud.internal', $7, '{}', 't', 't')`,
+			binding, "b-"+suffix, source, target, level, "ligo:apply:"+binding.String()+":r1:a1", regex)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = o.Exec(ctx, "delete from bindings where id = $1", binding)
+		_, _ = o.Exec(ctx, "delete from sources where id = $1", source)
+	})
+	return binding
+}
+
+// queued is the priority a binding is queued at by request cr, or -1.
+func queued(t *testing.T, o *pgxpool.Pool, binding uuid.UUID) int {
+	t.Helper()
+	p := -1
+	err := o.QueryRow(context.Background(), "select priority from binding_propagation_queue where binding_id = $1", binding).Scan(&p)
+	if err != nil && err != pgx.ErrNoRows {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestAC65: narrowing a level needs the owner and the platform and re-applies
+// only that level's bindings, at priority 0; a widening is refused; a new
+// level re-applies nothing. A level in use cannot be retired; deprecating
+// one needs only the owner. A new definition re-applies every binding at
+// priority 1 (§6.2.1).
+func TestAC65(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	tg := ledger()
+	unique(t, owner, &tg)
+	r, err := s.Create(ctx, alice, body(t, tg))
+	approved(t, s, r, err)
+	var id uuid.UUID
+	if err := owner.QueryRow(ctx, "select id from targets where name = $1", tg.Metadata.Name).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	read, write := bindingAt(t, owner, id, "read"), bindingAt(t, owner, id, "write")
+	revision := int64(1)
+	update := func(edit func(*Target)) (*changerequests.Request, error) {
+		u := tg
+		u.AccessLevels = append([]AccessLevel{}, tg.AccessLevels...)
+		edit(&u)
+		data, _ := json.Marshal(map[string]any{"metadata": u.Metadata, "definition": u.Definition, "accessLevels": u.AccessLevels,
+			"networkFlows": u.NetworkFlows, "expectedRevision": revision})
+		return s.Update(ctx, alice, tg.Metadata.Name, data)
+	}
+
+	if _, err := update(func(u *Target) {
+		u.AccessLevels[0].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"]}`)
+	}); slug(err) != "widening-not-allowed" {
+		t.Errorf("widening: %v", err)
+	}
+	r, err = update(func(u *Target) { u.AccessLevels[1].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE"]}`) })
+	if err == nil && len(r.Sides) != 2 {
+		t.Errorf("narrowing sides %+v", r.Sides)
+	}
+	approved(t, s, r, err)
+	revision++
+	if queued(t, owner, write) != 0 || queued(t, owner, read) != -1 {
+		t.Errorf("after the narrowing: write %d, read %d", queued(t, owner, write), queued(t, owner, read))
+	}
+	tg.AccessLevels[1].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE"]}`)
+
+	r, err = update(func(u *Target) {
+		u.AccessLevels = append(u.AccessLevels, AccessLevel{Name: "admin", Grants: json.RawMessage(`{"roles":["LEDGER_RW_ROLE"]}`)})
+	})
+	approved(t, s, r, err)
+	revision++
+	if queued(t, owner, read) != -1 {
+		t.Error("a new level queued a binding")
+	}
+	tg.AccessLevels = append(tg.AccessLevels, AccessLevel{Name: "admin", Grants: json.RawMessage(`{"roles":["LEDGER_RW_ROLE"]}`)})
+
+	if _, err := s.SetLevelState(ctx, alice, tg.Metadata.Name, "read", "retire", revision, "", nil); slug(err) != "resource-in-use" {
+		t.Errorf("retire a level in use: %v", err)
+	}
+	r, err = s.SetLevelState(ctx, alice, tg.Metadata.Name, "read", "deprecate", revision, "", nil)
+	if err == nil && len(r.Sides) != 1 {
+		t.Errorf("deprecation sides %+v", r.Sides)
+	}
+	approved(t, s, r, err)
+	revision++
+	tg.AccessLevels[0].State = "DEPRECATED"
+
+	r, err = update(func(u *Target) {
+		u.Definition = json.RawMessage(`{"schema":"LEDGER_APP","serviceName":"LEDGER2.prod.internal"}`)
+	})
+	approved(t, s, r, err)
+	revision++
+	if queued(t, owner, read) != 1 || queued(t, owner, write) != 0 {
+		t.Errorf("after a new definition: read %d, write %d", queued(t, owner, read), queued(t, owner, write))
+	}
+	var state string
+	var rev int64
+	if err := owner.QueryRow(ctx, `select l.state, t.revision from target_access_levels l join targets t on t.id = l.target_id
+		where t.id = $1 and l.name = 'read'`, id).Scan(&state, &rev); err != nil || state != "DEPRECATED" || rev != revision {
+		t.Errorf("read %s, revision %d (%v)", state, rev, err)
+	}
+	rows, _ := owner.Query(ctx, "select action from audit_log where resource_type = 'TARGET' and resource_id = $1 and action like 'ACCESS_LEVEL_%'", id)
+	actions, _ := pgx.CollectRows(rows, pgx.RowTo[string])
+	if len(actions) != 1 || actions[0] != "ACCESS_LEVEL_DEPRECATED" {
+		t.Errorf("audit %v", actions)
+	}
+}
+
+// TestTargetStates: a target without bindings can be retired, and is then
+// final.
+func TestTargetStates(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	tg := ledger()
+	unique(t, owner, &tg)
+	r, err := s.Create(ctx, alice, body(t, tg))
+	approved(t, s, r, err)
+	if _, err := s.SetState(ctx, eve, tg.Metadata.Name, "deprecate", 1, "", nil); slug(err) != "not-found" {
+		t.Errorf("caller without a role: %v", err)
+	}
+	r, err = s.SetState(ctx, alice, tg.Metadata.Name, "retire", 1, "", nil)
+	approved(t, s, r, err)
+	if _, err := s.SetState(ctx, alice, tg.Metadata.Name, "reactivate", 2, "", nil); slug(err) != "not-found" {
+		t.Errorf("a retired target is final: %v", err)
+	}
+}
