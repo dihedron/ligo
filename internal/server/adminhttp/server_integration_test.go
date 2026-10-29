@@ -34,6 +34,7 @@ import (
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,6 +127,25 @@ func validate(_ context.Context, req *pluginv1.ValidateBindingRequest) (*pluginv
 		Privileges: []string{"role:LEDGER_RO_ROLE"}}, nil
 }
 
+// validateTarget accepts any definition; a level's privileges are its
+// roles, sorted.
+func validateTarget(_ context.Context, req *pluginv1.ValidateTargetRequest) (*pluginv1.ValidateTargetResponse, error) {
+	resp := &pluginv1.ValidateTargetResponse{Valid: true, NormalizedDefinitionJson: req.GetDefinitionJson()}
+	for _, l := range req.GetAccessLevels() {
+		var g struct {
+			Roles []string `json:"roles"`
+		}
+		_ = json.Unmarshal(l.GetGrantsJson(), &g)
+		slices.Sort(g.Roles)
+		var privileges []string
+		for _, r := range g.Roles {
+			privileges = append(privileges, "role:"+r)
+		}
+		resp.AccessLevels = append(resp.AccessLevels, &pluginv1.NormalizedAccessLevel{Name: l.GetName(), GrantsJson: l.GetGrantsJson(), Privileges: privileges})
+	}
+	return resp, nil
+}
+
 func setup(t *testing.T, listener config.AdminListener) *env {
 	t.Helper()
 	ctx := context.Background()
@@ -168,6 +188,12 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: bs.Requests}
 	bs.Requests.Resources["SOURCE"] = ss
+	tgtRules, err := targets.NewRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := &targets.Service{DB: pools.App, Rules: tgtRules, Requests: bs.Requests, Validate: validateTarget}
+	bs.Requests.Resources["TARGET"] = ts
 	az, err := authz.New([]config.RoleBinding{
 		{SPIFFEID: opID, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
 		{SPIFFEID: appID, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
@@ -181,7 +207,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss,
+	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts,
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler)}
 	if listener.AllowBasicAuth {
@@ -222,8 +248,9 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		_, _ = owner.Exec(ctx, "update system_settings set maintenance_mode = false, maintenance_reason = null")
 		_, _ = owner.Exec(ctx, "delete from bindings where name like $1", "%"+x)
 		_, _ = owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
-		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id = $1", targetID)
-		_, _ = owner.Exec(ctx, "delete from targets where id = $1", targetID)
+		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id in (select id from targets where name like $1)", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
 		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
 	})
 	name := "api-" + x
@@ -506,5 +533,101 @@ func TestSourcesAPI(t *testing.T) {
 	if items := second.body["items"].([]any); len(items) != 1 || second.body["nextPageToken"] != nil ||
 		items[0].(map[string]any)["metadata"].(map[string]any)["name"] == first.body["items"].([]any)[0].(map[string]any)["metadata"].(map[string]any)["name"] {
 		t.Errorf("list page 2: %+v", second.body)
+	}
+}
+
+// TestTargetsAPI: publish a target through its owner and platform sides,
+// show, list and narrow it, with the privileges a level loses; revoke a
+// source's bindings on it in bulk (§7.2.3 targets, AC-79).
+func TestTargetsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	olga, dora, admin, viewer := v.client(t, opID), v.client(t, appID), v.client(t, adminID), v.client(t, viewerID)
+	name := "api-tgt-" + v.suffix
+	level := func(n string, roles ...string) map[string]any {
+		return map[string]any{"name": n, "grants": map[string][]string{"roles": roles}}
+	}
+	target := func(levels ...map[string]any) map[string]any {
+		return map[string]any{"metadata": map[string]string{"name": name, "platform": "oracle-prod", "scope": "dc/corp-prod/ledger"},
+			"definition": map[string]string{"schema": "LEDGER_APP"}, "accessLevels": levels, "networkFlows": []any{},
+			"visibility": map[string]string{"mode": "PRIVATE"}}
+	}
+	created := v.do(t, olga, "POST", "/v1/admin/targets", target(level("read", "LEDGER_RO_ROLE"), level("write", "LEDGER_RO_ROLE", "LEDGER_RW_ROLE")))
+	cr, _ := created.body["changeRequest"].(map[string]any)
+	if created.code != 202 || cr["status"] != "PENDING" || fmt.Sprint(cr["awaitingApproval"]) != "[OWNER PLATFORM]" {
+		t.Fatalf("create: %+v", created)
+	}
+	for i, c := range []*http.Client{dora, admin} { // distinct approvers, one per side
+		side := []string{"OWNER", "PLATFORM"}[i]
+		if r := v.do(t, c, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve", map[string]string{"payloadSha256": cr["payloadSha256"].(string), "side": side}); r.code != 200 {
+			t.Fatalf("approve %s: %+v", side, r)
+		}
+	}
+	got := v.do(t, viewer, "GET", "/v1/admin/targets/"+name, nil)
+	md, _ := got.body["metadata"].(map[string]any)
+	if got.code != 200 || md["platformScope"] != "dc/corp-prod" || md["revision"] != 1.0 || len(got.body["accessLevels"].([]any)) != 2 ||
+		len(got.body["audit"].([]any)) == 0 {
+		t.Fatalf("get: %+v", got)
+	}
+
+	body := target(level("read", "LEDGER_RO_ROLE"), level("write", "LEDGER_RO_ROLE"))
+	body["expectedRevision"] = 1
+	narrow := v.do(t, olga, "PUT", "/v1/admin/targets/"+name, body)
+	ncr, _ := narrow.body["changeRequest"].(map[string]any)
+	if narrow.code != 202 || ncr["status"] != "PENDING" {
+		t.Fatalf("narrow: %+v", narrow)
+	}
+	diff, _ := v.do(t, dora, "GET", "/v1/admin/change-requests/"+ncr["id"].(string), nil).body["diff"].(map[string]any)
+	if fmt.Sprint(diff["removedPrivileges"]) != "map[write:[role:LEDGER_RW_ROLE]]" {
+		t.Errorf("diff: %v", diff)
+	}
+	for _, tc := range []struct {
+		path string
+		body any
+		code int
+	}{
+		{"/access-levels/read/deprecate", map[string]any{}, 422},
+		{"/access-levels/read/deprecate", map[string]any{"expectedRevision": 1}, 409},
+		{"/retire", map[string]any{"expectedRevision": 1}, 409},
+	} {
+		if r := v.do(t, olga, "POST", "/v1/admin/targets/"+name+tc.path, tc.body); r.code != tc.code {
+			t.Errorf("%s: %d %v", tc.path, r.code, r.body)
+		}
+	}
+	list := v.do(t, olga, "GET", "/v1/admin/targets?q="+v.suffix, nil)
+	if items := list.body["items"].([]any); list.code != 200 || len(items) != 2 {
+		t.Errorf("olga administers %d targets: %v", len(items), list.body)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/targets?platform=oracle-prod&q=api-tgt-"+v.suffix, nil); len(r.body["items"].([]any)) != 1 {
+		t.Errorf("platform filter: %v", r.body)
+	}
+
+	// bulk revocation: the binding filed in setup, applied, then revoked
+	if r := v.do(t, dora, "POST", "/v1/admin/change-requests/"+v.request.ID.String()+"/approve", map[string]string{"payloadSha256": v.request.PayloadSHA256}); r.code != 200 {
+		t.Fatalf("approve the binding: %+v", r)
+	}
+	if _, err := v.owner.Exec(context.Background(), "update bindings set phase = 'ACTIVE' where name = $1", v.name); err != nil {
+		t.Fatal(err)
+	}
+	revoke := "/v1/admin/targets/tgt-" + v.suffix + "/bindings/revoke"
+	for _, tc := range []struct {
+		c    *http.Client
+		body map[string]string
+		code int
+	}{
+		{olga, map[string]string{"source": "src-" + v.suffix}, 422},
+		{olga, map[string]string{"source": "src-" + v.suffix, "sourceScope": "dc/*", "comment": "x"}, 422},
+		{viewer, map[string]string{"sourceScope": "dc/*", "comment": "contain"}, 403},
+	} {
+		if r := v.do(t, tc.c, "POST", revoke, tc.body); r.code != tc.code {
+			t.Errorf("%v: %d %v", tc.body, r.code, r.body)
+		}
+	}
+	r := v.do(t, olga, "POST", revoke, map[string]string{"sourceScope": "dc/*", "comment": "compromised workload"})
+	crs, _ := r.body["changeRequests"].([]any)
+	if r.code != 202 || len(crs) != 1 || len(r.body["errors"].([]any)) != 0 {
+		t.Fatalf("revoke: %+v", r)
+	}
+	if c := crs[0].(map[string]any); c["operation"] != "DELETE" || c["consent"] != "ANY" || c["resourceName"] != v.name {
+		t.Errorf("revocation: %v", c)
 	}
 }

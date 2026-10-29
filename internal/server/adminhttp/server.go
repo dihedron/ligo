@@ -27,6 +27,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/sources"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -44,6 +45,7 @@ type Server struct {
 	Requests *changerequests.Service
 	Bindings *bindings.Service
 	Sources  *sources.Service
+	Targets  *targets.Service
 	Logger   *slog.Logger
 
 	limits limiter
@@ -60,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	s.requestRoutes(mux)
 	s.opsRoutes(mux)
 	s.sourceRoutes(mux)
+	s.targetRoutes(mux)
 	return s.middleware(mux)
 }
 
