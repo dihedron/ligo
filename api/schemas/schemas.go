@@ -3,7 +3,7 @@ package schemas
 
 import "embed"
 
-// FS holds the schemas, by version: v1alpha2/network-flow.json (§3.3).
+// FS holds the schemas, by version: v1alpha1/network-flow.json (§3.3).
 //
-//go:embed v1alpha2/*.json
+//go:embed v1alpha1/*.json
 var FS embed.FS

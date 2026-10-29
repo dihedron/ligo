@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ligo.dihedron.org/schemas/v1alpha2/network-flow.json",
+  "$id": "https://ligo.dihedron.org/schemas/v1alpha1/network-flow.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "purpose", "protocol", "destination", "ports", "tls"],

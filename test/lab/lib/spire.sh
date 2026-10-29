@@ -227,7 +227,10 @@ plugins {
     }
   }
   WorkloadAttestor "unix" {
-    plugin_data {}
+    plugin_data {
+      # unix:sha256 selectors, which plugin entries use (§10.5)
+      discover_workload_path = true
+    }
   }
 }
 CONF

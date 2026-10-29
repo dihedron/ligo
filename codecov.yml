@@ -1,4 +1,6 @@
-# Codecov: generated protobuf code is left out of the coverage figures, as in
+# Codecov: generated protobuf code and the lab's plugins (test tooling, run
+# only on the lab) are left out of the coverage figures, as in
 # sonar-project.properties.
 ignore:
   - "**/*.pb.go"
+  - "test/lab/plugins/**"

@@ -9,10 +9,12 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"go.yaml.in/yaml/v3"
 )
@@ -87,11 +89,11 @@ const (
 	whatErr        = "%s: %v"
 )
 
-// allPlatforms returns the platforms of every target provider, with their
+// allPlatforms returns the platforms of every platform provider, with their
 // provider.
 func allPlatforms(cfg *Config) []providedPlatform {
 	var out []providedPlatform
-	for _, tp := range cfg.TargetProviders {
+	for _, tp := range cfg.PlatformProviders {
 		for _, p := range tp.Platforms {
 			out = append(out, providedPlatform{p, tp.Builtin})
 		}
@@ -111,8 +113,13 @@ func (c *checker) instances(cfg *Config, zones map[string]Zone) {
 	zoneOf := map[string]map[string]string{}
 	c.instanceProviders("identity provider", cfg.IdentityProviders, zones, zoneOf)
 	c.instanceProviders("secret store", cfg.SecretStores, zones, zoneOf)
-	for _, tp := range cfg.TargetProviders {
-		c.binary("target provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
+	for _, tp := range cfg.PlatformProviders {
+		c.binary("platform provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
+		if zoneOf[tp.Type] != nil {
+			c.failf(1, "platform provider type %q is declared twice", tp.Type)
+			continue
+		}
+		zoneOf[tp.Type] = map[string]string{} // a platform provider has no instances to wire
 	}
 	names := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {
@@ -177,10 +184,15 @@ func (c *checker) binary(kind, typ string, builtin bool, binary, sum string) {
 	}
 }
 
-// plugin checks rule 5, and that external instances have a selector.
+// plugin checks rule 5, and that external instances have a selector that
+// compiles (§5.4).
 func (c *checker) plugin(what string, builtin bool, sel *SVIDSelector, in *Instance) {
 	if !builtin && (sel == nil || sel.MatchExpr == "") {
 		c.failf(4, "%s: svid_selector.match_expr is required", what)
+	} else if sel != nil && sel.MatchExpr != "" {
+		if _, err := pluginsdk.CompileSelector(sel.MatchExpr); err != nil {
+			c.failf(4, "%s: svid_selector.match_expr: %v", what, err)
+		}
 	}
 	pc, err := hostKeys(&in.Config)
 	if err != nil {
@@ -220,6 +232,9 @@ func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
 			if !slices.Contains(wl.AcceptedTrustDomains, td) {
 				c.failf(6, "platform %q: allowed source trust domain %q is not in workload_listener.accepted_trust_domains", p.Name, td)
 			}
+		}
+		if _, err := engine.DerivedPrincipalName(uuid.UUID{}, p.PrincipalPrefix); err != nil {
+			c.failf(6, "platform %q: %v", p.Name, err)
 		}
 	}
 }

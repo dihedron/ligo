@@ -5,6 +5,11 @@
 
 LIGO1_TESTS=/home/ligo/tests
 
+# LIGO1_PLUGINS is ligo1's plugins.directory; LAB_PLUGINS are the lab's
+# plugins (test/lab/plugins), in the zone prod.
+LIGO1_PLUGINS=/usr/lib/ligo/plugins
+LAB_PLUGINS=(labprobe)
+
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {
 	(cd "$REPO_DIR" && grep -rlE '^//go:build .*\blab\b' --include='*_test.go' . | xargs -r -n1 dirname | sort -u)
@@ -26,7 +31,11 @@ env_ligo1() {
 		"LIGO_TEST_BAO_PROD_ADDR=https://bao-prod.ligo.lab:$BAO_PORT" \
 		"LIGO_TEST_BAO_PROD_AUDIENCE=https://bao-prod.ligo.lab" \
 		"LIGO_TEST_LDAP_URL=$LDAP_URL" \
-		"LIGO_TEST_LDAP_BASE=$LDAP_BASE"
+		"LIGO_TEST_LDAP_BASE=$LDAP_BASE" \
+		"LIGO_TEST_PLUGIN_DIR=$LIGO1_PLUGINS"
+	[[ -f "$LAB_STATE_DIR/plugins/labprobe" ]] &&
+		echo "LIGO_TEST_LABPROBE_SHA256=$(sha256sum "$LAB_STATE_DIR/plugins/labprobe" | cut -d' ' -f1)"
+	return 0
 }
 
 # cmd_deploy: builds the lab tests (static, linux/amd64) and copies them to
@@ -50,12 +59,82 @@ cmd_deploy() {
 	done
 	inner_exec ligo1 chown -R ligo:ligo "$LIGO1_TESTS"
 	info "copied $(find "$out" -name '*.test' | wc -l) test binaries to ligo1:$LIGO1_TESTS"
+	deploy_plugins
 }
 
-# test_ligo1 [-run REGEX]: deploys, then runs every lab test binary on ligo1
-# as the user ligo; fails if any fails.
+# deploy_plugins: builds the lab plugins and installs them on ligo1 as
+# production expects (root:root, 0755, §5.3 rule 3); then registers each
+# plugin's SPIRE entry, which selects on its hash, and its OpenBao objects.
+# Both change with every build, so every deploy applies them.
+deploy_plugins() {
+	local out="$LAB_STATE_DIR/plugins" uid name sum
+	rm -rf "${out:?}" && mkdir -p "$out"
+	uid="$(env_get .ligo1.ligo_uid)"
+	inner_exec ligo1 install -d -o root -g root -m 0755 /usr/lib/ligo "$LIGO1_PLUGINS"
+	for name in "${LAB_PLUGINS[@]}"; do
+		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out/$name" "./test/lab/plugins/$name") ||
+			die "cannot build the plugin $name"
+		inner_push "$out/$name" ligo1 "$LIGO1_PLUGINS/$name" 0755
+		sum="$(sha256sum "$out/$name" | cut -d' ' -f1)"
+		plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum"
+		plugin_svid_wait prod "$name" "$uid"
+		info "plugin $name installed in ligo1:$LIGO1_PLUGINS (sha256 ${sum:0:12}…); the agent issues its SVID, selected by that hash"
+	done
+	labprobe_bao
+}
+
+# plugin_svid_wait ZONE NAME UID: waits until the zone's agent issues the
+# plugin's SVID to the plugin's binary run as the user ligo (a new entry
+# reaches the agents at their next sync); the binary asks the agent itself,
+# so the agent attests exactly what it will attest for the plugin.
+plugin_svid_wait() {
+	local zone="$1" name="$2" uid="$3"
+	for _ in $(seq 1 30); do
+		lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$LIGO1_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
+			grep -qx "spiffe://$zone.lab/ligo/plugin/$name" && return
+		sleep 1
+	done
+	die "the $zone agent does not issue the SVID of the plugin $name after 30s (uid $uid)"
+}
+
+# plugin_entry ZONE PATH HINT UID SHA256: the plugin's entry under ligo1's
+# node alias, replaced when the binary's hash changed.
+plugin_entry() {
+	local zone="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" entry
+	spire "$zone" entry show -spiffeID "$id" 2>/dev/null | grep -q "unix:sha256:$sum" && return
+	for entry in $(spire "$zone" entry show -spiffeID "$id" 2>/dev/null | awk '/^Entry ID/ {print $4}'); do
+		spire "$zone" entry delete -entryID "$entry" >/dev/null
+	done
+	spire "$zone" entry create -parentID "spiffe://$zone.lab/node/ligo1" -spiffeID "$id" -hint "$hint" \
+		-selector "unix:uid:$uid" -selector "unix:sha256:$sum" >/dev/null || die "cannot register $id"
+}
+
+# labprobe_bao: on bao-prod, labprobe's bootstrap credential, the policy that
+# reads it and the JWT role of labprobe's SVID.
+labprobe_bao() {
+	local file="$LAB_STATE_DIR/passwords/labprobe"
+	[[ -f "$file" ]] || (umask 077 && openssl rand -hex 16 >"$file")
+	# the password goes through stdin, never on a command line
+	tr -d "\n" <"$file" | bao prod kv put -mount=kv ligo/bootstrap/labprobe username=lab-admin password=- >/dev/null ||
+		die "bao-prod: cannot write labprobe's bootstrap credential"
+	inner_exec bao-prod sh -c 'cat >/root/ligo-plugin-labprobe.hcl' <<'HCL'
+# labprobe's bootstrap credential, read only
+path "kv/data/ligo/bootstrap/labprobe" {
+  capabilities = ["read"]
+}
+HCL
+	bao prod policy write ligo-plugin-labprobe /root/ligo-plugin-labprobe.hcl >/dev/null
+	bao prod write auth/jwt-spiffe/role/ligo-plugin-labprobe role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/labprobe" bound_audiences="https://bao-prod.ligo.lab" \
+		token_policies=ligo-plugin-labprobe token_ttl=15m token_max_ttl=1h >/dev/null ||
+		die "bao-prod: cannot write the role ligo-plugin-labprobe"
+}
+
+# test_ligo1 [-run REGEX]: deploys, then runs the lab tests (TestLab*, or
+# REGEX) of every lab test binary on ligo1 as the user ligo; fails if any
+# fails.
 test_ligo1() {
-	local run=()
+	local run=(-test.run '^TestLab')
 	while (($#)); do
 		case "$1" in
 		-run) run=(-test.run "$2") && shift 2 ;;

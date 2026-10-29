@@ -41,11 +41,11 @@ func TestExample(t *testing.T) {
 	if err := Validate(cfg, Options{LookupEnv: lookupEnv}); err != nil {
 		t.Fatal(err)
 	}
-	p := cfg.TargetProviders[0].Platforms[0]
-	if p.Name != "oracle-prod" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
+	p := cfg.PlatformProviders[0].Platforms[0]
+	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.SecretStore.SecretStorageStrategy != "vault-static" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
 		t.Errorf("platform not decoded: %+v", p)
 	}
-	if got := cfg.TargetProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
+	if got := cfg.PlatformProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
 		t.Errorf("default target_scopes = %v", got)
 	}
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
@@ -77,14 +77,16 @@ func TestRules(t *testing.T) {
 		also           []int // rules that fail in consequence
 	}{
 		{"duplicate zone", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
+		{"type in two sections", `  - type: "oracle.v1"`, `  - type: "openldap.v1"`, 1, nil},
 		{"duplicate instance", `name: "vault-test"`, `name: "vault-prod"`, 1, []int{2}},
 		{"unknown zone", `      - { name: "no-store-prod", zone: prod`, `      - { name: "no-store-prod", zone: nowhere`, 2, nil},
-		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod" }`, `secret_store: { type: "vault.v1", instance: "vault-test" }`, 2, nil},
+		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
 		{"missing instance", `identity_provider: { type: "openldap.v1", instance: "ldap-prod" }`, `identity_provider: { type: "openldap.v1", instance: "ldap-nope" }`, 2, nil},
 		{"bootstrap audience", `role: "ligo-plugin-ldap-prod"
             jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-ldap-prod"
             jwt_audience: "https://other"`, 5, nil},
 		{"trust domain not accepted", "allowed_source_trust_domains: [test.internal]", "allowed_source_trust_domains: [test.internal, other.internal]", 6, []int{16}},
+		{"bad principal prefix", `principal_prefix: "svc_"`, `principal_prefix: "svc-"`, 6, nil},
 		{"bad sha256", `binary: "store-vault"
     sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "store-vault"
     sha256: "ABC"`, 7, nil},
@@ -181,10 +183,10 @@ func TestLoad(t *testing.T) {
 
 // TestDefaults checks the defaults of an almost empty file.
 func TestDefaults(t *testing.T) {
-	cfg := parse(t, "target_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
+	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
-		cfg.TargetProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
+		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
 		t.Errorf("defaults: %+v", cfg)
 	}
 	if err := Validate(cfg, Options{}); err == nil {
@@ -202,6 +204,8 @@ func TestPluginRules(t *testing.T) {
     binary: "x"`},
 		{"binary path", `binary: "store-vault"`, `binary: "../store-vault"`},
 		{"no selector", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: ''`},
+		{"selector not boolean", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'hint'`},
+		{"selector unknown field", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'spiffeID == "x"'`},
 		{"config not a mapping", `          host: "ora-scan.prod.internal"`, `          allowed_endpoints: 7
           host: "ora-scan.prod.internal"`},
 		{"identity provider flows", `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"`, `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"

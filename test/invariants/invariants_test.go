@@ -30,6 +30,8 @@ func TestINV08(t *testing.T) {
 		"target platform":       `update targets set platform = 'oracle-test' where id = $1`,
 		"target platform scope": `update targets set platform_scope = 'dc/corp-test' where id = $1`,
 		"binding wiring":        `update bindings set secret_store_instance = 'vault-test' where id = $1`,
+		"binding strategy":      `update bindings set secret_storage_strategy = 'vault-dynamic' where id = $1`,
+		"binding principal":     `update bindings set derived_principal_name = 'app_ty7bsxjkraerelw2' where id = $1`,
 		"binding source":        `update bindings set source_id = gen_random_uuid() where id = $1`,
 		"binding scope":         `update bindings set target_scope = 'dc/corp-test' where id = $1`,
 	} {

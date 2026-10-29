@@ -14,6 +14,7 @@
 4. **Compliance Audit:** Before finishing a task, verify that the implementation matches the API contracts, data models, and edge cases defined in the active spec.
 5. **No Secrets in Commits:** Before committing anything, check with all available local tools (e.g. gitleaks, trufflehog) that no secrets are in the sources being committed. 
 6. **No vulnerable dependencies in Commits:** Before committing, run govulncheck and check that there are no vulnerable dependencies in `go.mod`.
+7. **No unneeded backward compatibility:** Backward compatibility is not necessary (and should be avoided if it complicates code, introduces warts or hinders comprehension of the design and the code) until the product is released, and even then it may be worth evaluating costs and benefits of keeping the product backward-compatible versus bumping the product's major version. Always ask for the user's choice unless the decision is trivial.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers or gin, Gophercloud / database/sql where applicable.

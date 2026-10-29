@@ -49,11 +49,11 @@ func fixture(t *testing.T, owner *pgxpool.Pool, suffix, regex string) (source, b
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + suffix}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 			{`insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
-				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance,
+				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, phase,
 				active_revision, active_source_svid_regex, active_auth_config, active_spec, created_by, updated_by)
-				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod',
+				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
 				'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal', $6, '{}', 'ACTIVE',
 				1, $6, '{"strategy":"vault"}', '{"host":"ledger-db"}', 't', 't')`,
 				[]any{binding, "b-" + suffix, source, target, "ligo:apply:" + binding.String() + ":r1:a1", regex}},

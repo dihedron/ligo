@@ -39,7 +39,7 @@ type Config struct {
 	Reconciliation    Reconciliation     `yaml:"reconciliation"`
 	IdentityProviders []InstanceProvider `yaml:"identity_providers"`
 	SecretStores      []InstanceProvider `yaml:"secret_stores"`
-	TargetProviders   []PlatformProvider `yaml:"target_providers"`
+	PlatformProviders []PlatformProvider `yaml:"platform_providers"`
 }
 
 type Service struct {
@@ -334,6 +334,7 @@ type Platform struct {
 	NetworkFlows              []flows.Flow  `yaml:"network_flows"`
 	IdentityProvider          Wiring        `yaml:"identity_provider"`
 	SecretStore               Wiring        `yaml:"secret_store"`
+	PrincipalPrefix           string        `yaml:"principal_prefix"`
 	AllowedSourceTrustDomains []string      `yaml:"allowed_source_trust_domains"`
 	RotationInterval          time.Duration `yaml:"rotation_interval"`
 	SVIDSelector              *SVIDSelector `yaml:"svid_selector"`
@@ -347,8 +348,9 @@ type Contact struct {
 
 // Wiring names an instance of a plugin type.
 type Wiring struct {
-	Type     string `yaml:"type"`
-	Instance string `yaml:"instance"`
+	Type                  string `yaml:"type"`
+	Instance              string `yaml:"instance"`
+	SecretStorageStrategy string `yaml:"secret_storage_strategy"` // secret_store only (§5.6)
 }
 
 // pluginConfig holds the keys ligo itself reads from a plugin's config.
@@ -407,9 +409,9 @@ func (c *Config) applyDefaults() {
 	if c.Governance.Interconnects.DefaultCrossScope == "" {
 		c.Governance.Interconnects.DefaultCrossScope = "deny"
 	}
-	for i := range c.TargetProviders {
-		for j := range c.TargetProviders[i].Platforms {
-			if p := &c.TargetProviders[i].Platforms[j]; len(p.TargetScopes) == 0 && p.Scope != "" {
+	for i := range c.PlatformProviders {
+		for j := range c.PlatformProviders[i].Platforms {
+			if p := &c.PlatformProviders[i].Platforms[j]; len(p.TargetScopes) == 0 && p.Scope != "" {
 				p.TargetScopes = []string{p.Scope + "/*"}
 			}
 		}
@@ -432,7 +434,7 @@ func (c *Config) Policy() *governance.Policy {
 		Interconnects:            c.Governance.Interconnects,
 		BreakGlassPolicies:       c.BreakGlass.Policies,
 	}
-	for _, tp := range c.TargetProviders {
+	for _, tp := range c.PlatformProviders {
 		for _, pl := range tp.Platforms {
 			p.Platforms = append(p.Platforms, governance.PlatformScopes{Platform: pl.Name, Scope: pl.Scope, TargetScopes: pl.TargetScopes})
 		}

@@ -1,6 +1,6 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.2` (`v1alpha2` API)
+- **Document Version:** `4.0.2` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
 - **Supersedes:** `4.0.1` (no migration from 3.x, Go 1.27.3, §0.5). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.6). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.7).
 - **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
@@ -40,6 +40,11 @@ The application is named **`ligo`**, Latin for "I bind". It manages four kinds o
 
 - **`ligo`** means the application: the daemon, the binary, the service (`ligo serve`).
 - **Platform** replaces what 3.x called a *target instance*. In this document "target" always means a registered Target, never a system.
+- **Plugin kinds.** The three stages (ADR-01) are served by three plugin kinds, named the same way in the spec, the protobuf contract (`PluginKind`, §5.9), `server.yaml` (§8.1) and the code:
+  - an **IdentityProvider** (Stage 1) decides which principal represents the source: the SVID itself, a directory principal it creates, or a local principal a later stage creates. The built-ins `svid.v1`, `target-local.v1` and `delegated-dynamic.v1` are **mode markers**: they create nothing and only declare an identity mode;
+  - a **PlatformProvider** (Stage 2) manages platforms: each platform is one of its instances. It is the only component that connects to the platform, and grants access on targets there;
+  - a **SecretStore** (Stage 3) keeps the static credentials of a binding, or generates credentials on demand, and controls which workloads may read them.
+- **Instance** means a configured instance of a plugin type (`ldap-prod`, `vault-prod`, and each platform), never a target.
 - **Client** is used only in its ordinary meaning, a program connecting to a target. "Service" and "domain" are not used for entities, because both are taken in this context (SPIFFE service identities and trust domains, Kubernetes `Service`, DNS and LDAP domains).
 
 Identifiers derived from the **application** use the `ligo` prefix:
@@ -47,8 +52,8 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Namespace | Form | Example |
 | :--- | :--- | :--- |
 | Binary and CLI | `ligo` | `cmd/ligo/`, `ligo serve` |
-| Go module | `github.com/dihedron/ligo` | `github.com/dihedron/ligo/api/gen/plugin/v2` |
-| Protobuf packages | `ligo.*` | `ligo.plugin.v2`, `ligo.workload.v1alpha2` |
+| Go module | `github.com/dihedron/ligo` | `github.com/dihedron/ligo/api/gen/plugin/v1` |
+| Protobuf packages | `ligo.*` | `ligo.plugin.v1`, `ligo.workload.v1alpha1` |
 | Environment variables | `LIGO_*` | `LIGO_PG_APP_DSN` |
 | Prometheus metrics | `ligo_*` | `ligo_workflow_duration_seconds` |
 | DBOS workflow IDs | `ligo:{op}:…` | `ligo:apply:<uuid>:r2:a3` |
@@ -61,7 +66,7 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Vault/OpenBao objects | `ligo-*`, `kv/data/ligo/…` | `ligo-sealer`, `ligo-interstage`, `kv/data/ligo/bootstrap/oracle-prod` |
 | URNs, annotations, ownership tags | `ligo` | `urn:ligo:problem:<slug>`, `x-ligo-endpoint`, `ligo:binding_id=<uuid>` |
 | go-plugin handshake | `LIGO_PLUGIN` | `MagicCookieKey: "LIGO_PLUGIN"` |
-| Resource API group | `ligo.dihedron.org` (a domain owned by the project) | `"apiVersion": "ligo.dihedron.org/v1alpha2"` |
+| Resource API group | `ligo.dihedron.org` (a domain owned by the project) | `"apiVersion": "ligo.dihedron.org/v1alpha1"` |
 
 Identifiers that name a **resource** use its name: the tables `sources`, `targets`, `target_access_levels`, `target_network_flows`, `bindings`, `binding_stage_state` and `binding_propagation_queue`; the types `binding_phase`, `binding_operation`, `binding_stage`; the API paths `/v1/admin/sources`, `/v1/admin/targets`, `/v1/admin/platforms`, `/v1/admin/bindings` and the workload paths `/v1/bindings` and `/v1/flows`; the Protobuf names `WorkloadBindingService`, `WorkloadBinding` and `BindingContext`; the workflows `ApplyBindingWorkflow` and `DeleteBindingWorkflow`; the error slug `binding-busy`; and the per-binding secret path `kv/data/bindings/<binding_id>`. The audit table, shared by every resource type, is `audit_log`.
 
@@ -77,9 +82,19 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
 | Configuration (§8.1, §8.2 rule 9) | New key `secret_sealing.local_kek_file`: the 32-byte key file of the `local-kek` sealer, which must not be readable by group or others. Required with `local-kek`, which still requires `--insecure-dev`. |
 | Lab (§8.3, §11.1) | The lab moves from `deploy/lab/` to `test/lab/`, as in the openstack-spiffe and lxd-spiffe projects, and is specified in `.specs/ligo-test-environment.md`. |
+| Plugin handshake (§5.3 rule 1) | `ProtocolVersion: 1` instead of 2. The 4.0 plugin SDK is the first one released and no 3.x plugin exists (see the first row), so the handshake starts at 1, as `DescribeResponse.plugin_protocol_version` does. |
+| Principal names (§3.8, §4.2, §5.8 rule 2, §8.1, §8.2 rule 6, Appendix B, INV-08, AC-86) | `principal_prefix` moves from plugin instance configuration to the platform. The engine computes `derived_principal_name` once, when a binding is created, and stores it in the new immutable, unique column `bindings.derived_principal_name`; plugins never apply a prefix. With a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change would orphan principals still holding grants. |
+| Built-in markers (§5.8 rule 2) | `svid.v1` returns no metadata: the target already receives `source_svid_regex` and `source_trust_domain` in `BindingContext`. |
+| Secret storage strategies (§3.6, §4.2, §5.6, §5.9, §8.1, §8.2 rules 3 and 10, INV-08) | The workload `auth.strategy` had no defined source. A secret store now declares the strategies it serves (`Describe.secret_store.secret_storage_strategies`, each with its identity modes; one Vault store serves `vault-static`, `vault-dynamic` and `vault-static-rotated`); a platform chooses one in `secret_store.secret_storage_strategy`; a binding snapshots it in the new immutable column `bindings.secret_storage_strategy`, which is served as `auth.secretStorageStrategy`. The target and the store receive it (`InstanceDescriptor.secret_storage_strategy`, `secret_storage_strategy`). In the workload `auth` object, `strategy`, `providerType` and `providerInstance` become `secretStorageStrategy`, `secretStoreType` and `secretStoreInstance`. `none.v1`'s output is `{}`. |
+| Open issues (§13) | New OI-4: targets cannot map an X.509-SVID, whose SPIFFE ID is in the URI SAN, to a principal. |
+| Plugin kind names (§0.4, ADR-01, §5.9, §8.1) | The plugin kinds are named IdentityProvider, PlatformProvider and SecretStore everywhere. `TargetProvider` becomes `PlatformProvider` (its instances are platforms; "target" names only the API resource), `SecretStoreProvider` becomes `SecretStore`, `target_providers` becomes `platform_providers`, and the built-in identity providers are **mode markers** instead of strategy markers ("strategy" names only secret storage strategies). The stage names `IDENTITY`, `TARGET`, `SECRET_STORE` and the RPCs `ValidateTarget`, `EnsureTarget`, `CleanupTarget` are unchanged. |
+| Describe capabilities (§5.6, §5.9, §8.2 rule 3) | `DescribeResponse` carries its kind's capabilities in a `oneof`, so each kind declares only what applies to it: an identity provider its single `produced_identity_mode`, a platform provider its `accepted_identity_modes` and output schema, a secret store its `secret_storage_strategies` and output schema. `supported_identity_modes`, `client_output_schema_json` and `supported_secret_storage_strategies` are removed; the fields are renumbered, since nothing is released. A store-level list of identity modes would only repeat its strategies' modes, and an identity provider with several modes had no way to choose one. A capabilities case that does not match `kind` is refused at startup. |
+| Plugin startup (§5.2, §5.6, §8.2 rules 1, 3 and 8, startup step 5) | Startup runs in two passes: every process is spawned and described before any is configured, so the descriptions can be checked against each other first. `Describe` MUST be static; a restarted process that describes itself differently is not used. A plugin type is declared in one section only. Rules 3 and 8 run between the passes; rule 3 enforces the §5.6 matrix through the plugins' declarations instead of type names, and fills each platform's `identity_mode` and `secret_storage_strategy`. Rule 8, and refuses a plugin whose instance configuration schema is empty or does not compile. |
+| API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
+| Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
-No change to the API, the data model or the workflows.
+The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
 ### 0.6 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
@@ -251,7 +266,7 @@ The **SPIFFE Binding Lifecycle Service (`ligo`)** is an active control plane and
 2. **Desired-state changes.** Every change to a source, target or binding is proposed as a **Change Request**, via the Admin REST API, the CLI or the HTMX Web GUI.
    - Every resource belongs to a **governance scope**. A binding links the scope of its source, of its target and of the target's platform. Either side may propose a binding; it is created only when the source and target sides consent, together with any additional party the interconnection policy requires; the source, target or platform owner alone can revoke it or lower its access level (ADR-13, ADR-14).
    - On a side whose scope requires approval, a second, distinct principal with the `approver` role for that scope MUST approve. A side in a self-service scope is approved automatically when the requester acts for it.
-   - Applying a binding runs a checkpointed, fault-tolerant 3-stage pipeline (`IdentityProvider` → `TargetProvider` → `SecretStoreProvider`). The pipeline provisions the per-binding principal, grants it the access level's privileges on the target and sets up the secret-exchange policies. Approved changes of a source or target are propagated to the bindings that use them (§6.8).
+   - Applying a binding runs a checkpointed, fault-tolerant 3-stage pipeline (`IdentityProvider` → `PlatformProvider` → `SecretStore`). The pipeline provisions the per-binding principal, grants it the access level's privileges on the target and sets up the secret-exchange policies. Approved changes of a source or target are propagated to the bindings that use them (§6.8).
 3. **Workload reads.** Attested client workloads query the read-only Workload API (REST or gRPC), authenticated with an X.509-SVID (mTLS) or a JWT-SVID.
    - `ligo` resolves every binding whose active regex, and whose source's current regex, fully match the caller's SPIFFE ID.
    - For each match it returns the target connection coordinates (`spec`) and the credential retrieval instructions (`auth`). It also returns the network flows the caller needs (`/v1/flows`), so that a verification tool on the workload host can check them (ADR-16).
@@ -279,7 +294,7 @@ The **SPIFFE Binding Lifecycle Service (`ligo`)** is an active control plane and
 |  +-----------------------------------------------------------------------------+  |
 |  | Core Engine + DBOS Workflows (apply / reapply / delete), fenced by          |  |
 |  | workflow_id; inter-stage secrets sealed via Vault Transit                   |  |
-|  |   Stage 1 IdentityProvider  ->  Stage 2 TargetProvider  ->  Stage 3 Store   |  |
+|  |   Stage 1 IdentityProvider -> Stage 2 PlatformProvider -> Stage 3 Store     |  |
 |  |   (delete runs Stage 3 -> 2 -> 1)                                           |  |
 |  +--------------+---------------------------------------------+----------------+  |
 +-----------------|---------------------------------------------|-------------------+
@@ -305,12 +320,12 @@ Code generators and maintainers MUST preserve these decisions.
 ### ADR-01: Orthogonal 3-Stage Provisioning Pipeline
 - **Problem:** Identity origins, target systems and secret stores vary independently. Monolithic plugins would require $N_{\text{identity}} \times M_{\text{target}} \times K_{\text{store}}$ implementations.
 - **Decision:** Provisioning is decomposed into three plugin interfaces, executed sequentially as checkpointed DBOS steps.
-  1. **`IdentityProvider` (Stage 1)** manages directory principals (`openldap.v1`, `activedirectory.v1`), or acts as a built-in strategy marker (`svid.v1`, `target-local.v1`, `delegated-dynamic.v1`). It outputs an `IdentityArtifact` with a mode, a principal, and optional static secret material.
-  2. **`TargetProvider` (Stage 2)** is the **only** component that connects to the target system. Its behavior depends on the identity mode:
+  1. **`IdentityProvider` (Stage 1)** manages directory principals (`openldap.v1`, `activedirectory.v1`), or acts as a built-in mode marker (`svid.v1`, `target-local.v1`, `delegated-dynamic.v1`). It outputs an `IdentityArtifact` with a mode, a principal, and optional static secret material.
+  2. **`PlatformProvider` (Stage 2)** is the **only** component that connects to the platform. Its behavior depends on the identity mode:
      - `EXTERNAL_DIR` or `SVID`: grants the privileges of the binding's access level (§3.3) to the Stage 1 principal.
      - `TARGET_LOCAL`: creates or updates the local user and returns a `StaticSecret`.
      - `DELEGATED_DYNAMIC`: creates the parent role and grants, and returns a `DelegatedRoleSpec` (target-specific creation, revocation, rollback and rotation statements). It needs no knowledge of Vault APIs.
-  3. **`SecretStoreProvider` (Stage 3)** persists secrets and controls workload access to them (`vault.v1`, `s3-e2ee.v1`, `none.v1`).
+  3. **`SecretStore` (Stage 3)** persists secrets and controls workload access to them (`vault.v1`, `s3-e2ee.v1`, `none.v1`).
 - **Secret and metadata routing:** the **engine** composes the Stage 3 payload. Stage 2 never receives Stage 1 secret material.
   - The `IdentityArtifact` passed to Stage 2 and Stage 3 has `static_secret` stripped. Passing the stripped `IdentityArtifact` (and `previous_finalized_client_auth_json`) to Stage 3 ensures that when `secret_unchanged = true` (no new secret emitted), Stage 3 still has full access to `principal_id`, `distinguished_name`, and prior auth state to converge policies and return `finalized_client_auth_json`.
   - In `EXTERNAL_DIR` mode, the engine forwards the Stage 1 secret to Stage 3 directly.
@@ -526,7 +541,7 @@ Code generators and maintainers MUST preserve these decisions.
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Source",
   "metadata": {
     "id": "01928a10-55e1-7c3a-8f00-2a6b4c1d9e01",
@@ -569,7 +584,7 @@ Field rules:
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Target",
   "metadata": {
     "id": "01928a22-1b07-7d11-9a4e-0c3f5e6d7a02",
@@ -612,7 +627,7 @@ Field rules:
 
 Field rules:
 - `metadata.platform` names a configured platform (§8.1). `platformType`, `platformScope` and `zone` are copied from it. `metadata.scope` MUST match one of the platform's `target_scopes` patterns (default: the platform's scope and every scope below it).
-- `definition` is type-specific. `TargetProvider.ValidateTarget` (§5.9) checks it against the platform and returns it normalized; it MAY verify, over a read-only connection, that the resource exists. Publishing a target does not create the resource (ADR-15).
+- `definition` is type-specific. `PlatformProvider.ValidateTarget` (§5.9) checks it against the platform and returns it normalized; it MAY verify, over a read-only connection, that the resource exists. Publishing a target does not create the resource (ADR-15).
 - `accessLevels` has 1 to 16 entries with unique names matching `^[a-z][a-z0-9-]{0,31}$`. `grants` is type-specific; `ValidateTarget` checks it against the platform's privilege bounds (for example `grantable_roles`) and returns the normalized `grants` and `privileges`, a canonical, sorted list of privilege identifiers used to compare levels (§3.10). `privileges` is output only.
 - `networkFlows` has 0 to 32 entries with unique names. Each entry follows the flow schema below, with every destination inside the platform's `allowed_endpoints` (`422 flow-destination-not-allowed`, ADR-16).
 - `visibility` works as for sources (§3.2), except that the platform's owners always see the target. In the catalog, the interconnection policy filters it further (ADR-14 rule 7).
@@ -621,7 +636,7 @@ Field rules:
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ligo.dihedron.org/schemas/v1alpha2/network-flow.json",
+  "$id": "https://ligo.dihedron.org/schemas/v1alpha1/network-flow.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "purpose", "protocol", "destination", "ports", "tls"],
@@ -655,7 +670,7 @@ Platforms are read-only through the API. Their representation is derived from `s
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Platform",
   "name": "oracle-prod",
   "type": "oracle.v1",
@@ -684,7 +699,7 @@ Platforms are read-only through the API. Their representation is derived from `s
 **Normative** (field names and structure).
 ```json
 {
-  "apiVersion": "ligo.dihedron.org/v1alpha2",
+  "apiVersion": "ligo.dihedron.org/v1alpha1",
   "kind": "Binding",
   "metadata": {
     "id": "019286f8-7c80-7b2e-9f1a-4b5a6c7d8e9f",
@@ -743,9 +758,9 @@ Platforms are read-only through the API. Their representation is derived from `s
     "since": "2026-10-16T07:02:11Z"
   },
   "auth": {
-    "strategy": "vault",
-    "providerType": "vault.v1",
-    "providerInstance": "vault-prod",
+    "secretStorageStrategy": "vault-static",
+    "secretStoreType": "vault.v1",
+    "secretStoreInstance": "vault-prod",
     "config": {
       "vaultAddress": "https://vault.prod.internal:8200",
       "vaultNamespace": "prod",
@@ -771,10 +786,11 @@ Platforms are read-only through the API. Their representation is derived from `s
 
 Field rules:
 - `source`, `target` and `accessLevel` name the linked resources. On create the source and target MUST be `ACTIVE`, the access level MUST be `ACTIVE`, the source's trust domain MUST be in the platform's `allowed_source_trust_domains`, and no other binding may link the same pair (`409 binding-exists`).
-- `parameters` are type-specific per-binding settings (for example a connection limit), validated by `TargetProvider.ValidateBinding` (§5.9). They can never add privilege: privilege comes only from the access level.
+- `parameters` are type-specific per-binding settings (for example a connection limit), validated by `PlatformProvider.ValidateBinding` (§5.9). They can never add privilege: privilege comes only from the access level.
 - `expiresAt` is optional, at least 1 hour and at most `bindings.max_expiry` (default 365 days) in the future. The binding stops being served at that time and is revoked by the sweeper (§6.3, INV-25). `BINDING_EXPIRING` is sent `bindings.expiry_warning` (default 7 days) before.
 - `requested` is the state of revision `revision`: the revisions of the source and target it was composed from, the source's identity at that time, and `spec`, the normalized composition of the target definition, the access level's grants and the parameters returned by `ValidateBinding`. It appears only in admin views.
 - `active` describes the served revision. `auth` and `spec` always reflect it. All three are `null` when no revision has ever become active.
+- `auth.secretStorageStrategy` tells the workload how to obtain its credential (for example `svid`: present its own SVID to the target, nothing to fetch; `vault-static`: read the secret at `config.secretPath`; `vault-dynamic`: request leased credentials and renew them). It is the binding's `secret_storage_strategy`, fixed at creation from the platform's wiring (§5.6). `secretStoreType` and `secretStoreInstance` are the binding's store wiring; `config` is the store's `finalized_client_auth_json`, whose shape depends on the strategy.
 - `status.propagationPending` is `true` while the binding waits in the propagation queue (§6.8).
 - `metadata.sourceScope`, `targetScope` and `platformScope` are the governance scopes (ADR-13). They appear only in admin views.
 - `status.breakGlass` is `null`, or, while an unratified break-glass change is open on the binding (ADR-12), `{"changeRequestId": "…", "requestedBy": "…", "incidentReference": "…", "expiresAt": "…"}`.
@@ -795,7 +811,7 @@ Field rules:
       "platformType": "oracle.v1",
       "platform": "oracle-prod",
       "revision": 4,
-      "auth": { "strategy": "vault", "providerType": "vault.v1", "providerInstance": "vault-prod", "config": { } },
+      "auth": { "secretStorageStrategy": "vault-static", "secretStoreType": "vault.v1", "secretStoreInstance": "vault-prod", "config": { } },
       "spec": { },
       "updatedAt": "2026-10-16T07:02:11Z"
     }
@@ -870,7 +886,7 @@ When the target scope equals the platform scope, "owner and platform" is a singl
 | :--- | :--- | :--- | :--- | :--- |
 | `metadata.name` | Yes | **No** | | §3.8. |
 | `source`, `target` | Yes | **No** | | A different pair is a different binding. |
-| `metadata.zone`, `platform*`, `wiring`, scopes | Derived at creation | **No** | | Snapshotted (INV-08). |
+| `metadata.zone`, `platform*`, `wiring`, scopes, `derivedPrincipalName` | Derived at creation | **No** | | Snapshotted (INV-08). |
 | `accessLevel` | Yes | Yes | `ALL`, or `ANY` if the new level's privileges are a subset of the current one's | The new level MUST be `ACTIVE`. |
 | `parameters` | Yes | Yes | `ALL` | Validated by `ValidateBinding`. |
 | `expiresAt` | Yes | Yes | `ANY` if brought forward or set where there was none, `ALL` if extended or removed | |
@@ -883,8 +899,8 @@ An update with several changes uses consent `ANY` only if **every** change in it
 - **Name prefixes.** `governance.name_prefixes` entries apply per resource type (`resources`, default all three). The first entry whose `scopes` match the resource's **owner scope** wins: the source's scope for a source, the target's scope for a target, and the **source scope** for a binding. The name MUST start with that entry's resolved prefix and be longer than it. A prefix may contain `{n}`, the n-th segment of the scope (counting from 1): with `prefix: "{2}-{3}-"`, a source whose scope is `cloud/fin-01/payments` must be named `fin-01-payments-…`. The rule is checked on create; names are immutable.
   - **Rationale.** Names are unique across the whole system. Without prefixes any operator could take a name another team needs, and a `409` on create would reveal that a resource the caller cannot see exists. A prefix gives each owner its own part of the name space, so a conflict can only arise among the owner's own resources. Bindings use the source scope because most bindings are requested by source owners and every binding of a source is visible to them.
 - **Suggested binding names.** The UI and CLI propose `<source>-<target>` (truncated to 63 characters with a 6-character hash suffix when needed), adjusted to the prefix.
-- External resource names (directory principals, database users and roles, Vault roles, Vault paths) MUST be derived from the binding `id` and never from a name. The engine computes the 20-character `derived_principal_name` (Appendix B) and passes it in `BindingContext`.
-- A plugin MAY replace the default 4-character `"bnd_"` prefix with a configured prefix of up to 4 characters and/or apply a deterministic case transformation, guaranteeing the resulting identifier never exceeds 20 characters (Appendix B).
+- External resource names (directory principals, database users and roles, Vault roles, Vault paths) MUST be derived from the binding `id` and never from a name. The engine computes the 20-character `derived_principal_name` (Appendix B) once, when the binding is created, with the platform's `principal_prefix`; stores it in `bindings.derived_principal_name`, which never changes (INV-08); and passes the stored value in `BindingContext`. It is never recomputed, so a later change of `principal_prefix` affects only new bindings.
+- Plugins never apply a prefix of their own; they MAY apply a deterministic case transformation (§5.8 rule 2).
 
 ### 3.9 Governance scopes (Normative)
 
@@ -987,7 +1003,7 @@ Any other trigger in any other phase MUST be rejected with `409 binding-busy`, o
 | INV-05 | Before any `Ensure*` RPC is invoked, a `binding_stage_state` row with status `STARTED` exists for that stage, carrying the provider wiring. |
 | INV-06 | At most one workflow mutates a binding at any time. All workflow writes are fenced by `workflow_id`. |
 | INV-07 | Every `Ensure*` and `Cleanup*` implementation is idempotent and convergent. |
-| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
+| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `secret_storage_strategy`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
 | INV-09 | A workflow ID is never reused. |
 | INV-10 | Each logical plugin instance authenticates with exactly one SVID, from its own zone's trust domain. |
 | INV-11 | Every state-changing admin action, propagation and workflow outcome produces an audit record. The audit hash chain verifies end to end. |
@@ -1093,7 +1109,7 @@ erDiagram
 | Zone | Configuration | A technical placement: one trust domain, its SPIRE agent socket and the plugin processes attached to it (ADR-03). |
 | Trust domain | Configuration | A SPIFFE trust domain whose SVIDs `ligo` verifies, either a zone's own or a federated one reached through a zone (§7.1). |
 | Provider instance | Configuration | A configured identity provider or secret store (`identity_providers`, `secret_stores`), in exactly one zone. |
-| Platform | Configuration | A system that hosts targets (`target_providers[].platforms`): a plugin type and configuration in one zone, wired to one identity provider and one secret store of that zone, owned by one governance scope, with privilege bounds, an endpoint allowlist and its own network flows (§3.4). |
+| Platform | Configuration | A system that hosts targets (`platform_providers[].platforms`): a plugin type and configuration in one zone, wired to one identity provider and one secret store of that zone, owned by one governance scope, with privilege bounds, an endpoint allowlist and its own network flows (§3.4). |
 | Governance scope | Configuration (implicit) | An ownership boundary (§3.9). Scopes are not declared in a list: a scope exists when a platform, a target, a source-scope extractor or a party names it. |
 | Source-scope extractor | Configuration | The rule that derives a source's scope from its regex, one per accepted source trust domain (§3.9). |
 | Principal | External | A person (LDAP user) or a machine (SPIFFE ID) that uses the admin API or UI. Role bindings (§8.1 `authorization.bindings`) grant it roles on scope patterns. |
@@ -1406,7 +1422,7 @@ CREATE TABLE targets (
     zone               VARCHAR(63)  NOT NULL,               -- the platform's zone; immutable
     scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
     platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
-    definition         JSONB NOT NULL,                      -- normalized by TargetProvider.ValidateTarget
+    definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
     display_name       VARCHAR(128),
     description        TEXT CHECK (length(description) <= 4096),
     labels             JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1507,6 +1523,8 @@ CREATE TABLE bindings (
     identity_provider_instance  VARCHAR(128) NOT NULL,
     secret_store_type           VARCHAR(128) NOT NULL,
     secret_store_instance       VARCHAR(128) NOT NULL,
+    secret_storage_strategy       VARCHAR(64)  NOT NULL,          -- §5.6; from the platform's wiring at creation; immutable
+    derived_principal_name      VARCHAR(20) NOT NULL UNIQUE,    -- Appendix B, with the platform's principal_prefix at creation; immutable
     source_scope                scope_path NOT NULL,            -- copied from the source; immutable (re-scoping only)
     target_scope                scope_path NOT NULL,            -- copied from the target
     platform_scope              scope_path NOT NULL,            -- copied from the target's platform
@@ -1594,6 +1612,8 @@ BEGIN
      OR NEW.identity_provider_instance <> OLD.identity_provider_instance
      OR NEW.secret_store_type <> OLD.secret_store_type
      OR NEW.secret_store_instance <> OLD.secret_store_instance
+     OR NEW.secret_storage_strategy <> OLD.secret_storage_strategy
+     OR NEW.derived_principal_name <> OLD.derived_principal_name
      OR NEW.source_trust_domain <> OLD.source_trust_domain THEN
     RAISE EXCEPTION 'immutable binding column modified';
   END IF;
@@ -2198,9 +2218,11 @@ FROM v_active_bindings WHERE id = $1;
 ### 5.2 Process topology (ADR-03)
 - The plugin manager spawns one process per `(type, zone)`. Each process receives `ConfigureInstances` containing only its zone's instances (for target plugins, its zone's platforms) and that zone's `spiffe_workload_socket`.
 - Crashed processes are restarted with exponential backoff (`plugins.restart_backoff`). Any in-flight RPC fails with a retryable error.
+- **Startup in two passes.** `Describe` takes no input and returns the plugin type's capabilities, independent of its instances, so processes may start in any order. Pass 1 spawns every process and calls `Describe`; the descriptions are then checked against the configuration and against each other (§8.2 rules 3, 8). Pass 2 calls `ConfigureInstances` on every process. No process is configured before every process has described itself.
+- **`Describe` is static.** A plugin MUST return the same `DescribeResponse` for the life of its binary. A restarted process that describes itself differently from its first start is not used: the restart counts as failed and is retried with backoff, like a restart that resolves other SVIDs.
 
 ### 5.3 go-plugin hosting requirements
-1. **Handshake.** `ProtocolVersion: 2` (4.0 plugins; 3.x plugins use 1 and are refused), `MagicCookieKey: "LIGO_PLUGIN"`, `MagicCookieValue: "l1g0-pl7g-v1"`. `AllowedProtocols: [gRPC]` only.
+1. **Handshake.** `ProtocolVersion: 1` (the first plugin SDK; a plugin with another version is refused), `MagicCookieKey: "LIGO_PLUGIN"`, `MagicCookieValue: "l1g0-pl7g-v1"`. `AllowedProtocols: [gRPC]` only.
 2. **Transport security.** `AutoMTLS: true`.
 3. **Binary location and permissions.**
    - Binaries MUST reside in `plugins.directory`. That directory and every binary in it MUST be owned by `root:root`, MUST NOT be writable by group, others or the `ligo` user (binaries `0755`), and MUST NOT be symlinks.
@@ -2301,17 +2323,21 @@ bootstrap_credential:
 | `DELEGATED_DYNAMIC` | `delegated_role` | `vault.v1` | Stage 2 (statements only; Vault generates credentials) |
 
 - `s3-e2ee.v1` is a planned store specified with the external plugins; until it exists, only `vault.v1` and `none.v1` are available.
-- The config validator MUST reject wiring that violates this matrix.
-- It MUST also reject a platform whose plugin's `Describe.supported_identity_modes` does not include the wired identity provider's mode.
+- **Secret storage strategies.** A secret store declares in `Describe.secret_store.secret_storage_strategies` the strategies it serves, each with the identity modes it accepts. One store process MAY serve several strategies. `none.v1` declares `svid` (`SVID`). The Vault store declares `vault-static` (`EXTERNAL_DIR`, `TARGET_LOCAL`), `vault-dynamic` and `vault-static-rotated` (`DELEGATED_DYNAMIC`); its plugin specification defines their `config` shapes.
+- A platform chooses its strategy in `secret_store.secret_storage_strategy` (§8.1). When omitted, it is the store's only strategy that accepts the platform's identity mode; if there are several, the configuration is rejected. The engine passes the strategy to the platform (`InstanceDescriptor.secret_storage_strategy`), so the target emits a matching `DelegatedRoleSpec.role_type`, and to the store on every call (`secret_storage_strategy`). The store MUST reject a payload that does not match the strategy (`FAILED_PRECONDITION`, `INCOMPATIBLE_IDENTITY_MODE`).
+- A binding snapshots the strategy at creation (`bindings.secret_storage_strategy`, INV-08). A later change of the platform's strategy affects only new bindings.
+- The engine enforces this matrix through the plugins' declarations (§8.2 rule 3), not through type names: the "Allowed Stage 3 types" column lists the stores whose declared strategies accept each mode.
+- At startup, after every plugin has described itself and before any `ConfigureInstances` (§5.2), the engine rejects a platform whose plugin's `Describe.platform_provider.accepted_identity_modes` does not include the wired identity provider's `Describe.identity_provider.produced_identity_mode`, and a secret storage strategy that the wired store does not declare for that mode. It then sets the platform's `InstanceDescriptor.identity_mode` and `secret_storage_strategy` (explicit or defaulted), which the platform's `ConfigureInstances` receives.
 - `secret_unchanged = true` is valid only for `EXTERNAL_DIR` and `TARGET_LOCAL`. In that case no secret is forwarded, and Stage 3 MUST leave the stored secret in place while still converging policies and roles using the non-secret `IdentityArtifact` and `previous_finalized_client_auth_json`.
 
 ### 5.7 Output validation (INV-13)
-- At startup, `Describe` returns a JSON Schema (2020-12) for the plugin's client-facing output: `finalized_client_spec_json` for targets, `finalized_client_auth_json` for stores.
-- Schema properties carrying network endpoints MUST be annotated with `"x-ligo-endpoint": true`. The value is either a host, a `host:port`, or an absolute URL.
-- The engine MUST:
-  1. validate each finalized output against the schema;
-  2. extract every annotated value, and every entry in `declared_endpoints`, and check each against the instance's `allowed_endpoints` (exact host match, with optional port);
-  3. reject outputs larger than 64 KiB.
+- At startup, `Describe` returns a JSON Schema (2020-12) for the plugin's client-facing output: `finalized_client_spec_json` for platform providers, `finalized_client_auth_json` for secret stores (`client_output_schema_json`, §5.9). A platform provider or secret store whose output schema is empty or does not compile is refused at startup, after every plugin has described itself and before any `ConfigureInstances` (§5.2).
+- Schema properties carrying network endpoints MUST be annotated with `"x-ligo-endpoint": true`. The value is a string: a host, a `host:port`, or an absolute URL. A non-string value of an annotated property fails validation.
+- The engine MUST, in this order:
+  1. reject outputs larger than 64 KiB;
+  2. validate each finalized output against the schema, checking every annotated value against the instance's `allowed_endpoints` as it goes;
+  3. check every entry in `declared_endpoints` against the same `allowed_endpoints`.
+- **Endpoint matching.** An endpoint is allowed when an `allowed_endpoints` entry has the same host (case-insensitive; an address must lie within an address or CIDR entry) and either no port, which allows any port, or the endpoint's port. An endpoint without a port, including a URL without one, is allowed only by an entry without a port: a URL scheme does not imply a default port.
 - A validation failure is a terminal error (`OUTPUT_VALIDATION_FAILED`) and is audited.
 - **Target network flows** (ADR-16, INV-24) are checked against the platform's `allowed_endpoints` when a target change request is created and again when it is applied: a DNS-name destination MUST equal an allowed host; an IP address or CIDR destination MUST lie within an allowed CIDR entry (`allowed_endpoints` accepts CIDR entries for this purpose); when the allowed entry has a port, every port of the flow MUST equal it. A failure is `422 flow-destination-not-allowed`. The same check applies at startup to the configured flows of platforms and secret stores (§8.2 rule 19).
 
@@ -2320,7 +2346,8 @@ bootstrap_credential:
    - `Ensure*` converges: it creates what is missing, updates what differs, and revokes what the revision no longer requests.
    - `Cleanup*` returns success when the resource is absent.
 2. **Ownership.**
-   - Resources MUST be named from `BindingContext.derived_principal_name` (Appendix B).
+   - Resources MUST be named from `BindingContext.derived_principal_name` (Appendix B). A plugin MUST NOT apply a prefix of its own; it MAY apply a deterministic case transformation (Oracle's unquoted identifiers are upper case).
+   - Identity providers set `IdentityArtifact.principal_id` to `derived_principal_name` (case-transformed if needed); a backend-specific form, such as an LDAP DN, goes in `distinguished_name`. The built-in markers return no metadata, except `target-local.v1`'s `password_length` (§8.1), the length of the password the target generates.
    - Where the backend supports metadata (LDAP `description`, Vault role metadata, PostgreSQL `COMMENT ON ROLE`), resources MUST be tagged with `ligo:binding_id=<uuid>`.
    - `Ensure*` finding an existing resource tagged with a *different* binding id MUST fail with `FAILED_PRECONDITION` and code `RESOURCE_OWNED_BY_OTHER_BINDING`.
    - `Cleanup*` finding a foreign-owned resource MUST skip it and report `skipped_not_owner=true`; the engine audits `CLEANUP_SKIPPED_NOT_OWNER`.
@@ -2342,15 +2369,15 @@ bootstrap_credential:
 8. **Parameters never add privilege.** `ValidateBinding` MUST reject parameters that would grant anything beyond the access level (for example extra roles, or a schema other than the target's). The privileges it returns MUST equal those of the access level.
 9. **Canonical privileges.** `ValidateTarget` returns, for each access level, `privileges`: a sorted, duplicate-free list of identifiers such that, for two levels of the same target, `privileges(A) ⊆ privileges(B)` implies that everything `A` grants is also granted by `B` (§3.10). Identifiers are stable across plugin versions; a plugin that changes them MUST bump its major type version (`oracle.v2`). Where containment cannot be guaranteed (for example a grant with conditions the plugin cannot compare), the plugin MUST emit an identifier unique to that grant.
 
-### 5.9 Plugin Protobuf contract (`api/proto/plugin/v2/plugin.proto`)
+### 5.9 Plugin Protobuf contract (`api/proto/plugin/v1/plugin.proto`)
 
-4.0 changes the target plugin contract: `ValidateSpec` is replaced by `ValidateTarget` (a target's definition and access levels, at publication) and `ValidateBinding` (a binding's parameters against its target and access level), and `GetUISchema` by `GetUISchemas` (one form per purpose). The package becomes `ligo.plugin.v2`.
+4.0 changes the target plugin contract: `ValidateSpec` is replaced by `ValidateTarget` (a target's definition and access levels, at publication) and `ValidateBinding` (a binding's parameters against its target and access level), and `GetUISchema` by `GetUISchemas` (one form per purpose). The package becomes `ligo.plugin.v1`.
 
 **Normative.**
 ```protobuf
 syntax = "proto3";
-package ligo.plugin.v2;
-option go_package = "github.com/dihedron/ligo/api/gen/plugin/v2;pluginv2";
+package ligo.plugin.v1;
+option go_package = "github.com/dihedron/ligo/api/gen/plugin/v1;pluginv1";
 
 // ============================================================================
 // Enums & common types
@@ -2367,8 +2394,8 @@ enum IdentityMode {
 enum PluginKind {
   PLUGIN_KIND_UNSPECIFIED = 0;
   PLUGIN_KIND_IDENTITY_PROVIDER = 1;
-  PLUGIN_KIND_TARGET_PROVIDER = 2;
-  PLUGIN_KIND_SECRET_STORE_PROVIDER = 3;
+  PLUGIN_KIND_PLATFORM_PROVIDER = 2;
+  PLUGIN_KIND_SECRET_STORE = 3;
 }
 
 enum Operation {
@@ -2403,12 +2430,13 @@ message InstanceDescriptor {
   string config_json = 4;               // validated against Describe.instance_config_schema_json
   SVIDSelectorConfig svid_selector = 5;
   bool allow_shared_svid = 6;
-  // TargetProvider instances (platforms) only:
+  // PlatformProvider instances (platforms) only:
   string identity_provider_type = 7;
   string identity_provider_instance = 8;
   IdentityMode identity_mode = 9;
   string secret_store_type = 10;
   string secret_store_instance = 11;
+  string secret_storage_strategy = 12;    // §5.6; the target emits a matching DelegatedRoleSpec.role_type
 }
 
 message BindingContext {
@@ -2488,9 +2516,31 @@ message DescribeResponse {
   PluginKind kind = 2;
   uint32 plugin_protocol_version = 3;     // MUST be 1
   string plugin_version = 4;              // semver of the binary
-  repeated IdentityMode supported_identity_modes = 5; // targets: accepted; identity providers: produced
-  string instance_config_schema_json = 6; // JSON Schema 2020-12
-  string client_output_schema_json = 7;   // targets/stores; empty for identity providers
+  string instance_config_schema_json = 5; // JSON Schema 2020-12
+  oneof capabilities {                    // exactly the one of the plugin's kind
+    IdentityProviderCapabilities identity_provider = 6;
+    PlatformProviderCapabilities platform_provider = 7;
+    SecretStoreCapabilities secret_store = 8;
+  }
+}
+
+message IdentityProviderCapabilities {
+  IdentityMode produced_identity_mode = 1; // exactly one; never UNSPECIFIED (refused at startup)
+}
+
+message PlatformProviderCapabilities {
+  repeated IdentityMode accepted_identity_modes = 1;
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_spec_json
+}
+
+message SecretStoreCapabilities {
+  repeated SecretStorageStrategy secret_storage_strategies = 1; // §5.6
+  string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_auth_json
+}
+
+message SecretStorageStrategy {
+  string name = 1;                        // e.g. "svid", "vault-static", "vault-dynamic"
+  repeated IdentityMode identity_modes = 2;
 }
 
 message ConfigureInstancesRequest {
@@ -2592,10 +2642,10 @@ message CleanupIdentityRequest {
 message CleanupIdentityResponse { bool skipped_not_owner = 1; }
 
 // ============================================================================
-// Stage 2: TargetProviderPlugin
+// Stage 2: PlatformProviderPlugin
 // ============================================================================
 
-service TargetProviderPlugin {
+service PlatformProviderPlugin {
   rpc GetUISchemas(GetUISchemasRequest) returns (GetUISchemasResponse);
   rpc ValidateTarget(ValidateTargetRequest) returns (ValidateTargetResponse);
   rpc ValidateBinding(ValidateBindingRequest) returns (ValidateBindingResponse);
@@ -2667,10 +2717,10 @@ message CleanupTargetRequest {
 message CleanupTargetResponse { bool skipped_not_owner = 1; }
 
 // ============================================================================
-// Stage 3: SecretStoreProviderPlugin
+// Stage 3: SecretStorePlugin
 // ============================================================================
 
-service SecretStoreProviderPlugin {
+service SecretStorePlugin {
   rpc EnsureSecretStore(EnsureSecretStoreRequest) returns (EnsureSecretStoreResponse);
   rpc CleanupSecretStore(CleanupSecretStoreRequest) returns (CleanupSecretStoreResponse);
 }
@@ -2681,6 +2731,7 @@ message EnsureSecretStoreRequest {
   SecretProvisioningPayload secret_payload = 3;
   IdentityArtifact identity = 4;                    // static_secret ALWAYS stripped
   bytes previous_finalized_client_auth_json = 5;    // SECRET_STORE stage row's last ENSURED artifact (§6.4); empty if none
+  string secret_storage_strategy = 6;                       // the binding's secret_storage_strategy (§5.6)
 }
 message EnsureSecretStoreResponse {
   bytes finalized_client_auth_json = 1;
@@ -2692,6 +2743,7 @@ message CleanupSecretStoreRequest {
   BindingContext binding = 2;
   bytes finalized_client_auth_json = 3;    // MAY be empty after partial failure
   IdentityArtifact identity = 4;           // non-secret; MAY be empty
+  string secret_storage_strategy = 5;              // the binding's secret_storage_strategy (§5.6)
 }
 message CleanupSecretStoreResponse { bool skipped_not_owner = 1; }
 ```
@@ -2758,7 +2810,7 @@ Applying a binding change request whose consent rule is satisfied, a propagation
        - **Request complete at creation** (every side was approved automatically or by delegation when the request was filed, ADR-13 rule 6): in the same transaction that creates the change request and its sides, record it as `FAILED_TO_APPLY` with `apply_error = "binding busy"` and `decided_by` = the system identity that decided its last side (`'system:auto-approve'` or `'system:delegated-approval'`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit, and return `409 binding-busy`. The caller retries with a new request.
        - **Rationale.** A `PENDING` change request holds the binding's name (`uq_cr_one_pending_per_resource`) until it is decided or expires. When a person approved, that person is there to retry, so keeping the request pending is useful. When the request was complete at creation, nobody will ever approve it, so leaving it `PENDING` would block every further change to the binding for the whole `change_request_ttl` (72h by default). Recording the attempt as `FAILED_TO_APPLY` releases the name immediately while keeping the attempt in the audit trail, consistent with how revision conflicts are handled below.
      - For change requests (`UPDATE` or `DELETE`), check `expected_revision` against `bindings.revision`. If `expected_revision <> bindings.revision`, move the change request to `FAILED_TO_APPLY` with the compare-and-set of §4.3 (`apply_error = "revision conflict"`), write audit `CR_APPLY_FAILED` as the final statement before `COMMIT`, commit that status change, and return `409 revision-conflict`.
-   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields. For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
+   - Set `phase`, `operation`, `revision`, `attempt = attempt + 1` (1 on create), `workflow_id`, `current_step = 'INIT'`, `rotate_static_secrets` (§6.4) and the requested fields; on create, also `derived_principal_name` (Appendix B, with the platform's `principal_prefix`) and `secret_storage_strategy` (§5.6). For a new revision (create, update, propagation), compose the requested state from the source, target and access level read under the `FOR SHARE` locks: `source_revision`, `target_revision`, `source_trust_domain`, `source_svid_regex`, and `requested_spec` from `ValidateBinding` (§5.9). If the source or target revision differs from the one validated before the transaction (a change of the resource was applied meanwhile), roll back and validate again (at most 3 times, then `409 resource-changed`). Delete the binding's `binding_propagation_queue` row, if any: the new revision includes every applied change.
    - For `DELETE`, also set `active_revision`, `active_source_svid_regex`, `active_auth_config` and `active_spec` to `NULL` (T-10).
    - **Break-glass bookkeeping (ADR-12).** For a `BREAK_GLASS` `CREATE` or `UPDATE`, set `bindings.break_glass_cr_id` and `break_glass_expires_at = now() + ttl`. For a `SYSTEM_REVERT`, and for any `DELETE` of the binding, clear `break_glass_cr_id`, `break_glass_expires_at` and `break_glass_warned_at`, so that the same change is never reverted twice. An unratified break-glass change whose binding is deleted is not reverted; it falls under the overdue-review rule of §6.3. Insert the corresponding `notification_outbox` rows (§7.5) before the audit insert.
    - Close the change request, if any, with the request-decision compare-and-set of §4.3: `status = 'APPLIED'`, `decided_by` = the principal whose decision completed it, `decided_at`. If it updates zero rows, the request was withdrawn, rejected or expired concurrently: roll back the whole transaction and return `409 change-request-not-pending`.
@@ -2924,13 +2976,13 @@ An applied change of a source or target that affects provisioning is carried int
 - Returns the effective network flows (§3.6, ADR-16) of every binding the caller would receive from `GET /v1/bindings` with the same filter. It is intended for the network verification tool running on the workload host with the host's or workload's SVID.
 - Same authentication, rate limit, ETag and error rules as `/v1/bindings`. The response contains no credential and no `auth` or `spec`.
 
-**gRPC (`api/proto/workload/v1alpha2/workload.proto`)**
+**gRPC (`api/proto/workload/v1alpha1/workload.proto`)**
 
 **Normative.**
 ```protobuf
 syntax = "proto3";
-package ligo.workload.v1alpha2;
-option go_package = "github.com/dihedron/ligo/api/gen/workload/v1alpha2;workloadv1alpha2";
+package ligo.workload.v1alpha1;
+option go_package = "github.com/dihedron/ligo/api/gen/workload/v1alpha1;workloadv1alpha1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
@@ -3192,7 +3244,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 2. The platform exists; `scope` matches its `target_scopes`; derive `platformType`, `platformScope` and `zone`.
 3. Flows: schema, unique names, destinations within the platform's `allowed_endpoints` (§5.7).
 4. RBAC: `operator` (or `trusted_automation`, with `platforms`) on the target's or the platform's scope.
-5. `TargetProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges.
+5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges.
 6. For `UPDATE`: immutable fields; every existing level is kept (removal is refused; retire instead); changed grants narrow (§3.10); retiring a level or the target finds no binding using it.
 7. `expectedRevision` matches; no `PENDING` change request exists for the target.
 
@@ -3205,7 +3257,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 6. RBAC: `operator` (or `trusted_automation`) on the source or the target scope.
 7. Interconnection policy (ADR-14), when the source and target scopes differ: `403 interconnect-denied` (audited `CR_INTERCONNECT_DENIED`, nothing else stored), or the rule and its additional parties.
 8. `expiresAt` within the allowed range (§3.5).
-9. `TargetProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash.
+9. `PlatformProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash.
 10. Immutable-field check (update).
 11. `expectedRevision` matches (§6.2.2).
 12. No `PENDING` change request exists for the binding name.
@@ -3727,7 +3779,6 @@ identity_providers:
         config:
           url: "ldaps://openldap.prod.internal:636"
           service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
-          principal_prefix: "svc_"        # <= 4 chars; replaces default "bnd_" (Appendix B)
           allowed_endpoints: ["openldap.prod.internal:636"]
           bootstrap_credential:
             source: vault
@@ -3777,7 +3828,7 @@ secret_stores:
         network_flows:
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.test.internal", ports: [8200], tls: true, server_name: "vault.test.internal" }
 
-target_providers:                         # plugin types and the platforms that use them (§3.4)
+platform_providers:                       # plugin types and the platforms that use them (§3.4)
   - type: "oracle.v1"
     builtin: false
     binary: "target-oracle"
@@ -3794,7 +3845,8 @@ target_providers:                         # plugin types and the platforms that 
         network_flows:                    # flows shared by every target of the platform (ADR-16)
           - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, server_name: "ora-scan.prod.internal" }
         identity_provider: { type: "openldap.v1", instance: "ldap-prod" }
-        secret_store: { type: "vault.v1", instance: "vault-prod" }
+        secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy: "vault-static" }   # strategy optional when the mode allows only one (§5.6)
+        principal_prefix: "svc_"          # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:
@@ -3845,16 +3897,16 @@ target_providers:                         # plugin types and the platforms that 
 ### 8.2 Configuration validation & Daemon Startup/Shutdown Sequence
 
 **Validation rules (at startup; failures are fatal):**
-1. Instance names are unique within each provider kind; platform names are unique across all target providers. Zone names are unique.
+1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique.
 2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
-3. The wiring satisfies the §5.6 matrix and the plugins' `Describe.supported_identity_modes`.
+3. The wiring satisfies the §5.6 matrix and the plugins' Describe capabilities (§5.9: an identity provider produces exactly one mode, a platform provider lists the modes it accepts); the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
 5. Every `bootstrap_credential.jwt_audience` appears in the instance's `svid_selector.jwt_audience`.
-6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`.
+6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
-8. Every `config` validates against `Describe.instance_config_schema_json`.
+8. Every `config` validates against `Describe.instance_config_schema_json`, checked after every plugin has described itself and before any `ConfigureInstances` (§5.2). The schema MUST compile as JSON Schema 2020-12: a plugin with an empty or invalid schema is refused. An omitted `config` is validated as `{}`. A failure names the instance and the schema location that failed.
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`.
-10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited).
+10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited).
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
 12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone.
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
@@ -3877,7 +3929,7 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 2. Connect PostgreSQL pools (`app`, `reader`, `dbos`) and write audit `CONFIG_LOADED` with the configuration SHA-256, the SHA-256 of every theme file in use (§7.6), and the governance policy with its SHA-256 (rule 16, T-22). Compare the policy with the snapshot of the most recent previous `CONFIG_LOADED` entry. If its hash differs, write `CONFIG_GOVERNANCE_POLICY_CHANGED` with the differences. If the change loosens the policy (a pattern removed from `required_scopes`; `require_distinct_approvers_across_scopes` turned off or a rule's `distinct_approvers: false` added; a `deny` rule removed, moved below an `allow` rule that now matches its pairs, or changed to `allow`; an additional party removed; `default_cross_scope` changed to `allow`; a break-glass policy's `max_ttl` or `max_open` raised), log at `WARN` and also write `CONFIG_APPROVAL_POLICY_WEAKENED` listing the loosening changes. Then verify existing platform references and binding wiring (Rules 10, 11), scopes (Rule 17) and interconnections (Rule 18).
 3. Connect to all `zones[].spiffe_workload_socket` endpoints, start the composite bundle source (§7.1), and acquire `core_identity` from its zone's socket.
 4. Initialize the **Sealer** (`vault-transit` or `local-kek`) and verify connectivity/key availability.
-5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, zone)` plugin processes, execute `Describe`, `ConfigureInstances`, and initial `Health` checks, and validate Rules 3, 4, 8 and the plugin part of 19.
+5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, zone)` plugin processes and execute `Describe` on each; validate Rules 3 and 8 against the descriptions; then execute `ConfigureInstances` on each (§5.2) and initial `Health` checks, and validate Rule 4 and the plugin part of 19.
 6. Initialize the **DBOS runtime**, register `ApplyBindingWorkflow` and `DeleteBindingWorkflow`, and call `dbos.Launch()`.
 7. Load the initial **Workload Resolution Cache** (`v_active_bindings`) and start the `LISTEN ligo_bindings_changed` subscriber.
 8. Start the background **Sweeper**, **Reconciler**, **Propagator** and **Notification dispatcher** loops.
@@ -3896,11 +3948,11 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 ```text
 ligo/
 ├── api/
-│   ├── openapi/admin.v1alpha2.yaml      # MUST be kept consistent with §7.2
-│   ├── schemas/v1alpha2/network-flow.json   # §3.3
+│   ├── openapi/admin.v1alpha1.yaml      # MUST be kept consistent with §7.2
+│   ├── schemas/v1alpha1/network-flow.json   # §3.3
 │   └── proto/
-│       ├── plugin/v2/plugin.proto
-│       └── workload/v1alpha2/workload.proto
+│       ├── plugin/v1/plugin.proto
+│       └── workload/v1alpha1/workload.proto
 ├── cmd/
 │   ├── ligo/                            # jessevdk/go-flags CLI + daemon (Section 8.4)
 │   └── plugins/{id-openldap,target-oracle,target-postgres,store-vault}/   # external plugins: specified separately
@@ -4343,7 +4395,7 @@ type GovCheckCommand struct {
 
 ```
 
-**Manifests (Normative).** A manifest document has `apiVersion: ligo.dihedron.org/v1alpha2`, `kind` (`Source`, `Target` or `Binding`) and the create or update body of that kind (§3.2, §3.3, §7.2.3). A file may contain several documents (YAML `---` or a JSON array); `ligo apply` submits sources first, then targets, then bindings, and a binding whose source is created in the same file is filed with that source as its inline dependency (§7.2.4).
+**Manifests (Normative).** A manifest document has `apiVersion: ligo.dihedron.org/v1alpha1`, `kind` (`Source`, `Target` or `Binding`) and the create or update body of that kind (§3.2, §3.3, §7.2.3). A file may contain several documents (YAML `---` or a JSON array); `ligo apply` submits sources first, then targets, then bindings, and a binding whose source is created in the same file is filed with that source as its inline dependency (§7.2.4).
 
 **Create or update in `ligo apply` (Normative):** if a document contains `expectedRevision`, the CLI sends `PUT` to the resource (update); otherwise it sends `POST` (create). Replacing an existing resource therefore always requires stating which revision is being replaced. A create for a name that already exists fails with `409 invalid-transition` (`409 binding-exists` for a second binding of the same pair); the CLI then prints the current revision and tells the user to add `expectedRevision`.
 
@@ -4675,6 +4727,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-83 | A form submission returns `409`, `422`, `403` and `500` in turn | The browser receives each response | `409` and `422` appear in the form's error container; `403` in the global error container; `500` replaces nothing and shows the generic banner with the `request_id`. |
 | AC-84 | A binding is `PROVISIONING`, its status row is polling | The workflow completes | The final row is shown and no further `status-row` request is made. An approval that waits 70 s on a slow plugin (fault-injected) is not cut off by the browser. |
 | AC-85 | The UI has been used for creates, approvals and navigation, including back navigation | Browser storage is inspected | `localStorage` and `sessionStorage` contain no page content; `htmx.min.js` and `hx-csp.min.js` match the SHA-256 values in `web/static/VERSIONS`; `npx htmx.org@4.0.0 upgrade-check` reports nothing on `web/templates/`. |
+| AC-86 | Platform `oracle-prod` has `principal_prefix: "svc_"`; binding B is created, then the prefix is changed to `app_` and `ligo` restarted | B is reconciled, a binding C is created, B is deleted, and an `UPDATE` of B's `derived_principal_name` is attempted | B keeps `svc_…` in every `BindingContext`, in its principal and through cleanup, which removes it; C gets `app_…`; the `UPDATE` fails (INV-08). Every stage of one workflow receives the same name. |
 
 ---
 
@@ -4711,6 +4764,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `store-vault`. |
 | OI-2 | **The example configuration wires the `oracle-prod` platform to `openldap.v1`.** Oracle cannot authenticate database users against a generic OpenLDAP directory; `EXTERNAL_DIR` on Oracle needs Centrally Managed Users with Active Directory, or Enterprise User Security. | Change the example to `target-local.v1` (or to an Active Directory identity provider once one is bundled), and make the config validator reject `oracle.v1` + `EXTERNAL_DIR` unless the platform declares `directory_integration`. |
 | OI-3 | **Privilege identifiers of existing plugins.** Narrowing of access levels (§3.10) relies on each plugin's canonical `privileges` (§5.8 rule 9). For roles this is the role name, but plugins that grant object privileges, Kafka ACLs or OpenStack roles with project scoping need a documented identifier scheme in which set inclusion really means containment. | Each plugin specification defines its scheme and its test vectors before 4.0 plugins are released; until then, a plugin emits one identifier per grant, so every grant change is treated as a widening. |
+| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `target-postgres` and `target-oracle`. |
 
 **Future work** (not part of this version):
 
@@ -4718,7 +4772,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | :--- | :--- | :--- |
 | FW-1 | ~~**Target scope chosen by a request field.**~~ **Resolved in 4.0** by first-class targets (ADR-15): a cluster with one schema per tenant is modelled as one target per schema, each owned by its tenant's scope and confirmed by the platform owner, so no request field decides ownership. | — |
 | FW-2 | **Consumer policies** (formerly "standing interconnection approvals"). A target owner, or an additional party, pre-approves a class of sources ("sources of `cloud/fin-01/*` may bind `ledger-schema` at `read` until 2027-12-31, reviewed under SEC-1234"), so that later bindings matching it have that side approved automatically (basis `POLICY`). | Stored with the target (`consumer_policies`: scope patterns of sources, allowed access levels, expiry), changed through target change requests with the platform owner's consent, audited. A consumer policy may only satisfy the target side or a party required by an `allow` rule, on a pair the interconnection policy allows; it can never override a `deny`, add an `allow`, approve an access level not listed, or replace the source owner's consent (ADR-14). |
-| FW-3 | **Target provisioning.** 4.0 targets are register-only: publishing `ledger-schema` describes a schema that already exists, and per-binding provisioning creates only the binding's principal and grants (as in 3.x). Creating the resource itself (the schema, its roles, a Kafka topic) when a target is published, and removing it when it is retired, would let target owners self-serve resources. | A target lifecycle with its own workflow: `TargetProvider.EnsureResource` / `CleanupResource` RPCs, a target phase (`PROVISIONING`, `ACTIVE`, `FAILED`, `DELETING`), stage state for the target, consent of the target and platform owners (already required for publication), reverse-order cleanup only after the last binding is gone, ownership tags as in §5.8 rule 2, and a platform setting enabling it (`provision_targets: true`). The data model already gives targets revisions and change requests, so no change to bindings is needed. Threat-model additions: resource exhaustion on the platform, and orphaned resources after a failed retirement. |
+| FW-3 | **Target provisioning.** 4.0 targets are register-only: publishing `ledger-schema` describes a schema that already exists, and per-binding provisioning creates only the binding's principal and grants (as in 3.x). Creating the resource itself (the schema, its roles, a Kafka topic) when a target is published, and removing it when it is retired, would let target owners self-serve resources. | A target lifecycle with its own workflow: `PlatformProvider.EnsureResource` / `CleanupResource` RPCs, a target phase (`PROVISIONING`, `ACTIVE`, `FAILED`, `DELETING`), stage state for the target, consent of the target and platform owners (already required for publication), reverse-order cleanup only after the last binding is gone, ownership tags as in §5.8 rule 2, and a platform setting enabling it (`provision_targets: true`). The data model already gives targets revisions and change requests, so no change to bindings is needed. Threat-model additions: resource exhaustion on the platform, and orphaned resources after a failed retirement. |
 | FW-4 | **Access recertification.** Periodically, target owners (and optionally source owners) re-confirm each binding; bindings not re-confirmed within a grace period get an expiry and are revoked by the sweeper. | A `recertification` policy per target scope pattern (interval, grace period), a `RECERTIFICATION_DUE` notification and queue in the UI, re-confirmation recorded as an audited action (not a change request, because it changes nothing), and revocation through the existing `SYSTEM_EXPIRY` path. |
 
 ---
@@ -4893,7 +4947,8 @@ derived_principal_name = "bnd_" + lower(base32_nopad_rfc4648(SHA-256(uuid_bytes(
 ```
 - **Architectural Rationale:** Active Directory enforces a strict 20-character maximum on `sAMAccountName`. By combining a 4-character prefix (`"bnd_"`) with 16 RFC 4648 Base32 characters (`[a-z2-7]`), `derived_principal_name` is **exactly 20 characters** out of the box.
 - **Collision Resistance:** 16 Base32 characters encode $16 \times 5 = 80$ bits of SHA-256 output. By the birthday bound, a 50% collision probability requires $2^{40} \approx 1.1 \times 10^{12}$ bindings; at $10^5$ bindings, the collision probability is $\approx 4 \times 10^{-15}$. Any hypothetical collision is further stopped by the mandatory ownership tag check (`RESOURCE_OWNED_BY_OTHER_BINDING`, §5.8 Rule 2).
-- **Custom Prefix Rule:** If a plugin instance configures a custom `principal_prefix` (e.g. `"svc_"` in §8.1), the custom prefix MUST be 1 to 4 characters matching `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` and **replaces** `"bnd_"` (so total length remains $\le 20$ characters across AD, Oracle, PostgreSQL, OpenLDAP, and Vault with zero per-plugin truncation).
+- **Custom Prefix Rule:** If a platform configures `principal_prefix` (e.g. `"svc_"` in §8.1), the prefix MUST be 1 to 4 characters matching `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` and **replaces** `"bnd_"` (so total length remains $\le 20$ characters across AD, Oracle, PostgreSQL, OpenLDAP, and Vault with zero per-plugin truncation).
+- **Computed once.** The engine computes the name when the binding is created, with the prefix of the binding's platform at that moment, and stores it in `bindings.derived_principal_name` (immutable, unique). Every stage of every later workflow receives the stored name, so all stages name the same principal, and cleanup finds what was created even after `principal_prefix` changed. Plugins never apply a prefix (§5.8 rule 2). **Rationale:** with a per-plugin prefix, Stage 1 and Stage 2 could name different principals, and a prefix change between apply and delete would orphan the principal with its grants.
 - **Why an underscore, not a hyphen.** The separator must be legal in an *unquoted* identifier on every supported target. Oracle allows only letters, digits, `_`, `$` and `#` in unquoted identifiers (§5.8), and PostgreSQL requires quoting for role names containing `-`. A quoted name becomes case-sensitive in Oracle and must then be quoted in every DBA query, script and audit report. `_` is accepted unquoted by Oracle, PostgreSQL, Active Directory, OpenLDAP and Vault, so one name works everywhere without per-plugin substitution. (Version 2.3.0 used `bnd-`.)
 - Vault KV paths use the binding UUID directly: `kv/data/bindings/<binding_id>`.
 
@@ -5796,7 +5851,7 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | SVID fetch | X.509-SVID and private key (**secret**), trust bundles | Local Unix socket, workload attestation |
 | `GET /v1/bindings` | Caller's SVID (mTLS) or JWT-SVID (**secret**, bearer), optional `target` filter, ETag | TLS 1.3; JWT checks on audience, `iat`, TTL (T-01); headers redacted from logs |
-| Response | For each matching binding: ID, name, source, target, access level, platform and its type, active revision, `auth` (strategy, provider, Vault address, role, secret path, CA) and `spec` (connection coordinates); ETag | No secret values; only bindings whose active regex and source's current regex fully match the caller (INV-01) |
+| Response | For each matching binding: ID, name, source, target, access level, platform and its type, active revision, `auth` (secret storage strategy, secret store, Vault address, role, secret path, CA) and `spec` (connection coordinates); ETag | No secret values; only bindings whose active regex and source's current regex fully match the caller (INV-01) |
 | Vault login and read | JWT-SVID (**secret**), Vault token (**secret**), credentials (**secret**) | Between workload and Vault only; Vault's role constrains the subject (see OI-1) |
 | Target connection | Credentials (**secret**) | Target's own TLS |
 | Cache refresh | Active binding rows | `reader` role limited to `v_active_bindings`; regex re-validated on load (INV-15) |
