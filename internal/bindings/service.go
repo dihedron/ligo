@@ -175,7 +175,7 @@ type stored struct {
 	id, targetID                            uuid.UUID
 	name, source, target, accessLevel       string
 	sourceScope, targetScope, platformScope string
-	platform, phase, purpose                string
+	platform, phase, purpose, zone          string
 	revision, attempt                       int64
 	parameters                              json.RawMessage
 	labels                                  map[string]string
@@ -186,14 +186,14 @@ type stored struct {
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
 	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_scope, b.target_scope, b.platform_scope,
-		b.platform, b.phase, coalesce(b.purpose, ''), b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges
+		b.platform, b.phase, coalesce(b.purpose, ''), b.zone, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE OF b"
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceScope,
-		&st.targetScope, &st.platformScope, &st.platform, &st.phase, &st.purpose, &st.revision, &st.attempt, &st.parameters,
+		&st.targetScope, &st.platformScope, &st.platform, &st.phase, &st.purpose, &st.zone, &st.revision, &st.attempt, &st.parameters,
 		&st.labels, &st.expiresAt, &st.privileges)
 	return st, err
 }
@@ -542,7 +542,7 @@ func lockSnapshot(ctx context.Context, tx pgx.Tx, b *Binding) (*snapshot, error)
 func revise(ctx context.Context, tx pgx.Tx, cur *stored, b *Binding, sn *snapshot, actor string) (revision, attempt int64, err error) {
 	revision, attempt = cur.revision+1, cur.attempt+1
 	if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, purpose = $4, labels = $5::jsonb,
-		expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
+		expiry_warned_at = CASE WHEN expires_at IS DISTINCT FROM $6 THEN NULL ELSE expiry_warned_at END, expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
 		current_step = 'INIT', status_message = '', last_transition_at = now(),
 		rotate_static_secrets = (phase = 'FAILED' OR source_svid_regex IS DISTINCT FROM $13),
 		source_revision = $10, target_revision = $11, source_trust_domain = $12, source_svid_regex = $13, requested_spec = $14::jsonb,
@@ -575,8 +575,13 @@ func (s *Service) applyDelete(ctx context.Context, tx pgx.Tx, r *changerequests.
 		cur.id, attempt, wf, r.RequestedBy); err != nil {
 		return nil, err
 	}
-	return []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
-		Action: "DELETE_STARTED", Revision: &cur.revision, Attempt: &attempt, WorkflowID: wf}}, nil
+	entries := []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
+		Action: "DELETE_STARTED", Revision: &cur.revision, Attempt: &attempt, WorkflowID: wf}}
+	if r.Kind == kindExpiry {
+		entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
+			Action: "BINDING_EXPIRED", Revision: &cur.revision})
+	}
+	return entries, nil
 }
 
 // workflowID is the ID of an apply attempt's workflow, never reused

@@ -91,8 +91,28 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 		r.DistinctApprovers = s.Policy.RequireDistinctApprovers
 	}
 	r.ExpiresAt = time.Now().Add(s.TTL)
+	return s.file(ctx, res, r)
+}
+
+// System files and applies r, a request of a system kind whose sides were
+// all decided by the system (SYSTEM_EXPIRY, SYSTEM_REVERT, §6.3); r names
+// its requester. A failed apply closes it FAILED_TO_APPLY and is returned.
+func (s *Service) System(ctx context.Context, r *Request) error {
+	res, err := s.resource(r)
+	if err != nil {
+		return err
+	}
+	if r.PayloadSHA256, err = Hash(r.Payload); err != nil {
+		return err
+	}
+	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
+	return s.file(ctx, res, r)
+}
+
+// file inserts r and applies it at once if its consent rule is satisfied.
+func (s *Service) file(ctx context.Context, res Resource, r *Request) error {
 	var applyErr error
-	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if err := insert(ctx, tx, r); err != nil {
 			return err
 		}
@@ -109,6 +129,7 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 			}
 		}
 		if Complete(r.Consent, r.Sides) {
+			var err error
 			if entries, applyErr, err = s.apply(ctx, tx, r, res, decider, entries); err != nil {
 				return err
 			}
@@ -396,21 +417,28 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule)
-		VALUES ($1, $2, $3, $4, $5, 'STANDARD', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
-		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule)); err != nil {
+		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind()); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
 		if _, err := tx.Exec(ctx, `INSERT INTO change_request_sides (change_request_id, side, scope, approval_required, basis,
 			requested_by, cr_kind, decision, decided_by, decided_at)
-			VALUES ($1, $2, $3, $4, $5, $6, 'STANDARD', $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END)`,
-			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy)); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END)`,
+			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind()); err != nil {
 			return fmt.Errorf("changerequests: insert side %s: %w", sd.Name, err)
 		}
 	}
 	return nil
+}
+
+func (r *Request) kind() string {
+	if r.Kind == "" {
+		return "STANDARD"
+	}
+	return r.Kind
 }
 
 func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) {

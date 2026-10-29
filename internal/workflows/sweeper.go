@@ -10,6 +10,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -22,6 +23,10 @@ type Sweeper struct {
 	// Retention is storage.dbos.workflow_retention: finished workflows older
 	// than it are purged (§6.7); default 168h.
 	Retention time.Duration
+	// Bindings expires bindings (§6.3, INV-25); ExpiryWarning is
+	// bindings.expiry_warning, default 168h.
+	Bindings      *bindings.Service
+	ExpiryWarning time.Duration
 }
 
 // Run sweeps every Interval until ctx ends; errors wait for the next tick.
@@ -55,7 +60,7 @@ func (s *Sweeper) Sweep(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_sweeper'))") }()
-	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx))
+	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx), s.expiry(ctx))
 }
 
 // workflows starts the workflow of a stale binding that DBOS does not know
@@ -182,6 +187,18 @@ func (s *Sweeper) retain(ctx context.Context) error {
 		ids[i] = w.ID
 	}
 	return dbos.DeleteWorkflows(s.Engine.DBOS, ids)
+}
+
+// expiry warns of bindings about to expire and revokes expired ones.
+func (s *Sweeper) expiry(ctx context.Context) error {
+	if s.Bindings == nil {
+		return nil
+	}
+	warning := s.ExpiryWarning
+	if warning == 0 {
+		warning = 168 * time.Hour
+	}
+	return errors.Join(s.Bindings.WarnExpiry(ctx, warning), s.Bindings.Expire(ctx))
 }
 
 // sessions deletes admin sessions expired or revoked over 7 days ago.

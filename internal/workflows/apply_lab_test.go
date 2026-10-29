@@ -250,7 +250,7 @@ func labBinding(t *testing.T) *lab {
 func TestLabApply(t *testing.T) {
 	ctx := context.Background()
 	l := labBinding(t)
-	owner, bs, operator, name, id, auth := l.owner, l.bs, l.operator, l.name, l.id, l.auth
+	bs, operator, name, id, auth := l.bs, l.operator, l.name, l.id, l.auth
 	var a struct {
 		Strategy string `json:"secretStorageStrategy"`
 		Config   struct {
@@ -276,21 +276,7 @@ func TestLabApply(t *testing.T) {
 	if err != nil || d2.Status != "APPLIED" {
 		t.Fatalf("delete: %v (%v)", d2, err)
 	}
-	for deadline := time.Now().Add(90 * time.Second); ; {
-		var n int
-		if err := owner.QueryRow(ctx, "select count(*) from bindings where id = $1", id).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			var phase, message string
-			_ = owner.QueryRow(ctx, "select phase, status_message from bindings where id = $1", id).Scan(&phase, &message)
-			t.Fatalf("not deleted: %s %s", phase, message)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
+	l.gone(t)
 	if db, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=%s",
 		secret["username"], secret["password"], labEnv(t, "LIGO_TEST_CA"))); err == nil {
 		_ = db.Close(ctx)
@@ -299,6 +285,39 @@ func TestLabApply(t *testing.T) {
 	if st := checkStatus(t, a.Config.SecretPath); st != http.StatusNotFound {
 		t.Errorf("the deleted binding's secret: %d", st)
 	}
+}
+
+// gone waits for the binding's delete workflow to remove it.
+func (l *lab) gone(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		var n int
+		if err := l.owner.QueryRow(ctx, "select count(*) from bindings where id = $1", l.id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			var phase, message string
+			_ = l.owner.QueryRow(ctx, "select phase, status_message from bindings where id = $1", l.id).Scan(&phase, &message)
+			t.Fatalf("not deleted: %s %s", phase, message)
+		}
+	}
+}
+
+// TestLabExpiry: an expired binding is revoked by the sweeper and deleted
+// on the target by its workflow (§6.3, INV-25).
+func TestLabExpiry(t *testing.T) {
+	l := labBinding(t)
+	if _, err := l.owner.Exec(context.Background(), "update bindings set expires_at = now() - interval '1 minute' where id = $1", l.id); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := (&Sweeper{Engine: l.engine, Bindings: l.bs}).Sweep(context.Background()); err != nil || !ran {
+		t.Fatalf("sweep: %t %v", ran, err)
+	}
+	l.gone(t)
 }
 
 // TestLabReconcile: a role granted by hand to an ACTIVE binding's principal

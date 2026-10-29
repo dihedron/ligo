@@ -86,6 +86,7 @@ type Request struct {
 	ResourceName  string
 	ResourceID    *uuid.UUID
 	Operation     string // CREATE, UPDATE, DELETE
+	Kind          string // STANDARD when empty, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY
 	Consent       string
 	Zone          string // TARGET, BINDING
 	OwnerScope    string // SOURCE, TARGET
