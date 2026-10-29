@@ -69,7 +69,12 @@ type StepError struct {
 	Retryable     bool
 }
 
-func (e *StepError) Error() string { return e.Code + ": " + e.Message }
+func (e *StepError) Error() string {
+	if e.Code == "" {
+		return e.Message
+	}
+	return e.Code + ": " + e.Message
+}
 
 // retryable is §6.1 rule 4's classification of gRPC codes.
 var retryable = map[codes.Code]bool{codes.Unavailable: true, codes.DeadlineExceeded: true, codes.ResourceExhausted: true, codes.Aborted: true}
@@ -220,6 +225,21 @@ type ApplyInput struct {
 // Start starts the workflow of a PROVISIONING or DELETING binding under its
 // workflow_id; starting a started workflow returns it again (EXT-02).
 func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowHandle[string], error) {
+	in, phase, err := e.input(ctx, bindingID)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case phase == "PROVISIONING" && in.Operation != "DELETE":
+		return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
+	case phase == "DELETING" && in.Operation == "DELETE":
+		return dbos.RunWorkflow(e.DBOS, e.delete, in, dbos.WithWorkflowID(in.WorkflowID))
+	}
+	return nil, fmt.Errorf("workflows: binding %s is %s (%s): no workflow to run", bindingID, phase, in.Operation)
+}
+
+// input reads the input of a binding's current attempt, and its phase.
+func (e *Engine) input(ctx context.Context, bindingID uuid.UUID) (ApplyInput, string, error) {
 	in := ApplyInput{BindingID: bindingID.String()}
 	var phase string
 	var targetID uuid.UUID
@@ -233,16 +253,10 @@ func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowH
 			&in.AccessLevel, &in.RequestedSpec, &in.Wiring.IdentityType, &in.Wiring.IdentityInstance, &in.Wiring.PlatformType,
 			&in.Wiring.Platform, &in.Wiring.StoreType, &in.Wiring.StoreInstance, &in.Wiring.Strategy, &phase)
 	if err != nil {
-		return nil, fmt.Errorf("workflows: binding %s: %w", bindingID, err)
+		return in, "", fmt.Errorf("workflows: binding %s: %w", bindingID, err)
 	}
 	in.TargetID = targetID.String()
-	switch {
-	case phase == "PROVISIONING" && in.Operation != "DELETE":
-		return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
-	case phase == "DELETING" && in.Operation == "DELETE":
-		return dbos.RunWorkflow(e.DBOS, e.delete, in, dbos.WithWorkflowID(in.WorkflowID))
-	}
-	return nil, fmt.Errorf("workflows: binding %s is %s (%s): no workflow to run", bindingID, phase, in.Operation)
+	return in, phase, nil
 }
 
 // Retry starts a new attempt of a FAILED binding, with rotation, or of a
