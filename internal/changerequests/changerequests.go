@@ -6,6 +6,7 @@
 package changerequests
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -223,6 +224,30 @@ func SelectSides(r *Request, c Caller, p *governance.Policy, approve bool, side 
 		return nil, refuse(400, "side-required", "choose one of the sides %v", eligible)
 	}
 	return eligible, nil
+}
+
+// Common are the body fields every change request shares (§7.2.3).
+type Common struct {
+	ExpectedRevision  *int64          `json:"expectedRevision,omitempty"`
+	ApprovalReference string          `json:"approvalReference,omitempty"`
+	AutomationContext json.RawMessage `json:"automationContext,omitempty"`
+}
+
+// Decode decodes a request body into v, refusing unknown fields, and checks
+// common, the Common fields embedded in v.
+func Decode(body []byte, v any, common *Common) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil || dec.More() {
+		return refuse(422, "validation-failed", "request body: %v", err)
+	}
+	switch ac := common.AutomationContext; {
+	case len(common.ApprovalReference) > 128:
+		return refuse(422, "validation-failed", "approvalReference: at most 128 characters")
+	case len(ac) > 4096 || len(ac) > 0 && ac[0] != '{':
+		return refuse(422, "validation-failed", "automationContext: a JSON object of at most 4 KiB")
+	}
+	return nil
 }
 
 // Hash is the hex SHA-256 of the JCS form of a payload (§7.2.3).

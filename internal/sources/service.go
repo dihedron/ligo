@@ -27,23 +27,13 @@ type Service struct {
 // request is the body of a create or an update (§7.2.3).
 type request struct {
 	Source
-	ExpectedRevision  *int64          `json:"expectedRevision,omitempty"`
-	ApprovalReference string          `json:"approvalReference,omitempty"`
-	AutomationContext json.RawMessage `json:"automationContext,omitempty"`
+	changerequests.Common
 }
 
 func decode(body []byte) (*request, error) {
 	var req request
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || dec.More() {
-		return nil, invalid("request body: %v", err)
-	}
-	switch {
-	case len(req.ApprovalReference) > 128:
-		return nil, invalid("approvalReference: at most 128 characters")
-	case len(req.AutomationContext) > 4096 || len(req.AutomationContext) > 0 && req.AutomationContext[0] != '{':
-		return nil, invalid("automationContext: a JSON object of at most 4 KiB")
+	if err := changerequests.Decode(body, &req, &req.Common); err != nil {
+		return nil, err
 	}
 	return &req, nil
 }
@@ -119,7 +109,7 @@ func (s *Service) SetState(ctx context.Context, c changerequests.Caller, name, o
 	}
 	src := cur.Source
 	src.Metadata.State = to
-	return s.update(ctx, c, cur, &src, &request{ExpectedRevision: &expectedRevision, ApprovalReference: approvalReference, AutomationContext: automationContext})
+	return s.update(ctx, c, cur, &src, &request{Common: changerequests.Common{ExpectedRevision: &expectedRevision, ApprovalReference: approvalReference, AutomationContext: automationContext}})
 }
 
 func (s *Service) update(ctx context.Context, c changerequests.Caller, cur *stored, src *Source, req *request) (*changerequests.Request, error) {

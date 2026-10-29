@@ -186,25 +186,31 @@ func (r *Rules) validateMetadata(s *Source) error {
 	case utf8.RuneCountInString(s.Description) > 4096:
 		return invalid("description: at most 4096 characters")
 	}
-	if s.Visibility.Mode == "" {
-		s.Visibility.Mode = "PRIVATE"
+	return s.Visibility.Normalize()
+}
+
+// Normalize checks a visibility (§3.2) and defaults its mode to PRIVATE;
+// targets share it (§3.3).
+func (v *Visibility) Normalize() error {
+	if v.Mode == "" {
+		v.Mode = "PRIVATE"
 	}
-	switch s.Visibility.Mode {
+	switch v.Mode {
 	case "LISTED":
-		if len(s.Visibility.VisibleTo) == 0 {
+		if len(v.VisibleTo) == 0 {
 			return invalid("visibility.visibleTo is required with LISTED")
 		}
-		for _, p := range s.Visibility.VisibleTo {
+		for _, p := range v.VisibleTo {
 			if !governance.ValidScopePattern(p) {
 				return invalid("visibility.visibleTo: %q is not a scope pattern", p)
 			}
 		}
 	case "PRIVATE", "PUBLIC":
-		if len(s.Visibility.VisibleTo) > 0 {
+		if len(v.VisibleTo) > 0 {
 			return invalid("visibility.visibleTo is only for LISTED")
 		}
 	default:
-		return invalid("visibility.mode %q is not PRIVATE, LISTED or PUBLIC", s.Visibility.Mode)
+		return invalid("visibility.mode %q is not PRIVATE, LISTED or PUBLIC", v.Mode)
 	}
 	return nil
 }

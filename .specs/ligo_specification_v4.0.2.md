@@ -94,6 +94,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
 | Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
 | Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
+| Target pipeline (§7.2.3) | `ValidateTarget` refusing a target, or returning non-canonical `privileges` or levels out of order, is `422 validation-failed`. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -3246,7 +3247,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 2. The platform exists; `scope` matches its `target_scopes`; derive `platformType`, `platformScope` and `zone`.
 3. Flows: schema, unique names, destinations within the platform's `allowed_endpoints` (§5.7).
 4. RBAC: `operator` (or `trusted_automation`, with `platforms`) on the target's or the platform's scope.
-5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges.
+5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges. `valid = false` is `422 validation-failed` with the plugin's errors; so are `privileges` that are not sorted and free of duplicates (§5.8 rule 9), or levels returned in another order than requested.
 6. For `UPDATE`: immutable fields; every existing level is kept (removal is refused; retire instead); changed grants narrow (§3.10); retiring a level or the target finds no binding using it.
 7. `expectedRevision` matches; no `PENDING` change request exists for the target.
 

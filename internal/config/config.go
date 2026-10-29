@@ -330,7 +330,7 @@ type Platform struct {
 	DisplayName               string        `yaml:"display_name"`
 	Description               string        `yaml:"description"`
 	Contacts                  []Contact     `yaml:"contacts"`
-	CheckExistence            bool          `yaml:"check_existence"`
+	CheckExistence            *bool         `yaml:"check_existence"` // default true (§7.2.3)
 	NetworkFlows              []flows.Flow  `yaml:"network_flows"`
 	IdentityProvider          Wiring        `yaml:"identity_provider"`
 	SecretStore               Wiring        `yaml:"secret_store"`
