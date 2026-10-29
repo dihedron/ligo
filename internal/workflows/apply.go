@@ -386,8 +386,10 @@ func (e *Engine) finalize(ctx context.Context, f fence, in ApplyInput, id identi
 			return store.ErrFenced
 		}
 		snap, _ := json.Marshal(map[string]any{"mode": mode.String(), "rotated": rotated})
-		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
-			Action: "PROVISION_SUCCESS", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap})
-		return err
+		if _, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
+			Action: "PROVISION_SUCCESS", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap}); err != nil {
+			return err
+		}
+		return revertOutcome(ctx, tx, f, in, true)
 	})
 }

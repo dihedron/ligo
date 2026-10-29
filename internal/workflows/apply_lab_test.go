@@ -109,6 +109,8 @@ type lab struct {
 	bs       *bindings.Service
 	operator changerequests.Caller
 	name     string
+	source   string
+	target   string
 	id       uuid.UUID
 	auth     []byte
 }
@@ -240,7 +242,7 @@ func labBinding(t *testing.T) *lab {
 	if phase != "ACTIVE" {
 		t.Fatalf("binding %s: %s", phase, message)
 	}
-	return &lab{owner: owner, engine: engine, bs: bs, operator: operator, name: name, id: id, auth: auth}
+	return &lab{owner: owner, engine: engine, bs: bs, operator: operator, name: name, source: source, target: target, id: id, auth: auth}
 }
 
 // TestLabApply: a binding filed through the bindings service is applied at
@@ -320,6 +322,59 @@ func TestLabExpiry(t *testing.T) {
 	l.gone(t)
 }
 
+// settled waits for the binding to leave PROVISIONING.
+func (l *lab) settled(t *testing.T) (phase, message, workflow string) {
+	t.Helper()
+	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+		if err := l.owner.QueryRow(context.Background(), "select phase, status_message, workflow_id from bindings where id = $1",
+			l.id).Scan(&phase, &message, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		if phase != "PROVISIONING" || time.Now().After(deadline) {
+			return phase, message, workflow
+		}
+	}
+}
+
+// TestLabBreakGlass: a break-glass UPDATE is applied by its workflow; past
+// its TTL the sweeper reverts it to the previous state, and the revert's
+// workflow audits BREAK_GLASS_REVERTED (§6.3, ADR-12, INV-16).
+func TestLabBreakGlass(t *testing.T) {
+	ctx := context.Background()
+	l := labBinding(t)
+	p := l.bs.Requests.Policy
+	p.RequiredScopes = []string{"dc/corp-prod"}
+	p.BreakGlassPolicies = []governance.BreakGlassPolicy{{Scopes: []string{"dc/*"}, DefaultTTL: time.Hour, MaxTTL: 2 * time.Hour, MaxOpen: 100,
+		WarnBefore: 10 * time.Minute}}
+	livia := changerequests.Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{{Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}}}}
+	binding := fmt.Sprintf(`{"name":%q,"source":%q,"target":%q,"accessLevel":"read","purpose":"incident INC0012345","expectedRevision":1}`,
+		l.name, l.source, l.target)
+	r, err := l.bs.BreakGlass(ctx, livia, []byte(`{"operation":"UPDATE","binding":`+binding+
+		`,"justification":"the ledger needs a new purpose during the incident","incidentReference":"INC0012345"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if phase, message, _ := l.settled(t); phase != "ACTIVE" {
+		t.Fatalf("break-glass update %s: %s", phase, message)
+	}
+	if _, err := l.owner.Exec(ctx, "update bindings set break_glass_expires_at = now() - interval '1 minute' where id = $1", l.id); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := (&Sweeper{Engine: l.engine, Bindings: l.bs}).Sweep(ctx); err != nil || !ran {
+		t.Fatalf("sweep: %t %v", ran, err)
+	}
+	if phase, message, wf := l.settled(t); phase != "ACTIVE" || wf != "ligo:apply:"+l.id.String()+":r3:a3" {
+		t.Fatalf("revert %s (%s): %s", phase, wf, message)
+	}
+	var purpose string
+	var n int
+	if err := l.owner.QueryRow(ctx, `select coalesce(b.purpose, ''), (select count(*) from audit_log a join change_requests c
+		on c.id = a.change_request_id where a.resource_id = b.id and a.action = 'BREAK_GLASS_REVERTED' and c.reverts_cr_id = $2)
+		from bindings b where b.id = $1`, l.id, r.ID).Scan(&purpose, &n); err != nil || purpose != "" || n != 1 {
+		t.Errorf("purpose %q, %d BREAK_GLASS_REVERTED (%v)", purpose, n, err)
+	}
+}
+
 // TestLabReconcile: a role granted by hand to an ACTIVE binding's principal
 // is revoked when the reconciler re-applies the binding (§6.6).
 func TestLabReconcile(t *testing.T) {
@@ -352,16 +407,7 @@ func TestLabReconcile(t *testing.T) {
 	if _, err := (&Reconciler{Engine: l.engine, MaxConcurrent: 1000}).Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var phase, message, wf string
-	for deadline := time.Now().Add(90 * time.Second); ; time.Sleep(500 * time.Millisecond) {
-		if err := l.owner.QueryRow(ctx, "select phase, status_message, workflow_id from bindings where id = $1", l.id).Scan(&phase, &message, &wf); err != nil {
-			t.Fatal(err)
-		}
-		if phase != "PROVISIONING" || time.Now().After(deadline) {
-			break
-		}
-	}
-	if phase != "ACTIVE" || wf != "ligo:reapply:"+l.id.String()+":r1:a2" {
+	if phase, message, wf := l.settled(t); phase != "ACTIVE" || wf != "ligo:reapply:"+l.id.String()+":r1:a2" {
 		t.Fatalf("binding %s (%s): %s", phase, wf, message)
 	}
 	if member() {

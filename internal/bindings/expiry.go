@@ -80,7 +80,7 @@ func (s *Service) expire(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	if err := s.withdrawPending(ctx, cur); err != nil {
+	if err := s.withdrawPending(ctx, cur, actorExpiry); err != nil {
 		return err
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE", Kind: kindExpiry,
@@ -91,9 +91,9 @@ func (s *Service) expire(ctx context.Context, id uuid.UUID) error {
 	return s.Requests.System(ctx, r)
 }
 
-// withdrawPending withdraws the binding's own pending change request: the
-// revocation supersedes it.
-func (s *Service) withdrawPending(ctx context.Context, cur *stored) error {
+// withdrawPending withdraws the binding's own pending change request for
+// actor: a system change supersedes it.
+func (s *Service) withdrawPending(ctx context.Context, cur *stored, actor string) error {
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		var crID uuid.UUID
 		err := tx.QueryRow(ctx, `SELECT id FROM change_requests WHERE resource_type = 'BINDING' AND resource_id = $1 AND status = 'PENDING'`,
@@ -104,11 +104,11 @@ func (s *Service) withdrawPending(ctx context.Context, cur *stored) error {
 		if err != nil {
 			return err
 		}
-		if err := store.CloseRequest(ctx, tx, crID, "WITHDRAWN", actorExpiry, "the binding expired", ""); err != nil {
+		if err := store.CloseRequest(ctx, tx, crID, "WITHDRAWN", actor, "superseded by a system change", ""); err != nil {
 			return err
 		}
 		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name,
-			ChangeRequestID: &crID, Action: "CR_WITHDRAWN", Actor: actorExpiry})
+			ChangeRequestID: &crID, Action: "CR_WITHDRAWN", Actor: actor})
 		return err
 	})
 }

@@ -473,15 +473,20 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		case "DELETE_FAILED":
 			return nil, refuse(409, "invalid-transition", "the binding is DELETE_FAILED")
 		}
-		if cur.revision != *r.ExpectedRevision {
+		reverting := r.Kind == changerequests.KindSystemRevert
+		if reverting && (cur.breakGlassCR == nil || *cur.breakGlassCR != *r.RevertsID) { // ratified or reverted meanwhile
+			return nil, refuse(409, "break-glass-not-open", "binding %q no longer references the break-glass change %s", cur.name, r.RevertsID)
+		}
+		if cur.revision != *r.ExpectedRevision && !reverting {
 			return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 		}
-		if r.Operation == "UPDATE" && cur.breakGlassCR != nil && r.Kind != "SYSTEM_REVERT" {
+		if r.Operation == "UPDATE" && cur.breakGlassCR != nil && !reverting {
 			return nil, breakGlassOpen(cur)
 		}
 	}
 	if r.Operation == "DELETE" {
-		return s.applyDelete(ctx, tx, r, cur)
+		entries, err := s.applyDelete(ctx, tx, r, cur)
+		return revertStarted(r, cur, entries), err
 	}
 	snap, err := lockSnapshot(ctx, tx, &b)
 	if err != nil {
@@ -538,14 +543,30 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, err
 		}
 	}
-	if r.Kind == changerequests.KindBreakGlass { // §6.2.2 break-glass bookkeeping
+	switch r.Kind { // §6.2.2 break-glass bookkeeping
+	case changerequests.KindBreakGlass:
 		if _, err := tx.Exec(ctx, `UPDATE bindings SET break_glass_cr_id = $2, break_glass_expires_at = now() + $3::interval,
 			break_glass_warned_at = NULL WHERE id = $1`, id, r.ID, r.TTL.String()); err != nil {
 			return nil, err
 		}
+	case changerequests.KindSystemRevert:
+		if _, err := tx.Exec(ctx, `UPDATE bindings SET break_glass_cr_id = NULL, break_glass_expires_at = NULL,
+			break_glass_warned_at = NULL WHERE id = $1`, id); err != nil {
+			return nil, err
+		}
 	}
-	return []audit.Entry{{ResourceType: "BINDING", ResourceID: &id, ResourceName: b.Name, ChangeRequestID: &r.ID,
-		Action: "APPLY_STARTED", Revision: &revision, Attempt: &attempt, WorkflowID: workflowID(id, revision, attempt)}}, nil
+	return revertStarted(r, cur, []audit.Entry{{ResourceType: "BINDING", ResourceID: &id, ResourceName: b.Name, ChangeRequestID: &r.ID,
+		Action: "APPLY_STARTED", Revision: &revision, Attempt: &attempt, WorkflowID: workflowID(id, revision, attempt)}}), nil
+}
+
+// revertStarted adds BREAK_GLASS_REVERT_STARTED to the entries of a
+// SYSTEM_REVERT's apply.
+func revertStarted(r *changerequests.Request, cur *stored, entries []audit.Entry) []audit.Entry {
+	if r.Kind != changerequests.KindSystemRevert || len(entries) == 0 {
+		return entries
+	}
+	return append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
+		Action: "BREAK_GLASS_REVERT_STARTED", Revision: entries[0].Revision, Attempt: entries[0].Attempt, WorkflowID: entries[0].WorkflowID})
 }
 
 // snapshot is the source, target and access level a revision is composed

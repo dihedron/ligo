@@ -294,6 +294,32 @@ type fence struct {
 	workflowID string
 }
 
+// revertOutcome audits BREAK_GLASS_REVERTED or BREAK_GLASS_REVERT_FAILED
+// when the attempt's revision was started by a SYSTEM_REVERT, retries
+// included (§6.3).
+func revertOutcome(ctx context.Context, tx pgx.Tx, f fence, in ApplyInput, ok bool) error {
+	started, action := "APPLY_STARTED", "BREAK_GLASS_REVERTED"
+	if in.Operation == "DELETE" {
+		started = "DELETE_STARTED"
+	}
+	if !ok {
+		action = "BREAK_GLASS_REVERT_FAILED"
+	}
+	var cr uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT a.change_request_id FROM audit_log a JOIN change_requests c ON c.id = a.change_request_id
+		WHERE a.resource_type = 'BINDING' AND a.resource_name = $1 AND a.resource_id = $2 AND a.revision = $3 AND a.action = $4
+		AND c.kind = 'SYSTEM_REVERT' ORDER BY a.id DESC LIMIT 1`, in.BindingName, f.bindingID, in.Revision, started).Scan(&cr)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
+		ChangeRequestID: &cr, Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID})
+	return err
+}
+
 // markFailed records a terminal error of the attempt: FAILED for an apply,
 // DELETE_FAILED for a delete (§6.4 failure path, §6.5).
 func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *StepError, in ApplyInput) error {
@@ -312,8 +338,10 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 			return store.ErrFenced
 		}
 		snap, _ := json.Marshal(map[string]string{"step": step, "code": cause.Code, "message": cause.Message})
-		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
-			Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap})
-		return err
+		if _, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
+			Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap}); err != nil {
+			return err
+		}
+		return revertOutcome(ctx, tx, f, in, false)
 	})
 }

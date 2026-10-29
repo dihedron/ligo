@@ -46,10 +46,14 @@ const (
 	AutoApprover       = "system:auto-approve"
 	DelegatedApprover  = "system:delegated-approval"
 	BreakGlassApprover = "system:break-glass"
+	RevertApprover     = "system:break-glass-revert"
 )
 
-// KindBreakGlass is the kind of an emergency change (ADR-12).
-const KindBreakGlass = "BREAK_GLASS"
+// Kinds of emergency changes and their reverts (ADR-12).
+const (
+	KindBreakGlass   = "BREAK_GLASS"
+	KindSystemRevert = "SYSTEM_REVERT"
+)
 
 // Error is a refusal with the problem slug and HTTP status of §7.2.3.
 type Error struct {
@@ -98,7 +102,9 @@ type Request struct {
 	TTL           time.Duration
 	RevertPayload json.RawMessage
 	// DependsOn is the inline source's request a binding CREATE needs.
-	DependsOn     *uuid.UUID
+	DependsOn *uuid.UUID
+	// RevertsID is the break-glass change a SYSTEM_REVERT reverts.
+	RevertsID     *uuid.UUID
 	Consent       string
 	Zone          string // TARGET, BINDING
 	OwnerScope    string // SOURCE, TARGET

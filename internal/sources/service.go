@@ -162,6 +162,19 @@ func (s *Service) Inline(ctx context.Context, body []byte) (*changerequests.Requ
 	return r, sides, &src, err
 }
 
+// Retirement composes the change that retires a source, for the system
+// to file: the revert of a break-glass inline source (§6.3).
+func (s *Service) Retirement(ctx context.Context, id uuid.UUID) (*changerequests.Request, error) {
+	cur, err := s.loadID(ctx, s.DB, id, false)
+	if err != nil {
+		return nil, err
+	}
+	src := cur.Source
+	src.Metadata.State = "RETIRED"
+	r, _, err := compose("UPDATE", cur, &src, &request{Common: changerequests.Common{ExpectedRevision: &cur.Revision}})
+	return r, err
+}
+
 // compose builds the change request of a validated source change and its
 // side.
 func compose(op string, cur *stored, src *Source, req *request) (*changerequests.Request, []changerequests.Candidate, error) {

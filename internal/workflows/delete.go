@@ -140,8 +140,10 @@ func (e *Engine) remove(ctx context.Context, f fence, in ApplyInput) error {
 		if tag.RowsAffected() == 0 {
 			return store.ErrFenced
 		}
-		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
-			Action: "DELETE_COMPLETED", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID})
-		return err
+		if _, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
+			Action: "DELETE_COMPLETED", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID}); err != nil {
+			return err
+		}
+		return revertOutcome(ctx, tx, f, in, true)
 	})
 }

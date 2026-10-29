@@ -189,7 +189,8 @@ func (s *Sweeper) retain(ctx context.Context) error {
 	return dbos.DeleteWorkflows(s.Engine.DBOS, ids)
 }
 
-// expiry warns of bindings about to expire and revokes expired ones.
+// expiry warns of bindings about to expire and revokes expired ones, and
+// does the same for break-glass changes (§6.3, ADR-12).
 func (s *Sweeper) expiry(ctx context.Context) error {
 	if s.Bindings == nil {
 		return nil
@@ -198,7 +199,9 @@ func (s *Sweeper) expiry(ctx context.Context) error {
 	if warning == 0 {
 		warning = 168 * time.Hour
 	}
-	return errors.Join(s.Bindings.WarnExpiry(ctx, warning), s.Bindings.Expire(ctx))
+	b := s.Bindings
+	return errors.Join(b.WarnExpiry(ctx, warning), b.Expire(ctx), b.WarnBreakGlass(ctx), b.RevertExpired(ctx), b.RetireInlineSources(ctx),
+		b.OverdueReviews(ctx))
 }
 
 // sessions deletes admin sessions expired or revoked over 7 days ago.

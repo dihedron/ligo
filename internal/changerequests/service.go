@@ -246,6 +246,32 @@ func (s *Service) System(ctx context.Context, r *Request) error {
 	return s.file(ctx, filed{res, r})
 }
 
+// SystemFailed records r, a system request whose validation failed before
+// it could apply, as FAILED_TO_APPLY, with extra audit entries (§6.3: a
+// revert that no longer validates is a failed revert).
+func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, extra ...audit.Entry) error {
+	var err error
+	if r.PayloadSHA256, err = Hash(r.Payload); err != nil {
+		return err
+	}
+	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
+	decider := r.Sides[0].DecidedBy
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		if err := insert(ctx, tx, r); err != nil {
+			return err
+		}
+		if err := store.CloseRequest(ctx, tx, r.ID, "FAILED_TO_APPLY", decider, "", limit(reason)); err != nil {
+			return err
+		}
+		r.Status = "FAILED_TO_APPLY"
+		for i := range extra {
+			extra[i].ChangeRequestID = &r.ID
+		}
+		return appendAll(ctx, tx, append([]audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", nil),
+			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})}, extra...))
+	})
+}
+
 // file inserts each request in one transaction and applies it at once if
 // its consent rule is satisfied. With several, a failed apply rolls them all
 // back: a later request depends on the earlier ones.
@@ -433,6 +459,11 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 	return r, err
 }
 
+// Read reads a change request for the system, without visibility checks.
+func (s *Service) Read(ctx context.Context, id uuid.UUID) (*Request, error) {
+	return read(ctx, s.DB, id)
+}
+
 func (s *Service) pending(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
 	r, err := s.Get(ctx, c, id)
 	if err == nil && r.Status != "PENDING" {
@@ -582,12 +613,12 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
-		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id)
-		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26)`,
+		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id)
+		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
 		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
-		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn); err != nil {
+		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
@@ -615,11 +646,11 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
-		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id
+		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id
 		FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID)
 	if err != nil {
 		return nil, err
 	}
