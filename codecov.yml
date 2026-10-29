@@ -4,3 +4,15 @@
 ignore:
   - "**/*.pb.go"
   - "test/lab/plugins/**"
+
+# The same bar as SonarCloud's gate on new code; the project may dip by 1%
+# (error-only branches) without failing a pull request.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%

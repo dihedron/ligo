@@ -219,3 +219,22 @@ func TestPropagateEdges(t *testing.T) {
 		t.Errorf("DELETE_FAILED binding %+v", p)
 	}
 }
+
+// TestPropagatorSingleton: while another replica holds the propagator's
+// lock, a pass starts nothing (§6.8).
+func TestPropagatorSingleton(t *testing.T) {
+	s, _, _, _ := setup(t)
+	ctx := context.Background()
+	conn, err := s.DB.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext('ligo_propagator'))"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock(hashtext('ligo_propagator'))") }()
+	if n, err := (&Propagator{Service: s}).Propagate(ctx); err != nil || n != 0 {
+		t.Errorf("under another replica's lock: %d started, %v", n, err)
+	}
+}

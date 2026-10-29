@@ -111,3 +111,22 @@ func TestRetention(t *testing.T) {
 		t.Errorf("the finished workflow is still there: %v", err)
 	}
 }
+
+// TestReconcileSingleton: while another replica holds the reconciler's
+// lock, a pass starts nothing (§6.6).
+func TestReconcileSingleton(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
+	ctx := context.Background()
+	conn, err := v.engine.DB.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(hashtext('ligo_reconciler'))"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock(hashtext('ligo_reconciler'))") }()
+	if n, err := v.reconciler().Reconcile(ctx); err != nil || n != 0 {
+		t.Errorf("under another replica's lock: %d started, %v", n, err)
+	}
+}
