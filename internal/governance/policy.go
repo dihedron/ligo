@@ -301,15 +301,15 @@ func matchesAny(patterns []string, scope string) bool {
 // overlap reports whether some scope matches a pattern of each list.
 func overlap(a, b []string) bool {
 	for _, p := range a {
-		if slices.ContainsFunc(b, func(q string) bool { return patternsOverlap(p, q) }) {
+		if slices.ContainsFunc(b, func(q string) bool { return PatternsOverlap(p, q) }) {
 			return true
 		}
 	}
 	return false
 }
 
-// patternsOverlap reports whether some scope matches both patterns.
-func patternsOverlap(a, b string) bool {
+// PatternsOverlap reports whether some scope matches both patterns.
+func PatternsOverlap(a, b string) bool {
 	if a == "*" || b == "*" {
 		return true
 	}

@@ -81,17 +81,20 @@ func (c Caller) ID() string {
 
 // Request is a change request (change_requests, §4.2) with its sides.
 type Request struct {
-	ID                uuid.UUID
-	ResourceType      string // SOURCE, TARGET, BINDING
-	ResourceName      string
-	ResourceID        *uuid.UUID
-	Operation         string // CREATE, UPDATE, DELETE
-	Consent           string
-	Zone              string // TARGET, BINDING
-	OwnerScope        string // SOURCE, TARGET
-	SourceScope       string // BINDING
-	TargetScope       string // BINDING
-	PlatformScope     string // TARGET, BINDING
+	ID            uuid.UUID
+	ResourceType  string // SOURCE, TARGET, BINDING
+	ResourceName  string
+	ResourceID    *uuid.UUID
+	Operation     string // CREATE, UPDATE, DELETE
+	Consent       string
+	Zone          string // TARGET, BINDING
+	OwnerScope    string // SOURCE, TARGET
+	SourceScope   string // BINDING
+	TargetScope   string // BINDING
+	PlatformScope string // TARGET, BINDING
+	// InterconnectRule is the rule a cross-scope binding matched (ADR-14);
+	// with one, DistinctApprovers is the rule's, else the policy's.
+	InterconnectRule  string
 	ExpectedRevision  *int64 // UPDATE, DELETE
 	Payload           json.RawMessage
 	PayloadSHA256     string

@@ -96,6 +96,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
 | Target pipeline (§7.2.3) | `ValidateTarget` refusing a target, or returning non-canonical `privileges` or levels out of order, is `422 validation-failed`. |
 | Target updates (§3.7, §7.2.3, §4.3) | A target update names its errors as the source pipeline does; its `PLATFORM` side depends on the normalized definition, the flows and the levels' `privileges`, not on the grants as written. New audit action `ACCESS_LEVEL_REACTIVATED`, for the existing `/access-levels/{level}/reactivate`. |
+| Binding payload (§7.2.3) | The normalized payload of a binding change carries `requestedSpec`, the composition `ValidateBinding` returns: the apply transaction stores it without calling the plugin, and the hash covers it. `ValidateBinding` refusing, or returning privileges other than the level's, is `422 validation-failed`. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -3226,6 +3227,7 @@ A `trusted_automation` principal whose `platforms` do not include a target's pla
 { "kind": "Binding", "name": "...", "source": "...", "sourceRevision": 3,
   "target": "...", "targetRevision": 2, "accessLevel": "...",
   "parameters": { "...": "normalized_parameters_json returned by ValidateBinding" },
+  "requestedSpec": { "...": "requested_spec_json returned by ValidateBinding" },
   "purpose": "...", "labels": { }, "expiresAt": null }
 ```
 
@@ -3261,7 +3263,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 6. RBAC: `operator` (or `trusted_automation`) on the source or the target scope.
 7. Interconnection policy (ADR-14), when the source and target scopes differ: `403 interconnect-denied` (audited `CR_INTERCONNECT_DENIED`, nothing else stored), or the rule and its additional parties.
 8. `expiresAt` within the allowed range (§3.5).
-9. `PlatformProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash.
+9. `PlatformProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash. `valid = false`, or `privileges` different from the access level's (§5.8 rule 8), is `422 validation-failed`. The requested spec is part of the payload, because the apply transaction makes no plugin call (§6.2) and stores it as `bindings.requested_spec`.
 10. Immutable-field check (update).
 11. `expectedRevision` matches (§6.2.2).
 12. No `PENDING` change request exists for the binding name.

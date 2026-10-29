@@ -23,8 +23,23 @@ type Resource interface {
 	// rebuilds (approval steps 2 and 3).
 	Revalidate(ctx context.Context, r *Request) (json.RawMessage, error)
 	// Apply writes the change in tx and returns its audit entries, which
-	// are appended last (§4.3). An error leaves the request FAILED_TO_APPLY.
+	// are appended last (§4.3). An error leaves the request FAILED_TO_APPLY,
+	// except binding-busy at an approval, which leaves it PENDING (§6.2.2).
 	Apply(ctx context.Context, tx pgx.Tx, r *Request) ([]audit.Entry, error)
+}
+
+// Rechecker is a Resource whose requests also depend on the policy beyond
+// their sides' approval requirements (bindings: ADR-14 rule 5).
+type Rechecker interface {
+	// Recheck fails, with governance-policy-changed, a request that the
+	// policy now in force would refuse or give other sides.
+	Recheck(r *Request, p *governance.Policy) error
+}
+
+// IsBusy reports a binding-busy refusal (§6.2.2).
+func IsBusy(err error) bool {
+	e := (*Error)(nil)
+	return errors.As(err, &e) && e.Slug == "binding-busy"
 }
 
 // Service files and decides change requests.
@@ -58,7 +73,10 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 		return refuse(422, "validation-failed", "payload: %v", err)
 	}
 	r.ID, r.RequestedBy, r.Status, r.ApprovalReference = uuid.NewV7(), c.ID(), "PENDING", approvalReference
-	r.PolicySHA256, r.DistinctApprovers = s.Policy.SHA256(), s.Policy.RequireDistinctApprovers
+	r.PolicySHA256 = s.Policy.SHA256()
+	if r.InterconnectRule == "" {
+		r.DistinctApprovers = s.Policy.RequireDistinctApprovers
+	}
 	r.ExpiresAt = time.Now().Add(s.TTL)
 	var applyErr error
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
@@ -138,6 +156,9 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 		if Complete(r.Consent, r.Sides) {
 			if entries, applyErr, err = s.apply(ctx, tx, r, res, c.ID(), entries); err != nil {
 				return err
+			}
+			if IsBusy(applyErr) {
+				return applyErr // roll back the side decision: the approver approves again later
 			}
 		}
 		return appendAll(ctx, tx, entries)
@@ -229,7 +250,11 @@ func (s *Service) apply(ctx context.Context, tx pgx.Tx, r *Request, res Resource
 	if err != nil {
 		return nil, nil, err
 	}
-	applied, applyErr := res.Apply(ctx, sp, r)
+	var applied []audit.Entry
+	applyErr = s.recheck(r, res)
+	if applyErr == nil {
+		applied, applyErr = res.Apply(ctx, sp, r)
+	}
 	if applyErr == nil {
 		applyErr = sp.Commit(ctx)
 	}
@@ -259,6 +284,21 @@ func (s *Service) apply(ctx context.Context, tx pgx.Tx, r *Request, res Resource
 		entries = append(entries, e)
 	}
 	return entries, nil, nil
+}
+
+// recheck re-evaluates the policy now in force before an apply (approval
+// step 5): a side decided automatically must still not need a person, and
+// the resource may check more.
+func (s *Service) recheck(r *Request, res Resource) error {
+	for _, sd := range r.Sides {
+		if sd.Basis == BasisAuto && s.Policy.ApprovalRequired(sd.Scope) {
+			return refuse(409, "governance-policy-changed", "side %s now needs an approver: file the change again", sd.Name)
+		}
+	}
+	if rc, ok := res.(Rechecker); ok {
+		return rc.Recheck(r, s.Policy)
+	}
+	return nil
 }
 
 // fail closes a pending request FAILED_TO_APPLY after a failed approval
@@ -339,11 +379,11 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
-		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at)
-		VALUES ($1, $2, $3, $4, $5, 'STANDARD', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule)
+		VALUES ($1, $2, $3, $4, $5, 'STANDARD', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
-		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt); err != nil {
+		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule)); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
@@ -362,11 +402,11 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 	err := q.QueryRow(ctx, `SELECT resource_type, resource_name, resource_id, operation, consent, coalesce(zone, ''),
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
-		distinct_approvers_required, status, requested_by, expires_at
+		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, '')
 		FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule)
 	if err != nil {
 		return nil, err
 	}

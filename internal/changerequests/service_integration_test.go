@@ -14,6 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -227,5 +228,79 @@ func TestApproveFailures(t *testing.T) {
 				t.Errorf("audit %v", got)
 			}
 		})
+	}
+}
+
+// newBinding files a BINDING CREATE as alice with a SOURCE side in payments
+// (decided automatically) and a TARGET side in ledger (pending).
+func newBinding(t *testing.T, s *Service, owner *pgxpool.Pool) *Request {
+	t.Helper()
+	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
+		Consent: ConsentAll, Zone: "prod", SourceScope: payments, TargetScope: ledger, PlatformScope: "dc/corp-prod",
+		InterconnectRule: "cloud-to-dc", DistinctApprovers: false, Payload: json.RawMessage(`{"kind":"Binding"}`)}
+	err := s.Create(context.Background(), alice, r, []Candidate{{Side: "SOURCE", Scope: payments}, {Side: "TARGET", Scope: ledger}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", r.ID) })
+	return r
+}
+
+// TestInterconnectRule: a binding request keeps its rule and the rule's
+// distinct_approvers (ADR-14 rule 4).
+func TestInterconnectRule(t *testing.T) {
+	s, _, owner := setup(t)
+	s.Resources["BINDING"] = &fake{}
+	r := newBinding(t, s, owner)
+	var rule string
+	var distinct bool
+	if err := owner.QueryRow(context.Background(), "select interconnect_rule, distinct_approvers_required from change_requests where id = $1", r.ID).
+		Scan(&rule, &distinct); err != nil || rule != "cloud-to-dc" || distinct {
+		t.Errorf("rule %q distinct %t (%v)", rule, distinct, err)
+	}
+}
+
+// TestAC52: a side decided automatically that the policy now in force
+// would leave to a person fails the request at apply (ADR-14 rule 5).
+func TestAC52(t *testing.T) {
+	s, f, owner := setup(t)
+	s.Resources["BINDING"] = f
+	r := newBinding(t, s, owner)
+	s.Policy = &governance.Policy{RequiredScopes: []string{"dc/corp-prod/*", "cloud/*"}} // tightened
+	if _, err := s.Approve(context.Background(), bob, r.ID, r.PayloadSHA256, "", "ok"); status(err) != "governance-policy-changed" {
+		t.Fatalf("err = %v", err)
+	}
+	if st, _ := statusOf(t, owner, r.ID); st != "FAILED_TO_APPLY" || f.applied != 0 {
+		t.Errorf("status %s, applied %d", st, f.applied)
+	}
+}
+
+// TestBusy: an approval that finds the binding busy is rolled back, side
+// decision included; a request complete at creation fails instead (§6.2.2).
+func TestBusy(t *testing.T) {
+	s, f, owner := setup(t)
+	ctx := context.Background()
+	s.Resources["BINDING"] = f
+	f.apply = &Error{Status: 409, Slug: "binding-busy"}
+	r := newBinding(t, s, owner)
+	if _, err := s.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); status(err) != "binding-busy" {
+		t.Fatalf("err = %v", err)
+	}
+	var pending int
+	if err := owner.QueryRow(ctx, "select count(*) from change_request_sides where change_request_id = $1 and decision is null", r.ID).Scan(&pending); err != nil || pending != 1 {
+		t.Errorf("%d undecided sides (%v)", pending, err)
+	}
+	if st, _ := statusOf(t, owner, r.ID); st != "PENDING" {
+		t.Errorf("status %s", st)
+	}
+	a := &Request{ResourceType: "SOURCE", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
+		Consent: ConsentAll, OwnerScope: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
+	err := s.Create(ctx, alice, a, []Candidate{{Side: "OWNER", Scope: payments}}, "") // complete at creation
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", a.ID) })
+	if status(err) != "binding-busy" {
+		t.Errorf("busy at creation: %v", err)
+	}
+	if st, by := statusOf(t, owner, a.ID); st != "FAILED_TO_APPLY" || by != "system:auto-approve" {
+		t.Errorf("request complete at creation: %s by %s", st, by)
 	}
 }
