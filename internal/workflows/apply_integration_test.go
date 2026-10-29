@@ -22,8 +22,10 @@ import (
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
 )
 
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
@@ -45,6 +47,12 @@ type fake struct {
 	storeBlock chan struct{} // the first EnsureSecretStore waits on it
 	targetSpec string
 	validator  *outputvalidation.Validator
+
+	targetFail   error          // EnsureTarget fails with it
+	cleanups     []string       // the stages cleaned, in order
+	cleanupFail  map[string]int // stage: how many cleanups fail before one succeeds
+	skipped      map[string]bool
+	laterPresent []string // INV-04 violations: a later stage's row still there
 }
 
 func (f *fake) started(ctx context.Context, b *pluginv1.BindingContext, stage string) {
@@ -78,6 +86,9 @@ func (f *fake) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetRequest
 	if hook != nil {
 		hook(r)
 	}
+	if f.targetFail != nil {
+		return nil, f.targetFail
+	}
 	p := &pluginv1.SecretProvisioningPayload{Mode: r.GetIdentity().GetMode()}
 	switch r.GetIdentity().GetMode() {
 	case pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL:
@@ -105,6 +116,41 @@ func (f *fake) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecretSt
 	f.stored = r.GetSecretPayload()
 	f.mu.Unlock()
 	return &pluginv1.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte(`{"secretPath":"kv/data/bindings/x"}`)}, nil
+}
+
+// cleanup records a stage's cleanup, checks that every later stage's row is
+// gone (INV-04), and fails while cleanupFail says so.
+func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage string, later ...string) (bool, error) {
+	for _, l := range later {
+		var n int
+		_ = f.db.QueryRow(ctx, "SELECT count(*) FROM binding_stage_state WHERE binding_id = $1 AND stage = $2", b.GetBindingId(), l).Scan(&n)
+		if n > 0 {
+			f.laterPresent = append(f.laterPresent, stage+" before "+l)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cleanupFail[stage] > 0 {
+		f.cleanupFail[stage]--
+		return false, pluginsdk.Error(codes.PermissionDenied, "CLEANUP_DENIED", "cleanup refused", false)
+	}
+	f.cleanups = append(f.cleanups, stage)
+	return f.skipped[stage], nil
+}
+
+func (f *fake) CleanupIdentity(ctx context.Context, r *pluginv1.CleanupIdentityRequest) (*pluginv1.CleanupIdentityResponse, error) {
+	skipped, err := f.cleanup(ctx, r.GetBinding(), "IDENTITY", "TARGET", "SECRET_STORE")
+	return &pluginv1.CleanupIdentityResponse{SkippedNotOwner: skipped}, err
+}
+
+func (f *fake) CleanupTarget(ctx context.Context, r *pluginv1.CleanupTargetRequest) (*pluginv1.CleanupTargetResponse, error) {
+	skipped, err := f.cleanup(ctx, r.GetBinding(), "TARGET", "SECRET_STORE")
+	return &pluginv1.CleanupTargetResponse{SkippedNotOwner: skipped}, err
+}
+
+func (f *fake) CleanupSecretStore(ctx context.Context, r *pluginv1.CleanupSecretStoreRequest) (*pluginv1.CleanupSecretStoreResponse, error) {
+	skipped, err := f.cleanup(ctx, r.GetBinding(), "SECRET_STORE")
+	return &pluginv1.CleanupSecretStoreResponse{SkippedNotOwner: skipped}, err
 }
 
 func (f *fake) OutputValidator(pluginv1.PluginKind, string) *outputvalidation.Validator {
@@ -218,9 +264,18 @@ func launch(t *testing.T, e *Engine, version string) {
 // revision 1, attempt 1, removed at the end of the test.
 func (v *env) binding(t *testing.T) uuid.UUID {
 	t.Helper()
+	return v.bindingNamed(t, "")
+}
+
+// bindingNamed is binding with the binding's name, if not empty.
+func (v *env) bindingNamed(t *testing.T, name string) uuid.UUID {
+	t.Helper()
 	ctx := context.Background()
 	source, target, id := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	x := id.String()[24:]
+	if name == "" {
+		name = "b-" + x
+	}
 	regex := `^spiffe://prod\.internal/ns/w/sa/` + x + `$`
 	err := pgx.BeginFunc(ctx, v.owner, func(tx pgx.Tx) error {
 		for _, q := range []struct {
@@ -237,7 +292,7 @@ func (v *env) binding(t *testing.T) uuid.UUID {
 				source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'postgres.v1', 'pg', 'fake.v1', 'id-prod', 'vault.v1', 'vault-prod', 'vault-static',
 				'bnd_' || left(md5($1::uuid::text), 16), 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', $5, 1, 1, 'prod.internal', $6, '{"roles":[]}', 't', 't')`,
-				[]any{id, "b-" + x, source, target, "ligo:apply:" + id.String() + ":r1:a1", regex}},
+				[]any{id, name, source, target, "ligo:apply:" + id.String() + ":r1:a1", regex}},
 		} {
 			if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
 				return err

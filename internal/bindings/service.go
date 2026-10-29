@@ -35,10 +35,9 @@ type Service struct {
 	Start func(ctx context.Context, bindingID uuid.UUID) error
 }
 
-// Applied starts the workflow of an applied create or update; a delete's
-// workflow comes with the delete workflow (§6.5).
+// Applied starts the workflow of an applied create, update or delete.
 func (s *Service) Applied(ctx context.Context, r *changerequests.Request) {
-	if s.Start != nil && r.Operation != "DELETE" && r.ResourceID != nil {
+	if s.Start != nil && r.ResourceID != nil {
 		_ = s.Start(ctx, *r.ResourceID) // the sweeper retries a failed start
 	}
 }

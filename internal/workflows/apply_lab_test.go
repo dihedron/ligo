@@ -193,16 +193,20 @@ func TestLabApply(t *testing.T) {
 		ctx := context.Background()
 		// no delete workflow yet (§6.5): undo the stages by hand, store first
 		var b struct{ id, principal string }
-		_ = owner.QueryRow(ctx, "select id::text, derived_principal_name from bindings where id = $1", id).Scan(&b.id, &b.principal)
+		if err := owner.QueryRow(ctx, "select id::text, derived_principal_name from bindings where id = $1", id).Scan(&b.id, &b.principal); err != nil {
+			b.id = "" // deleted by its workflow
+		}
 		bc := &pluginv1.BindingContext{BindingId: b.id, DerivedPrincipalName: b.principal}
-		_ = m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, "vault-prod", true, func(ctx context.Context, c *pluginmgr.Client) error {
-			_, err := c.Store.CleanupSecretStore(ctx, &pluginv1.CleanupSecretStoreRequest{Instance: "vault-prod", Binding: bc, SecretStorageStrategy: "vault-static"})
-			return err
-		})
-		_ = m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, "pg-ledger", true, func(ctx context.Context, c *pluginmgr.Client) error {
-			_, err := c.Platform.CleanupTarget(ctx, &pluginv1.CleanupTargetRequest{Instance: "pg-ledger", Binding: bc})
-			return err
-		})
+		if b.id != "" {
+			_ = m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, "vault-prod", true, func(ctx context.Context, c *pluginmgr.Client) error {
+				_, err := c.Store.CleanupSecretStore(ctx, &pluginv1.CleanupSecretStoreRequest{Instance: "vault-prod", Binding: bc, SecretStorageStrategy: "vault-static"})
+				return err
+			})
+			_ = m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, "pg-ledger", true, func(ctx context.Context, c *pluginmgr.Client) error {
+				_, err := c.Platform.CleanupTarget(ctx, &pluginv1.CleanupTargetRequest{Instance: "pg-ledger", Binding: bc})
+				return err
+			})
+		}
 		_, _ = owner.Exec(ctx, "delete from change_requests where resource_name = $1", name)
 		_, _ = owner.Exec(ctx, "delete from bindings where id = $1", id)
 		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id = $1", targetID)
@@ -240,14 +244,58 @@ func TestLabApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the stored credential does not connect: %v", err)
 	}
-	defer func() { _ = db.Close(ctx) }()
 	if _, err := db.Exec(ctx, "SELECT count(*) FROM ledger.entries"); err != nil {
 		t.Errorf("read with the stored credential: %v", err)
 	}
+	_ = db.Close(ctx)
+
+	// the delete: revoked through the bindings service, cleaned by its workflow (§6.5)
+	d2, err := bs.Delete(ctx, operator, name, 1, "", nil)
+	if err != nil || d2.Status != "APPLIED" {
+		t.Fatalf("delete: %v (%v)", d2, err)
+	}
+	for deadline := time.Now().Add(90 * time.Second); ; {
+		var n int
+		if err := owner.QueryRow(ctx, "select count(*) from bindings where id = $1", id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			var phase, message string
+			_ = owner.QueryRow(ctx, "select phase, status_message from bindings where id = $1", id).Scan(&phase, &message)
+			t.Fatalf("not deleted: %s %s", phase, message)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if db, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=%s",
+		secret["username"], secret["password"], labEnv(t, "LIGO_TEST_CA"))); err == nil {
+		_ = db.Close(ctx)
+		t.Error("the deleted binding's credential still connects")
+	}
+	if st := checkStatus(t, a.Config.SecretPath); st != http.StatusNotFound {
+		t.Errorf("the deleted binding's secret: %d", st)
+	}
+}
+
+// checkStatus is the HTTP status of reading path as lab-standins-check.
+func checkStatus(t *testing.T, path string) int {
+	t.Helper()
+	status := http.StatusOK
+	checkAt(t, path, &status)
+	return status
 }
 
 // checkRead reads a KV v2 secret as the lab-only role lab-standins-check.
 func checkRead(t *testing.T, path string) map[string]string {
+	t.Helper()
+	return checkAt(t, path, nil)
+}
+
+// checkAt reads path; with status set, it records the status of the read
+// instead of failing on one other than 200.
+func checkAt(t *testing.T, path string, status *int) map[string]string {
 	t.Helper()
 	ctx := context.Background()
 	svid, err := workloadapi.FetchJWTSVID(ctx, jwtsvid.Params{Audience: labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}, workloadapi.WithAddr(labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")))
@@ -266,7 +314,9 @@ func checkRead(t *testing.T, path string) map[string]string {
 		}
 		defer func() { _ = resp.Body.Close() }()
 		data, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != http.StatusOK {
+		if status != nil && token != "" {
+			*status = resp.StatusCode
+		} else if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s %s: %d", method, path, resp.StatusCode)
 		}
 		_ = json.Unmarshal(data, out)

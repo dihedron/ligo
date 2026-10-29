@@ -32,6 +32,9 @@ type Plugins interface {
 	EnsureIdentity(ctx context.Context, req *pluginv1.EnsureIdentityRequest) (*pluginv1.EnsureIdentityResponse, error)
 	EnsureTarget(ctx context.Context, req *pluginv1.EnsureTargetRequest) (*pluginv1.EnsureTargetResponse, error)
 	EnsureSecretStore(ctx context.Context, req *pluginv1.EnsureSecretStoreRequest) (*pluginv1.EnsureSecretStoreResponse, error)
+	CleanupIdentity(ctx context.Context, req *pluginv1.CleanupIdentityRequest) (*pluginv1.CleanupIdentityResponse, error)
+	CleanupTarget(ctx context.Context, req *pluginv1.CleanupTargetRequest) (*pluginv1.CleanupTargetResponse, error)
+	CleanupSecretStore(ctx context.Context, req *pluginv1.CleanupSecretStoreRequest) (*pluginv1.CleanupSecretStoreResponse, error)
 	OutputValidator(kind pluginv1.PluginKind, instance string) *outputvalidation.Validator
 }
 
@@ -56,6 +59,7 @@ type Engine struct {
 // Register registers the workflows with DBOS; call it before dbos.Launch.
 func (e *Engine) Register() {
 	dbos.RegisterWorkflow(e.DBOS, e.apply, dbos.WithWorkflowName("ApplyBindingWorkflow"))
+	dbos.RegisterWorkflow(e.DBOS, e.delete, dbos.WithWorkflowName("DeleteBindingWorkflow"))
 }
 
 // StepError is a plugin or workflow error as it may be persisted: its code
@@ -148,6 +152,30 @@ func (p managed) EnsureSecretStore(ctx context.Context, req *pluginv1.EnsureSecr
 	return resp, err
 }
 
+func (p managed) CleanupIdentity(ctx context.Context, req *pluginv1.CleanupIdentityRequest) (resp *pluginv1.CleanupIdentityResponse, err error) {
+	err = p.m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, req.GetInstance(), true, func(ctx context.Context, c *pluginmgr.Client) error {
+		resp, err = c.Identity.CleanupIdentity(ctx, req)
+		return err
+	})
+	return resp, err
+}
+
+func (p managed) CleanupTarget(ctx context.Context, req *pluginv1.CleanupTargetRequest) (resp *pluginv1.CleanupTargetResponse, err error) {
+	err = p.m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, req.GetInstance(), true, func(ctx context.Context, c *pluginmgr.Client) error {
+		resp, err = c.Platform.CleanupTarget(ctx, req)
+		return err
+	})
+	return resp, err
+}
+
+func (p managed) CleanupSecretStore(ctx context.Context, req *pluginv1.CleanupSecretStoreRequest) (resp *pluginv1.CleanupSecretStoreResponse, err error) {
+	err = p.m.Call(ctx, pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, req.GetInstance(), true, func(ctx context.Context, c *pluginmgr.Client) error {
+		resp, err = c.Store.CleanupSecretStore(ctx, req)
+		return err
+	})
+	return resp, err
+}
+
 func (p managed) OutputValidator(kind pluginv1.PluginKind, instance string) *outputvalidation.Validator {
 	return p.m.OutputValidator(kind, instance)
 }
@@ -189,7 +217,7 @@ type ApplyInput struct {
 	Wiring               Wiring          `json:"wiring"`
 }
 
-// Start starts the workflow of a PROVISIONING binding under its
+// Start starts the workflow of a PROVISIONING or DELETING binding under its
 // workflow_id; starting a started workflow returns it again (EXT-02).
 func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowHandle[string], error) {
 	in := ApplyInput{BindingID: bindingID.String()}
@@ -207,25 +235,31 @@ func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowH
 	if err != nil {
 		return nil, fmt.Errorf("workflows: binding %s: %w", bindingID, err)
 	}
-	if phase != "PROVISIONING" || in.Operation == "DELETE" {
-		return nil, fmt.Errorf("workflows: binding %s is %s (%s): nothing to apply", bindingID, phase, in.Operation)
-	}
 	in.TargetID = targetID.String()
-	return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
+	switch {
+	case phase == "PROVISIONING" && in.Operation != "DELETE":
+		return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
+	case phase == "DELETING" && in.Operation == "DELETE":
+		return dbos.RunWorkflow(e.DBOS, e.delete, in, dbos.WithWorkflowID(in.WorkflowID))
+	}
+	return nil, fmt.Errorf("workflows: binding %s is %s (%s): no workflow to run", bindingID, phase, in.Operation)
 }
 
-// Retry starts a new attempt of a FAILED binding, with rotation (§3.11):
-// same revision and operation, a new workflow ID (INV-09).
+// Retry starts a new attempt of a FAILED binding, with rotation, or of a
+// DELETE_FAILED one, which resumes its cleanup (§3.11, §6.5): same revision
+// and operation, a new workflow ID (INV-09).
 func (e *Engine) Retry(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
 		var name, op string
 		var revision, attempt int64
-		err := tx.QueryRow(ctx, `UPDATE bindings SET attempt = attempt + 1, phase = 'PROVISIONING', current_step = 'INIT',
-			status_message = '', rotate_static_secrets = true, last_transition_at = now(), updated_at = now(), updated_by = $2,
+		err := tx.QueryRow(ctx, `UPDATE bindings SET attempt = attempt + 1, current_step = 'INIT', status_message = '',
+			phase = CASE phase WHEN 'FAILED' THEN 'PROVISIONING'::binding_phase ELSE 'DELETING'::binding_phase END,
+			rotate_static_secrets = (phase = 'FAILED') OR rotate_static_secrets,
+			last_transition_at = now(), updated_at = now(), updated_by = $2,
 			workflow_id = format('ligo:%s:%s:r%s:a%s', lower(operation::text), id, revision, attempt + 1)
-			WHERE id = $1 AND phase = 'FAILED' RETURNING name, operation, revision, attempt`, bindingID, actor).Scan(&name, &op, &revision, &attempt)
+			WHERE id = $1 AND phase IN ('FAILED', 'DELETE_FAILED') RETURNING name, operation, revision, attempt`, bindingID, actor).Scan(&name, &op, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("workflows: binding %s is not FAILED", bindingID)
+			return fmt.Errorf("workflows: binding %s is neither FAILED nor DELETE_FAILED", bindingID)
 		}
 		if err != nil {
 			return err
@@ -246,12 +280,17 @@ type fence struct {
 	workflowID string
 }
 
-// markFailed records a terminal error of the attempt (§6.4 failure path).
+// markFailed records a terminal error of the attempt: FAILED for an apply,
+// DELETE_FAILED for a delete (§6.4 failure path, §6.5).
 func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *StepError, in ApplyInput) error {
+	from, to, action := "PROVISIONING", "FAILED", "PROVISION_FAILURE"
+	if in.Operation == "DELETE" {
+		from, to, action = "DELETING", "DELETE_FAILED", "DELETE_FAILURE"
+	}
 	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE bindings SET phase = 'FAILED', current_step = $3, status_message = left($4, 2048),
-			last_transition_at = now(), updated_at = now() WHERE id = $1 AND workflow_id = $2 AND phase = 'PROVISIONING'`,
-			f.bindingID, f.workflowID, step, cause.Error())
+		tag, err := tx.Exec(ctx, `UPDATE bindings SET phase = $5, current_step = $3, status_message = left($4, 2048),
+			last_transition_at = now(), updated_at = now() WHERE id = $1 AND workflow_id = $2 AND phase = $6`,
+			f.bindingID, f.workflowID, step, cause.Error(), to, from)
 		if err != nil {
 			return err
 		}
@@ -260,7 +299,7 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 		}
 		snap, _ := json.Marshal(map[string]string{"step": step, "code": cause.Code, "message": cause.Message})
 		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
-			Action: "PROVISION_FAILURE", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap})
+			Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap})
 		return err
 	})
 }
