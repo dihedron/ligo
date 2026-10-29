@@ -93,6 +93,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
 | Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
 | Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
+| Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -3230,15 +3231,15 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 
 **Validation pipeline at creation** (`SOURCE`, `CREATE` and `UPDATE`):
 1. JSON schema of the request body.
-2. Name grammar, and for `CREATE` the name prefix (§3.8) and uniqueness among non-retired sources.
+2. Name grammar, and for `CREATE` the name prefix (§3.8) and uniqueness among non-retired sources (`422 validation-failed` on `metadata.name`). A `CREATE` body sets neither `metadata.scope` nor `metadata.state`.
 3. `identity.trustDomain` is a valid SPIFFE trust domain, accepted by at least one platform, with a `governance.source_scopes` entry.
 4. Regex validator (Appendix A).
 5. Scope (§3.9): `422 scope-unresolvable` if the fixed prefix does not resolve; for `UPDATE`, `422 immutable-field` if it differs from the stored scope.
 6. For `UPDATE` with a new regex: narrowing (§3.10, Appendix D.3), `422 widening-not-allowed` with the witness.
 7. Samples belong to the trust domain and match the regex (`422 sample-not-matched`).
 8. RBAC: `operator` (or `trusted_automation`) on the scope. For an `UPDATE` of a source the caller cannot see, `404`.
-9. State changes: `RETIRED` only without bindings (`409 resource-in-use`).
-10. `expectedRevision` matches; no `PENDING` change request exists for the source.
+9. State changes: `deprecate` from `ACTIVE`, `reactivate` from `DEPRECATED`, `retire` from either; any other change of state is `409 invalid-transition`. `RETIRED` only without bindings (`409 resource-in-use`), and final: a retired source is no longer found by name.
+10. `expectedRevision` matches (`409 revision-conflict`); no `PENDING` change request exists for the source (`409 change-request-pending`).
 
 **Validation pipeline at creation** (`TARGET`, `CREATE` and `UPDATE`):
 1. JSON schema; name grammar, prefix and uniqueness among non-retired targets.

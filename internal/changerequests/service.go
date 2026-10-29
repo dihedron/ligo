@@ -110,7 +110,11 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	}
 	payload, err := res.Revalidate(ctx, r)
 	if err != nil {
-		return nil, s.fail(ctx, r, c.ID(), err.Error(), refuse(422, "validation-failed", "%v", err))
+		detail := err.Error()
+		if e := (*Error)(nil); errors.As(err, &e) {
+			detail = e.Detail
+		}
+		return nil, s.fail(ctx, r, c.ID(), detail, refuse(422, "validation-failed", "%s", detail))
 	}
 	if r.Operation != "DELETE" {
 		if h, err := Hash(payload); err != nil || h != r.PayloadSHA256 {
