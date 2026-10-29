@@ -91,7 +91,7 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 	if err := s.stamp(c, r, approvalReference); err != nil {
 		return err
 	}
-	return s.file(ctx, res, r)
+	return s.file(ctx, filed{res, r})
 }
 
 // stamp fills r's identity, requester, hashes and expiry.
@@ -109,17 +109,34 @@ func (s *Service) stamp(c Caller, r *Request, approvalReference string) error {
 	return nil
 }
 
-// BreakGlass files r as a break-glass change and applies it at once
-// (ADR-12, §7.2.3 "Break-glass operations"). r carries the justification
-// and the TTL, 0 for the policies' default; incident is the incident
-// reference.
-func (s *Service) BreakGlass(ctx context.Context, c Caller, r *Request, candidates []Candidate, incident string) error {
-	res, err := s.resource(r)
-	if err != nil {
-		return err
+// Filing is a request to file with the sides it needs.
+type Filing struct {
+	Request    *Request
+	Candidates []Candidate
+}
+
+// BreakGlass files the requests of a break-glass change and applies them
+// at once, in one transaction (ADR-12, §7.2.3 "Break-glass operations"):
+// an inline source first, then the binding, which depends on it. The last
+// request carries the justification and the TTL, 0 for the policies'
+// default; incident is the incident reference. At least one side must need
+// a decision.
+func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, filings ...Filing) error {
+	r := filings[len(filings)-1].Request
+	items := make([]filed, len(filings))
+	var sides []Side
+	for i, f := range filings {
+		res, err := s.resource(f.Request)
+		if err != nil {
+			return err
+		}
+		if f.Request.Sides, err = BreakGlassSides(f.Candidates, c, s.Policy); err != nil {
+			return err
+		}
+		items[i], sides = filed{res, f.Request}, append(sides, f.Request.Sides...)
 	}
-	if r.Sides, err = BreakGlassSides(candidates, c, s.Policy); err != nil {
-		return err
+	if !slices.ContainsFunc(sides, func(sd Side) bool { return sd.Basis == BasisBreakGlass }) {
+		return refuse(422, "validation-failed", "no side needs a decision: file a normal change")
 	}
 	if n := max(s.BreakGlassRules.MinJustificationLength, 20); len([]rune(r.Justification)) < n {
 		return refuse(422, "validation-failed", "justification: at least %d characters", n)
@@ -138,7 +155,7 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, r *Request, candidat
 	}
 	maxTTL, defaultTTL := 24*time.Hour, 24*time.Hour
 	var policies []*governance.BreakGlassPolicy
-	for _, sd := range r.Sides {
+	for _, sd := range sides {
 		if sd.Basis != BasisBreakGlass {
 			continue
 		}
@@ -160,11 +177,22 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, r *Request, candidat
 	if err := s.checkOpen(ctx, policies); err != nil {
 		return err
 	}
-	r.Kind = KindBreakGlass
-	if err := s.stamp(c, r, incident); err != nil {
-		return err
+	for i, it := range items {
+		it.r.Kind, it.r.Justification, it.r.TTL = KindBreakGlass, r.Justification, r.TTL
+		if err := s.stamp(c, it.r, incident); err != nil {
+			return err
+		}
+		if i > 0 {
+			it.r.DependsOn = &items[0].r.ID
+		}
 	}
-	return s.file(ctx, res, r)
+	return s.file(ctx, items...)
+}
+
+// filed is a request and its resource.
+type filed struct {
+	res Resource
+	r   *Request
 }
 
 // checkOpen refuses a change that would exceed a policy's max_open
@@ -215,14 +243,16 @@ func (s *Service) System(ctx context.Context, r *Request) error {
 		return err
 	}
 	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
-	return s.file(ctx, res, r)
+	return s.file(ctx, filed{res, r})
 }
 
-// file inserts r and applies it at once if its consent rule is satisfied.
-func (s *Service) file(ctx context.Context, res Resource, r *Request) error {
+// file inserts each request in one transaction and applies it at once if
+// its consent rule is satisfied. With several, a failed apply rolls them all
+// back: a later request depends on the earlier ones.
+func (s *Service) file(ctx context.Context, items ...filed) error {
 	var applyErr error
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if r.Kind == KindBreakGlass { // §6.2.2: refused in maintenance mode
+		if items[0].r.Kind == KindBreakGlass { // §6.2.2: refused in maintenance mode
 			var maintenance bool
 			if err := tx.QueryRow(ctx, "SELECT maintenance_mode FROM system_settings FOR SHARE").Scan(&maintenance); err != nil {
 				return err
@@ -231,25 +261,33 @@ func (s *Service) file(ctx context.Context, res Resource, r *Request) error {
 				return refuse(503, "maintenance", "maintenance mode is on")
 			}
 		}
-		if err := insert(ctx, tx, r); err != nil {
-			return err
-		}
-		sides := make([]map[string]any, 0, len(r.Sides))
-		for _, sd := range r.Sides {
-			sides = append(sides, map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis})
-		}
-		entries := []audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", map[string]any{"consent": r.Consent, "sides": sides})}
-		decider := ""
-		for _, sd := range r.Sides {
-			if sd.Decision == Approved {
-				entries = append(entries, s.sideApproved(r, sd, r.RequestedBy))
-				decider = sd.DecidedBy
-			}
-		}
-		if Complete(r.Consent, r.Sides) {
-			var err error
-			if entries, applyErr, err = s.apply(ctx, tx, r, res, decider, entries); err != nil {
+		var entries []audit.Entry
+		for _, it := range items {
+			r := it.r
+			if err := insert(ctx, tx, r); err != nil {
 				return err
+			}
+			sides := make([]map[string]any, 0, len(r.Sides))
+			for _, sd := range r.Sides {
+				sides = append(sides, map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis})
+			}
+			entries = append(entries, entry(r, "CR_CREATED", r.RequestedBy, "", map[string]any{"consent": r.Consent, "sides": sides}))
+			decider := ""
+			for _, sd := range r.Sides {
+				if sd.Decision == Approved {
+					entries = append(entries, s.sideApproved(r, sd, r.RequestedBy))
+					decider = sd.DecidedBy
+				}
+			}
+			if !Complete(r.Consent, r.Sides) {
+				continue
+			}
+			var err error
+			if entries, applyErr, err = s.apply(ctx, tx, r, it.res, decider, entries); err != nil {
+				return err
+			}
+			if applyErr != nil && len(items) > 1 {
+				return applyErr
 			}
 			if r.Kind == KindBreakGlass && applyErr == nil {
 				entries = append(entries, entry(r, "BREAK_GLASS_USED", r.RequestedBy, "", map[string]any{"operation": r.Operation,
@@ -261,7 +299,9 @@ func (s *Service) file(ctx context.Context, res Resource, r *Request) error {
 	if err != nil {
 		return err
 	}
-	applied(ctx, res, r)
+	for _, it := range items {
+		applied(ctx, it.res, it.r)
+	}
 	return applyErr
 }
 
@@ -542,12 +582,12 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
-		break_glass_justification, break_glass_ttl_seconds, revert_payload)
-		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25)`,
+		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id)
+		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
 		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
-		null(r.Justification), null(int64(r.TTL.Seconds())), revert); err != nil {
+		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
@@ -575,11 +615,11 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
-		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload
+		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id
 		FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -24,6 +25,8 @@ type BreakGlassRequest struct {
 	Justification     string          `json:"justification"`
 	IncidentReference string          `json:"incidentReference"`
 	TTL               string          `json:"ttl,omitempty"`
+	// InlineSource is a source create body registered with a CREATE.
+	InlineSource json.RawMessage `json:"inlineSource,omitempty"`
 }
 
 func breakGlassOpen(cur *stored) error {
@@ -48,72 +51,92 @@ func (s *Service) BreakGlass(ctx context.Context, c changerequests.Caller, body 
 			return nil, invalid("ttl: %v", err)
 		}
 	}
-	var (
-		r     *changerequests.Request
-		sides []changerequests.Candidate
-		err   error
-	)
+	if in.InlineSource != nil && in.Operation != "CREATE" {
+		return nil, invalid("inlineSource is only for a CREATE")
+	}
+	var filings []changerequests.Filing
+	var err error
 	switch in.Operation {
 	case "CREATE", "UPDATE":
-		r, sides, err = s.breakGlassChange(ctx, c, &in)
+		filings, err = s.breakGlassChange(ctx, c, &in)
 	case "DELETE":
-		r, sides, err = s.breakGlassDelete(ctx, c, &in)
+		var f changerequests.Filing
+		f.Request, f.Candidates, err = s.breakGlassDelete(ctx, c, &in)
+		filings = []changerequests.Filing{f}
 	default:
 		return nil, invalid("operation must be CREATE, UPDATE or DELETE")
 	}
 	if err != nil {
 		return nil, err
 	}
+	r := filings[len(filings)-1].Request
 	r.Justification, r.TTL = in.Justification, ttl
-	return r, pendingError(s.Requests.BreakGlass(ctx, c, r, sides, in.IncidentReference), r.ResourceName)
+	return r, pendingError(s.Requests.BreakGlass(ctx, c, in.IncidentReference, filings...), r.ResourceName)
 }
 
 // breakGlassChange runs the creation pipeline with the break_glass check of
 // the sides in place of the operator check (§7.2.3 "Break-glass
-// operations"). An UPDATE stores the current requested state to revert to.
+// operations"): an inline source's request first, then the binding's. An
+// UPDATE stores the current requested state to revert to.
 // shortcut: an UPDATE always has consent ALL, so a removal-only one needs break_glass on every side; use DELETE to cut access in an emergency.
-func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller, in *BreakGlassRequest) (*changerequests.Request, []changerequests.Candidate, error) {
+func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller, in *BreakGlassRequest) ([]changerequests.Filing, error) {
 	req, err := decode(in.Binding)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	b := req.Binding
+	var filings []changerequests.Filing
+	var inline *sources.Source
+	if in.InlineSource != nil {
+		var f changerequests.Filing
+		if f.Request, f.Candidates, inline, err = s.Sources.Inline(ctx, in.InlineSource); err != nil {
+			return nil, err
+		}
+		if b.Source != inline.Metadata.Name {
+			return nil, invalid("source %q is not the inline source %q", b.Source, inline.Metadata.Name)
+		}
+		filings = append(filings, f)
+	}
 	var cur *stored
 	if in.Operation == "UPDATE" {
 		if req.ExpectedRevision == nil {
-			return nil, nil, invalid("expectedRevision is required")
+			return nil, invalid("expectedRevision is required")
 		}
 		if cur, err = s.emergencyTarget(ctx, c, b.Name); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if cur.breakGlassCR != nil {
-			return nil, nil, breakGlassOpen(cur)
+			return nil, breakGlassOpen(cur)
 		}
 		if *req.ExpectedRevision != cur.revision {
-			return nil, nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
+			return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 		}
 	} else if req.ExpectedRevision != nil {
-		return nil, nil, invalid("expectedRevision is only for updates")
+		return nil, invalid("expectedRevision is only for updates")
 	}
 	p := s.Requests.Policy
-	res, err := s.resolve(ctx, nil, &b, cur, p, changerequests.ConsentAll)
+	res, err := s.resolve(ctx, nil, &b, cur, p, changerequests.ConsentAll, inline)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if res.decision = p.Evaluate(res.sourceScope, res.targetScope); !res.decision.Allowed {
-		return nil, nil, s.denied(ctx, c, &b, res)
+		return nil, s.denied(ctx, c, &b, res)
 	}
 	if err := s.Rules.checkExpiry(b.ExpiresAt, time.Now()); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	r, sides, err := compose(in.Operation, changerequests.ConsentAll, cur, &b, res, &req.Common, nil)
-	if err != nil || cur == nil {
-		return r, sides, err
+	if err != nil {
+		return nil, err
 	}
-	previous := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
-		Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
-	r.RevertPayload, err = json.Marshal(previous)
-	return r, sides, err
+	if cur != nil {
+		previous := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
+			Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+		if r.RevertPayload, err = json.Marshal(previous); err != nil {
+			return nil, err
+		}
+	}
+	return append(filings, changerequests.Filing{Request: r, Candidates: sides}), nil
 }
 
 // breakGlassDelete runs the revocation pipeline, where acting for a side
@@ -202,10 +225,35 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 				return err
 			}
 		}
+		var entries []audit.Entry
+		var scopes []string
 		for _, n := range names {
 			snap, _ := json.Marshal(map[string]any{"side": n, "fullyRatified": left == 0})
-			if _, err := audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: r.ResourceID, ResourceName: r.ResourceName,
-				ChangeRequestID: &id, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap}); err != nil {
+			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: r.ResourceID, ResourceName: r.ResourceName,
+				ChangeRequestID: &id, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
+			for _, sd := range r.Sides {
+				if sd.Name == n {
+					scopes = append(scopes, sd.Scope)
+				}
+			}
+		}
+		if r.DependsOn != nil { // the inline source's change, ratified with the side of its scope
+			var source string
+			var sourceID *uuid.UUID
+			err := tx.QueryRow(ctx, `UPDATE change_request_sides s SET ratified_by = $3, ratified_at = now(), ratification_comment = $4
+				FROM change_requests r WHERE r.id = s.change_request_id AND s.change_request_id = $1 AND s.basis = 'BREAK_GLASS'
+				AND s.ratified_by IS NULL AND s.scope = ANY($2) RETURNING r.resource_name, r.resource_id`,
+				*r.DependsOn, scopes, c.ID(), comment).Scan(&source, &sourceID)
+			if err == nil {
+				snap, _ := json.Marshal(map[string]any{"side": "OWNER", "fullyRatified": true})
+				entries = append(entries, audit.Entry{ResourceType: "SOURCE", ResourceID: sourceID, ResourceName: source,
+					ChangeRequestID: r.DependsOn, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		for _, e := range entries {
+			if _, err := audit.Append(ctx, tx, e); err != nil {
 				return err
 			}
 		}

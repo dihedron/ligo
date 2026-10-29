@@ -138,11 +138,36 @@ func (s *Service) current(ctx context.Context, c changerequests.Caller, name str
 	return cur, err
 }
 
-// file files the change request of a validated source change.
-func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, cur *stored, src *Source, req *request) (*changerequests.Request, error) {
+// Inline validates the source a break-glass binding CREATE registers
+// (ADR-12) and returns its request and side, for the caller to file with
+// the binding's; RBAC is the break-glass check of its side.
+func (s *Service) Inline(ctx context.Context, body []byte) (*changerequests.Request, []changerequests.Candidate, *Source, error) {
+	req, err := decode(body)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if req.ExpectedRevision != nil {
+		return nil, nil, nil, invalid("expectedRevision is only for updates")
+	}
+	src := req.Source
+	if _, err := s.Rules.validate(&src, nil); err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
+		return nil, nil, nil, invalid("metadata.name %q is in use", src.Metadata.Name)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil, err
+	}
+	r, sides, err := compose("CREATE", nil, &src, req)
+	return r, sides, &src, err
+}
+
+// compose builds the change request of a validated source change and its
+// side.
+func compose(op string, cur *stored, src *Source, req *request) (*changerequests.Request, []changerequests.Candidate, error) {
 	payload, err := json.Marshal(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r := &changerequests.Request{ResourceType: "SOURCE", ResourceName: src.Metadata.Name, Operation: op,
 		Consent: changerequests.ConsentAll, OwnerScope: src.Metadata.Scope, ExpectedRevision: req.ExpectedRevision,
@@ -150,7 +175,16 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 	if cur != nil {
 		r.ResourceID = &cur.ID
 	}
-	err = s.Requests.Create(ctx, c, r, []changerequests.Candidate{{Side: "OWNER", Scope: src.Metadata.Scope}}, req.ApprovalReference)
+	return r, []changerequests.Candidate{{Side: "OWNER", Scope: src.Metadata.Scope}}, nil
+}
+
+// file files the change request of a validated source change.
+func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, cur *stored, src *Source, req *request) (*changerequests.Request, error) {
+	r, sides, err := compose(op, cur, src, req)
+	if err != nil {
+		return nil, err
+	}
+	err = s.Requests.Create(ctx, c, r, sides, req.ApprovalReference)
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_cr_one_pending_per_resource" {
 		return nil, refuse(409, "change-request-pending", "source %q has a pending change request", src.Metadata.Name)
 	}

@@ -219,3 +219,49 @@ func TestAC35(t *testing.T) {
 		t.Errorf("the delete left %s open", r.ID)
 	}
 }
+
+// TestBreakGlassInlineSource: a break-glass CREATE registers its inline
+// source in the same transaction, both requests BREAK_GLASS, the binding's
+// depending on the source's; ratifying the side of the source's scope
+// ratifies the source's change too. A refused binding stores neither
+// (ADR-12, §7.2.3 "Break-glass operations").
+func TestBreakGlassInlineSource(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	src, name := "dc-inl-src-"+w.suffix, "dc-inl-"+w.suffix
+	inline := `"inlineSource":{"metadata":{"name":"` + src + `"},"identity":{"trustDomain":"prod.internal",` +
+		`"svidRegex":"^spiffe://prod\\.internal/ns/inline/sa/` + w.suffix + `$","sampleSpiffeIds":["spiffe://prod.internal/ns/inline/sa/` + w.suffix + `"]},` +
+		`"visibility":{"mode":"PRIVATE"}},`
+	if _, err := s.BreakGlass(ctx, livia, emergency("CREATE", inline+`"binding":`+string(body(name, src, w.dcShared, "nope"))+`,`, "")); slug(err) != "validation-failed" {
+		t.Fatalf("invalid level: %v", err)
+	}
+	var n int
+	if err := o.QueryRow(ctx, "select count(*) from sources where name = $1", src).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a refused binding registered its source (%d, %v)", n, err)
+	}
+	r, err := s.BreakGlass(ctx, livia, emergency("CREATE", inline+`"binding":`+string(body(name, src, w.dcShared, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sourceCR uuid.UUID
+	var kind, status, state string
+	if err := o.QueryRow(ctx, `select c.id, c.kind, c.status, s.state from change_requests c join sources s on s.id = c.resource_id
+		where c.id = (select depends_on_cr_id from change_requests where id = $1)`, r.ID).Scan(&sourceCR, &kind, &status, &state); err != nil ||
+		kind != "BREAK_GLASS" || status != "APPLIED" || state != "ACTIVE" {
+		t.Fatalf("inline source %s %s %s (%v)", kind, status, state, err)
+	}
+	if phase, _, _, _, _ := bindingRow(t, o, name); phase != "PROVISIONING" {
+		t.Errorf("binding %s", phase)
+	}
+	if _, err := s.Ratify(ctx, dcApp, r.ID, "", "the inline workload is the payments batch"); err != nil {
+		t.Fatal(err)
+	}
+	var unratified int
+	if err := o.QueryRow(ctx, `select count(*) from change_request_sides where change_request_id in ($1, $2) and basis = 'BREAK_GLASS'
+		and ratified_by is null`, r.ID, sourceCR).Scan(&unratified); err != nil || unratified != 0 {
+		t.Errorf("%d sides left unratified (%v)", unratified, err)
+	}
+	if n, _ := audited(t, o, src, "BREAK_GLASS_RATIFIED"); n != 1 {
+		t.Errorf("source BREAK_GLASS_RATIFIED %d", n)
+	}
+}

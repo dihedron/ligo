@@ -1,6 +1,7 @@
 package changerequests
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -222,7 +223,7 @@ func TestBreakGlassSides(t *testing.T) {
 		"self-service side stays AUTO": {livia, authz.Grants{bg, op}, both, "BREAK_GLASS,AUTO", ""},
 		"no role on the other side":    {livia, authz.Grants{bg}, both, "", "forbidden"},
 		"SPIFFE principal":             {robot, authz.Grants{bg}, both[:1], "", "forbidden"},
-		"no side needs a decision":     {livia, authz.Grants{bg, op}, both[1:], "", "validation-failed"},
+		"only AUTO sides":              {livia, authz.Grants{bg, op}, both[1:], "AUTO", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sides, err := BreakGlassSides(tc.candidates, Caller{Principal: tc.caller, Grants: tc.grants}, policy)
@@ -240,6 +241,19 @@ func TestBreakGlassSides(t *testing.T) {
 				t.Errorf("bases %s, want %s", got, tc.bases)
 			}
 		})
+	}
+}
+
+// TestBreakGlassNeedsADecision: a break-glass change whose sides all need
+// no decision is refused before anything is stored (§7.2.3).
+func TestBreakGlassNeedsADecision(t *testing.T) {
+	s := &Service{Policy: policy, Resources: map[string]Resource{"SOURCE": nil, "BINDING": nil}}
+	c := Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/*")}}
+	err := s.BreakGlass(context.Background(), c, "INC0012345",
+		Filing{&Request{ResourceType: "SOURCE"}, []Candidate{{Side: "OWNER", Scope: payments}}},
+		Filing{&Request{ResourceType: "BINDING"}, []Candidate{{Side: "TARGET", Scope: payments}}})
+	if status(err) != "validation-failed" {
+		t.Errorf("err = %v", err)
 	}
 }
 

@@ -97,6 +97,8 @@ type Request struct {
 	Justification string
 	TTL           time.Duration
 	RevertPayload json.RawMessage
+	// DependsOn is the inline source's request a binding CREATE needs.
+	DependsOn     *uuid.UUID
 	Consent       string
 	Zone          string // TARGET, BINDING
 	OwnerScope    string // SOURCE, TARGET
@@ -180,25 +182,21 @@ func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approval
 // BreakGlassSides builds the sides of a break-glass change (§7.2.3): a side
 // the caller acts for that needs no approval is AUTO, every other side is
 // BREAK_GLASS, approved at once, and needs the break_glass role on its
-// scope. At least one side must be BREAK_GLASS.
+// scope.
 func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]Side, error) {
 	if c.Principal.SPIFFEID != "" {
 		return nil, refuse(403, "forbidden", "break-glass is for people only")
 	}
 	var sides []Side
-	emergency := false
 	for _, cand := range candidates {
 		s := Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisAuto, Decision: Approved, DecidedBy: AutoApprover}
 		if !c.Grants.ActsFor(cand.Scope, cand.Platform) || p.ApprovalRequired(cand.Scope) {
 			if !c.Grants.BreakGlass(cand.Scope) {
 				return nil, refuse(403, "forbidden", "%s holds no break_glass on %s (side %s)", c.ID(), cand.Scope, cand.Side)
 			}
-			s.Basis, s.ApprovalRequired, s.DecidedBy, emergency = BasisBreakGlass, true, BreakGlassApprover, true
+			s.Basis, s.ApprovalRequired, s.DecidedBy = BasisBreakGlass, true, BreakGlassApprover
 		}
 		sides = append(sides, s)
-	}
-	if !emergency {
-		return nil, refuse(422, "validation-failed", "no side needs a decision: file a normal change")
 	}
 	return sides, nil
 }

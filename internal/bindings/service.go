@@ -17,6 +17,7 @@ import (
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/regexpolicy"
+	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,6 +34,8 @@ type Service struct {
 	// Start starts a binding's workflow once its change committed
 	// (§6.2.2 step 2); the sweeper starts it if this fails (§6.3).
 	Start func(ctx context.Context, bindingID uuid.UUID) error
+	// Sources validates the inline source of a break-glass CREATE.
+	Sources *sources.Service
 }
 
 // Applied starts the workflow of an applied create, update or delete.
@@ -69,7 +72,7 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	b := req.Binding
-	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll)
+	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,7 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	if s.removesOnly(ctx, cur, &b) {
 		consent = changerequests.ConsentAny
 	}
-	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, consent)
+	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, consent, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +218,7 @@ type resolved struct {
 // checked by the approval itself (Recheck). A change with consent ANY only
 // removes access: it needs no ACTIVE resources and no policy, and the
 // platform's owner may file it too.
-func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy, consent string) (*resolved, error) {
+func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy, consent string, inline *sources.Source) (*resolved, error) {
 	b.Kind = "Binding"
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
@@ -230,14 +233,18 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		visibility              string
 		visibleTo               []string
 	}
-	err := s.DB.QueryRow(ctx, `SELECT id, revision, scope, state, trust_domain, svid_regex, visibility, visible_to FROM sources
-		WHERE name = $1 AND state <> 'RETIRED'`, b.Source).Scan(&src.id, &src.revision, &src.scope, &src.state, &src.td, &src.regex,
-		&src.visibility, &src.visibleTo)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{src.scope}, src.visibility, src.visibleTo) {
-		return nil, refuse(404, "not-found", "source %q", b.Source)
-	}
-	if err != nil {
-		return nil, err
+	if inline != nil { // registered in the same transaction, at revision 1
+		src.revision, src.scope, src.state, src.td, src.regex = 1, inline.Metadata.Scope, "ACTIVE", inline.Identity.TrustDomain, inline.Identity.SVIDRegex
+	} else {
+		err := s.DB.QueryRow(ctx, `SELECT id, revision, scope, state, trust_domain, svid_regex, visibility, visible_to FROM sources
+			WHERE name = $1 AND state <> 'RETIRED'`, b.Source).Scan(&src.id, &src.revision, &src.scope, &src.state, &src.td, &src.regex,
+			&src.visibility, &src.visibleTo)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{src.scope}, src.visibility, src.visibleTo) {
+			return nil, refuse(404, "not-found", "source %q", b.Source)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	var tgt struct {
 		id                             uuid.UUID
@@ -247,7 +254,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		visibleTo                      []string
 		definition                     json.RawMessage
 	}
-	err = s.DB.QueryRow(ctx, `SELECT id, revision, scope, platform_scope, platform, state, visibility, visible_to, definition FROM targets
+	err := s.DB.QueryRow(ctx, `SELECT id, revision, scope, platform_scope, platform, state, visibility, visible_to, definition FROM targets
 		WHERE name = $1 AND state <> 'RETIRED'`, b.Target).Scan(&tgt.id, &tgt.revision, &tgt.scope, &tgt.platformScope, &tgt.platform,
 		&tgt.state, &tgt.visibility, &tgt.visibleTo, &tgt.definition)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{tgt.scope, tgt.platformScope}, tgt.visibility, tgt.visibleTo) {
@@ -440,7 +447,7 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 	if r.Consent == changerequests.ConsentAny && !s.removesOnly(ctx, cur, &b) {
 		return nil, invalid("the change no longer only removes access: file it again")
 	}
-	if _, err := s.resolve(ctx, nil, &b, cur, s.Requests.Policy, r.Consent); err != nil {
+	if _, err := s.resolve(ctx, nil, &b, cur, s.Requests.Policy, r.Consent, nil); err != nil {
 		return nil, err
 	}
 	return json.Marshal(b)
