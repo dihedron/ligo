@@ -245,8 +245,8 @@ func endpoint(address string) *pluginv1.Endpoint {
 		return &pluginv1.Endpoint{}
 	}
 	host, port, _ := net.SplitHostPort(u.Host)
-	n, _ := strconv.Atoi(port)
-	return &pluginv1.Endpoint{Host: host, Port: uint32(n), Scheme: u.Scheme} // #nosec G115 -- a port
+	n, _ := strconv.ParseUint(port, 10, 16)
+	return &pluginv1.Endpoint{Host: host, Port: uint32(n), Scheme: u.Scheme}
 }
 
 // CleanupSecretStore revokes the binding's leases and deletes its objects;

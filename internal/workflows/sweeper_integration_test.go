@@ -10,6 +10,10 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -179,5 +183,99 @@ func TestSweepSingleton(t *testing.T) {
 	ran, err := (&Sweeper{Engine: v.engine}).Sweep(ctx)
 	if err != nil || ran {
 		t.Errorf("sweep under another replica's lock: ran %t, %v", ran, err)
+	}
+}
+
+// TestRunLoops: the singletons run their pass on every tick until their
+// context ends; the sweeper's expiry and break-glass duties run with a
+// bindings service.
+func TestRunLoops(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
+	bs := &bindings.Service{DB: v.engine.DB, Requests: &changerequests.Service{DB: v.engine.DB, Policy: &governance.Policy{}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{}, 2)
+	go func() {
+		(&Sweeper{Engine: v.engine, Interval: 20 * time.Millisecond, Bindings: bs}).Run(ctx)
+		done <- struct{}{}
+	}()
+	go func() {
+		(&Reconciler{Engine: v.engine, Interval: 20 * time.Millisecond, Jitter: time.Millisecond, MaxConcurrent: 1}).Run(ctx)
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
+	// a pass cancelled mid-query closes its connection; its lock goes once the server notices
+	var ran bool
+	var err error
+	for deadline := time.Now().Add(2 * time.Second); !ran && err == nil && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		ran, err = (&Sweeper{Engine: v.engine, Bindings: bs}).Sweep(context.Background())
+	}
+	if err != nil || !ran {
+		t.Errorf("sweep with expiry: %t %v", ran, err)
+	}
+}
+
+// TestRevertOutcome: the attempt of a revision a SYSTEM_REVERT started
+// audits BREAK_GLASS_REVERTED when it ends (§6.3, INV-16); other attempts
+// do not. A binding that is not FAILED is not retried.
+func TestRevertOutcome(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
+	ctx := context.Background()
+	id, plain := v.binding(t), v.binding(t)
+	var name string
+	if err := v.owner.QueryRow(ctx, "select name from bindings where id = $1", id).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	bg, revert := uuid.NewV7(), uuid.NewV7()
+	err := pgx.BeginFunc(ctx, v.owner, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
+			break_glass_justification, break_glass_ttl_seconds, status, requested_by, decided_by, decided_at, expires_at)
+			values ($1, 'BINDING', $2, $3, 'CREATE', 'BREAK_GLASS', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
+			true, '{}', repeat('b', 64), 'INC0012345', 'an incident needed this binding at once', 3600, 'APPLIED', 'livia',
+			'system:break-glass', now(), now() + interval '1 day')`, bg, name, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256,
+			reverts_cr_id, requested_by, expires_at)
+			values ($1, 'BINDING', $2, $3, 'UPDATE', 'SYSTEM_REVERT', 'ANY', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
+			false, 1, '{}', repeat('b', 64), $4, 'system:break-glass-expiry', now() + interval '1 day')`, revert, name, id, bg); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind,
+			decision, decided_by, decided_at) values ($1, 'TARGET', 'dc/corp-prod', true, 'BREAK_GLASS', 'livia', 'BREAK_GLASS', 'APPROVED',
+			'system:break-glass', now()), ($2, 'TARGET', 'dc/corp-prod', false, 'SYSTEM_REVERT', 'system:break-glass-expiry', 'SYSTEM_REVERT',
+			'APPROVED', 'system:break-glass-revert', now())`, bg, revert); err != nil {
+			return err
+		}
+		revision := int64(1)
+		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &id, ResourceName: name, ChangeRequestID: &revert,
+			Action: "APPLY_STARTED", Actor: "system:break-glass-revert", Revision: &revision})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = v.owner.Exec(context.Background(), "delete from change_requests where id in ($1, $2)", revert, bg)
+	})
+	if _, err := v.engine.Retry(ctx, id, "olga"); err == nil {
+		t.Error("retried a PROVISIONING binding")
+	}
+	for _, b := range []uuid.UUID{id, plain} {
+		if _, err := v.engine.Start(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		if r := v.waitPhase(t, b, "ACTIVE"); r.phase != "ACTIVE" {
+			t.Fatalf("binding %+v", r)
+		}
+	}
+	if n := v.audited(t, id, "BREAK_GLASS_REVERTED"); n != 1 {
+		t.Errorf("BREAK_GLASS_REVERTED %d", n)
+	}
+	if n := v.audited(t, plain, "BREAK_GLASS_REVERTED"); n != 0 {
+		t.Errorf("a plain apply audited BREAK_GLASS_REVERTED %d times", n)
 	}
 }

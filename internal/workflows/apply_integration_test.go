@@ -49,6 +49,9 @@ type fake struct {
 	validator  *outputvalidation.Validator
 
 	targetFail   error          // EnsureTarget fails with it
+	identityFail error          // EnsureIdentity fails with it
+	storeFail    error          // EnsureSecretStore fails with it
+	unhealthy    error          // Health fails with it
 	cleanups     []string       // the stages cleaned, in order
 	cleanupFail  map[string]int // stage: how many cleanups fail before one succeeds
 	skipped      map[string]bool
@@ -65,10 +68,13 @@ func (f *fake) started(ctx context.Context, b *pluginv1.BindingContext, stage st
 	}
 }
 
-func (f *fake) Health(context.Context, pluginv1.PluginKind, string) error { return nil }
+func (f *fake) Health(context.Context, pluginv1.PluginKind, string) error { return f.unhealthy }
 
 func (f *fake) EnsureIdentity(ctx context.Context, r *pluginv1.EnsureIdentityRequest) (*pluginv1.EnsureIdentityResponse, error) {
 	f.started(ctx, r.GetBinding(), "IDENTITY")
+	if f.identityFail != nil {
+		return nil, f.identityFail
+	}
 	a := &pluginv1.IdentityArtifact{Mode: f.mode, PrincipalId: r.GetBinding().GetDerivedPrincipalName()}
 	if f.mode == pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR {
 		a.StaticSecret = &pluginv1.StaticSecret{Username: a.PrincipalId, Password: f.secret}
@@ -111,6 +117,9 @@ func (f *fake) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecretSt
 	f.mu.Unlock()
 	if block != nil {
 		<-block // a crash: this call never returns
+	}
+	if f.storeFail != nil {
+		return nil, f.storeFail
 	}
 	f.mu.Lock()
 	f.stored = r.GetSecretPayload()
@@ -440,6 +449,41 @@ func TestOutputRefused(t *testing.T) {
 	var failures int
 	if err := v.owner.QueryRow(context.Background(), "select count(*) from audit_log where resource_id = $1 and action = 'PROVISION_FAILURE'", id).Scan(&failures); err != nil || failures != 1 {
 		t.Errorf("PROVISION_FAILURE %d (%v)", failures, err)
+	}
+}
+
+// TestStageFailures: a terminal plugin error, or an instance that stays
+// unhealthy, fails the attempt at that stage: FAILED, the step recorded,
+// nothing promoted, PROVISION_FAILURE audited (§6.4 failure path).
+func TestStageFailures(t *testing.T) {
+	terminal := pluginsdk.Error(codes.FailedPrecondition, "REFUSED", "refused", false)
+	for step, set := range map[string]func(*fake){
+		"ensureIdentity":    func(f *fake) { f.identityFail = terminal },
+		"ensureSecretStore": func(f *fake) { f.storeFail = terminal },
+		"health": func(f *fake) {
+			f.unhealthy = pluginsdk.Error(codes.FailedPrecondition, "PLUGIN_UNHEALTHY", "down", false)
+		},
+	} {
+		t.Run(step, func(t *testing.T) {
+			v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+			set(v.fake)
+			id := v.binding(t)
+			h, err := v.engine.Start(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out, err := wait(t, h); out != "FAILED" || err == nil {
+				t.Fatalf("workflow: %q, %v", out, err)
+			}
+			r := v.row(t, id)
+			want := step
+			if step == "health" {
+				want = "ensureIdentity" // checked before the identity stage
+			}
+			if r.phase != "FAILED" || r.step != want || r.activeRevision != nil || v.audited(t, id, "PROVISION_FAILURE") != 1 {
+				t.Errorf("binding %+v", r)
+			}
+		})
 	}
 }
 

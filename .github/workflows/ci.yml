@@ -100,8 +100,16 @@ jobs:
 
       - name: Test with coverage
         # unit and integration tests in one run; -coverpkg credits code with
-        # the coverage of every package's tests, not only its own
-        run: go test -count=1 -tags integration ./... -coverpkg=./... -coverprofile=coverage.txt
+        # the coverage of every package's tests, not only its own; -p 1: the
+        # packages share one database, and the singletons act on all of it
+        run: go test -count=1 -p 1 -tags integration ./... -coverpkg=./... -coverprofile=coverage.txt
+      - name: Merge coverage blocks
+        # with -coverpkg every test binary reports every block, most with 0;
+        # SonarCloud does not merge them, so keep the highest count of each
+        run: |
+          awk 'NR == 1 { print; next } { k = $1 " " $2; if (!(k in c)) o[++n] = k; if (!(k in c) || $3 > c[k]) c[k] = $3 }
+            END { for (i = 1; i <= n; i++) print o[i], c[o[i]] }' coverage.txt > coverage.merged
+          mv coverage.merged coverage.txt
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1

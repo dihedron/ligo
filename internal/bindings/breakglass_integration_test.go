@@ -265,3 +265,113 @@ func TestBreakGlassInlineSource(t *testing.T) {
 		t.Errorf("source BREAK_GLASS_RATIFIED %d", n)
 	}
 }
+
+// TestBreakGlassDelete: an emergency DELETE revokes at once, where acting
+// for a side includes break_glass; it is final, never reverted, but still
+// ratified (ADR-12 rule 4).
+func TestBreakGlassDelete(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "ledger-d-" + w.suffix
+	active(t, s, o, ledgerOp, name, ledgerSource(t, o, w, "d"), w.ledger, "read", "", ledgerApp)
+	del := func(extra string) []byte {
+		return []byte(`{"operation":"DELETE","name":"` + name + `"` + extra + `,"justification":"` + justification + `","incidentReference":"INC0012345"}`)
+	}
+	for body, want := range map[string]string{"": "validation-failed", `,"expectedRevision":7`: "revision-conflict"} {
+		if _, err := s.BreakGlass(ctx, livia, del(body)); slug(err) != want {
+			t.Errorf("%s: %v, want %s", body, err, want)
+		}
+	}
+	if _, err := s.BreakGlass(ctx, caller("nobody"), del(`,"expectedRevision":1`)); slug(err) != "not-found" {
+		t.Errorf("a stranger: %v", err)
+	}
+	r, err := s.BreakGlass(ctx, livia, del(`,"expectedRevision":1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "APPLIED" || r.Consent != changerequests.ConsentAny || sides(r) != "SOURCE=BREAK_GLASS,PLATFORM=BREAK_GLASS" {
+		t.Fatalf("request %s %s %s", r.Status, r.Consent, sides(r))
+	}
+	if phase, _, _, _, _ := bindingRow(t, o, name); phase != "DELETING" {
+		t.Errorf("phase %s", phase)
+	}
+	if _, err := s.RevertNow(ctx, livia, r.ID); slug(err) != "break-glass-not-open" {
+		t.Errorf("revert an emergency delete: %v", err)
+	}
+	if _, err := s.RevertNow(ctx, caller("nobody"), r.ID); slug(err) != "not-found" {
+		t.Errorf("a stranger reverts: %v", err)
+	}
+	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", "the workload was compromised"); err != nil {
+		t.Errorf("ratify: %v", err)
+	}
+}
+
+// TestBreakGlassValidation: malformed break-glass requests and refusals
+// of ratify and revert-now on what is not an open break-glass change.
+func TestBreakGlassValidation(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name, src := "ledger-v-"+w.suffix, ledgerSource(t, o, w, "v")
+	active(t, s, o, ledgerOp, name, src, w.ledger, "read", "", ledgerApp)
+	update := func(extra ...string) string {
+		return `"binding":` + string(body(name, src, w.ledger, "write", extra...)) + `,`
+	}
+	viewer := caller("vera", role(config.RoleViewer, "dc/*"))
+	for label, tc := range map[string]struct {
+		c    changerequests.Caller
+		body []byte
+		want string
+	}{
+		"no incident reference":     {livia, []byte(`{"operation":"UPDATE",` + update(`"expectedRevision":1`) + `"justification":"` + justification + `"}`), "validation-failed"},
+		"bad ttl":                   {livia, emergency("UPDATE", update(`"expectedRevision":1`), `,"ttl":"soon"`), "validation-failed"},
+		"unknown operation":         {livia, emergency("PATCH", update(`"expectedRevision":1`), ""), "validation-failed"},
+		"inline source on update":   {livia, emergency("UPDATE", `"inlineSource":{},`+update(`"expectedRevision":1`), ""), "validation-failed"},
+		"update, no revision":       {livia, emergency("UPDATE", update(), ""), "validation-failed"},
+		"update, stale revision":    {livia, emergency("UPDATE", update(`"expectedRevision":4`), ""), "revision-conflict"},
+		"create with a revision":    {livia, emergency("CREATE", update(`"expectedRevision":1`), ""), "validation-failed"},
+		"delete, viewer only":       {viewer, []byte(`{"operation":"DELETE","name":"` + name + `","expectedRevision":1,"justification":"` + justification + `","incidentReference":"INC0012345"}`), "forbidden"},
+		"inline source of another":  {livia, emergency("CREATE", `"inlineSource":{"metadata":{"name":"other-`+w.suffix+`"},"identity":{"trustDomain":"prod.internal","svidRegex":"^spiffe://prod\\.internal/ns/o/sa/x$","sampleSpiffeIds":["spiffe://prod.internal/ns/o/sa/x"]},"visibility":{"mode":"PRIVATE"}},`+update(), ""), "validation-failed"},
+		"update of an unknown name": {livia, emergency("UPDATE", `"binding":`+string(body("ledger-x-"+w.suffix, src, w.ledger, "write", `"expectedRevision":1`))+`,`, ""), "not-found"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			if _, err := s.BreakGlass(ctx, tc.c, tc.body); slug(err) != tc.want {
+				t.Errorf("%v, want %s", err, tc.want)
+			}
+		})
+	}
+	// a standard request is neither ratified nor reverted
+	r, err := s.Update(ctx, ledgerOp, name, body(name, src, w.ledger, "write", `"expectedRevision":1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", "no"); slug(err) != "break-glass-not-open" {
+		t.Errorf("ratify a standard request: %v", err)
+	}
+	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", ""); slug(err) != "validation-failed" {
+		t.Errorf("ratify without a comment: %v", err)
+	}
+	if _, err := s.RevertNow(ctx, ledgerOp, r.ID); slug(err) != "break-glass-not-open" {
+		t.Errorf("revert a standard request: %v", err)
+	}
+	if _, err := s.RevertNow(ctx, ledgerOp, uuid.NewV7()); slug(err) != "not-found" {
+		t.Errorf("revert an unknown request: %v", err)
+	}
+}
+
+// TestRevertGone: a break-glass change whose binding is gone has nothing
+// left to revert.
+func TestRevertGone(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "ledger-g-" + w.suffix
+	bg, err := s.BreakGlass(ctx, livia, emergency("CREATE", `"binding":`+string(body(name, ledgerSource(t, o, w, "g"), w.ledger, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevertNow(ctx, livia, bg.ID); slug(err) != "break-glass-not-open" {
+		t.Errorf("revert: %v", err)
+	}
+}

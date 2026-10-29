@@ -6,6 +6,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -165,5 +166,56 @@ func TestAC76(t *testing.T) {
 		if r := propagation(t, o, name); r.revision != 2 || r.queued {
 			t.Errorf("%s after the drain %+v", name, r)
 		}
+	}
+}
+
+// TestPropagatorRun: the propagator propagates on every tick until its
+// context ends.
+func TestPropagatorRun(t *testing.T) {
+	s, o, w, _ := setup(t)
+	name := "dd-r-" + w.suffix
+	active(t, s, o, dcOp, name, w.dcSrc, w.dcShared, "read", "", dcApp)
+	enqueue(t, o, name, "", 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	(&Propagator{Service: s, Interval: 20 * time.Millisecond, MaxConcurrent: 100}).Run(ctx)
+	if p := propagation(t, o, name); p.revision != 2 || p.queued {
+		t.Errorf("binding %+v", p)
+	}
+}
+
+// TestPropagateEdges: a DELETE_FAILED binding is never re-applied, its row
+// goes; a row whose binding was deleted went with it.
+func TestPropagateEdges(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	failed, gone := "dd-f-"+w.suffix, "dd-g-"+w.suffix
+	active(t, s, o, dcOp, failed, source(t, o, w, "f"), w.dcShared, "read", "", dcApp)
+	active(t, s, o, dcOp, gone, source(t, o, w, "g"), w.dcShared, "read", "", dcApp)
+	enqueue(t, o, failed, "", 1)
+	var id uuid.UUID
+	if err := o.QueryRow(ctx, "select id from bindings where name = $1", gone).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'DELETE_FAILED' where name = $1", failed); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.propagate(ctx, id); err != nil || ok {
+		t.Errorf("an unqueued binding: %t %v", ok, err)
+	}
+	if _, err := o.Exec(ctx, "delete from bindings where name = $1", gone); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.propagate(ctx, id); err != nil || ok {
+		t.Errorf("a deleted binding: %t %v", ok, err)
+	}
+	if err := o.QueryRow(ctx, "select id from bindings where name = $1", failed).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.propagate(ctx, id); err != nil || ok {
+		t.Errorf("a DELETE_FAILED binding: %t %v", ok, err)
+	}
+	if p := propagation(t, o, failed); p.queued || p.revision != 1 {
+		t.Errorf("DELETE_FAILED binding %+v", p)
 	}
 }
