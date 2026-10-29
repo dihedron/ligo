@@ -25,6 +25,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/authz"
@@ -105,10 +106,26 @@ const (
 type fakeDirectory struct{}
 
 func (fakeDirectory) Authenticate(_ context.Context, user, password string) (authz.Principal, error) {
-	if user == "olivia" && password == "pw" {
+	switch {
+	case user == "olivia" && password == "pw":
 		return authz.Principal{Name: "olivia", Groups: []string{"cn=ligo-viewers,ou=groups,dc=ligo,dc=lab"}}, nil
+	case user == "livia" && password == "pw":
+		return authz.Principal{Name: "livia", Groups: []string{"cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab"}}, nil
 	}
 	return authz.Principal{}, adminauth.ErrInvalidCredentials
+}
+
+// fakeWorkflows records the operational actions it is asked for.
+type fakeWorkflows struct{ calls []string }
+
+func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
+	f.calls = append(f.calls, "retry "+actor)
+	return nil, nil
+}
+
+func (f *fakeWorkflows) Rotate(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
+	f.calls = append(f.calls, "rotate "+actor)
+	return nil, nil
 }
 
 type env struct {
@@ -181,7 +198,8 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		t.Fatal(err)
 	}
 	bs := &bindings.Service{DB: pools.App, Rules: rules, Validate: validate}
-	bs.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": bs}}
+	bs.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": bs},
+		BreakGlassRules: cfg.BreakGlass}
 	srcRules, err := sources.NewRules(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -201,13 +219,14 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		{SPIFFEID: viewerID, Role: config.RoleViewer, Scopes: []string{"*"}},
 		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}},
 		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Scopes: []string{"*"}},
+		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts,
+	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler)}
 	if listener.AllowBasicAuth {
@@ -424,8 +443,8 @@ func TestRequestsAPI(t *testing.T) {
 func TestMaintenanceAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	admin, viewer, dora := v.client(t, adminID), v.client(t, viewerID), v.client(t, appID)
-	var start time.Time
-	if err := v.owner.QueryRow(context.Background(), "select clock_timestamp()").Scan(&start); err != nil {
+	var start int64 // audit ids grow; clocks of host and database may differ
+	if err := v.owner.QueryRow(context.Background(), "select coalesce(max(id), 0) from audit_log").Scan(&start); err != nil {
 		t.Fatal(err)
 	}
 	if r := v.do(t, viewer, "PUT", "/v1/admin/maintenance", map[string]any{"enabled": true, "reason": "upgrade"}); r.code != 403 {
@@ -447,7 +466,7 @@ func TestMaintenanceAPI(t *testing.T) {
 	}
 	var n int
 	if err := v.owner.QueryRow(context.Background(), `select count(*) from audit_log where actor = $1
-		and action in ('SYSTEM_MAINTENANCE_ENABLED', 'SYSTEM_MAINTENANCE_DISABLED') and occurred_at > $2`, adminID, start).Scan(&n); err != nil || n != 2 {
+		and action in ('SYSTEM_MAINTENANCE_ENABLED', 'SYSTEM_MAINTENANCE_DISABLED') and id > $2`, adminID, start).Scan(&n); err != nil || n != 2 {
 		t.Errorf("audited %d (%v)", n, err)
 	}
 }
@@ -629,5 +648,113 @@ func TestTargetsAPI(t *testing.T) {
 	}
 	if c := crs[0].(map[string]any); c["operation"] != "DELETE" || c["consent"] != "ANY" || c["resourceName"] != v.name {
 		t.Errorf("revocation: %v", c)
+	}
+}
+
+// TestBindingsAPI: show, list, change, rotate and revoke bindings; their
+// flows; break-glass with Basic credentials only (§7.2.3 bindings).
+func TestBindingsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{AllowBasicAuth: true})
+	ctx := context.Background()
+	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)
+	x := v.suffix
+	if r := v.do(t, dora, "POST", "/v1/admin/change-requests/"+v.request.ID.String()+"/approve", map[string]string{"payloadSha256": v.request.PayloadSHA256}); r.code != 200 {
+		t.Fatalf("approve: %+v", r)
+	}
+	got := v.do(t, viewer, "GET", "/v1/admin/bindings/"+v.name, nil)
+	st, _ := got.body["status"].(map[string]any)
+	req, _ := got.body["requested"].(map[string]any)
+	if got.code != 200 || got.body["kind"] != "Binding" || st["phase"] != "PROVISIONING" || got.body["active"] != nil ||
+		req["svidRegex"] == "" || got.body["stages"] == nil || len(got.body["audit"].([]any)) == 0 {
+		t.Fatalf("get: %+v", got.body)
+	}
+	for path, n := range map[string]int{"/v1/admin/bindings?source=src-" + x: 1, "/v1/admin/bindings?source=src-" + x + "&phase=ACTIVE": 0,
+		"/v1/admin/bindings?scope=dc/*&target=tgt-" + x: 1, "/v1/admin/sources/src-" + x + "/bindings": 1, "/v1/admin/targets/tgt-" + x + "/bindings": 1,
+		"/v1/admin/bindings?propagationPending=true&source=src-" + x: 0} {
+		if r := v.do(t, viewer, "GET", path, nil); r.code != 200 || len(r.body["items"].([]any)) != n {
+			t.Errorf("%s: %d %v", path, r.code, r.body)
+		}
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/sources/nope-"+x+"/bindings", nil); r.code != 404 {
+		t.Errorf("bindings of an unknown source: %d", r.code)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/bindings?expiringBefore=tomorrow", nil); r.code != 422 {
+		t.Errorf("bad expiringBefore: %d", r.code)
+	}
+	flows := v.do(t, viewer, "GET", "/v1/admin/bindings/"+v.name+"/flows", nil)
+	if fs, _ := flows.body["networkFlows"].([]any); flows.code != 200 || len(fs) == 0 || fs[len(fs)-1].(map[string]any)["declaredBy"] != "ligo" {
+		t.Errorf("flows: %+v", flows.body)
+	}
+
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", v.name); err != nil {
+		t.Fatal(err)
+	}
+	upd := v.do(t, olga, "PUT", "/v1/admin/bindings/"+v.name, map[string]any{"name": v.name, "source": "src-" + x, "target": "tgt-" + x,
+		"accessLevel": "read", "purpose": "reporting", "expectedRevision": 1})
+	ucr, _ := upd.body["changeRequest"].(map[string]any)
+	if upd.code != 202 || ucr["status"] != "PENDING" {
+		t.Fatalf("update: %+v", upd)
+	}
+	diff, _ := v.do(t, dora, "GET", "/v1/admin/change-requests/"+ucr["id"].(string), nil).body["diff"].(map[string]any)
+	if changes, _ := diff["changes"].([]any); len(changes) != 1 || changes[0].(map[string]any)["field"] != "purpose" {
+		t.Errorf("diff: %v", diff)
+	}
+	if r := v.do(t, olga, "POST", "/v1/admin/change-requests/"+ucr["id"].(string)+"/withdraw", nil); r.code != 200 {
+		t.Fatalf("withdraw: %+v", r)
+	}
+	if r := v.do(t, viewer, "POST", "/v1/admin/bindings/"+v.name+"/rotate", nil); r.code != 403 {
+		t.Errorf("a viewer rotates: %d", r.code)
+	}
+	if r := v.do(t, olga, "POST", "/v1/admin/bindings/"+v.name+"/rotate", nil); r.code != 202 ||
+		fmt.Sprint(v.s.Workflows.(*fakeWorkflows).calls) != "[rotate "+opID+"]" {
+		t.Errorf("rotate: %d %v", r.code, v.s.Workflows.(*fakeWorkflows).calls)
+	}
+	if r := v.do(t, olga, "DELETE", "/v1/admin/bindings/"+v.name, nil); r.code != 422 {
+		t.Errorf("delete without a revision: %d", r.code)
+	}
+	if r := v.do(t, olga, "DELETE", "/v1/admin/bindings/"+v.name+"?expectedRevision=1", nil); r.code != 202 ||
+		r.body["changeRequest"].(map[string]any)["operation"] != "DELETE" {
+		t.Errorf("delete: %+v", r)
+	}
+
+	// ?wait=true: a change complete at creation answers once the binding settled
+	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), "src2-"+x,
+		`^spiffe://prod\.internal/ns/api2/sa/`+x+`$`); err != nil {
+		t.Fatal(err)
+	}
+	v.bs.Requests.Policy.RequiredScopes = nil
+	v.bs.Start = func(ctx context.Context, id uuid.UUID) error {
+		_, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where id = $1", id)
+		return err
+	}
+	waited := v.do(t, olga, "POST", "/v1/admin/bindings?wait=true", map[string]string{"name": "api2-" + x, "source": "src2-" + x,
+		"target": "tgt-" + x, "accessLevel": "read"})
+	if res, _ := waited.body["resource"].(map[string]any); waited.code != 200 || res["status"].(map[string]any)["phase"] != "ACTIVE" {
+		t.Errorf("wait: %+v", waited)
+	}
+
+	// break-glass: Basic credentials on the request, never an SVID
+	v.bs.Requests.Policy.RequiredScopes = []string{"dc/corp-prod/*"}
+	bg := map[string]any{"operation": "DELETE", "name": "api2-" + x, "expectedRevision": 1, "justification": "the workload is compromised, cut it",
+		"incidentReference": "INC0012345"}
+	if r := v.do(t, olga, "POST", "/v1/admin/break-glass", bg); r.code != 403 {
+		t.Errorf("break-glass by SVID: %d", r.code)
+	}
+	r := v.do(t, v.client(t, ""), "POST", "/v1/admin/break-glass", bg, "livia", "pw")
+	if bcr, _ := r.body["changeRequest"].(map[string]any); r.code != 202 || bcr["kind"] != "BREAK_GLASS" || bcr["status"] != "APPLIED" {
+		t.Fatalf("break-glass: %+v", r)
+	}
+	listed := v.do(t, dora, "GET", "/v1/admin/break-glass?resourceName=api2-"+x, nil)
+	if items, _ := listed.body["items"].([]any); len(items) != 1 || items[0].(map[string]any)["breakGlass"] == nil {
+		t.Errorf("break-glass list: %+v", listed.body)
+	}
+	if r = v.do(t, v.client(t, ""), "GET", "/v1/admin/maintenance", nil, "livia", "wrong"); r.code != 401 {
+		t.Errorf("wrong password: %d", r.code)
+	}
+	var failed int
+	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where action = 'SESSION_LOGIN_FAILED' and snapshot->>'username' = 'livia'
+		and request_id = $1`, r.header.Get("X-Request-Id")).Scan(&failed); err != nil || failed != 1 {
+		t.Errorf("failed login not audited (%v)", err)
 	}
 }

@@ -60,6 +60,15 @@ type requestDTO struct {
 	Sides                     []sideDTO       `json:"sides"`
 	AwaitingApproval          []string        `json:"awaitingApproval"`
 	Diff                      any             `json:"diff,omitempty"` // against the resource's current revision
+	BreakGlass                *breakGlassDTO  `json:"breakGlass,omitempty"`
+}
+
+// breakGlassDTO is what a break-glass change adds (ADR-12): its
+// justification and when its TTL ends.
+type breakGlassDTO struct {
+	Justification string    `json:"justification"`
+	TTLSeconds    int64     `json:"ttlSeconds"`
+	ExpiresAt     time.Time `json:"expiresAt"`
 }
 
 func dto(r *changerequests.Request, full bool) requestDTO {
@@ -71,6 +80,9 @@ func dto(r *changerequests.Request, full bool) requestDTO {
 		ExpiresAt: r.ExpiresAt, Sides: []sideDTO{}, AwaitingApproval: []string{}}
 	if d.Kind == "" {
 		d.Kind = "STANDARD"
+	}
+	if r.Kind == changerequests.KindBreakGlass {
+		d.BreakGlass = &breakGlassDTO{Justification: r.Justification, TTLSeconds: int64(r.TTL.Seconds()), ExpiresAt: r.RequestedAt.Add(r.TTL)}
 	}
 	if full {
 		d.Payload = r.Payload
@@ -89,6 +101,11 @@ func dto(r *changerequests.Request, full bool) requestDTO {
 }
 
 func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
+	s.listKind(w, r, r.URL.Query().Get("kind"))
+}
+
+// listKind lists the change requests of a kind, every kind if empty.
+func (s *Server) listKind(w http.ResponseWriter, r *http.Request, kind string) {
 	c := caller(r)
 	if !viewer(c) {
 		problem(w, http.StatusForbidden, "forbidden", "viewer role required")
@@ -104,7 +121,7 @@ func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	list, more, err := s.Requests.List(r.Context(), c, changerequests.Filter{Status: q.Get("status"), ResourceType: q.Get("resourceType"),
-		ResourceName: q.Get("resourceName"), Zone: q.Get("zone"), Scope: q.Get("scope"), AwaitingMe: q.Get("awaitingMe") == "true",
+		ResourceName: q.Get("resourceName"), Zone: q.Get("zone"), Scope: q.Get("scope"), AwaitingMe: q.Get("awaitingMe") == "true", Kind: kind,
 		Before: cursor.BeforeID, Limit: size})
 	if err != nil {
 		s.fail(w, r, err)

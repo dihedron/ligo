@@ -2,12 +2,15 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand/v2"
 	"time"
 	"uuid"
 
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -89,7 +92,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 	started := 0
 	var errs []error
 	for _, d := range list {
-		ok, err := r.reapply(ctx, d.id, r.Rotation[d.platform])
+		ok, err := r.Engine.reapply(ctx, d.id, "system:reconciler", false, r.Rotation[d.platform])
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -106,21 +109,24 @@ func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 }
 
 // reapply moves an ACTIVE binding to a REAPPLY attempt: same revision, a
-// new attempt and workflow, and rotation for a static secret whose
-// rotation_interval has passed (§6.4 rotation flag); it reports false if
-// the binding is no longer ACTIVE.
-func (r *Reconciler) reapply(ctx context.Context, id uuid.UUID, rotation time.Duration) (bool, error) {
+// new attempt and workflow, rotating if rotate is set or, for a static
+// secret, once rotation has passed (§6.4 rotation flag); it reports false
+// if the binding is no longer ACTIVE. Maintenance mode refuses it.
+func (e *Engine) reapply(ctx context.Context, id uuid.UUID, actor string, rotate bool, rotation time.Duration) (bool, error) {
 	ok := false
-	err := pgx.BeginFunc(ctx, r.Engine.DB, func(tx pgx.Tx) error {
+	err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		if err := changerequests.Maintenance(ctx, tx); err != nil {
+			return err
+		}
 		var name string
 		var revision, attempt int64
 		err := tx.QueryRow(ctx, `UPDATE bindings b SET phase = 'PROVISIONING', operation = 'REAPPLY', attempt = attempt + 1,
 			workflow_id = format('ligo:reapply:%s:r%s:a%s', id, revision, attempt + 1), current_step = 'INIT', status_message = '',
-			rotate_static_secrets = coalesce((SELECT s.artifact->>'mode' IN ('IDENTITY_MODE_EXTERNAL_DIR', 'IDENTITY_MODE_TARGET_LOCAL')
+			rotate_static_secrets = $3 OR coalesce((SELECT s.artifact->>'mode' IN ('IDENTITY_MODE_EXTERNAL_DIR', 'IDENTITY_MODE_TARGET_LOCAL')
 				FROM binding_stage_state s WHERE s.binding_id = b.id AND s.stage = 'IDENTITY'), false)
 				AND (last_rotated_at IS NULL OR last_rotated_at < now() - $2::interval),
-			last_transition_at = now(), updated_at = now()
-			WHERE id = $1 AND phase = 'ACTIVE' RETURNING name, revision, attempt`, id, rotation.String()).Scan(&name, &revision, &attempt)
+			last_transition_at = now(), updated_at = now(), updated_by = $4
+			WHERE id = $1 AND phase = 'ACTIVE' RETURNING name, revision, attempt`, id, rotation.String(), rotate, actor).Scan(&name, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -128,9 +134,23 @@ func (r *Reconciler) reapply(ctx context.Context, id uuid.UUID, rotation time.Du
 			return err
 		}
 		ok = true
+		snap, _ := json.Marshal(map[string]bool{"rotate": rotate})
 		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &id, ResourceName: name, Action: "REAPPLY_STARTED",
-			Actor: "system:reconciler", Revision: &revision, Attempt: &attempt})
+			Actor: actor, Revision: &revision, Attempt: &attempt, Snapshot: snap})
 		return err
 	})
 	return ok, err
+}
+
+// Rotate starts a re-apply of an ACTIVE binding that rotates its static
+// secret now (POST /v1/admin/bindings/{name}/rotate).
+func (e *Engine) Rotate(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
+	ok, err := e.reapply(ctx, bindingID, actor, true, 0)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &changerequests.Error{Status: 409, Slug: "invalid-transition", Detail: "only an ACTIVE binding is rotated"}
+	}
+	return e.Start(ctx, bindingID)
 }

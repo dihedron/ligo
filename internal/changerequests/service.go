@@ -490,6 +490,7 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 // Filter selects change requests (GET /v1/admin/change-requests).
 type Filter struct {
 	Status, ResourceType, ResourceName, Zone string
+	Kind                                     string // BREAK_GLASS for GET /v1/admin/break-glass
 	Scope                                    string // a pattern matched against every scope of the request
 	AwaitingMe                               bool   // with a pending side the caller may decide
 	Before                                   *uuid.UUID
@@ -505,8 +506,8 @@ func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, boo
 	for {
 		rows, err := s.DB.Query(ctx, `SELECT id FROM change_requests WHERE ($1 = '' OR status::text = $1)
 			AND ($2 = '' OR resource_type::text = $2) AND ($3 = '' OR resource_name = $3) AND ($4 = '' OR zone = $4)
-			AND ($5::uuid IS NULL OR id < $5) ORDER BY id DESC LIMIT $6`,
-			f.Status, f.ResourceType, f.ResourceName, f.Zone, before, 2*f.Limit)
+			AND ($5::uuid IS NULL OR id < $5) AND ($7 = '' OR kind::text = $7) ORDER BY id DESC LIMIT $6`,
+			f.Status, f.ResourceType, f.ResourceName, f.Zone, before, 2*f.Limit, f.Kind)
 		if err != nil {
 			return nil, false, err
 		}

@@ -37,16 +37,17 @@ import (
 
 // Server is the admin API.
 type Server struct {
-	Listener config.AdminListener
-	LDAP     Directory         // nil: Basic credentials are refused
-	Authz    *authz.Authorizer // grants of the principals
-	Bundles  x509bundle.Source // the accepted trust domains' bundles, for client SVIDs
-	DB       *pgxpool.Pool     // the app pool
-	Requests *changerequests.Service
-	Bindings *bindings.Service
-	Sources  *sources.Service
-	Targets  *targets.Service
-	Logger   *slog.Logger
+	Listener  config.AdminListener
+	LDAP      Directory         // nil: Basic credentials are refused
+	Authz     *authz.Authorizer // grants of the principals
+	Bundles   x509bundle.Source // the accepted trust domains' bundles, for client SVIDs
+	DB        *pgxpool.Pool     // the app pool
+	Requests  *changerequests.Service
+	Bindings  *bindings.Service
+	Sources   *sources.Service
+	Targets   *targets.Service
+	Workflows Workflows
+	Logger    *slog.Logger
 
 	limits limiter
 }
@@ -63,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	s.opsRoutes(mux)
 	s.sourceRoutes(mux)
 	s.targetRoutes(mux)
+	s.bindingRoutes(mux)
 	return s.middleware(mux)
 }
 
@@ -125,6 +127,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		case errors.Is(err, adminauth.ErrInvalidCredentials):
 			if s.basicAllowed() {
 				w.Header().Set("WWW-Authenticate", `Basic realm="ligo"`)
+				if user, _, basic := r.BasicAuth(); basic {
+					s.loginFailed(r, user)
+				}
 			}
 			problem(w, http.StatusUnauthorized, "unauthenticated", "valid credentials are required")
 		case err != nil:
@@ -142,6 +147,23 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		s.Logger.Info("request refused", "request_id", id, "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 	})
+}
+
+// loginFailed audits a refused Basic login, without the password (§7.3
+// rule 6).
+func (s *Server) loginFailed(r *http.Request, user string) {
+	if len(user) > 255 {
+		user = user[:255]
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	snap, _ := json.Marshal(map[string]string{"username": user, "remote": ip, "path": r.URL.Path})
+	err := pgx.BeginFunc(r.Context(), s.DB, func(tx pgx.Tx) error {
+		_, err := audit.Append(r.Context(), tx, audit.Entry{Action: "SESSION_LOGIN_FAILED", Actor: "system:admin-api", Snapshot: snap})
+		return err
+	})
+	if err != nil {
+		s.Logger.Error("audit a failed login", "error", err)
+	}
 }
 
 type status struct {

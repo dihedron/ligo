@@ -12,6 +12,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/changerequests"
 )
 
 func (v *env) reconciler() *Reconciler {
@@ -128,5 +129,37 @@ func TestReconcileSingleton(t *testing.T) {
 	defer func() { _, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock(hashtext('ligo_reconciler'))") }()
 	if n, err := v.reconciler().Reconcile(ctx); err != nil || n != 0 {
 		t.Errorf("under another replica's lock: %d started, %v", n, err)
+	}
+}
+
+// TestRotate: an operator's rotation re-applies an ACTIVE binding with
+// rotation forced; another phase is invalid, maintenance refuses it.
+func TestRotate(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	v.fake.rotations = nil
+	if _, err := v.owner.Exec(ctx, "update system_settings set maintenance_mode = true"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := v.engine.Rotate(ctx, id, "olga")
+	_, _ = v.owner.Exec(ctx, "update system_settings set maintenance_mode = false")
+	if e := (*changerequests.Error)(nil); !errors.As(err, &e) || e.Slug != "maintenance" {
+		t.Errorf("in maintenance: %v", err)
+	}
+	if _, err := v.engine.Rotate(ctx, id, "olga"); err != nil {
+		t.Fatal(err)
+	}
+	if r := v.waitPhase(t, id, "ACTIVE"); r.phase != "ACTIVE" || !strings.HasSuffix(v.workflowID(t, id), ":r1:a2") {
+		t.Fatalf("binding %+v", r)
+	}
+	if len(v.fake.rotations) != 1 || !v.fake.rotations[0] {
+		t.Errorf("rotations %v", v.fake.rotations)
+	}
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'FAILED' where id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.engine.Rotate(ctx, id, "olga"); err == nil {
+		t.Error("rotated a FAILED binding")
 	}
 }
