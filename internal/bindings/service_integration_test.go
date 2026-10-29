@@ -88,7 +88,7 @@ func setup(t *testing.T) (*Service, *pgxpool.Pool, *world, *plugin) {
 	p := &plugin{}
 	s := &Service{DB: pools.App, Rules: rules(t), Validate: p.validate}
 	s.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: cfg.Authorization.Approval.ChangeRequestTTL,
-		Resources: map[string]changerequests.Resource{"BINDING": s}}
+		Resources: map[string]changerequests.Resource{"BINDING": s}, BreakGlassRules: cfg.BreakGlass}
 	return s, owner, newWorld(t, owner), p
 }
 
@@ -142,8 +142,8 @@ func newWorld(t *testing.T, o *pgxpool.Pool) *world {
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
+		_, _ = o.Exec(ctx, "delete from bindings where name like $1", "%"+x+"%") // first: they reference break-glass changes
 		_, _ = o.Exec(ctx, "delete from change_requests where resource_type = 'BINDING' and resource_name like $1", "%"+x+"%")
-		_, _ = o.Exec(ctx, "delete from bindings where name like $1", "%"+x+"%")
 		_, _ = o.Exec(ctx, "delete from target_access_levels where target_id in (select id from targets where name like $1)", "%"+x)
 		_, _ = o.Exec(ctx, "delete from targets where name like $1", "%"+x)
 		_, _ = o.Exec(ctx, "delete from sources where name like $1", "%"+x)

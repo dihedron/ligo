@@ -91,6 +91,9 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	if err != nil {
 		return nil, err
 	}
+	if cur.breakGlassCR != nil {
+		return nil, breakGlassOpen(cur)
+	}
 	b := req.Binding
 	if b.Name == "" {
 		b.Name = name
@@ -180,13 +183,14 @@ type stored struct {
 	parameters                              json.RawMessage
 	labels                                  map[string]string
 	expiresAt                               *time.Time
-	privileges                              []string // of the current level
+	privileges                              []string   // of the current level
+	breakGlassCR                            *uuid.UUID // the open break-glass change (ADR-12)
 }
 
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
 	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_scope, b.target_scope, b.platform_scope,
-		b.platform, b.phase, coalesce(b.purpose, ''), b.zone, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges
+		b.platform, b.phase, coalesce(b.purpose, ''), b.zone, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
@@ -194,7 +198,7 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceScope,
 		&st.targetScope, &st.platformScope, &st.platform, &st.phase, &st.purpose, &st.zone, &st.revision, &st.attempt, &st.parameters,
-		&st.labels, &st.expiresAt, &st.privileges)
+		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR)
 	return st, err
 }
 
@@ -331,10 +335,11 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 // anySides are the sides of a change that only removes access: one for
 // each of the source, target and platform scopes the requester acts for;
 // equal scopes give one side, named after the first (§7.2.3).
-func (res *resolved) anySides(c changerequests.Caller) []changerequests.Candidate {
+func (res *resolved) anySides(c changerequests.Caller, breakGlass bool) []changerequests.Candidate {
 	var out []changerequests.Candidate
 	for _, sd := range []struct{ name, scope string }{{"SOURCE", res.sourceScope}, {"TARGET", res.targetScope}, {"PLATFORM", res.platformScope}} {
-		if c.Grants.ActsFor(sd.scope, res.platform.Name) && !slices.ContainsFunc(out, func(o changerequests.Candidate) bool { return o.Scope == sd.scope }) {
+		acts := c.Grants.ActsFor(sd.scope, res.platform.Name) || breakGlass && c.Grants.BreakGlass(sd.scope)
+		if acts && !slices.ContainsFunc(out, func(o changerequests.Candidate) bool { return o.Scope == sd.scope }) {
 			out = append(out, changerequests.Candidate{Side: sd.name, Scope: sd.scope, Platform: res.platform.Name})
 		}
 	}
@@ -344,7 +349,7 @@ func (res *resolved) anySides(c changerequests.Caller) []changerequests.Candidat
 // actsFor is RBAC for a change that only removes access: operator of the
 // source, target or platform scope.
 func (res *resolved) actsFor(c changerequests.Caller) error {
-	if len(res.anySides(c)) == 0 {
+	if len(res.anySides(c, false)) == 0 {
 		return refuse(403, "forbidden", "%s is no operator of %s, %s or %s", c.ID(), res.sourceScope, res.targetScope, res.platformScope)
 	}
 	return nil
@@ -369,12 +374,30 @@ func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Bindin
 // sides: TARGET, SOURCE when the scopes differ, and the policy's parties
 // (§7.2.3 "Sides at creation").
 func (s *Service) file(ctx context.Context, c changerequests.Caller, op, consent string, cur *stored, b *Binding, res *resolved, common *changerequests.Common) (*changerequests.Request, error) {
+	r, sides, err := compose(op, consent, cur, b, res, common, res.anySides(c, false))
+	if err != nil {
+		return nil, err
+	}
+	return r, pendingError(s.Requests.Create(ctx, c, r, sides, common.ApprovalReference), b.Name)
+}
+
+func pendingError(err error, name string) error {
+	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_cr_one_pending_per_resource" {
+		return refuse(409, "change-request-pending", "binding %q has a pending change request", name)
+	}
+	return err
+}
+
+// compose builds the change request of a validated binding change and the
+// sides it needs: anySides with consent ANY; with ALL, TARGET, SOURCE when
+// the scopes differ, and the policy's parties (§7.2.3 "Sides at creation").
+func compose(op, consent string, cur *stored, b *Binding, res *resolved, common *changerequests.Common, anySides []changerequests.Candidate) (*changerequests.Request, []changerequests.Candidate, error) {
 	payload, err := json.Marshal(b)
 	if op == "DELETE" {
 		payload = json.RawMessage("{}")
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
 		Zone: res.platform.Zone, SourceScope: res.sourceScope, TargetScope: res.targetScope, PlatformScope: res.platformScope,
@@ -383,7 +406,7 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op, consent
 	if cur != nil {
 		r.ResourceID = &cur.id
 	}
-	sides := res.anySides(c)
+	sides := anySides
 	if consent == changerequests.ConsentAll {
 		sides = []changerequests.Candidate{{Side: "TARGET", Scope: res.targetScope, Platform: res.platform.Name}}
 		if res.sourceScope != res.targetScope {
@@ -393,11 +416,7 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op, consent
 			sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: res.platform.Name})
 		}
 	}
-	err = s.Requests.Create(ctx, c, r, sides, common.ApprovalReference)
-	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_cr_one_pending_per_resource" {
-		return nil, refuse(409, "change-request-pending", "binding %q has a pending change request", b.Name)
-	}
-	return r, err
+	return r, sides, nil
 }
 
 // Revalidate re-runs the pipeline, plugin included, on the stored request
@@ -449,6 +468,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		}
 		if cur.revision != *r.ExpectedRevision {
 			return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
+		}
+		if r.Operation == "UPDATE" && cur.breakGlassCR != nil && r.Kind != "SYSTEM_REVERT" {
+			return nil, breakGlassOpen(cur)
 		}
 	}
 	if r.Operation == "DELETE" {
@@ -506,6 +528,12 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	} else {
 		id = cur.id
 		if revision, attempt, err = revise(ctx, tx, cur, &b, snap, r.RequestedBy); err != nil {
+			return nil, err
+		}
+	}
+	if r.Kind == changerequests.KindBreakGlass { // §6.2.2 break-glass bookkeeping
+		if _, err := tx.Exec(ctx, `UPDATE bindings SET break_glass_cr_id = $2, break_glass_expires_at = now() + $3::interval,
+			break_glass_warned_at = NULL WHERE id = $1`, id, r.ID, r.TTL.String()); err != nil {
 			return nil, err
 		}
 	}

@@ -201,3 +201,82 @@ func TestDecode(t *testing.T) {
 		}
 	}
 }
+
+// TestBreakGlassSides: a side that needs a decision becomes BREAK_GLASS and
+// needs the role on its scope; people only; at least one such side
+// (§7.2.3 "Sides at creation", ADR-12 rule 1).
+func TestBreakGlassSides(t *testing.T) {
+	livia := authz.Principal{Name: "livia"}
+	robot := authz.Principal{SPIFFEID: "spiffe://prod.internal/ci/robot"}
+	bg := grant(config.RoleBreakGlass, "dc/corp-prod/*")
+	op := grant(config.RoleOperator, "cloud/*")
+	both := []Candidate{{Side: "TARGET", Scope: ledger}, {Side: "SOURCE", Scope: payments}}
+	for name, tc := range map[string]struct {
+		caller     authz.Principal
+		grants     authz.Grants
+		candidates []Candidate
+		bases      string
+		err        string
+	}{
+		"break-glass side":             {livia, authz.Grants{bg}, both[:1], "BREAK_GLASS", ""},
+		"self-service side stays AUTO": {livia, authz.Grants{bg, op}, both, "BREAK_GLASS,AUTO", ""},
+		"no role on the other side":    {livia, authz.Grants{bg}, both, "", "forbidden"},
+		"SPIFFE principal":             {robot, authz.Grants{bg}, both[:1], "", "forbidden"},
+		"no side needs a decision":     {livia, authz.Grants{bg, op}, both[1:], "", "validation-failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sides, err := BreakGlassSides(tc.candidates, Caller{Principal: tc.caller, Grants: tc.grants}, policy)
+			if status(err) != tc.err {
+				t.Fatalf("err = %v, want %q", err, tc.err)
+			}
+			var bases []string
+			for _, s := range sides {
+				bases = append(bases, s.Basis)
+				if s.Decision != Approved || s.ApprovalRequired != (s.Basis == BasisBreakGlass) {
+					t.Errorf("side %+v", s)
+				}
+			}
+			if got := strings.Join(bases, ","); got != tc.bases {
+				t.Errorf("bases %s, want %s", got, tc.bases)
+			}
+		})
+	}
+}
+
+// TestRatifiableSides: approvers of unratified BREAK_GLASS sides, never the
+// requester, one side per person when distinct approvers are required.
+func TestRatifiableSides(t *testing.T) {
+	r := &Request{RequestedBy: "livia", DistinctApprovers: true, Sides: []Side{
+		{Name: "SOURCE", Scope: payments, Basis: BasisAuto},
+		{Name: "TARGET", Scope: ledger, Basis: BasisBreakGlass},
+		{Name: "PARTY:security", Scope: "sec/infosec", Basis: BasisBreakGlass},
+	}}
+	marco := Caller{Principal: authz.Principal{Name: "marco"}, Grants: authz.Grants{grant(config.RoleApprover, "dc/*", "sec/*")}}
+	livia := Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{grant(config.RoleApprover, "*")}}
+	bob := Caller{Principal: authz.Principal{Name: "bob"}, Grants: authz.Grants{grant(config.RoleApprover, "dc/*")}}
+	ratified := *r
+	ratified.Sides = append([]Side{}, r.Sides...)
+	ratified.Sides[1].RatifiedBy = "marco"
+	for name, tc := range map[string]struct {
+		r      *Request
+		caller Caller
+		side   string
+		want   []string
+		err    string
+	}{
+		"requester":                     {r, livia, "", nil, "four-eyes-violation"},
+		"several sides, distinct":       {r, marco, "", nil, "side-required"},
+		"one side chosen":               {r, marco, "TARGET", []string{"TARGET"}, ""},
+		"AUTO sides are not ratified":   {r, marco, "SOURCE", nil, "forbidden"},
+		"the only side":                 {r, bob, "", []string{"TARGET"}, ""},
+		"already ratified":              {&ratified, bob, "", nil, "break-glass-not-open"},
+		"ratified another side already": {&ratified, marco, "", nil, "distinct-approver-required"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := RatifiableSides(tc.r, tc.caller, tc.side)
+			if status(err) != tc.err || !equal(got, tc.want) {
+				t.Errorf("got %v, %v; want %v, %q", got, err, tc.want, tc.err)
+			}
+		})
+	}
+}
