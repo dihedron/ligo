@@ -278,6 +278,11 @@ func TestAC65(t *testing.T) {
 	if queued(t, owner, write) != 0 || queued(t, owner, read) != -1 {
 		t.Errorf("after the narrowing: write %d, read %d", queued(t, owner, write), queued(t, owner, read))
 	}
+	var snapshot string
+	if err := owner.QueryRow(ctx, "select snapshot::text from audit_log where change_request_id = $1 and action = 'TARGET_UPDATED'", r.ID).
+		Scan(&snapshot); err != nil || snapshot != `{"changed": null, "addedLevels": null, "narrowedLevels": ["write"]}` {
+		t.Errorf("TARGET_UPDATED %s (%v)", snapshot, err)
+	}
 	tg.AccessLevels[1].Grants = json.RawMessage(`{"roles":["LEDGER_RO_ROLE"]}`)
 
 	r, err = update(func(u *Target) {

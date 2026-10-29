@@ -199,6 +199,11 @@ func TestNarrowingPropagates(t *testing.T) {
 	if len(actions) < 2 || actions[len(actions)-2] != "SOURCE_UPDATED" || actions[len(actions)-1] != "PROPAGATION_ENQUEUED" {
 		t.Errorf("audit %v", actions)
 	}
+	var changed string
+	if err := owner.QueryRow(ctx, "select snapshot->>'changed' from audit_log where change_request_id = $1 and action = 'SOURCE_UPDATED'", r.ID).
+		Scan(&changed); err != nil || changed != `["identity"]` {
+		t.Errorf("SOURCE_UPDATED changed %s (%v)", changed, err)
+	}
 	if _, err := s.SetState(ctx, alice, src.Metadata.Name, "retire", 2, "", nil); slug(err) != "resource-in-use" {
 		t.Errorf("retire with a binding: %v", err)
 	}

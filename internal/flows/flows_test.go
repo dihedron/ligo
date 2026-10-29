@@ -153,6 +153,19 @@ func TestParseMultirange(t *testing.T) {
 	}
 }
 
+// TestCanonicalPorts: ports compare as the database stores them, sorted
+// with neighbours merged.
+func TestCanonicalPorts(t *testing.T) {
+	var ports []Port
+	if err := json.Unmarshal([]byte(`[1523, 1522, 443, "2000-2100", "2050-2200"]`), &ports); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(CanonicalPorts(ports))
+	if string(data) != `[443,"1522-1523","2000-2200"]` {
+		t.Errorf("ports %s", data)
+	}
+}
+
 // TestCheckEndpoint: an endpoint without a port is allowed only by an entry
 // without a port (§5.7).
 func TestCheckEndpoint(t *testing.T) {

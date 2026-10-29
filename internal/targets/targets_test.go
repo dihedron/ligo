@@ -233,6 +233,20 @@ func TestValidateUpdate(t *testing.T) {
 	}
 }
 
+// TestSameFlow: ports compare as the database stores them (sorted,
+// neighbours merged), so a re-sent manifest is not a change of flows.
+func TestSameFlow(t *testing.T) {
+	f := func(ports string) flows.Flow {
+		return flowsOf(`[{"name":"f","purpose":"DATA","protocol":"TCP","destination":"db","ports":` + ports + `,"tls":false}]`)[0]
+	}
+	if !sameFlow(f(`[1523, 1522, 443]`), f(`[443, "1522-1523"]`)) {
+		t.Error("the same ports in another form differ")
+	}
+	if sameFlow(f(`[443]`), f(`[444]`)) {
+		t.Error("other ports are the same")
+	}
+}
+
 // TestCheckExistenceDefault: check_existence defaults to true (§7.2.3).
 func TestCheckExistenceDefault(t *testing.T) {
 	cfg := example(t)

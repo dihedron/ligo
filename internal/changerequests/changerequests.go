@@ -250,6 +250,35 @@ func Decode(body []byte, v any, common *Common) error {
 	return nil
 }
 
+// Field is a field of a resource before and after a change.
+type Field struct {
+	Name     string
+	Old, New any
+}
+
+// Changed names the fields whose values differ as JSON. null, {} and []
+// are equal: an empty field the body omits reads back from the database as
+// an empty object or array.
+func Changed(fields ...Field) []string {
+	var out []string
+	for _, f := range fields {
+		a, _ := json.Marshal(f.Old)
+		b, _ := json.Marshal(f.New)
+		if !bytes.Equal(empty(a), empty(b)) {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+func empty(data []byte) []byte {
+	switch string(data) {
+	case "{}", "[]":
+		return []byte("null")
+	}
+	return data
+}
+
 // Hash is the hex SHA-256 of the JCS form of a payload (§7.2.3).
 func Hash(payload json.RawMessage) (string, error) {
 	canonical, err := jcs.Transform(payload)

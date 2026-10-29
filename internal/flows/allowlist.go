@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -139,6 +140,23 @@ func ParseMultirange(s string) ([]Port, error) {
 		ports = append(ports, Port{Low: low, High: high, isRange: high != low})
 	}
 	return ports, nil
+}
+
+// CanonicalPorts is ports as the database stores them: sorted, with
+// overlapping and neighbouring ranges merged.
+func CanonicalPorts(ports []Port) []Port {
+	sorted := slices.Clone(ports)
+	slices.SortFunc(sorted, func(a, b Port) int { return a.Low - b.Low })
+	var out []Port
+	for _, p := range sorted {
+		if n := len(out); n > 0 && p.Low <= out[n-1].High+1 {
+			out[n-1].High = max(out[n-1].High, p.High)
+			out[n-1].isRange = true
+			continue
+		}
+		out = append(out, Port{Low: p.Low, High: p.High, isRange: p.High != p.Low})
+	}
+	return out
 }
 
 func portString(p Port) string {

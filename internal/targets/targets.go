@@ -273,7 +273,9 @@ func material(cur, t *Target) bool {
 	return false
 }
 
+// sameFlow compares flows with their ports as the database stores them.
 func sameFlow(a, b flows.Flow) bool {
+	a.Ports, b.Ports = flows.CanonicalPorts(a.Ports), flows.CanonicalPorts(b.Ports)
 	return proto.Equal(toProto(a), toProto(b)) && a.Description == b.Description
 }
 

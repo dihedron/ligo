@@ -483,23 +483,28 @@ func (s *Service) applyUpdate(ctx context.Context, tx pgx.Tx, r *changerequests.
 			entries = append(entries, entry(action, map[string]any{"accessLevel": l.Name}))
 		}
 	}
-	var queued int64
+	// counted apart: a binding of a narrowed level is queued by both
+	queued := map[string]any{}
 	if len(narrowed) > 0 { // privilege removed: before anything else (§6.8)
 		n, err := store.Enqueue(ctx, tx, "TARGET", cur.ID, r.ID, 0, narrowed)
 		if err != nil {
 			return nil, err
 		}
-		queued += n
+		if n > 0 {
+			queued["narrowedLevelBindings"] = n
+		}
 	}
 	if definition {
 		n, err := store.Enqueue(ctx, tx, "TARGET", cur.ID, r.ID, 1, nil)
 		if err != nil {
 			return nil, err
 		}
-		queued += n
+		if n > 0 {
+			queued["definitionBindings"] = n
+		}
 	}
-	if queued > 0 {
-		entries = append(entries, entry("PROPAGATION_ENQUEUED", map[string]any{"bindings": queued}))
+	if len(queued) > 0 {
+		entries = append(entries, entry("PROPAGATION_ENQUEUED", queued))
 	}
 	return entries, nil
 }
@@ -514,19 +519,11 @@ func changes(old, cur *Target, definition bool) []string {
 	if !slices.EqualFunc(old.NetworkFlows, cur.NetworkFlows, sameFlow) {
 		out = append(out, "networkFlows")
 	}
-	for _, f := range []struct {
-		name     string
-		old, cur any
-	}{
-		{"displayName", old.DisplayName, cur.DisplayName}, {"description", old.Description, cur.Description},
-		{"labels", old.Labels, cur.Labels}, {"documentationUrl", old.DocumentationURL, cur.DocumentationURL},
-		{"contacts", old.Contacts, cur.Contacts}, {"visibility", old.Visibility, cur.Visibility},
-	} {
-		a, _ := json.Marshal(f.old)
-		b, _ := json.Marshal(f.cur)
-		if !bytes.Equal(a, b) {
-			out = append(out, f.name)
-		}
-	}
-	return out
+	return append(out, changerequests.Changed(
+		changerequests.Field{Name: "displayName", Old: old.DisplayName, New: cur.DisplayName},
+		changerequests.Field{Name: "description", Old: old.Description, New: cur.Description},
+		changerequests.Field{Name: "labels", Old: old.Labels, New: cur.Labels},
+		changerequests.Field{Name: "documentationUrl", Old: old.DocumentationURL, New: cur.DocumentationURL},
+		changerequests.Field{Name: "contacts", Old: old.Contacts, New: cur.Contacts},
+		changerequests.Field{Name: "visibility", Old: old.Visibility, New: cur.Visibility})...)
 }

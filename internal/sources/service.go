@@ -1,7 +1,6 @@
 package sources
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -247,23 +246,14 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 
 // changes names the fields of a source that differ, state excepted.
 func changes(old, cur *Source) []string {
-	var out []string
-	for _, f := range []struct {
-		name     string
-		old, cur any
-	}{
-		{"identity", old.Identity, cur.Identity}, {"displayName", old.DisplayName, cur.DisplayName},
-		{"description", old.Description, cur.Description}, {"labels", old.Labels, cur.Labels},
-		{"externalRefs", old.ExternalRefs, cur.ExternalRefs}, {"contacts", old.Contacts, cur.Contacts},
-		{"visibility", old.Visibility, cur.Visibility},
-	} {
-		a, _ := json.Marshal(f.old)
-		b, _ := json.Marshal(f.cur)
-		if !bytes.Equal(a, b) {
-			out = append(out, f.name)
-		}
-	}
-	return out
+	return changerequests.Changed(
+		changerequests.Field{Name: "identity", Old: old.Identity, New: cur.Identity},
+		changerequests.Field{Name: "displayName", Old: old.DisplayName, New: cur.DisplayName},
+		changerequests.Field{Name: "description", Old: old.Description, New: cur.Description},
+		changerequests.Field{Name: "labels", Old: old.Labels, New: cur.Labels},
+		changerequests.Field{Name: "externalRefs", Old: old.ExternalRefs, New: cur.ExternalRefs},
+		changerequests.Field{Name: "contacts", Old: old.Contacts, New: cur.Contacts},
+		changerequests.Field{Name: "visibility", Old: old.Visibility, New: cur.Visibility})
 }
 
 func entry(r *changerequests.Request, action string, revision int64, snapshot map[string]any) audit.Entry {
