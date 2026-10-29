@@ -2,7 +2,7 @@
 
 `ligo`, Latin for "I bind", is the SPIFFE binding lifecycle service: it manages sources, targets and the bindings that link them.
 
-**Status**: scaffolding only. The specification is in [.specs/ligo_specification_v4.0.2.md](.specs/ligo_specification_v4.0.2.md).
+**Status**: scaffolding only. The specification is in [.specs/ligo_specification.md](.specs/ligo_specification.md).
 
 ## Build
 

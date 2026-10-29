@@ -2,7 +2,6 @@ package plugin_test
 
 import (
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,11 +13,7 @@ import (
 // specProto returns the normative protobuf block of §5.9 of the specification.
 func specProto(t *testing.T) string {
 	t.Helper()
-	specs, err := filepath.Glob("../../../../.specs/ligo_specification_v*.md")
-	if err != nil || len(specs) != 1 {
-		t.Fatalf("want exactly one specification in .specs, got %v (%v)", specs, err)
-	}
-	data, err := os.ReadFile(specs[0])
+	data, err := os.ReadFile("../../../../.specs/ligo_specification.md")
 	if err != nil {
 		t.Fatal(err)
 	}
