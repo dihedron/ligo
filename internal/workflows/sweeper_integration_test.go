@@ -4,6 +4,7 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 	"uuid"
@@ -277,5 +278,27 @@ func TestRevertOutcome(t *testing.T) {
 	}
 	if n := v.audited(t, plain, "BREAK_GLASS_REVERTED"); n != 0 {
 		t.Errorf("a plain apply audited BREAK_GLASS_REVERTED %d times", n)
+	}
+}
+
+// TestRetryInMaintenance: a retry starts a workflow, so maintenance mode
+// refuses it (§10.3).
+func TestRetryInMaintenance(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
+	ctx := context.Background()
+	id := v.binding(t)
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'FAILED' where id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.owner.Exec(ctx, "update system_settings set maintenance_mode = true"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := v.engine.Retry(ctx, id, "olga")
+	_, _ = v.owner.Exec(ctx, "update system_settings set maintenance_mode = false")
+	if e := (*changerequests.Error)(nil); !errors.As(err, &e) || e.Slug != "maintenance" {
+		t.Errorf("retry in maintenance: %v", err)
+	}
+	if r := v.row(t, id); r.phase != "FAILED" {
+		t.Errorf("binding %+v", r)
 	}
 }

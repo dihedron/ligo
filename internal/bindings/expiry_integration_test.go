@@ -102,3 +102,43 @@ func TestAC71(t *testing.T) {
 		t.Errorf("busy binding %s", phase)
 	}
 }
+
+// TestAC26: in maintenance mode, filing and approving a change are refused
+// with 503 maintenance and nothing changes; declining and withdrawing,
+// which start no workflow, remain possible (§10.3).
+func TestAC26(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "dd-m-" + w.suffix
+	pending, err := s.Create(ctx, dcOp, body(name, w.dcSrc, w.dcShared, "read"))
+	if err != nil || pending.Status != "PENDING" {
+		t.Fatalf("create: %v", err)
+	}
+	other, err := s.Create(ctx, dcOp, body("dd-n-"+w.suffix, source(t, o, w, "n"), w.dcShared, "read"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "update system_settings set maintenance_mode = true"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = o.Exec(ctx, "update system_settings set maintenance_mode = false") }()
+	if _, err := s.Create(ctx, dcOp, body("dd-x-"+w.suffix, source(t, o, w, "x"), w.dcShared, "read")); slug(err) != "maintenance" {
+		t.Errorf("create in maintenance: %v", err)
+	}
+	if _, err := s.Requests.Approve(ctx, dcApp, pending.ID, pending.PayloadSHA256, "", "ok"); slug(err) != "maintenance" {
+		t.Errorf("approve in maintenance: %v", err)
+	}
+	if st := status(t, o, pending.ID); st != "PENDING" {
+		t.Errorf("the refused approval left %s", st)
+	}
+	if _, err := s.Requests.Decline(ctx, dcApp, pending.ID, "", "not now"); err != nil {
+		t.Errorf("decline in maintenance: %v", err)
+	}
+	if err := s.Requests.Withdraw(ctx, dcOp, other.ID, "later"); err != nil {
+		t.Errorf("withdraw in maintenance: %v", err)
+	}
+	var n int
+	if err := o.QueryRow(ctx, "select count(*) from change_requests where resource_name = $1", "dd-x-"+w.suffix).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d requests stored in maintenance (%v)", n, err)
+	}
+}

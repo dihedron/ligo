@@ -123,6 +123,7 @@ type Request struct {
 	DistinctApprovers bool
 	Status            string
 	RequestedBy       string
+	RequestedAt       time.Time
 	ExpiresAt         time.Time
 	Sides             []Side
 }
@@ -149,7 +150,10 @@ type Side struct {
 	Basis            string
 	Decision         string // "", APPROVED, DECLINED
 	DecidedBy        string
+	DecidedAt        *time.Time
 	RatifiedBy       string // BREAK_GLASS sides (ADR-12)
+	RatifiedAt       *time.Time
+	RatificationNote string
 }
 
 // Candidate is a side a request needs, before its basis is known; Platform

@@ -246,6 +246,21 @@ func (s *Service) System(ctx context.Context, r *Request) error {
 	return s.file(ctx, filed{res, r})
 }
 
+// Maintenance refuses a change while maintenance mode is on: the shared
+// lock makes the check race-free, as turning maintenance on waits for the
+// transactions that passed it (§6.2.2, §10.3). It is the first statement
+// of the transaction (lock hierarchy, §4.3).
+func Maintenance(ctx context.Context, tx pgx.Tx) error {
+	var on bool
+	if err := tx.QueryRow(ctx, "SELECT maintenance_mode FROM system_settings FOR SHARE").Scan(&on); err != nil {
+		return err
+	}
+	if on {
+		return refuse(503, "maintenance", "maintenance mode is on")
+	}
+	return nil
+}
+
 // SystemFailed records r, a system request whose validation failed before
 // it could apply, as FAILED_TO_APPLY, with extra audit entries (§6.3: a
 // revert that no longer validates is a failed revert).
@@ -278,13 +293,9 @@ func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, e
 func (s *Service) file(ctx context.Context, items ...filed) error {
 	var applyErr error
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if items[0].r.Kind == KindBreakGlass { // §6.2.2: refused in maintenance mode
-			var maintenance bool
-			if err := tx.QueryRow(ctx, "SELECT maintenance_mode FROM system_settings FOR SHARE").Scan(&maintenance); err != nil {
+		if k := items[0].r.kind(); k != KindSystemRevert && k != "SYSTEM_EXPIRY" { // system changes run in maintenance too
+			if err := Maintenance(ctx, tx); err != nil {
 				return err
-			}
-			if maintenance {
-				return refuse(503, "maintenance", "maintenance mode is on")
 			}
 		}
 		var entries []audit.Entry
@@ -364,6 +375,9 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	}
 	var applyErr error
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		if err := Maintenance(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := store.DecideSides(ctx, tx, id, payloadSHA256, names, Approved, c.ID(), comment); err != nil {
 			return decisionError(err)
 		}
@@ -457,6 +471,60 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 		return nil, refuse(404, "not-found", "change request %s", id)
 	}
 	return r, err
+}
+
+// Filter selects change requests (GET /v1/admin/change-requests).
+type Filter struct {
+	Status, ResourceType, ResourceName, Zone string
+	Scope                                    string // a pattern matched against every scope of the request
+	AwaitingMe                               bool   // with a pending side the caller may decide
+	Before                                   *uuid.UUID
+	Limit                                    int
+}
+
+// List returns the change requests c sees that f selects, newest first,
+// at most f.Limit, and whether more follow (keyset on id, §7.2.3).
+// shortcut: each request is read with its sides (two queries), fine for pages of ≤ 200 on an admin API; aggregate in SQL if lists get hot.
+func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, bool, error) {
+	var out []*Request
+	before := f.Before
+	for {
+		rows, err := s.DB.Query(ctx, `SELECT id FROM change_requests WHERE ($1 = '' OR status::text = $1)
+			AND ($2 = '' OR resource_type::text = $2) AND ($3 = '' OR resource_name = $3) AND ($4 = '' OR zone = $4)
+			AND ($5::uuid IS NULL OR id < $5) ORDER BY id DESC LIMIT $6`,
+			f.Status, f.ResourceType, f.ResourceName, f.Zone, before, 2*f.Limit)
+		if err != nil {
+			return nil, false, err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+		if err != nil {
+			return nil, false, err
+		}
+		for _, id := range ids {
+			r, err := read(ctx, s.DB, id)
+			if err != nil {
+				return nil, false, err
+			}
+			if !c.Grants.Sees(r.scopes()...) || f.Scope != "" && !slices.ContainsFunc(r.scopes(), func(sc string) bool {
+				return governance.ScopeMatches(f.Scope, sc)
+			}) {
+				continue
+			}
+			if f.AwaitingMe {
+				if names, err := SelectSides(r, c, s.Policy, true, ""); err != nil || len(names) == 0 {
+					continue
+				}
+			}
+			if len(out) == f.Limit {
+				return out, true, nil
+			}
+			out = append(out, r)
+		}
+		if len(ids) < 2*f.Limit {
+			return out, false, nil
+		}
+		before = &ids[len(ids)-1]
+	}
 }
 
 // Read reads a change request for the system, without visibility checks.
@@ -646,11 +714,11 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
-		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id
-		FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
+		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id,
+		requested_at FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID, &r.RequestedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -661,13 +729,15 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 
 func loadSides(ctx context.Context, q store.Querier, id uuid.UUID) ([]Side, error) {
 	rows, err := q.Query(ctx, `SELECT side, scope, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, ''),
-		coalesce(ratified_by, '') FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
+		decided_at, coalesce(ratified_by, ''), ratified_at, coalesce(ratification_comment, '')
+		FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Side, error) {
 		var s Side
-		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.RatifiedBy)
+		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.DecidedAt, &s.RatifiedBy,
+			&s.RatifiedAt, &s.RatificationNote)
 		return s, err
 	})
 }
