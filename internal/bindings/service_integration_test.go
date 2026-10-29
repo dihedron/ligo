@@ -235,6 +235,8 @@ func TestAC44(t *testing.T) {
 func TestApplied(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
+	var workflows []uuid.UUID
+	s.Start = func(_ context.Context, id uuid.UUID) error { workflows = append(workflows, id); return nil }
 	name := "dd-" + w.suffix
 	r, err := s.Create(ctx, dcOp, body(name, w.dcSrc, w.dcShared, "write", `"parameters":{"connectionLimit":20}`, `"purpose":"posting"`))
 	if err != nil {
@@ -254,6 +256,9 @@ func TestApplied(t *testing.T) {
 	var started int
 	if err := o.QueryRow(ctx, "select count(*) from audit_log where change_request_id = $1 and action = 'APPLY_STARTED'", r.ID).Scan(&started); err != nil || started != 1 {
 		t.Errorf("APPLY_STARTED %d (%v)", started, err)
+	}
+	if len(workflows) != 1 || workflows[0] != id {
+		t.Errorf("workflows started %v, want %v", workflows, id)
 	}
 	if _, err := s.Create(ctx, dcOp, body("dd2-"+w.suffix, w.dcSrc, w.dcShared, "read")); slug(err) != "binding-exists" {
 		t.Errorf("second binding of the pair: %v", err)

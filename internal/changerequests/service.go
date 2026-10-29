@@ -36,6 +36,19 @@ type Rechecker interface {
 	Recheck(r *Request, p *governance.Policy) error
 }
 
+// AfterApply is a Resource that acts once an applied request has
+// committed: bindings start their workflow (§6.2.2 step 2).
+type AfterApply interface {
+	Applied(ctx context.Context, r *Request)
+}
+
+// applied calls the resource's AfterApply once r's transaction committed.
+func applied(ctx context.Context, res Resource, r *Request) {
+	if a, ok := res.(AfterApply); ok && r.Status == "APPLIED" {
+		a.Applied(ctx, r)
+	}
+}
+
 // IsBusy reports a binding-busy refusal (§6.2.2).
 func IsBusy(err error) bool {
 	e := (*Error)(nil)
@@ -105,6 +118,7 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 	if err != nil {
 		return err
 	}
+	applied(ctx, res, r)
 	return applyErr
 }
 
@@ -166,6 +180,7 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	if err != nil {
 		return nil, err
 	}
+	applied(ctx, res, r)
 	return r, applyErr
 }
 

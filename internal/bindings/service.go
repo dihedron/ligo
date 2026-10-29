@@ -30,6 +30,17 @@ type Service struct {
 	Rules    *Rules
 	Requests *changerequests.Service
 	Validate ValidateBinding
+	// Start starts a binding's workflow once its change committed
+	// (§6.2.2 step 2); the sweeper starts it if this fails (§6.3).
+	Start func(ctx context.Context, bindingID uuid.UUID) error
+}
+
+// Applied starts the workflow of an applied create or update; a delete's
+// workflow comes with the delete workflow (§6.5).
+func (s *Service) Applied(ctx context.Context, r *changerequests.Request) {
+	if s.Start != nil && r.Operation != "DELETE" && r.ResourceID != nil {
+		_ = s.Start(ctx, *r.ResourceID) // the sweeper retries a failed start
+	}
 }
 
 // request is the body of a create or an update (§7.2.3).
