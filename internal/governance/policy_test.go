@@ -177,8 +177,8 @@ func TestPatternsOverlap(t *testing.T) {
 		{"*", "x", true}, {"a/*", "a/b", true}, {"a/b", "a/*", true}, {"a/*", "a/b/*", true},
 		{"a", "a", true}, {"a", "b", false}, {"a/*", "b/*", false}, {"a/b", "a/c", false}, {"a/bc/*", "a/b/*", false},
 	} {
-		if got := patternsOverlap(v.a, v.b); got != v.want {
-			t.Errorf("patternsOverlap(%q, %q) = %v", v.a, v.b, got)
+		if got := PatternsOverlap(v.a, v.b); got != v.want {
+			t.Errorf("PatternsOverlap(%q, %q) = %v", v.a, v.b, got)
 		}
 	}
 }

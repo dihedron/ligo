@@ -92,6 +92,12 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Plugin startup (§5.2, §5.6, §8.2 rules 1, 3 and 8, startup step 5) | Startup runs in two passes: every process is spawned and described before any is configured, so the descriptions can be checked against each other first. `Describe` MUST be static; a restarted process that describes itself differently is not used. A plugin type is declared in one section only. Rules 3 and 8 run between the passes; rule 3 enforces the §5.6 matrix through the plugins' declarations instead of type names, and fills each platform's `identity_mode` and `secret_storage_strategy`. Rule 8, and refuses a plugin whose instance configuration schema is empty or does not compile. |
 | API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
 | Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
+| Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
+| Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
+| Target pipeline (§7.2.3) | `ValidateTarget` refusing a target, or returning non-canonical `privileges` or levels out of order, is `422 validation-failed`. |
+| Target updates (§3.7, §7.2.3, §4.3) | A target update names its errors as the source pipeline does; its `PLATFORM` side depends on the normalized definition, the flows and the levels' `privileges`, not on the grants as written. New audit action `ACCESS_LEVEL_REACTIVATED`, for the existing `/access-levels/{level}/reactivate`. |
+| Binding payload (§7.2.3) | The normalized payload of a binding change carries `requestedSpec`, the composition `ValidateBinding` returns: the apply transaction stores it without calling the plugin, and the hash covers it. `ValidateBinding` refusing, or returning privileges other than the level's, is `422 validation-failed`. |
+| AC-72 (§7.2.4, ADR-14 rule 7) | The first caller is an operator, not a viewer: the catalog lists what the caller could request, so a viewer, who can request nothing, sees an empty catalog and still fetches visible targets by name. |
 | Target stack, EXT-18, EXT-19 | Go 1.27.3. The Appendix D vectors verifying EXT-18 and EXT-19 are re-run on it before the code relying on them is merged. |
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
@@ -2120,7 +2126,7 @@ GRANT SELECT ON v_active_bindings, v_active_binding_flows TO ligo_reader;
 
 The audit action vocabulary (**Normative**) is (`resource_type` and `resource_name` identify the resource; `SESSION_*`, `CONFIG_*` and `SYSTEM_*` actions may have none):
 - Change requests: `CR_CREATED` (snapshot includes the consent rule, the sides and their bases), `CR_SIDE_APPROVED` (snapshot: side, scope, basis; for `DELEGATED` also `approvalReference` and `automationContext`), `CR_SIDE_DECLINED`, `CR_APPROVED` (the consent rule is satisfied; the change is applied), `CR_REJECTED`, `CR_WITHDRAWN`, `CR_EXPIRED`, `CR_APPLY_FAILED`, `CR_INTERCONNECT_DENIED` (snapshot: scopes and rule; no change request is stored), `CR_DEPENDENCY_FAILED` (a binding create whose inline source was not registered)
-- Sources and targets: `SOURCE_REGISTERED`, `SOURCE_UPDATED` (snapshot: changed fields; for a narrowing, old and new regex), `SOURCE_DEPRECATED`, `SOURCE_REACTIVATED`, `SOURCE_RETIRED`, `TARGET_PUBLISHED`, `TARGET_UPDATED` (snapshot: changed fields, added levels, narrowed levels, flow changes), `TARGET_DEPRECATED`, `TARGET_REACTIVATED`, `TARGET_RETIRED`, `ACCESS_LEVEL_DEPRECATED`, `ACCESS_LEVEL_RETIRED`
+- Sources and targets: `SOURCE_REGISTERED`, `SOURCE_UPDATED` (snapshot: changed fields; for a narrowing, old and new regex), `SOURCE_DEPRECATED`, `SOURCE_REACTIVATED`, `SOURCE_RETIRED`, `TARGET_PUBLISHED`, `TARGET_UPDATED` (snapshot: changed fields, added levels, narrowed levels, flow changes), `TARGET_DEPRECATED`, `TARGET_REACTIVATED`, `TARGET_RETIRED`, `ACCESS_LEVEL_DEPRECATED`, `ACCESS_LEVEL_REACTIVATED`, `ACCESS_LEVEL_RETIRED`
 - Propagation: `PROPAGATION_ENQUEUED` (on the source or target: the cause and the number of bindings), `PROPAGATION_STARTED` (on each binding: cause and new revision), `PROPAGATION_DEFERRED` (binding busy; snapshot: attempts)
 - Workflow starts: `APPLY_STARTED`, `REAPPLY_STARTED`, `DELETE_STARTED`
 - Workflow outcomes: `PROVISION_SUCCESS`, `PROVISION_FAILURE`, `DELETE_COMPLETED`, `DELETE_FAILURE`
@@ -3115,7 +3121,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | Method | Path | Role | Description |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/v1/admin/targets` | operator (the target's scope or the platform's scope) | Change request `TARGET`/`CREATE`. Body as §3.3 without `metadata` except `name`, `platform` and `scope`. |
-| `PUT` | `/v1/admin/targets/{name}` | operator | Change request `TARGET`/`UPDATE` (`expectedRevision` required). Sides per §3.7: a `PLATFORM` side is added when the definition, the flows or the grants change, or a level is added. A grants change MUST narrow (`422 widening-not-allowed`). |
+| `PUT` | `/v1/admin/targets/{name}` | operator | Change request `TARGET`/`UPDATE` (`expectedRevision` required). Sides per §3.7: a `PLATFORM` side is added when the normalized definition, the flows or a level's `privileges` change, or a level is added (grants with equal `privileges` need only the owner, §3.10 rule 3). A grants change MUST narrow (`422 widening-not-allowed`). |
 | `POST` | `/v1/admin/targets/{name}/deprecate`, `/reactivate`, `/retire` | operator | As for sources. |
 | `POST` | `/v1/admin/targets/{name}/access-levels/{level}/deprecate`, `/reactivate`, `/retire` | operator | Change request `TARGET`/`UPDATE` of the level's state. `retire` refused while bindings use the level. |
 | `GET` | `/v1/admin/targets` | viewer | Keyset-paginated list of targets the caller owns or administers (role on the target or platform scope). Filters as for the catalog. |
@@ -3154,7 +3160,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `GET` | `/v1/admin/change-requests` | viewer | Keyset-paginated list of the change requests visible to the caller. Filters: `status`, `resourceType`, `resourceName`, `zone`, `scope` (matched against every scope of the request), `awaitingMe=true` (requests with a pending side the caller may decide). |
 | `GET` | `/v1/admin/change-requests/{id}` | viewer | The change request representation below, including `payloadSha256`, its sides, `awaitingApproval` and a diff against the current revision of the resource (for a narrowing, the samples it drops or the privileges it removes). |
 | `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 governance-policy-changed`, `409 dependency-pending`, `422 validation-failed`, `409 binding-busy`, `409 change-request-not-pending`. |
-| `POST` | `/v1/admin/change-requests/{id}/reject` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
+| `POST` | `/v1/admin/change-requests/{id}/decline` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
 | `POST` | `/v1/admin/change-requests/{id}/withdraw` | requester | Allowed only while `PENDING`. Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. Withdrawing an inline source's `CREATE` fails the binding `CREATE` that depends on it. |
 | `GET` | `/v1/admin/governance` | viewer | The governance policy in force (source-scope extractors, approval-required scopes, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_scopes`) and its SHA-256 (§8.2). |
 | `POST` | `/v1/admin/governance/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the scopes, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. |
@@ -3222,6 +3228,7 @@ A `trusted_automation` principal whose `platforms` do not include a target's pla
 { "kind": "Binding", "name": "...", "source": "...", "sourceRevision": 3,
   "target": "...", "targetRevision": 2, "accessLevel": "...",
   "parameters": { "...": "normalized_parameters_json returned by ValidateBinding" },
+  "requestedSpec": { "...": "requested_spec_json returned by ValidateBinding" },
   "purpose": "...", "labels": { }, "expiresAt": null }
 ```
 
@@ -3229,24 +3236,24 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 
 **Validation pipeline at creation** (`SOURCE`, `CREATE` and `UPDATE`):
 1. JSON schema of the request body.
-2. Name grammar, and for `CREATE` the name prefix (§3.8) and uniqueness among non-retired sources.
+2. Name grammar, and for `CREATE` the name prefix (§3.8) and uniqueness among non-retired sources (`422 validation-failed` on `metadata.name`). A `CREATE` body sets neither `metadata.scope` nor `metadata.state`.
 3. `identity.trustDomain` is a valid SPIFFE trust domain, accepted by at least one platform, with a `governance.source_scopes` entry.
 4. Regex validator (Appendix A).
 5. Scope (§3.9): `422 scope-unresolvable` if the fixed prefix does not resolve; for `UPDATE`, `422 immutable-field` if it differs from the stored scope.
 6. For `UPDATE` with a new regex: narrowing (§3.10, Appendix D.3), `422 widening-not-allowed` with the witness.
 7. Samples belong to the trust domain and match the regex (`422 sample-not-matched`).
 8. RBAC: `operator` (or `trusted_automation`) on the scope. For an `UPDATE` of a source the caller cannot see, `404`.
-9. State changes: `RETIRED` only without bindings (`409 resource-in-use`).
-10. `expectedRevision` matches; no `PENDING` change request exists for the source.
+9. State changes: `deprecate` from `ACTIVE`, `reactivate` from `DEPRECATED`, `retire` from either; any other change of state is `409 invalid-transition`. `RETIRED` only without bindings (`409 resource-in-use`), and final: a retired source is no longer found by name.
+10. `expectedRevision` matches (`409 revision-conflict`); no `PENDING` change request exists for the source (`409 change-request-pending`).
 
 **Validation pipeline at creation** (`TARGET`, `CREATE` and `UPDATE`):
 1. JSON schema; name grammar, prefix and uniqueness among non-retired targets.
 2. The platform exists; `scope` matches its `target_scopes`; derive `platformType`, `platformScope` and `zone`.
 3. Flows: schema, unique names, destinations within the platform's `allowed_endpoints` (§5.7).
 4. RBAC: `operator` (or `trusted_automation`, with `platforms`) on the target's or the platform's scope.
-5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges.
-6. For `UPDATE`: immutable fields; every existing level is kept (removal is refused; retire instead); changed grants narrow (§3.10); retiring a level or the target finds no binding using it.
-7. `expectedRevision` matches; no `PENDING` change request exists for the target.
+5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges. `valid = false` is `422 validation-failed` with the plugin's errors; so are `privileges` that are not sorted and free of duplicates (§5.8 rule 9), or levels returned in another order than requested.
+6. For `UPDATE`: immutable fields (`422 immutable-field`); every existing level is kept (removal is `422 validation-failed`; retire instead); changed grants narrow (§3.10; otherwise `422 widening-not-allowed`, naming the level and the privileges it would add); the target and each level change state as a source does (step 9 of the source pipeline: `409 invalid-transition`, and `RETIRED` is final); retiring a level or the target finds no binding using it (`409 resource-in-use`).
+7. `expectedRevision` matches (`409 revision-conflict`); no `PENDING` change request exists for the target (`409 change-request-pending`).
 
 **Validation pipeline at creation** (`BINDING`, `CREATE` and `UPDATE` with consent `ALL`):
 1. JSON schema of the request body; name grammar and, for `CREATE`, the name prefix (§3.8).
@@ -3257,7 +3264,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 6. RBAC: `operator` (or `trusted_automation`) on the source or the target scope.
 7. Interconnection policy (ADR-14), when the source and target scopes differ: `403 interconnect-denied` (audited `CR_INTERCONNECT_DENIED`, nothing else stored), or the rule and its additional parties.
 8. `expiresAt` within the allowed range (§3.5).
-9. `PlatformProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash.
+9. `PlatformProvider.ValidateBinding`, which produces the normalized parameters and the requested spec; build the normalized payload and its hash. `valid = false`, or `privileges` different from the access level's (§5.8 rule 8), is `422 validation-failed`. The requested spec is part of the payload, because the apply transaction makes no plugin call (§6.2) and stores it as `bindings.requested_spec`.
 10. Immutable-field check (update).
 11. `expectedRevision` matches (§6.2.2).
 12. No `PENDING` change request exists for the binding name.
@@ -3272,7 +3279,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 5. **Governance re-check** (ADR-14 rule 5). It needs no remote call, so it runs inside the transaction of step 6, after the side-decision compare-and-set, whenever the request would be complete: compute the sides the request would need under the policy now in force. If the pair is now denied, if a required party is missing from the stored sides, or if a side stored as `AUTO` would now need a decision, move the request to `FAILED_TO_APPLY` (`apply_error = "governance policy changed"`), audit `CR_APPLY_FAILED`, and return `409 governance-policy-changed`.
 6. **Record and apply.** Record the side decision and, if the consent rule is now satisfied, apply (§6.2) in the same transaction. A busy binding leaves the change request `PENDING` and the side undecided (§6.2.2); a revision conflict moves it to `FAILED_TO_APPLY`.
 
-**Deciding sides (Normative)** (`/approve`, `/reject`):
+**Deciding sides (Normative)** (`/approve`, `/decline`):
 1. **Eligible sides.** The caller's eligible sides are the request's pending `HUMAN` sides whose scope the caller holds `approver` for (or `operator`, ADR-13 rule 6). If the caller is the requester, nothing is eligible: `403 four-eyes-violation`. If nothing else is eligible: `403 forbidden` (or `404` if the caller cannot see the request).
 2. **Distinct approvers.** If `distinct_approvers_required` is set and the caller has already approved another side of this request, the caller cannot approve a further side: `403 distinct-approver-required`. Declines are not limited.
 3. **Side selection.** If `side` is given, it MUST be one of the eligible sides (`403 forbidden` otherwise). If it is omitted: for an approval with distinct approvers required and more than one eligible side, `400 side-required`; otherwise all eligible sides are selected.
@@ -3410,7 +3417,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 
 **HTMX Navigation & Response Semantics (Normative):**
 - Full-page navigations triggered by mutating HTMX actions (`POST /ui/login`, `POST /ui/logout`, and `POST`, `PUT` and `DELETE` on `/ui/sources…`, `/ui/targets…` and `/ui/bindings…`) MUST respond with HTTP `200 OK` and an `HX-Redirect: <target-path>` header (never HTTP `301`/`302`/`303`, which cause inconsistent browser method repetition on `PUT`/`DELETE` or partial swap of full pages).
-- Inline partial mutations (`retry`, `rotate`, `approve`, `reject`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
+- Inline partial mutations (`retry`, `rotate`, `approve`, `decline`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
 - Validation or conflict errors on `/ui/*` endpoints respond with `422 Unprocessable Entity` or `409 Conflict` and an HTML error alert fragment swapped into the form's error target container.
 - When an approval returns `409 binding-busy`, the alert MUST state that the binding is currently being provisioned or reconciled, that the change request is still `PENDING`, and that approving again once the operation completes will apply it.
 - **Governance (ADR-13, ADR-14).** Every create and update form (source, target, binding wizard) shows, as soon as the relevant fields are entered, the resolved scopes, the name-prefix check, the consent rule, the interconnection outcome (allowed, denied by rule X, extra parties) and the sides that will need a decision, using the same code as `POST /v1/admin/governance/evaluate`. A source form shows the regex tester (matches, samples, overlaps with other sources of the scope, and for an update whether it narrows); a target form shows, for an update, which bindings will be re-applied. The change-request view shows every side with its scope, basis and state; approve and decline buttons appear only for sides the user may decide, with a side selector when the user is eligible for more than one. The dashboard has an "Awaiting my decision" queue (`awaitingMe`).
@@ -3452,7 +3459,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `GET` | `/ui/break-glass/new-form` | Break-glass form (visible only to `break_glass` members): operation, binding (with an optional inline source), justification, incident reference, TTL, and **password re-entry**. Styled as an emergency action with a confirmation step. |
 | `POST` | `/ui/break-glass` | Submit a break-glass change; `200 OK` with `HX-Redirect` to the binding. |
 | `POST` | `/ui/change-requests/{id}/ratify` · `/revert` | Ratify or revert a break-glass change (returns the updated fragment). |
-| `POST` | `/ui/change-requests/{id}/approve` · `/reject` · `/withdraw` | Decisions (approve submits the displayed `payloadSha256` and the selected `side`). |
+| `POST` | `/ui/change-requests/{id}/approve` · `/decline` · `/withdraw` | Decisions (approve submits the displayed `payloadSha256` and the selected `side`). |
 
 **UISchema rendering rules (INV-12):**
 - Every descriptor field is passed to templates as plain data.
@@ -4029,7 +4036,7 @@ type Options struct {
 	Platform PlatformCommand      `command:"platform" description:"Inspect configured platforms and their UI schemas."`
 	Catalog  CatalogCommand       `command:"catalog" description:"Search the catalog of targets and show their flows."`
 	Flows    FlowsCommand         `command:"flows" description:"Show the effective network flows of a binding (JSON for the verification tool)."`
-	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, reject, withdraw)."`
+	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
 	Audit    AuditCommand         `command:"audit" description:"Query and verify the cryptographic audit log."`
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
@@ -4111,13 +4118,13 @@ type RotateCommand struct {
 }
 
 // ---------------------------------------------------------------------------
-// Change Request subcommands: `ligo cr list|get|approve|reject|withdraw`
+// Change Request subcommands: `ligo cr list|get|approve|decline|withdraw`
 // ---------------------------------------------------------------------------
 type ChangeRequestCommand struct {
 	List     CRListCommand     `command:"list" alias:"ls" description:"List change requests."`
 	Get      CRGetCommand      `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
 	Approve  CRApproveCommand  `command:"approve" description:"Approve one or more sides of a PENDING change request; applies it when every required side is approved (four-eyes)." `
-	Reject   CRRejectCommand   `command:"reject" description:"Decline one or more sides of a PENDING change request."`
+	Decline  CRDeclineCommand  `command:"decline" description:"Decline one or more sides of a PENDING change request."`
 	Withdraw CRWithdrawCommand `command:"withdraw" description:"Withdraw own PENDING change request."`
 	Ratify   CRRatifyCommand   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
 	Revert   CRRevertCommand   `command:"revert" description:"Revert an open break-glass change now."`
@@ -4152,7 +4159,7 @@ type CRApproveCommand struct {
 	} `positional-args:"yes" required:"yes"`
 }
 
-type CRRejectCommand struct {
+type CRDeclineCommand struct {
 	ClientOptions
 	Comment string `short:"m" long:"comment" required:"true" description:"Rejection reason (required)."`
 	Side    string `long:"side" description:"Side to decline; default: every side you may decide."`
@@ -4661,7 +4668,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-19 | Process crash between the admin commit and workflow start | Sweeper runs | The workflow is started with the recorded ID; the binding converges. |
 | AC-20 | Two bindings would produce the same principal name | Second Ensure | `RESOURCE_OWNED_BY_OTHER_BINDING`; the first binding is unaffected. |
 | AC-21 | A `PENDING` change request in an approval-required scope | The requester withdraws it while an approver approves it concurrently | Exactly one decision is recorded. If the withdrawal commits first, the approval returns `409 change-request-not-pending` and nothing is provisioned; otherwise the withdrawal returns `409 change-request-not-pending`. |
-| AC-22 | A `PENDING` change request | Two approvers decide it concurrently (approve/approve, or approve/reject) | Exactly one decision is recorded and audited; the other caller gets `409 change-request-not-pending`; at most one workflow is started. |
+| AC-22 | A `PENDING` change request | Two approvers decide it concurrently (approve/approve, or approve/decline) | Exactly one decision is recorded and audited; the other caller gets `409 change-request-not-pending`; at most one workflow is started. |
 | AC-23 | A `PENDING` binding `CREATE` change request | Approval is attempted while a plugin `ValidateBinding` call is slow (fault-injected delay) | No row locks are held during the delay: concurrent admin actions on other change requests and workflow steps on other bindings are not blocked. |
 | AC-24 | A change request whose side is in an approval-required scope | The application (fault-injected) tries to record that side as approved by `system:auto-approve`, or to mark the request `APPLIED` while the side is pending | PostgreSQL rejects it (`chk_side_basis`, respectively `trg_change_requests_check` at commit); nothing is provisioned. |
 | AC-25 | `dc/corp-prod` is removed from `approval.required_scopes` while a change request with a pending `dc/corp-prod` side exists, and `ligo` restarts | Startup, then an attempt to apply the pending request without approval | Startup logs a `WARN` and audits `CONFIG_GOVERNANCE_POLICY_CHANGED` and `CONFIG_APPROVAL_POLICY_WEAKENED` naming the pattern; the pending side still requires a human approver other than the requester. |
@@ -4714,7 +4721,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-69 | A cross-scope binding at `write`, both scopes requiring approval | The source owner lowers it to `read`; then raises it back to `write` | The downgrade has consent `ANY`, one `SOURCE` side, and is applied after that side's approval alone; the raise has consent `ALL` with `SOURCE`, `TARGET` and any party, and waits for all. |
 | AC-70 | A cross-scope binding on `oracle-prod` | A `dc/corp-prod` operator (platform owner, not the target owner) revokes it | Consent `ANY` with one `PLATFORM` side; applied after a `dc/corp-prod` approval; `BINDING_REVOKED` is delivered to webhooks filtering on the source and target scopes. The same operator cannot create or raise a binding on that target (`403 forbidden`). |
 | AC-71 | A binding with `expiresAt` in 8 days and `expiry_warning: 7d` | Time passes (lab clock control) to the warning, then to the expiry, with maintenance mode on at the expiry | `BINDING_EXPIRING` is emitted once; at `expiresAt` the workload API stops returning the binding at once; within one sweeper interval a `SYSTEM_EXPIRY` revocation is applied (basis `SYSTEM_EXPIRY`, decider `system:expiry`) even in maintenance; `BINDING_EXPIRED` is audited. |
-| AC-72 | Target A `PRIVATE`, target B `LISTED` to `cloud/fin-01/*`, target C `PUBLIC` in a scope that rule `no-test-to-prod` denies for `cloud/fin-01-test/*` | A viewer of `cloud/fin-01/payments`, and an operator of `cloud/fin-01-test/web`, search the catalog and fetch each target | The first sees B and C, and `404` for A; the second does not see C in the catalog and gets `denied` in C's governance outcome. |
+| AC-72 | Target A `PRIVATE`, target B `LISTED` to `cloud/fin-01/*`, target C `PUBLIC` in a scope that rule `no-test-to-prod` denies for `cloud/fin-01-test/*` | An operator of `cloud/fin-01/payments`, and an operator of `cloud/fin-01-test/web`, search the catalog and fetch each target | The first sees B and C, and `404` for A; the second does not see C in the catalog and gets `denied` in C's governance outcome. |
 | AC-73 | A workload with one binding whose credential is in `vault-prod` | The probe calls `GET /v1/flows`, `GET /v1/flows?target=ledger-schema` and the catalog flows of the target | The flows are the target's, the platform's, `vault-prod`'s and `ligo`'s, in that order, each with `declaredBy`; the response has no `auth` or `spec`; the catalog flows omit the secret store; ETag and `304` behave as for `/v1/bindings`. |
 | AC-74 | An operator uses the wizard to request a binding with a new inline source | The target owner tries to approve the binding before the source is approved; then the source owner rejects the source | `409 dependency-pending` (the binding request stays `PENDING`); after the rejection, the binding request is `FAILED_TO_APPLY` with `CR_DEPENDENCY_FAILED`. |
 | AC-75 | A break-glass binding `CREATE` with an inline source, unratified | The TTL expires | The binding is deleted by the `SYSTEM_REVERT`, then the source is retired by a `SYSTEM_REVERT` source change; both audited. |
@@ -5748,7 +5755,7 @@ sequenceDiagram
 **Variants.**
 - **Offer by the target owner.** A ledger operator offers the binding to the source instead (scenario 14): the `TARGET` side is then the automatic one and the `SOURCE` side waits for a tenancy lead (in an approval-required tenancy), which preserves the protection against credential injection (T-28).
 - **Inline source.** If the developer registers the source in the same wizard, a source `CREATE` and a binding `CREATE` depending on it are filed together; the binding cannot be approved before the source is registered (§7.2.4).
-- **Veto.** Any approver of a pending side can decline (`/reject`); a request with consent `ALL` is then `REJECTED` at once.
+- **Veto.** Any approver of a pending side can decline (`/decline`); a request with consent `ALL` is then `REJECTED` at once.
 - **One approver for several sides.** If the target owner approver were also an InfoSec approver, an approval without `side` would get `400 side-required`, and a second approval by the same person `403 distinct-approver-required` (INV-18), unless the rule sets `distinct_approvers: false`.
 - **Concurrent approvals.** If both approvers approve at the same moment, the `decision_seq` compare-and-set serializes them; the second sees the first's decision and applies the change (§4.3, AC-50).
 - **Policy tightened, or target changed, meanwhile.** The final approval moves the request to `FAILED_TO_APPLY` with `409 governance-policy-changed`, respectively `409 normalization-drift` (ADR-14 rule 5, §7.2.3).

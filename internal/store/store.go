@@ -119,6 +119,27 @@ func MarkStep(ctx context.Context, q Querier, bindingID uuid.UUID, workflowID, s
 	return nil
 }
 
+// Enqueue queues for propagation the bindings of a source, or of a target
+// (at levels, or at every level if levels is nil), that are not being
+// deleted; a binding already queued keeps the lower priority (§6.2.1 step
+// 5). It returns how many bindings it queued.
+func Enqueue(ctx context.Context, q Querier, cause string, resourceID, crID uuid.UUID, priority int, levels []string) (int64, error) {
+	column := map[string]string{"SOURCE": "source_id", "TARGET": "target_id"}[cause]
+	if column == "" {
+		return 0, fmt.Errorf("store: enqueue: cause %q", cause)
+	}
+	tag, err := q.Exec(ctx, `INSERT INTO binding_propagation_queue (binding_id, cause_change_request_id, cause, priority)
+		SELECT id, $2, $3, $4 FROM bindings
+		WHERE `+column+` = $1 AND phase NOT IN ('DELETING', 'DELETE_FAILED') AND ($5::text[] IS NULL OR access_level = ANY($5))
+		ON CONFLICT (binding_id) DO UPDATE SET cause_change_request_id = EXCLUDED.cause_change_request_id,
+			cause = EXCLUDED.cause, priority = least(binding_propagation_queue.priority, EXCLUDED.priority),
+			enqueued_at = now(), attempts = 0`, resourceID, crID, cause, priority, levels)
+	if err != nil {
+		return 0, fmt.Errorf("store: enqueue: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // DecideSides records decision ("APPROVED" or "DECLINED") on the sides of a
 // pending change request (§4.3, side decision). It serializes the deciders
 // of the request on its row, so that the caller, reading the sides

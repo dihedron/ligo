@@ -132,3 +132,27 @@ func TestFullAccess(t *testing.T) {
 		t.Error("viewer has full access")
 	}
 }
+
+// TestVisible: a resource is visible through a role on its scopes, or
+// beyond them as its visibility says (§7.2.4).
+func TestVisible(t *testing.T) {
+	gs := Grants{{Role: config.RoleOperator, Scopes: []string{"dc/corp-prod/ledger"}}}
+	for _, tc := range []struct {
+		scope, mode string
+		visibleTo   []string
+		want        bool
+	}{
+		{"dc/corp-prod/ledger", "PRIVATE", nil, true},
+		{"cloud/fin-01/payments", "PRIVATE", nil, false},
+		{"cloud/fin-01/payments", "LISTED", []string{"dc/corp-prod/*"}, true},
+		{"cloud/fin-01/payments", "LISTED", []string{"dc/corp-test/*"}, false},
+		{"cloud/fin-01/payments", "PUBLIC", nil, true},
+	} {
+		if got := gs.Visible([]string{tc.scope}, tc.mode, tc.visibleTo); got != tc.want {
+			t.Errorf("%+v: %t", tc, got)
+		}
+	}
+	if (Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}).Visible([]string{"x"}, "PUBLIC", nil) {
+		t.Error("break_glass alone sees a PUBLIC resource")
+	}
+}
