@@ -1,6 +1,7 @@
 package bindings
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -57,15 +59,16 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	b := req.Binding
-	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy)
+	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll)
 	if err != nil {
 		return nil, err
 	}
-	return s.file(ctx, c, "CREATE", nil, &b, res, &req.Common)
+	return s.file(ctx, c, "CREATE", changerequests.ConsentAll, nil, &b, res, &req.Common)
 }
 
-// Update files a change of a binding that adds access, or changes it
-// otherwise (PUT /v1/admin/bindings/{name}): consent ALL.
+// Update files a change of a binding (PUT /v1/admin/bindings/{name}):
+// consent ANY when every change removes access (a lower level, an earlier
+// expiry), ALL otherwise (ADR-13 rule 5, §3.10).
 func (s *Service) Update(ctx context.Context, c changerequests.Caller, name string, body []byte) (*changerequests.Request, error) {
 	req, err := decode(body)
 	if err != nil {
@@ -74,10 +77,7 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	if req.ExpectedRevision == nil {
 		return nil, invalid("expectedRevision is required")
 	}
-	cur, err := load(ctx, s.DB, "b.name = $1", name, false)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.sourceScope, cur.targetScope, cur.platformScope) {
-		return nil, refuse(404, "not-found", "binding %q", name)
-	}
+	cur, err := s.current(ctx, c, name)
 	if err != nil {
 		return nil, err
 	}
@@ -85,34 +85,106 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	if b.Name == "" {
 		b.Name = name
 	}
-	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy)
+	consent := changerequests.ConsentAll
+	if s.removesOnly(ctx, cur, &b) {
+		consent = changerequests.ConsentAny
+	}
+	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, consent)
 	if err != nil {
 		return nil, err
 	}
 	if *req.ExpectedRevision != cur.revision {
 		return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 	}
-	return s.file(ctx, c, "UPDATE", cur, &b, res, &req.Common)
+	return s.file(ctx, c, "UPDATE", consent, cur, &b, res, &req.Common)
+}
+
+// Delete files the revocation of a binding (DELETE /v1/admin/bindings/{name}):
+// consent ANY, decided by any one of the scopes the requester acts for.
+func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, approvalReference string, automationContext json.RawMessage) (*changerequests.Request, error) {
+	common := &changerequests.Common{ExpectedRevision: &expectedRevision, ApprovalReference: approvalReference, AutomationContext: automationContext}
+	if err := changerequests.Decode([]byte("{}"), &struct{}{}, common); err != nil {
+		return nil, err
+	}
+	cur, err := s.current(ctx, c, name)
+	if err != nil {
+		return nil, err
+	}
+	pl := s.Rules.Platforms[cur.platform]
+	res := &resolved{platform: pl, sourceScope: cur.sourceScope, targetScope: cur.targetScope, platformScope: cur.platformScope}
+	if err := res.actsFor(c); err != nil {
+		return nil, err
+	}
+	if expectedRevision != cur.revision {
+		return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
+	}
+	return s.file(ctx, c, "DELETE", changerequests.ConsentAny, cur, &Binding{Name: name}, res, common)
+}
+
+// current reads a binding the caller can see by name (404 otherwise).
+func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
+	cur, err := load(ctx, s.DB, "b.name = $1", name, false)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.sourceScope, cur.targetScope, cur.platformScope) {
+		return nil, refuse(404, "not-found", "binding %q", name)
+	}
+	return cur, err
+}
+
+// removesOnly reports whether an update of cur only removes access: a level
+// whose privileges are a subset of the current one's, or the same level,
+// and an earlier expiry, or the same one, with nothing else changed.
+func (s *Service) removesOnly(ctx context.Context, cur *stored, b *Binding) bool {
+	params, _ := jcs.Transform(orEmpty(b.Parameters))
+	stored, _ := jcs.Transform(orEmpty(cur.parameters))
+	if !bytes.Equal(params, stored) || len(changerequests.Changed(
+		changerequests.Field{Name: "purpose", Old: cur.purpose, New: b.Purpose},
+		changerequests.Field{Name: "labels", Old: cur.labels, New: b.Labels})) > 0 {
+		return false
+	}
+	sameExpiry := cur.expiresAt == nil && b.ExpiresAt == nil || cur.expiresAt != nil && b.ExpiresAt != nil && cur.expiresAt.Equal(*b.ExpiresAt)
+	if !sameExpiry && !engine.ExpiryNarrower(cur.expiresAt, b.ExpiresAt) {
+		return false
+	}
+	if b.AccessLevel == cur.accessLevel {
+		return !sameExpiry
+	}
+	var privileges []string
+	err := s.DB.QueryRow(ctx, "SELECT privileges FROM target_access_levels WHERE target_id = $1 AND name = $2", cur.targetID, b.AccessLevel).Scan(&privileges)
+	return err == nil && engine.PrivilegesNarrower(cur.privileges, privileges)
+}
+
+func orEmpty(j json.RawMessage) json.RawMessage {
+	if len(j) == 0 {
+		return json.RawMessage("{}")
+	}
+	return j
 }
 
 // stored is the part of a binding row its changes need.
 type stored struct {
-	id                                      uuid.UUID
+	id, targetID                            uuid.UUID
 	name, source, target, accessLevel       string
 	sourceScope, targetScope, platformScope string
-	phase                                   string
+	platform, phase, purpose                string
 	revision, attempt                       int64
+	parameters                              json.RawMessage
+	labels                                  map[string]string
+	expiresAt                               *time.Time
+	privileges                              []string // of the current level
 }
 
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
-	sql := `SELECT b.id, b.name, s.name, t.name, b.access_level, b.source_scope, b.target_scope, b.platform_scope, b.phase,
-		b.revision, b.attempt FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id WHERE ` + where
+	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_scope, b.target_scope, b.platform_scope,
+		b.platform, b.phase, coalesce(b.purpose, ''), b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges
+		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
+		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE OF b"
 	}
-	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceScope,
-		&st.targetScope, &st.platformScope, &st.phase, &st.revision, &st.attempt)
+	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceScope,
+		&st.targetScope, &st.platformScope, &st.platform, &st.phase, &st.purpose, &st.revision, &st.attempt, &st.parameters,
+		&st.labels, &st.expiresAt, &st.privileges)
 	return st, err
 }
 
@@ -126,8 +198,10 @@ type resolved struct {
 // resolve runs the pipeline (§7.2.3 steps 1 to 10) on b, a new binding if
 // cur is nil, and normalizes it. c is nil when the stored request is
 // re-validated at approval: RBAC and the interconnection policy are then
-// checked by the approval itself (Recheck).
-func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy) (*resolved, error) {
+// checked by the approval itself (Recheck). A change with consent ANY only
+// removes access: it needs no ACTIVE resources and no policy, and the
+// platform's owner may file it too.
+func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy, consent string) (*resolved, error) {
 	b.Kind = "Binding"
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
@@ -179,7 +253,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	if err != nil {
 		return nil, err
 	}
-	if cur == nil || b.AccessLevel != cur.accessLevel {
+	if consent == changerequests.ConsentAll && (cur == nil || b.AccessLevel != cur.accessLevel) {
 		if src.state != "ACTIVE" || tgt.state != "ACTIVE" || levelState != "ACTIVE" {
 			return nil, refuse(409, "resource-deprecated", "the source, the target and the access level must be ACTIVE")
 		}
@@ -208,7 +282,12 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	}
 	res := &resolved{platform: pl, sourceScope: src.scope, targetScope: tgt.scope, platformScope: tgt.platformScope,
 		decision: governance.Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}}
-	if c != nil {
+	switch {
+	case c != nil && consent == changerequests.ConsentAny:
+		if err := res.actsFor(*c); err != nil {
+			return nil, err
+		}
+	case c != nil:
 		if !c.Grants.ActsFor(src.scope, pl.Name) && !c.Grants.ActsFor(tgt.scope, pl.Name) {
 			return nil, refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), src.scope, tgt.scope)
 		}
@@ -239,6 +318,28 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	return res, nil
 }
 
+// anySides are the sides of a change that only removes access: one for
+// each of the source, target and platform scopes the requester acts for;
+// equal scopes give one side, named after the first (§7.2.3).
+func (res *resolved) anySides(c changerequests.Caller) []changerequests.Candidate {
+	var out []changerequests.Candidate
+	for _, sd := range []struct{ name, scope string }{{"SOURCE", res.sourceScope}, {"TARGET", res.targetScope}, {"PLATFORM", res.platformScope}} {
+		if c.Grants.ActsFor(sd.scope, res.platform.Name) && !slices.ContainsFunc(out, func(o changerequests.Candidate) bool { return o.Scope == sd.scope }) {
+			out = append(out, changerequests.Candidate{Side: sd.name, Scope: sd.scope, Platform: res.platform.Name})
+		}
+	}
+	return out
+}
+
+// actsFor is RBAC for a change that only removes access: operator of the
+// source, target or platform scope.
+func (res *resolved) actsFor(c changerequests.Caller) error {
+	if len(res.anySides(c)) == 0 {
+		return refuse(403, "forbidden", "%s is no operator of %s, %s or %s", c.ID(), res.sourceScope, res.targetScope, res.platformScope)
+	}
+	return nil
+}
+
 // denied audits a binding the interconnection policy refuses; nothing else
 // is stored (ADR-14 rule 3).
 func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Binding, res *resolved) error {
@@ -257,24 +358,30 @@ func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Bindin
 // file files the change request of a validated binding change with its
 // sides: TARGET, SOURCE when the scopes differ, and the policy's parties
 // (§7.2.3 "Sides at creation").
-func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, cur *stored, b *Binding, res *resolved, common *changerequests.Common) (*changerequests.Request, error) {
+func (s *Service) file(ctx context.Context, c changerequests.Caller, op, consent string, cur *stored, b *Binding, res *resolved, common *changerequests.Common) (*changerequests.Request, error) {
 	payload, err := json.Marshal(b)
+	if op == "DELETE" {
+		payload = json.RawMessage("{}")
+	}
 	if err != nil {
 		return nil, err
 	}
-	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: changerequests.ConsentAll,
+	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
 		Zone: res.platform.Zone, SourceScope: res.sourceScope, TargetScope: res.targetScope, PlatformScope: res.platformScope,
 		InterconnectRule: res.decision.Rule, DistinctApprovers: res.decision.DistinctApprovers, ExpectedRevision: common.ExpectedRevision,
 		Payload: payload, AutomationContext: common.AutomationContext}
 	if cur != nil {
 		r.ResourceID = &cur.id
 	}
-	sides := []changerequests.Candidate{{Side: "TARGET", Scope: res.targetScope, Platform: res.platform.Name}}
-	if res.sourceScope != res.targetScope {
-		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: res.sourceScope, Platform: res.platform.Name})
-	}
-	for _, a := range res.decision.AdditionalApprovals {
-		sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: res.platform.Name})
+	sides := res.anySides(c)
+	if consent == changerequests.ConsentAll {
+		sides = []changerequests.Candidate{{Side: "TARGET", Scope: res.targetScope, Platform: res.platform.Name}}
+		if res.sourceScope != res.targetScope {
+			sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: res.sourceScope, Platform: res.platform.Name})
+		}
+		for _, a := range res.decision.AdditionalApprovals {
+			sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: res.platform.Name})
+		}
 	}
 	err = s.Requests.Create(ctx, c, r, sides, common.ApprovalReference)
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_cr_one_pending_per_resource" {
@@ -286,19 +393,25 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 // Revalidate re-runs the pipeline, plugin included, on the stored request
 // (approval steps 2 and 3); the policy is re-checked by Recheck.
 func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (json.RawMessage, error) {
-	var b Binding
-	if err := json.Unmarshal(r.Payload, &b); err != nil {
-		return nil, err
-	}
-	b.SourceRevision, b.TargetRevision, b.RequestedSpec = 0, 0, nil // derived again
 	var cur *stored
-	if r.Operation == "UPDATE" {
+	if r.Operation != "CREATE" {
 		var err error
 		if cur, err = load(ctx, s.DB, "b.id = $1", *r.ResourceID, false); err != nil {
 			return nil, err
 		}
 	}
-	if _, err := s.resolve(ctx, nil, &b, cur, s.Requests.Policy); err != nil {
+	if r.Operation == "DELETE" {
+		return r.Payload, nil // no plugin call, no drift check
+	}
+	var b Binding
+	if err := json.Unmarshal(r.Payload, &b); err != nil {
+		return nil, err
+	}
+	b.SourceRevision, b.TargetRevision, b.RequestedSpec = 0, 0, nil // derived again
+	if r.Consent == changerequests.ConsentAny && !s.removesOnly(ctx, cur, &b) {
+		return nil, invalid("the change no longer only removes access: file it again")
+	}
+	if _, err := s.resolve(ctx, nil, &b, cur, s.Requests.Policy, r.Consent); err != nil {
 		return nil, err
 	}
 	return json.Marshal(b)
@@ -313,7 +426,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		return nil, err
 	}
 	var cur *stored
-	if r.Operation == "UPDATE" {
+	if r.Operation != "CREATE" {
 		var err error
 		if cur, err = load(ctx, tx, "b.id = $1", *r.ResourceID, true); err != nil {
 			return nil, err
@@ -327,6 +440,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		if cur.revision != *r.ExpectedRevision {
 			return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 		}
+	}
+	if r.Operation == "DELETE" {
+		return s.applyDelete(ctx, tx, r, cur)
 	}
 	var sourceID, targetID uuid.UUID
 	var td, regex, platform, srcState, tgtState, levelState string
@@ -342,7 +458,8 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	if err != nil {
 		return nil, err
 	}
-	if (cur == nil || b.AccessLevel != cur.accessLevel) && (srcState != "ACTIVE" || tgtState != "ACTIVE" || levelState != "ACTIVE") {
+	if r.Consent == changerequests.ConsentAll && (cur == nil || b.AccessLevel != cur.accessLevel) &&
+		(srcState != "ACTIVE" || tgtState != "ACTIVE" || levelState != "ACTIVE") {
 		return nil, refuse(409, "resource-deprecated", "the source, the target and the access level must be ACTIVE")
 	}
 	if srcRev != b.SourceRevision || tgtRev != b.TargetRevision {
@@ -393,11 +510,12 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		id, revision, attempt = cur.id, cur.revision+1, cur.attempt+1
 		if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, purpose = $4, labels = $5::jsonb,
 			expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
-			current_step = 'INIT', status_message = '', last_transition_at = now(), rotate_static_secrets = false,
+			current_step = 'INIT', status_message = '', last_transition_at = now(), rotate_static_secrets = $16,
 			source_revision = $10, target_revision = $11, source_trust_domain = $12, source_svid_regex = $13, requested_spec = $14::jsonb,
 			updated_at = now(), updated_by = $15 WHERE id = $1`,
 			id, b.AccessLevel, string(b.Parameters), null(b.Purpose), string(labels), b.ExpiresAt, revision, attempt,
-			workflowID(id, revision, attempt), srcRev, tgtRev, td, regex, string(b.RequestedSpec), r.RequestedBy); err != nil {
+			workflowID(id, revision, attempt), srcRev, tgtRev, td, regex, string(b.RequestedSpec), r.RequestedBy,
+			cur.phase == "FAILED"); err != nil { // §3.11: an update of a FAILED binding rotates
 			return nil, err
 		}
 		// the new revision includes every applied change (§6.2.2)
@@ -409,7 +527,24 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		Action: "APPLY_STARTED", Revision: &revision, Attempt: &attempt, WorkflowID: workflowID(id, revision, attempt)}}, nil
 }
 
-// workflowID is the ID of an attempt's workflow, never reused (INV-09).
+// applyDelete starts the deletion of a binding (§6.2.2, §3.11): DELETING
+// with a new attempt, its active snapshot cleared at once (T-10).
+func (s *Service) applyDelete(ctx context.Context, tx pgx.Tx, r *changerequests.Request, cur *stored) ([]audit.Entry, error) {
+	attempt := cur.attempt + 1
+	wf := fmt.Sprintf("ligo:delete:%s:r%d:a%d", cur.id, cur.revision, attempt)
+	if _, err := tx.Exec(ctx, `UPDATE bindings SET phase = 'DELETING', operation = 'DELETE', attempt = $2, workflow_id = $3,
+		current_step = 'INIT', status_message = '', last_transition_at = now(), active_revision = NULL,
+		active_source_svid_regex = NULL, active_auth_config = NULL, active_spec = NULL, break_glass_cr_id = NULL,
+		break_glass_expires_at = NULL, break_glass_warned_at = NULL, updated_at = now(), updated_by = $4 WHERE id = $1`,
+		cur.id, attempt, wf, r.RequestedBy); err != nil {
+		return nil, err
+	}
+	return []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
+		Action: "DELETE_STARTED", Revision: &cur.revision, Attempt: &attempt, WorkflowID: wf}}, nil
+}
+
+// workflowID is the ID of an apply attempt's workflow, never reused
+// (INV-09).
 func workflowID(id uuid.UUID, revision, attempt int64) string {
 	return fmt.Sprintf("ligo:apply:%s:r%d:a%d", id, revision, attempt)
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
@@ -439,5 +440,175 @@ func TestUpdate(t *testing.T) {
 	}
 	if _, err := s.Update(ctx, dcOp, name, body(name, w.dcSrc, w.dcShared, "write", `"expectedRevision":1`)); slug(err) != "revision-conflict" {
 		t.Errorf("stale revision: %v", err)
+	}
+}
+
+// active creates the binding name and makes it ACTIVE, as a finished
+// workflow would; approvers approve its creation.
+func active(t *testing.T, s *Service, o *pgxpool.Pool, by changerequests.Caller, name, source, target, level string, extra string, approvers ...changerequests.Caller) {
+	t.Helper()
+	var r *changerequests.Request
+	var err error
+	if extra != "" {
+		r, err = s.Create(context.Background(), by, body(name, source, target, level, extra))
+	} else {
+		r, err = s.Create(context.Background(), by, body(name, source, target, level))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, r, approvers...)
+	if _, err := o.Exec(context.Background(), "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRevoke: either owner, or the platform owner, revokes alone with
+// consent ANY; a side in a self-service scope revokes at once; the binding
+// is DELETING with its active snapshot cleared (ADR-13 rules 4 and 5).
+func TestRevoke(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "fin-01-payments-r-" + w.suffix
+	active(t, s, o, cloudOp, name, w.cloudSrc, w.ledger, "read", "", ledgerApp, cloudLead, sec)
+	if _, err := s.Delete(ctx, testOp, name, 1, "", nil); slug(err) != "not-found" {
+		t.Errorf("a stranger revokes: %v", err)
+	}
+	r, err := s.Delete(ctx, dcOp, name, 1, "", nil) // platform owner, containment
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Consent != changerequests.ConsentAny || sides(r) != "PLATFORM=HUMAN" {
+		t.Fatalf("platform revocation %s %s", r.Consent, sides(r))
+	}
+	if err := s.Requests.Withdraw(ctx, dcOp, r.ID, "later"); err != nil {
+		t.Fatal(err)
+	}
+	r, err = s.Delete(ctx, ledgerOp, name, 1, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sides(r) != "TARGET=HUMAN" {
+		t.Fatalf("target revocation %s", sides(r))
+	}
+	approve(t, s, r, ledgerApp)
+	phase, workflow, _, _, revision := bindingRow(t, o, name)
+	var id uuid.UUID
+	var cleared bool
+	if err := o.QueryRow(ctx, "select id, active_spec is null from bindings where name = $1", name).Scan(&id, &cleared); err != nil {
+		t.Fatal(err)
+	}
+	if phase != "DELETING" || workflow != "ligo:delete:"+id.String()+":r1:a2" || revision != 1 || !cleared {
+		t.Errorf("binding %s %s %d cleared=%t", phase, workflow, revision, cleared)
+	}
+	if _, err := s.Delete(ctx, ledgerOp, name, 1, "", nil); err != nil {
+		t.Fatal(err) // filed; the apply finds it busy
+	}
+
+	// fin-02 does not require approval: its owner revokes at once
+	auto := "fin-02-x-r-" + w.suffix
+	active(t, s, o, fin02Op, auto, w.fin02Src, w.ledger, "read", "", ledgerApp, sec)
+	r, err = s.Delete(ctx, fin02Op, auto, 1, "", nil)
+	if err != nil || r.Status != "APPLIED" || sides(r) != "SOURCE=AUTO" {
+		t.Fatalf("self-service revocation: %v %+v", err, r)
+	}
+	if phase, _, _, _, _ := bindingRow(t, o, auto); phase != "DELETING" {
+		t.Errorf("phase %s", phase)
+	}
+}
+
+// TestDowngrade: a lower level or an earlier expiry only removes access,
+// consent ANY; a higher level, a later expiry or new parameters add or
+// change it, consent ALL (ADR-13 rule 5, §3.10).
+func TestDowngrade(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "fin-01-payments-g-" + w.suffix
+	expiry := `"expiresAt":"` + time.Now().Add(240*time.Hour).UTC().Format(time.RFC3339) + `"`
+	active(t, s, o, cloudOp, name, w.cloudSrc, w.ledger, "write", expiry, ledgerApp, cloudLead, sec)
+	sooner := `"expiresAt":"` + time.Now().Add(48*time.Hour).UTC().Format(time.RFC3339) + `"`
+	later := `"expiresAt":"` + time.Now().Add(480*time.Hour).UTC().Format(time.RFC3339) + `"`
+	for _, tc := range []struct {
+		level, extra, consent, sides string
+	}{
+		{"read", expiry, "ANY", "TARGET=HUMAN"},
+		{"write", sooner, "ANY", "TARGET=HUMAN"},
+		{"read", sooner, "ANY", "TARGET=HUMAN"},
+		{"write", later, "ALL", "TARGET=HUMAN,SOURCE=HUMAN,PARTY:security=HUMAN"},
+		{"write", expiry + `,"parameters":{"connectionLimit":5}`, "ALL", "TARGET=HUMAN,SOURCE=HUMAN,PARTY:security=HUMAN"},
+	} {
+		r, err := s.Update(ctx, ledgerOp, name, body(name, w.cloudSrc, w.ledger, tc.level, tc.extra, `"expectedRevision":1`))
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.level, tc.extra, err)
+		}
+		if r.Consent != tc.consent || sides(r) != tc.sides {
+			t.Errorf("%s %s: %s %s", tc.level, tc.extra, r.Consent, sides(r))
+		}
+		if err := s.Requests.Withdraw(ctx, ledgerOp, r.ID, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := s.Update(ctx, ledgerOp, name, body(name, w.cloudSrc, w.ledger, "read", expiry, `"expectedRevision":1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, r, ledgerApp)
+	var level string
+	var revision int64
+	if err := o.QueryRow(ctx, "select access_level, revision from bindings where name = $1", name).Scan(&level, &revision); err != nil || level != "read" || revision != 2 {
+		t.Errorf("binding %s r%d (%v)", level, revision, err)
+	}
+}
+
+// TestFailedUpdate: an update of a FAILED binding rotates its secrets
+// (§3.11).
+func TestFailedUpdate(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "dd-" + w.suffix
+	active(t, s, o, dcOp, name, w.dcSrc, w.dcShared, "read", "", dcApp)
+	if _, err := o.Exec(ctx, "update bindings set phase = 'FAILED', rotate_static_secrets = false where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Update(ctx, dcOp, name, body(name, w.dcSrc, w.dcShared, "write", `"expectedRevision":1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, r, dcApp)
+	var rotate bool
+	if err := o.QueryRow(ctx, "select rotate_static_secrets from bindings where name = $1", name).Scan(&rotate); err != nil || !rotate {
+		t.Errorf("rotate_static_secrets %t (%v)", rotate, err)
+	}
+}
+
+// TestAC50: two approvers completing a request at the same moment apply it
+// exactly once.
+func TestAC50(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name := "fin-01-payments-c-" + w.suffix
+	r, err := s.Create(ctx, cloudOp, body(name, w.cloudSrc, w.ledger, "read"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, r, cloudLead)
+	errs := make(chan error, 2)
+	for _, c := range []changerequests.Caller{ledgerApp, sec} {
+		go func() {
+			_, err := s.Requests.Approve(ctx, c, r.ID, r.PayloadSHA256, "", "ok")
+			errs <- err
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	var applied, started, bindings int
+	if err := o.QueryRow(ctx, `select (select count(*) from change_requests where id = $1 and status = 'APPLIED'),
+		(select count(*) from audit_log where change_request_id = $1 and action = 'APPLY_STARTED'),
+		(select count(*) from bindings where name = $2)`, r.ID, name).Scan(&applied, &started, &bindings); err != nil ||
+		applied != 1 || started != 1 || bindings != 1 {
+		t.Errorf("applied %d, started %d, bindings %d (%v)", applied, started, bindings, err)
 	}
 }
