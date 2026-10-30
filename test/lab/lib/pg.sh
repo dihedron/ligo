@@ -102,11 +102,12 @@ pg_target() {
 	info "target database ledger ready (target-postgres)"
 }
 
-# pg_dsn ROLE [HOST ROOTCERT]: the DSN of ligo_ROLE, verifying the server with
-# the lab CA; by default from the lab host, through the proxy.
+# pg_dsn ROLE [HOST ROOTCERT DATABASE]: the DSN of ligo_ROLE, verifying the
+# server with the lab CA; by default from the lab host, through the proxy, to
+# the database ligo.
 pg_dsn() {
-	printf 'postgres://ligo_%s:%s@%s:5432/ligo?sslmode=verify-full&sslrootcert=%s' \
-		"$1" "$(password "$1")" "${2:-$(lxd_ip)}" "${3:-$LAB_STATE_DIR/pki/ca.crt}"
+	printf 'postgres://ligo_%s:%s@%s:5432/%s?sslmode=verify-full&sslrootcert=%s' \
+		"$1" "$(password "$1")" "${2:-$(lxd_ip)}" "${4:-ligo}" "${3:-$LAB_STATE_DIR/pki/ca.crt}"
 }
 
 # pg_psql ROLE ARGS: psql in the VM as ligo_ROLE, over TLS to the lab
