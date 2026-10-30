@@ -172,21 +172,43 @@ type Candidate struct {
 func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approvalReference string) ([]Side, error) {
 	var sides []Side
 	for _, cand := range candidates {
-		s := Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
-		if c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
-			s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
-		} else if g := c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+		s, g := side(cand, c, p)
+		if g != nil {
 			if approvalReference == "" {
 				return nil, refuse(422, "validation-failed", "side %s is approved by delegation: approvalReference is required", cand.Side)
 			}
 			if g.ApprovalReference != nil && !g.ApprovalReference.MatchString(approvalReference) {
 				return nil, refuse(422, "validation-failed", "approvalReference %q does not match the delegation's approval_reference_pattern", approvalReference)
 			}
-			s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
 		}
 		sides = append(sides, s)
 	}
 	return sides, nil
+}
+
+// PreviewSides are the sides BuildSides would build, without checking the
+// approval reference (POST /v1/admin/governance/evaluate).
+func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side {
+	sides := []Side{}
+	for _, cand := range candidates {
+		s, _ := side(cand, c, p)
+		sides = append(sides, s)
+	}
+	return sides
+}
+
+// side decides how cand is decided; g is the delegating grant of a
+// DELEGATED side.
+func side(cand Candidate, c Caller, p *governance.Policy) (s Side, g *authz.Grant) {
+	s = Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
+	if c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
+		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
+	} else if g = c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+		s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
+	} else {
+		g = nil
+	}
+	return s, g
 }
 
 // Change is a top-level field of a resource that a request changes.

@@ -104,7 +104,7 @@ func TestPolicyHash(t *testing.T) {
 		t.Errorf("hashes differ for the same policy: %s %s", ha, hb)
 	}
 	canonical, err := a.Canonical()
-	if err != nil || !strings.Contains(string(canonical), `"max_ttl":28800`) || !strings.Contains(string(canonical), `"required_scopes":["dc/corp-prod/*","cloud/fin-01/*"]`) {
+	if err != nil || !strings.Contains(string(canonical), `"maxTtlSeconds":28800`) || !strings.Contains(string(canonical), `"requiredScopes":["dc/corp-prod/*","cloud/fin-01/*"]`) {
 		t.Errorf("canonical policy: (%s, %v)", canonical, err)
 	}
 	b.Interconnects.Rules[0].Action = "allow"

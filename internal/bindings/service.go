@@ -415,15 +415,22 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	}
 	sides := anySides
 	if consent == changerequests.ConsentAll {
-		sides = []changerequests.Candidate{{Side: "TARGET", Scope: res.targetScope, Platform: res.platform.Name}}
-		if res.sourceScope != res.targetScope {
-			sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: res.sourceScope, Platform: res.platform.Name})
-		}
-		for _, a := range res.decision.AdditionalApprovals {
-			sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: res.platform.Name})
-		}
+		sides = Candidates(res.sourceScope, res.targetScope, res.platform.Name, res.decision)
 	}
 	return r, sides, nil
+}
+
+// Candidates are the sides of a binding change with consent ALL: TARGET,
+// SOURCE when the scopes differ, and the parties of the deciding rule.
+func Candidates(sourceScope, targetScope, platform string, d governance.Decision) []changerequests.Candidate {
+	sides := []changerequests.Candidate{{Side: "TARGET", Scope: targetScope, Platform: platform}}
+	if sourceScope != targetScope {
+		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: sourceScope, Platform: platform})
+	}
+	for _, a := range d.AdditionalApprovals {
+		sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: platform})
+	}
+	return sides
 }
 
 // Revalidate re-runs the pipeline, plugin included, on the stored request

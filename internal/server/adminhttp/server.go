@@ -71,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	s.bindingRoutes(mux)
 	s.platformRoutes(mux)
 	s.catalogRoutes(mux)
+	s.governanceRoutes(mux)
 	return s.middleware(mux)
 }
 

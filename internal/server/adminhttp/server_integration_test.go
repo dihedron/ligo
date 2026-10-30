@@ -898,3 +898,78 @@ func TestCatalogAPI(t *testing.T) {
 		t.Errorf("a viewer of * sees nothing beyond: %q", names(r))
 	}
 }
+
+// TestGovernanceAPI: the policy in force with its SHA-256, and the dry run
+// of a binding, a source and a target: scopes, name prefix, interconnection
+// rule and sides with their basis, storing nothing.
+func TestGovernanceAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	ctx := context.Background()
+	olga, viewer := v.client(t, opID), v.client(t, viewerID)
+	x := v.suffix
+	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+		values ($1, $2, 'dc/corp-test', 'test.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), "test-"+x, `^spiffe://test\.internal/x/`+x+`$`); err != nil {
+		t.Fatal(err)
+	}
+
+	g := v.do(t, viewer, "GET", "/v1/admin/governance", nil)
+	if p, _ := g.body["policy"].(map[string]any); g.code != 200 || g.body["sha256"] != v.bs.Requests.Policy.SHA256() || p["interconnects"] == nil {
+		t.Fatalf("governance: %d %v", g.code, g.body["sha256"])
+	}
+
+	var before int64
+	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0) from audit_log").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	sides := func(r response) string {
+		var out []string
+		for _, s := range r.body["sides"].([]any) {
+			m := s.(map[string]any)
+			out = append(out, fmt.Sprint(m["side"], ":", m["basis"]))
+		}
+		return strings.Join(out, ",")
+	}
+	cloud := map[string]string{"trustDomain": "cloud.internal", "svidRegex": `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/[a-z]+$`}
+	for _, tc := range []struct {
+		name               string
+		body               map[string]any
+		sides, rule, valid string
+	}{
+		{"same scope", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"},
+			"TARGET:HUMAN", "<nil>", "true"},
+		{"inline cloud source", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": cloud, "target": "tgt-" + x, "accessLevel": "read"},
+			"TARGET:HUMAN,SOURCE:HUMAN,PARTY:security:HUMAN", "map[action:allow rule:cloud-to-dc]", "false"},
+		{"denied", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": "test-" + x, "target": "tgt-" + x, "accessLevel": "read"},
+			"", "map[action:deny rule:no-test-to-prod]", "true"},
+		{"source", map[string]any{"kind": "Source", "metadata": map[string]string{"name": "fin-01-payments-" + x}, "identity": cloud},
+			"OWNER:HUMAN", "<nil>", "true"},
+		{"target", map[string]any{"kind": "Target", "metadata": map[string]string{"name": "ledger-" + x, "platform": "oracle-prod", "scope": "dc/corp-prod/ledger"}},
+			"OWNER:HUMAN,PLATFORM:HUMAN", "<nil>", "true"},
+	} {
+		r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", tc.body)
+		if r.code != 200 || sides(r) != tc.sides || fmt.Sprint(r.body["interconnect"]) != tc.rule ||
+			fmt.Sprint(r.body["namePrefix"].(map[string]any)["valid"]) != tc.valid {
+			t.Errorf("%s: %d %+v", tc.name, r.code, r.body)
+		}
+	}
+	v.bs.Requests.Policy.RequiredScopes = nil
+	if r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", map[string]any{"resourceType": "BINDING", "name": "eval-" + x,
+		"source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"}); sides(r) != "TARGET:AUTO" {
+		t.Errorf("no approval required: %+v", r.body)
+	}
+	for body, code := range map[string]int{`{"resourceType":"BINDING","source":"src-` + x + `","target":"nope-` + x + `","accessLevel":"read"}`: 404,
+		`{"resourceType":"BINDING","source":"src-` + x + `","target":"tgt-` + x + `","accessLevel":"admin"}`: 422,
+		`{"kind":"Other"}`: 422, `[]`: 422} {
+		req, _ := http.NewRequest("POST", v.srv.URL+"/v1/admin/governance/evaluate", strings.NewReader(body))
+		resp, err := olga.Do(req)
+		if err != nil || resp.StatusCode != code {
+			t.Errorf("%s: %v %v, want %d", body, err, resp.StatusCode, code)
+		}
+		_ = resp.Body.Close()
+	}
+	var after, filed int64
+	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0), (select count(*) from change_requests where resource_name like 'eval-%') from audit_log").
+		Scan(&after, &filed); err != nil || after != before || filed != 0 {
+		t.Errorf("the dry run stored something: audit %d to %d, %d requests (%v)", before, after, filed, err)
+	}
+}

@@ -15,11 +15,11 @@ import (
 // SourceScope is the scope extractor of one trust domain
 // (governance.source_scopes, §3.9).
 type SourceScope struct {
-	TrustDomain   string `yaml:"trust_domain" json:"trust_domain"`
+	TrustDomain   string `yaml:"trust_domain" json:"trustDomain"`
 	Mode          string `yaml:"mode" json:"mode"`
 	Scope         string `yaml:"scope" json:"scope,omitempty"`
-	PathRegex     string `yaml:"path_regex" json:"path_regex,omitempty"`
-	ScopeTemplate string `yaml:"scope_template" json:"scope_template,omitempty"`
+	PathRegex     string `yaml:"path_regex" json:"pathRegex,omitempty"`
+	ScopeTemplate string `yaml:"scope_template" json:"scopeTemplate,omitempty"`
 }
 
 // Extractor returns the extractor the entry describes.
@@ -42,7 +42,7 @@ type NamePrefix struct {
 
 // Interconnects is governance.interconnects (ADR-14).
 type Interconnects struct {
-	DefaultCrossScope string             `yaml:"default_cross_scope" json:"default_cross_scope"`
+	DefaultCrossScope string             `yaml:"default_cross_scope" json:"defaultCrossScope"`
 	Rules             []InterconnectRule `yaml:"rules" json:"rules"`
 }
 
@@ -51,8 +51,8 @@ type InterconnectRule struct {
 	From                []string             `yaml:"from" json:"from"`
 	To                  []string             `yaml:"to" json:"to"`
 	Action              string               `yaml:"action" json:"action"`
-	AdditionalApprovals []AdditionalApproval `yaml:"additional_approvals" json:"additional_approvals,omitempty"`
-	DistinctApprovers   *bool                `yaml:"distinct_approvers" json:"distinct_approvers,omitempty"`
+	AdditionalApprovals []AdditionalApproval `yaml:"additional_approvals" json:"additionalApprovals,omitempty"`
+	DistinctApprovers   *bool                `yaml:"distinct_approvers" json:"distinctApprovers,omitempty"`
 }
 
 // AdditionalApproval is a party whose approvers decide a side of their own.
@@ -74,10 +74,10 @@ type BreakGlassPolicy struct {
 func (b BreakGlassPolicy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Scopes     []string `json:"scopes"`
-		DefaultTTL int64    `json:"default_ttl"`
-		MaxTTL     int64    `json:"max_ttl"`
-		MaxOpen    int      `json:"max_open"`
-		WarnBefore int64    `json:"warn_before"`
+		DefaultTTL int64    `json:"defaultTtlSeconds"`
+		MaxTTL     int64    `json:"maxTtlSeconds"`
+		MaxOpen    int      `json:"maxOpen"`
+		WarnBefore int64    `json:"warnBeforeSeconds"`
 	}{b.Scopes, int64(b.DefaultTTL.Seconds()), int64(b.MaxTTL.Seconds()), b.MaxOpen, int64(b.WarnBefore.Seconds())})
 }
 
@@ -85,18 +85,18 @@ func (b BreakGlassPolicy) MarshalJSON() ([]byte, error) {
 type PlatformScopes struct {
 	Platform     string   `json:"platform"`
 	Scope        string   `json:"scope"`
-	TargetScopes []string `json:"target_scopes"`
+	TargetScopes []string `json:"targetScopes"`
 }
 
 // Policy is the governance policy (§8.2 rule 16): its SHA-256 is stored on
 // every change request.
 type Policy struct {
-	RequiredScopes           []string           `json:"required_scopes"`
-	RequireDistinctApprovers bool               `json:"require_distinct_approvers_across_scopes"`
-	SourceScopes             []SourceScope      `json:"source_scopes"`
-	NamePrefixes             []NamePrefix       `json:"name_prefixes"`
+	RequiredScopes           []string           `json:"requiredScopes"`
+	RequireDistinctApprovers bool               `json:"requireDistinctApproversAcrossScopes"`
+	SourceScopes             []SourceScope      `json:"sourceScopes"`
+	NamePrefixes             []NamePrefix       `json:"namePrefixes"`
 	Interconnects            Interconnects      `json:"interconnects"`
-	BreakGlassPolicies       []BreakGlassPolicy `json:"break_glass_policies"`
+	BreakGlassPolicies       []BreakGlassPolicy `json:"breakGlassPolicies"`
 	Platforms                []PlatformScopes   `json:"platforms"` // sorted by Canonical
 }
 
