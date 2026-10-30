@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 	"uuid"
 
@@ -17,7 +18,9 @@ func (s *Server) opsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/admin/maintenance", s.getMaintenance)
 	mux.HandleFunc("PUT /v1/admin/maintenance", s.putMaintenance)
 	mux.HandleFunc("GET /v1/admin/audit/verify", s.verifyAudit)
-	mux.HandleFunc("GET /v1/admin/{kind}/{name}/audit", s.resourceAudit)
+	for kind := range scopeQueries { // one route each: a {kind} wildcard would overlap /v1/admin/catalog/targets/{name}
+		mux.HandleFunc("GET /v1/admin/"+kind+"/{name}/audit", s.resourceAudit)
+	}
 }
 
 type maintenance struct {
@@ -128,16 +131,13 @@ type auditDTO struct {
 // resourceAudit lists a resource's audit entries, newest first, for a
 // caller who sees its scopes (keyset on id).
 func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
-	q, ok := scopeQueries[r.PathValue("kind")]
-	if !ok {
-		problem(w, http.StatusNotFound, "not-found", "no such resource kind")
-		return
-	}
+	kind := strings.Split(r.Pattern, "/")[3] // GET /v1/admin/<kind>/{name}/audit
+	q := scopeQueries[kind]
 	name := r.PathValue("name")
 	var scopes []string
 	err := s.DB.QueryRow(r.Context(), q.sql, name).Scan(&scopes)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !caller(r).Grants.Sees(scopes...) {
-		problem(w, http.StatusNotFound, "not-found", r.PathValue("kind")+" "+name)
+		problem(w, http.StatusNotFound, "not-found", kind+" "+name)
 		return
 	}
 	var cursor struct {

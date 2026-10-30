@@ -699,10 +699,11 @@ Platforms are read-only through the API. Their representation is derived from `s
   ],
   "identityProvider": { "type": "openldap.v1", "instance": "ldap-prod" },
   "secretStore": { "type": "vault.v1", "instance": "vault-prod" },
-  "uiSchemas": { "target": "…", "binding": "…" }
+  "health": { "serving": true, "message": "…" },
+  "uiSchemas": { "targetDefinition": { "fields": [] }, "accessLevelGrants": { "fields": [] }, "bindingParameters": { "fields": [] } }
 }
 ```
-`privilegeBounds` is the platform's privilege upper bound in the plugin's terms (for Oracle and PostgreSQL, `grantableRoles`). `uiSchemas` are the forms returned by `GetUISchemas` (§5.9). A platform is visible to every authenticated principal with any role, because the catalog needs it; its configuration beyond these fields is not.
+`privilegeBounds` is the platform's privilege upper bound in the plugin's terms (for Oracle and PostgreSQL, `grantableRoles`). `health` is the platform plugin's `Health` answer (`serving`, and its `public_message` as `message`); a plugin that cannot be reached within 2 s is shown as not serving. `uiSchemas` are the three forms returned by `GetUISchemas` (§5.9), in the Protobuf JSON mapping of `UIForm`; only `GET /v1/admin/platforms/{name}` carries them. A platform is visible to every authenticated principal with any role, because the catalog needs it; its configuration beyond these fields is not.
 
 ### 3.5 Binding (admin representation)
 

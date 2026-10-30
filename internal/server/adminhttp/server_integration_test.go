@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -30,6 +32,7 @@ import (
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/sources"
@@ -126,6 +129,24 @@ func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (db
 func (f *fakeWorkflows) Rotate(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	f.calls = append(f.calls, "rotate "+actor)
 	return nil, nil
+}
+
+// fakePlugins: oracle-prod serves, every other platform is unreachable.
+type fakePlugins struct{}
+
+func (fakePlugins) Health(_ context.Context, platform string) (*pluginv1.HealthResponse, error) {
+	if platform != "oracle-prod" {
+		return nil, errors.New("unreachable")
+	}
+	return &pluginv1.HealthResponse{Serving: true}, nil
+}
+
+func (fakePlugins) UISchemas(_ context.Context, platform string) (*pluginv1.GetUISchemasResponse, error) {
+	if platform != "oracle-prod" {
+		return nil, errors.New("unreachable")
+	}
+	return &pluginv1.GetUISchemasResponse{PluginType: "oracle.v1", Instance: platform, TargetDefinition: &pluginv1.UIForm{
+		Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "schema", Label: "Schema", FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_TEXT}}}}, nil
 }
 
 type env struct {
@@ -226,7 +247,8 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
+	s := &Server{Listener: listener, Config: cfg, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
+		Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler)}
 	if listener.AllowBasicAuth {
@@ -756,5 +778,123 @@ func TestBindingsAPI(t *testing.T) {
 	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where action = 'SESSION_LOGIN_FAILED' and snapshot->>'username' = 'livia'
 		and request_id = $1`, r.header.Get("X-Request-Id")).Scan(&failed); err != nil || failed != 1 {
 		t.Errorf("failed login not audited (%v)", err)
+	}
+}
+
+// TestPlatformsAPI: platforms from server.yaml, without credentials, with
+// their health and, one at a time, their forms (§3.4).
+func TestPlatformsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	viewer := v.client(t, viewerID)
+	list := v.do(t, viewer, "GET", "/v1/admin/platforms", nil)
+	byName := map[string]map[string]any{}
+	for _, it := range list.body["items"].([]any) {
+		p := it.(map[string]any)
+		byName[p["name"].(string)] = p
+	}
+	prod, test := byName["oracle-prod"], byName["oracle-test-dynamic"]
+	if list.code != 200 || prod == nil || test == nil || prod["kind"] != "Platform" || prod["scope"] != "dc/corp-prod" ||
+		prod["health"].(map[string]any)["serving"] != true || test["health"].(map[string]any)["serving"] != false ||
+		fmt.Sprint(prod["privilegeBounds"]) != "map[grantableRoles:[ORDERS_RO_ROLE ORDERS_RW_ROLE LEDGER_RO_ROLE LEDGER_RW_ROLE]]" ||
+		prod["config"] != nil || prod["uiSchemas"] != nil {
+		t.Fatalf("list: %d %+v", list.code, prod)
+	}
+	got := v.do(t, viewer, "GET", "/v1/admin/platforms/oracle-prod", nil)
+	ui, _ := got.body["uiSchemas"].(map[string]any)
+	if got.code != 200 || ui["targetDefinition"] == nil || ui["pluginType"] != nil {
+		t.Errorf("get: %d %+v", got.code, got.body)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/platforms/oracle-test-dynamic", nil); r.code != 503 {
+		t.Errorf("unreachable plugin: %d", r.code)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/platforms/nope", nil); r.code != 404 {
+		t.Errorf("unknown platform: %d", r.code)
+	}
+	if r := v.do(t, v.client(t, bgID), "GET", "/v1/admin/platforms", nil); r.code != 403 {
+		t.Errorf("break-glass only: %d", r.code)
+	}
+}
+
+// TestCatalogAPI: the catalog search with its filters and forSource, a
+// target's card with its outcomes and flows, and the sources visible
+// beyond one's own (§7.2.4).
+func TestCatalogAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	ctx := context.Background()
+	olga, viewer := v.client(t, opID), v.client(t, viewerID)
+	x := v.suffix
+	for _, q := range []struct{ name, scope, td, vis string }{
+		{"cloud-" + x, "cloud/fin-01/payments", "cloud.internal", "PUBLIC"},
+		{"test-" + x, "dc/corp-test", "test.internal", "PUBLIC"},
+		{"hidden-" + x, "dc/corp-test", "test.internal", "PRIVATE"},
+	} {
+		if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+			values ($1, $2, $3, $4, $5, $6, 't', 't')`, uuid.NewV7(), q.name, q.scope, q.td, `^spiffe://`+q.td+`/x/`+q.name+`$`, q.vis); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := v.do(t, v.client(t, appID), "POST", "/v1/admin/change-requests/"+v.request.ID.String()+"/approve",
+		map[string]string{"payloadSha256": v.request.PayloadSHA256}); r.code != 200 {
+		t.Fatalf("approve: %+v", r)
+	}
+	names := func(r response) string {
+		var out []string
+		for _, it := range r.body["items"].([]any) {
+			m := it.(map[string]any)
+			out = append(out, fmt.Sprint(m["name"], m["bound"]))
+		}
+		return strings.Join(out, ",")
+	}
+	for path, want := range map[string]string{
+		"?q=" + x:                                  "tgt-" + x + "<nil>",
+		"?q=" + x + "&platform=oracle-test":        "",
+		"?q=" + x + "&platformType=oracle.v1":      "tgt-" + x + "<nil>",
+		"?q=" + x + "&scope=cloud/*":               "",
+		"?q=" + x + "&forSource=src-" + x:          "tgt-" + x + "true",
+		"?q=" + x + "&forSource=cloud-" + x:        "tgt-" + x + "<nil>",
+		"?q=" + x + "&forSource=test-" + x:         "", // no-test-to-prod
+		"?q=" + x + "&state=DEPRECATED&pageSize=1": "tgt-" + x + "<nil>",
+	} {
+		if r := v.do(t, olga, "GET", "/v1/admin/catalog/targets"+path, nil); r.code != 200 || names(r) != want {
+			t.Errorf("%s: %d %q, want %q", path, r.code, names(r), want)
+		}
+	}
+	if r := v.do(t, olga, "GET", "/v1/admin/catalog/targets?forSource=hidden-"+x, nil); r.code != 404 {
+		t.Errorf("forSource of a hidden source: %d", r.code)
+	}
+
+	card := v.do(t, olga, "GET", "/v1/admin/catalog/targets/tgt-"+x, nil)
+	var outcome map[string]any
+	for _, o := range card.body["outcomes"].([]any) {
+		if o.(map[string]any)["source"] == "src-"+x {
+			outcome = o.(map[string]any)
+		}
+	}
+	if card.code != 200 || len(card.body["accessLevels"].([]any)) != 1 || outcome == nil || outcome["allowed"] != true ||
+		fmt.Sprint(outcome["sides"]) != "[TARGET]" {
+		t.Errorf("card: %d %+v", card.code, card.body)
+	}
+	flows := v.do(t, viewer, "GET", "/v1/admin/catalog/targets/tgt-"+x+"/flows", nil)
+	fs, _ := flows.body["networkFlows"].([]any)
+	for _, f := range fs {
+		if strings.HasPrefix(f.(map[string]any)["declaredBy"].(string), "secret-store:") {
+			t.Errorf("a secret store flow: %v", f)
+		}
+	}
+	if flows.code != 200 || len(fs) == 0 || fs[len(fs)-1].(map[string]any)["declaredBy"] != "ligo" {
+		t.Errorf("flows: %+v", flows.body)
+	}
+	if r := v.do(t, olga, "GET", "/v1/admin/catalog/targets/nope-"+x, nil); r.code != 404 {
+		t.Errorf("unknown target: %d", r.code)
+	}
+
+	beyond := v.do(t, olga, "GET", "/v1/admin/catalog/sources?pageSize=200", nil)
+	got := names(beyond)
+	if beyond.code != 200 || !strings.Contains(got, "cloud-"+x) || !strings.Contains(got, "test-"+x) ||
+		strings.Contains(got, "hidden-"+x) || strings.Contains(got, "src-"+x) {
+		t.Errorf("sources beyond olga's: %q", got)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/catalog/sources?pageSize=200", nil); strings.Contains(names(r), x) {
+		t.Errorf("a viewer of * sees nothing beyond: %q", names(r))
 	}
 }

@@ -30,20 +30,27 @@ func notFound(format string, args ...any) error {
 
 // Target is a target as the catalog shows it.
 type Target struct {
-	Name, Scope, Platform, PlatformScope, State string
-	DisplayName, Description                    string
-	Labels                                      map[string]string
-	visibility                                  string
-	visibleTo                                   []string
+	Name          string            `json:"name"`
+	Scope         string            `json:"scope"`
+	Platform      string            `json:"platform"`
+	PlatformType  string            `json:"platformType"`
+	PlatformScope string            `json:"platformScope"`
+	State         string            `json:"state"`
+	DisplayName   string            `json:"displayName,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Bound         bool              `json:"bound,omitempty"` // to Query.ForSource
+	visibility    string
+	visibleTo     []string
 }
 
-const targetColumns = `name, scope, platform, platform_scope, state, coalesce(display_name, ''), coalesce(description, ''), labels,
-	visibility, visible_to`
+const targetColumns = `name, scope, platform, platform_type, platform_scope, state, coalesce(display_name, ''), coalesce(description, ''),
+	labels, visibility, visible_to`
 
-func scanTarget(row pgx.Row) (Target, error) {
+func scanTarget(row pgx.Row, extra ...any) (Target, error) {
 	var t Target
-	err := row.Scan(&t.Name, &t.Scope, &t.Platform, &t.PlatformScope, &t.State, &t.DisplayName, &t.Description, &t.Labels,
-		&t.visibility, &t.visibleTo)
+	err := row.Scan(append([]any{&t.Name, &t.Scope, &t.Platform, &t.PlatformType, &t.PlatformScope, &t.State, &t.DisplayName,
+		&t.Description, &t.Labels, &t.visibility, &t.visibleTo}, extra...)...)
 	return t, err
 }
 
@@ -62,43 +69,77 @@ func (r *Reader) Target(ctx context.Context, c changerequests.Caller, name strin
 
 // Query filters the catalog of targets.
 type Query struct {
-	Q          string // in the name, display name, description or labels
-	Deprecated bool   // DEPRECATED targets too
-	AfterName  string // keyset pagination (§7.2.3)
-	Limit      int    // default 50, at most 200
+	Q            string // in the name, display name, description or labels
+	Platform     string
+	PlatformType string
+	Scope        string // a scope pattern the target scope matches
+	Label        string // key=value
+	ForSource    string // only targets the policy allows for this source, marked if bound to it
+	Deprecated   bool   // DEPRECATED targets too
+	AfterName    string // keyset pagination (§7.2.3)
+	Limit        int    // default 50, at most 201
 }
 
 // Targets is the catalog (§7.2.4): the visible ACTIVE (and, on request,
 // DEPRECATED) targets that the interconnection policy allows for a scope
 // in which the caller is operator or trusted_automation, sorted by name.
-// The owners of a target, on its scope or its platform's, see it anyway.
+// The owners of a target, on its scope or its platform's, see it anyway,
+// except with ForSource, which keeps only what the policy allows for that
+// source (an ACTIVE source the caller sees; 404 otherwise).
 func (r *Reader) Targets(ctx context.Context, c changerequests.Caller, q Query) ([]Target, error) {
 	limit := q.Limit
 	switch {
 	case limit <= 0:
 		limit = 50
-	case limit > 200:
-		limit = 200
+	case limit > 201: // 200 and one more, which tells the caller a next page exists
+		limit = 201
 	}
 	states := []string{"ACTIVE"}
 	if q.Deprecated {
 		states = append(states, "DEPRECATED")
 	}
-	rows, err := r.DB.Query(ctx, "SELECT "+targetColumns+` FROM targets
+	var sourceID *uuid.UUID
+	var sourceScope string
+	if q.ForSource != "" {
+		var id uuid.UUID
+		var vis string
+		var visibleTo []string
+		err := r.DB.QueryRow(ctx, "SELECT id, scope, visibility, visible_to FROM sources WHERE name = $1 AND state = 'ACTIVE'", q.ForSource).
+			Scan(&id, &sourceScope, &vis, &visibleTo)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Visible([]string{sourceScope}, vis, visibleTo) {
+			return nil, notFound("source %q", q.ForSource)
+		}
+		if err != nil {
+			return nil, err
+		}
+		sourceID = &id
+	}
+	key, value, _ := strings.Cut(q.Label, "=")
+	rows, err := r.DB.Query(ctx, "SELECT "+targetColumns+`,
+			EXISTS (SELECT 1 FROM bindings b WHERE b.target_id = targets.id AND b.source_id = $7) FROM targets
 		WHERE state = ANY($1) AND name > $2 AND ($3 = '' OR name ILIKE '%' || $3 || '%' OR display_name ILIKE '%' || $3 || '%'
 			OR description ILIKE '%' || $3 || '%' OR labels::text ILIKE '%' || $3 || '%')
-		ORDER BY name`, states, q.AfterName, q.Q)
+			AND ($4 = '' OR platform = $4) AND ($5 = '' OR platform_type = $5) AND ($6 = '' OR labels ->> $6 = $8)
+		ORDER BY name`, states, q.AfterName, q.Q, q.Platform, q.PlatformType, key, sourceID, value)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Target
 	for rows.Next() && len(out) < limit {
-		t, err := scanTarget(rows)
+		var bound bool
+		t, err := scanTarget(rows, &bound)
 		if err != nil {
 			return nil, err
 		}
-		if t.visible(c) && (c.Grants.Sees(t.Scope, t.PlatformScope) || r.requestable(c, t.Scope)) {
+		switch {
+		case !t.visible(c) || q.Scope != "" && !governance.ScopeMatches(q.Scope, t.Scope):
+		case sourceID != nil:
+			if sourceScope == t.Scope || r.Policy.Evaluate(sourceScope, t.Scope).Allowed {
+				t.Bound = bound
+				out = append(out, t)
+			}
+		case c.Grants.Sees(t.Scope, t.PlatformScope) || r.requestable(c, t.Scope):
 			out = append(out, t)
 		}
 	}
@@ -127,10 +168,11 @@ func (r *Reader) requestable(c changerequests.Caller, targetScope string) bool {
 // Outcome is the governance outcome of a target for one of the caller's
 // sources: allowed with the sides a binding would need, or denied.
 type Outcome struct {
-	Source, SourceScope string
-	Allowed             bool
-	Rule                string   // the deciding rule, "default", or "" for the same scope
-	Sides               []string // when allowed
+	Source      string   `json:"source"`
+	SourceScope string   `json:"sourceScope"`
+	Allowed     bool     `json:"allowed"`
+	Rule        string   `json:"rule,omitempty"`  // the deciding rule, "default", or "" for the same scope
+	Sides       []string `json:"sides,omitempty"` // when allowed
 }
 
 // Outcomes evaluates a visible target against every source whose scope the
@@ -198,4 +240,39 @@ func (r *Reader) Binding(ctx context.Context, c changerequests.Caller, name stri
 		return nil, notFound("binding %q", name)
 	}
 	return b, err
+}
+
+// Source is a source as the catalog shows it to a target owner offering a
+// binding.
+type Source struct {
+	Name        string `json:"name"`
+	Scope       string `json:"scope"`
+	TrustDomain string `json:"trustDomain"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// Sources are the ACTIVE sources visible to the caller beyond their own:
+// LISTED or PUBLIC ones on scopes where the caller holds no role (§7.2.4),
+// sorted by name after afterName.
+func (r *Reader) Sources(ctx context.Context, c changerequests.Caller, afterName string, limit int) ([]Source, error) {
+	rows, err := r.DB.Query(ctx, `SELECT name, scope, trust_domain, coalesce(display_name, ''), coalesce(description, ''), visibility,
+		visible_to FROM sources WHERE state = 'ACTIVE' AND visibility <> 'PRIVATE' AND name > $1 ORDER BY name`, afterName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Source
+	for rows.Next() && len(out) < limit {
+		var s Source
+		var vis string
+		var visibleTo []string
+		if err := rows.Scan(&s.Name, &s.Scope, &s.TrustDomain, &s.DisplayName, &s.Description, &vis, &visibleTo); err != nil {
+			return nil, err
+		}
+		if !c.Grants.Sees(s.Scope) && c.Grants.Visible([]string{s.Scope}, vis, visibleTo) {
+			out = append(out, s)
+		}
+	}
+	return out, rows.Err()
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/sources"
@@ -38,6 +39,7 @@ import (
 // Server is the admin API.
 type Server struct {
 	Listener  config.AdminListener
+	Config    *config.Config    // the platforms and the governance policy
 	LDAP      Directory         // nil: Basic credentials are refused
 	Authz     *authz.Authorizer // grants of the principals
 	Bundles   x509bundle.Source // the accepted trust domains' bundles, for client SVIDs
@@ -47,6 +49,8 @@ type Server struct {
 	Sources   *sources.Service
 	Targets   *targets.Service
 	Workflows Workflows
+	Catalog   *catalog.Reader
+	Plugins   Plugins // the platforms' health and forms
 	Logger    *slog.Logger
 
 	limits limiter
@@ -65,6 +69,8 @@ func (s *Server) Handler() http.Handler {
 	s.sourceRoutes(mux)
 	s.targetRoutes(mux)
 	s.bindingRoutes(mux)
+	s.platformRoutes(mux)
+	s.catalogRoutes(mux)
 	return s.middleware(mux)
 }
 
