@@ -28,6 +28,7 @@ import (
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
@@ -205,6 +206,11 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		run((&workflows.Reconciler{Engine: engine, Interval: rc.Interval, Jitter: rc.Jitter, MaxConcurrent: rc.MaxConcurrent, Rotation: rotation}).Run)
 	}
 	run((&bindings.Propagator{Service: s.Bindings, Interval: cfg.Propagation.Interval, MaxConcurrent: cfg.Propagation.MaxConcurrent}).Run)
+	dispatcher, err := notify.NewDispatcher(pools.App, cfg.Notifications.Webhooks, log)
+	if err != nil {
+		return err
+	}
+	run(dispatcher.Run)
 
 	// 9. the admin listener (the workload listener comes in phase 8)
 	return cmd.listen(ctx, log, cfg, zones, s)
