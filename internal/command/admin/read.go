@@ -220,7 +220,7 @@ type GovernanceShow struct{ Base }
 
 func (cmd *GovernanceShow) Execute([]string) error { return cmd.get(path("governance"), nil) }
 
-// ChangeRequest: ligo cr list|get|approve|decline|withdraw|ratify|revert.
+// ChangeRequest: ligo cr list|get|approve|decline|withdraw|ratify|revert|review.
 type ChangeRequest struct {
 	List     ChangeRequestList     `command:"list" alias:"ls" description:"List change requests."`
 	Get      ChangeRequestGet      `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
@@ -229,6 +229,7 @@ type ChangeRequest struct {
 	Withdraw ChangeRequestWithdraw `command:"withdraw" description:"Withdraw own PENDING change request."`
 	Ratify   ChangeRequestRatify   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
 	Revert   ChangeRequestRevert   `command:"revert" description:"Revert an open break-glass change now."`
+	Review   Review                `command:"review" description:"Interactive queue of the change requests awaiting you: read them and approve or decline several at once (needs a terminal)."`
 }
 
 type ChangeRequestList struct {

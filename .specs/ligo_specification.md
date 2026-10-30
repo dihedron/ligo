@@ -4148,6 +4148,7 @@ type ChangeRequestCommand struct {
 	Withdraw CRWithdrawCommand `command:"withdraw" description:"Withdraw own PENDING change request."`
 	Ratify   CRRatifyCommand   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
 	Revert   CRRevertCommand   `command:"revert" description:"Revert an open break-glass change now."`
+	Review   CRReviewCommand   `command:"review" description:"Interactive queue of the change requests awaiting you: read them and approve or decline several at once (needs a terminal)."`
 }
 
 type CRListCommand struct {
@@ -4202,6 +4203,16 @@ type CRRevertCommand struct {
 	Args struct {
 		ID string `positional-arg-name:"cr-id" description:"Break-glass change request UUID."`
 	} `positional-args:"yes" required:"yes"`
+}
+
+// CRReviewCommand is interactive (§8.4 "Output"): the requests awaiting the
+// caller, oldest first, with details and diffs; several are approved side
+// by side with the payloadSha256 that was shown, or declined with a reason.
+type CRReviewCommand struct {
+	ClientOptions
+	Scope string `long:"scope" description:"Only requests with a scope matching this pattern."`
+	Kind  string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
+	Zone  string `short:"z" long:"zone" description:"Only requests of this zone."`
 }
 
 type CRWithdrawCommand struct {
