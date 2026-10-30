@@ -79,6 +79,9 @@ func readManifest(file string) ([]document, error) {
 		}
 		docs = append(docs, d)
 	}
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("manifest %s: no document", file)
+	}
 	slices.SortStableFunc(docs, func(a, b document) int { return order[a.kind] - order[b.kind] })
 	return docs, nil
 }

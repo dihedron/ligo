@@ -79,22 +79,29 @@ func (o *Options) Connect(ctx context.Context) (*Client, error) {
 			c.Close()
 			return nil, err
 		}
-	} else if c.user, c.pass, err = o.credentials(); err != nil {
-		return nil, err
+	}
+	if o.Username != "" || o.SpiffeSocket == "" {
+		if c.user, c.pass, err = o.credentials(); err != nil {
+			c.Close()
+			return nil, err
+		}
 	}
 	c.http = &http.Client{Timeout: 90 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
 	return c, nil
 }
 
-// svidConfig presents the source's SVID; without --ca-cert the server is
-// verified with the source's bundle and must be exactly --server-id.
+// svidConfig presents the source's SVID, unless --username asks for Basic
+// credentials; without --ca-cert the server is verified with the source's
+// bundle and must be exactly --server-id.
 func (o *Options) svidConfig(cfg *tls.Config, source *workloadapi.X509Source) (*tls.Config, error) {
 	svid, err := source.GetX509SVID()
 	if err != nil {
 		return nil, fmt.Errorf("client: --spiffe-socket: %w", err)
 	}
 	if cfg.RootCAs != nil {
-		cfg.GetClientCertificate = tlsconfig.GetClientCertificate(source)
+		if o.Username == "" {
+			cfg.GetClientCertificate = tlsconfig.GetClientCertificate(source)
+		}
 		return cfg, nil
 	}
 	id := o.ServerID
@@ -104,6 +111,9 @@ func (o *Options) svidConfig(cfg *tls.Config, source *workloadapi.X509Source) (*
 	server, err := spiffeid.FromString(id)
 	if err != nil {
 		return nil, fmt.Errorf("client: --server-id %q: %w", id, err)
+	}
+	if o.Username != "" {
+		return tlsconfig.TLSClientConfig(source, tlsconfig.AuthorizeID(server)), nil
 	}
 	return tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(server)), nil
 }

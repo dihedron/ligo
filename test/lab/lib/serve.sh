@@ -40,6 +40,127 @@ serve_install() {
 	inner_exec ligo1 systemctl restart ligo
 	serve_wait
 	info "ligo serves on ligo1:9443 (database $SERVE_DB)"
+	serve_cli_users
+}
+
+# CLI_USERS: the users on ligo1 that run the CLI, and their SPIFFE IDs on
+# the prod agent (unix:uid only, like the core entry).
+CLI_USERS=("ligo-ops ops/olga" "ligo-approver ops/dora")
+
+# serve_cli_users: the users, their entries, and a wait until the agent
+# issues each its SVID.
+serve_cli_users() {
+	local pair user id uid
+	for pair in "${CLI_USERS[@]}"; do
+		user="${pair%% *}" id="spiffe://prod.lab/${pair#* }"
+		inner_exec ligo1 id -u "$user" >/dev/null 2>&1 || inner_exec ligo1 useradd -m -s /bin/bash "$user"
+		uid="$(inner_exec ligo1 id -u "$user")"
+		spire prod entry show -spiffeID "$id" 2>/dev/null | grep -q "unix:uid:$uid" ||
+			spire prod entry create -parentID "spiffe://prod.lab/node/ligo1" -spiffeID "$id" -selector "unix:uid:$uid" >/dev/null ||
+			die "cannot register $id"
+		for _ in $(seq 1 30); do
+			lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 \
+				-socketPath /run/spire/prod/agent.sock 2>/dev/null | grep -q "SPIFFE ID:.*$id" && break
+			sleep 1
+		done
+		lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 \
+			-socketPath /run/spire/prod/agent.sock 2>/dev/null | grep -q "SPIFFE ID:.*$id" || die "the prod agent does not issue $id to $user"
+		info "CLI user $user on ligo1 holds $id"
+	done
+}
+
+# cli USER ARGS: runs the ligo CLI on ligo1 as USER (ligo-ops,
+# ligo-approver, or ligo for olivia's Basic credentials), against the
+# service, with the prod agent's socket.
+cli() {
+	local user="$1" uid
+	shift
+	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" # not the caller's stdin: it may be a manifest for ligo
+	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env LIGO_SERVER_URL=https://ligo1.ligo.lab:9443 \
+		--env LIGO_SPIFFE_SOCKET=unix:///run/spire/prod/agent.sock -- /usr/local/bin/ligo "$@"
+}
+
+# cli_approve KIND NAME: ligo-approver approves every side of the
+# request awaiting it for KIND NAME, until it is applied.
+cli_approve() {
+	local json id sha side status
+	json="$(cli ligo-approver -o json cr list --awaiting-me --kind "$1" --name "$2")" || die "cr list $1 $2"
+	id="$(jq -r '.items[0].id // empty' <<<"$json")"
+	sha="$(jq -r '.items[0].payloadSha256' <<<"$json")"
+	[[ -n "$id" ]] || die "nothing awaits ligo-approver for $1 $2"
+	for side in $(jq -r '.items[0].awaitingApproval[]' <<<"$json"); do
+		status="$(cli ligo-approver -o json cr approve "$id" --sha256 "$sha" --side "$side" -m e2e | jq -r '.[0].changeRequest.status')" ||
+			die "cr approve $id --side $side"
+		[[ "$status" == APPLIED ]] && break
+	done
+	info "CLI: $1 $2 approved ($id, $status)"
+}
+
+# cli_phase NAME PHASE: waits until the binding NAME is in PHASE ("" for
+# gone).
+cli_phase() {
+	local phase=""
+	for _ in $(seq 1 60); do
+		phase="$(cli ligo-ops -o json get binding "$1" 2>/dev/null | jq -r '.status.phase')" || phase=""
+		[[ "$phase" == "$2" ]] && return
+		sleep 1
+	done
+	die "binding $1 is ${phase:-gone}, not ${2:-gone}"
+}
+
+# serve_cli: the CLI e2e (.specs/ligo-test-environment.md).
+serve_cli() {
+	section "CLI e2e of ligo serve"
+	local x target source binding out revision pw
+	x="$(openssl rand -hex 4)" target="e2e-cli-ledger-$x" source="e2e-cli-src-$x" binding="e2e-cli-$x"
+	cli ligo-ops apply -f - <<YAML || die "apply the target"
+kind: Target
+metadata: {name: $target, platform: pg-ledger, scope: dc/corp-prod/ledger}
+definition: {database: ledger, schema: ledger}
+accessLevels: [{name: read, grants: {roles: [LEDGER_RO_ROLE]}}]
+networkFlows: [{name: ledger, purpose: DATA, protocol: TCP, destination: pg.ligo.lab, ports: [5432], tls: true, serverName: pg.ligo.lab}]
+visibility: {mode: PRIVATE}
+YAML
+	cli_approve target "$target"
+	out="$(cli ligo-ops apply -f - <<YAML
+kind: Source
+metadata: {name: $source}
+identity:
+  trustDomain: prod.lab
+  svidRegex: '^spiffe://prod\.lab/ns/cli/sa/w$x\$'
+  sampleSpiffeIds: ['spiffe://prod.lab/ns/cli/sa/w$x']
+visibility: {mode: PRIVATE}
+---
+{kind: Binding, name: $binding, source: $source, target: $target, accessLevel: read}
+YAML
+)" || die "apply the source and its binding"
+	grep -q "ligo cr approve" <<<"$out" || die "apply printed no approver command: $out"
+	local json
+	json="$(cli ligo-approver -o json cr list --awaiting-me --kind binding --name "$binding")" || die "cr list $binding"
+	if out="$(cli ligo-approver cr approve "$(jq -r '.items[0].id' <<<"$json")" --sha256 "$(jq -r '.items[0].payloadSha256' <<<"$json")" \
+		--side "$(jq -r '.items[0].awaitingApproval[0]' <<<"$json")" -m early 2>&1)"; then
+		die "the binding was approved before its source"
+	fi
+	grep -q dependency-pending <<<"$out" || die "approving the binding early: $out"
+	info "CLI: the binding waits for its source (dependency-pending)"
+	cli_approve source "$source"
+	cli_approve binding "$binding"
+	cli_phase "$binding" ACTIVE
+	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
+	out="$(cli ligo-ops flows "$binding")" || die "flows of $binding"
+	grep -q "target:$target" <<<"$out" || die "flows of $binding: $out"
+	info "CLI: $binding is ACTIVE, with its flows"
+	pw="$LIGO1_E2E/olivia.pw"
+	ldap_password olivia | inner_exec ligo1 sh -c "umask 077 && cat >$pw && chown ligo:ligo $pw"
+	out="$(cli ligo get binding "$binding" --username olivia --password-file "$pw")" || die "olivia cannot read $binding"
+	grep -q "$binding" <<<"$out" || die "olivia reads: $out"
+	info "CLI: olivia reads $binding with LDAP Basic credentials"
+	revision="$(cli ligo-ops -o json get binding "$binding" | jq -r '.metadata.revision')"
+	cli ligo-ops delete binding "$binding" -r "$revision" >/dev/null || die "delete $binding"
+	cli_approve binding "$binding"
+	cli_phase "$binding" ""
+	[[ "$(cli ligo-approver -o json audit verify | jq -r .valid)" == true ]] || die "audit verify"
+	info "CLI: $binding revoked and deleted; the audit chain verifies"
 }
 
 # serve_db: the database ligo_serve, once, migrated as ligo_migrator from
@@ -49,7 +170,7 @@ serve_db() {
 		pg_superuser -q -f - <"$LAB_DIR/sql/serve-db.sql" || die "pg: cannot create the database $SERVE_DB"
 		info "database $SERVE_DB created"
 	fi
-	(cd "$REPO_DIR" && LIGO_MIGRATOR_DSN="$(pg_dsn migrator "" "" "$SERVE_DB")" go run ./test/lab/tools/migrate) ||
+	(cd "$REPO_DIR" && LIGO_MIGRATOR_DSN="$(pg_dsn migrator "" "" "$SERVE_DB")" go run ./cmd/ligo migrate) ||
 		die "cannot migrate $SERVE_DB"
 	info "database $SERVE_DB migrated"
 }
@@ -273,5 +394,6 @@ serve_test() {
 	serve_wait
 	info "start: ligo serves again"
 	serve_e2e '^TestServeE2ERestarted$' || die "TestServeE2ERestarted failed"
+	serve_cli
 	info "e2e of ligo serve passed"
 }

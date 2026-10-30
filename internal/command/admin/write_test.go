@@ -53,7 +53,7 @@ metadata: {name: s1}
 		!docs[0].creates() || docs[1].creates() {
 		t.Errorf("documents: %v %+v", got, docs)
 	}
-	for text, want := range map[string]string{"kind: Pod\nname: x\n": "kind must be", "kind: Binding\n": "has no name", "- 1\n": "not an object",
+	for text, want := range map[string]string{"": "no document", "---\n": "no document", "kind: Pod\nname: x\n": "kind must be", "kind: Binding\n": "has no name", "- 1\n": "not an object",
 		"apiVersion: v1\nkind: Source\nmetadata: {name: s}\n": "apiVersion", "kind: [": "manifest"} {
 		if _, err := readManifest(manifest(t, text)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v", text, err)

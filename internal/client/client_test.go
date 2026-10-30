@@ -163,6 +163,28 @@ func TestSVID(t *testing.T) {
 	if _, err := (&Options{ServerURL: ligo.URL, SpiffeSocket: socket, ServerID: "not an id"}).Connect(ctx); err == nil {
 		t.Error("an invalid --server-id")
 	}
+
+	// --username: Basic credentials, no client SVID; the socket only verifies the server
+	svid := ca.SVID(t, "spiffe://prod.lab/ns/sys/sa/ligo")
+	k, _ := x509.ParsePKCS8PrivateKey(svid.GetX509SvidKey())
+	basic := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, _, _ := r.BasicAuth()
+		_ = json.NewEncoder(w).Encode(map[string]any{"user": user, "certs": len(r.TLS.PeerCertificates)})
+	}))
+	basic.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{svid.GetX509Svid()}, PrivateKey: k}}, ClientAuth: tls.RequestClientCert}
+	basic.StartTLS()
+	t.Cleanup(basic.Close)
+	pw := filepath.Join(t.TempDir(), "pw")
+	_ = os.WriteFile(pw, []byte("pw"), 0o600)
+	c, err = (&Options{ServerURL: basic.URL, SpiffeSocket: socket, Username: "olivia", PasswordFile: pw}).Connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var who map[string]any
+	if err := c.Do(ctx, "GET", "/v1/admin/x", nil, nil, &who); err != nil || who["user"] != "olivia" || who["certs"] != float64(0) {
+		t.Errorf("Basic over a SPIRE-verified server: %v %v", who, err)
+	}
+	c.Close()
 }
 
 // TestPrint: JSON and YAML as they are; tables from columns over items,
