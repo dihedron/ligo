@@ -81,6 +81,24 @@ func (b BreakGlassPolicy) MarshalJSON() ([]byte, error) {
 	}{b.Scopes, int64(b.DefaultTTL.Seconds()), int64(b.MaxTTL.Seconds()), b.MaxOpen, int64(b.WarnBefore.Seconds())})
 }
 
+// UnmarshalJSON reads the canonical form back, for the policy of a previous
+// CONFIG_LOADED entry.
+func (b *BreakGlassPolicy) UnmarshalJSON(data []byte) error {
+	var v struct {
+		Scopes     []string `json:"scopes"`
+		DefaultTTL int64    `json:"defaultTtlSeconds"`
+		MaxTTL     int64    `json:"maxTtlSeconds"`
+		MaxOpen    int      `json:"maxOpen"`
+		WarnBefore int64    `json:"warnBeforeSeconds"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*b = BreakGlassPolicy{Scopes: v.Scopes, DefaultTTL: time.Duration(v.DefaultTTL) * time.Second, MaxTTL: time.Duration(v.MaxTTL) * time.Second,
+		MaxOpen: v.MaxOpen, WarnBefore: time.Duration(v.WarnBefore) * time.Second}
+	return nil
+}
+
 // PlatformScopes is the governance part of a platform.
 type PlatformScopes struct {
 	Platform     string   `json:"platform"`
