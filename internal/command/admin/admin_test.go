@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,7 @@ type fake struct {
 	srv      *httptest.Server
 	answers  map[string][]string // path -> answers, the last one repeats
 	requests []string            // "METHOD path?query"
+	bodies   []string            // the request bodies, in order
 }
 
 func newFake(t *testing.T, answers map[string][]string) *fake {
@@ -30,6 +32,8 @@ func newFake(t *testing.T, answers map[string][]string) *fake {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.requests = append(f.requests, r.Method+" "+r.URL.RequestURI())
+		b, _ := io.ReadAll(r.Body)
+		f.bodies = append(f.bodies, string(b))
 		list, ok := f.answers[r.URL.Path]
 		if !ok {
 			w.Header().Set("Content-Type", "application/problem+json")

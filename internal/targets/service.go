@@ -65,7 +65,7 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, err
 	}
 	if n > 0 {
-		return nil, invalid("metadata.name %q is in use", t.Metadata.Name)
+		return nil, refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", t.Metadata.Name)
 	}
 	if err := s.Rules.validate(ctx, s.Validate, &t, nil, authorize(c)); err != nil {
 		return nil, err
@@ -318,7 +318,7 @@ func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, actor strin
 		null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
 		jsonb(t.Visibility.VisibleTo, "[]"), actor)
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_targets_name" {
-		return invalid("metadata.name %q is in use", m.Name)
+		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", m.Name)
 	}
 	if err != nil {
 		return err

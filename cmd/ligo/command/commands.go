@@ -20,6 +20,12 @@ type Commands struct {
 	List     admin.List          `command:"list" alias:"ls" description:"List sources, targets or bindings."`
 	Platform admin.Platform      `command:"platform" description:"Inspect configured platforms and their UI schemas."`
 	Catalog  admin.Catalog       `command:"catalog" description:"Search the catalog of targets and show their flows."`
+	Apply    admin.Apply         `command:"apply" description:"Submit create or update change requests from a YAML/JSON manifest (kind Source, Target or Binding)."`
+	Delete   admin.Delete        `command:"delete" alias:"rm" description:"Revoke a binding, or retire a source or target."`
+	Retry    admin.Retry         `command:"retry" description:"Retry a binding in FAILED or DELETE_FAILED phase."`
+	Rotate   admin.Rotate        `command:"rotate" description:"Trigger an immediate credential rotation (reapply) on an ACTIVE binding."`
+	Source   admin.Source        `command:"source" description:"Source operations: test a regex, deprecate, reactivate."`
+	Target   admin.Target        `command:"target" description:"Target operations: deprecate, reactivate, access levels, bulk revocation."`
 	Flows    admin.Flows         `command:"flows" description:"Show the effective network flows of a binding (JSON for the verification tool)."`
 	CR       admin.ChangeRequest `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
 	Audit    admin.Audit         `command:"audit" description:"Query and verify the cryptographic audit log."`

@@ -158,7 +158,7 @@ func TestAC60(t *testing.T) {
 	if state != "ACTIVE" || revision != 1 {
 		t.Errorf("state %s revision %d", state, revision)
 	}
-	if _, err := s.Create(ctx, alice, body(t, src, nil)); slug(err) != "validation-failed" {
+	if _, err := s.Create(ctx, alice, body(t, src, nil)); slug(err) != "invalid-transition" { // §8.4: a create of an existing name
 		t.Errorf("name in use: %v", err)
 	}
 }

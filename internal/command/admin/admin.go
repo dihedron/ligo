@@ -7,7 +7,6 @@ import (
 	"context"
 	"io"
 	"net/url"
-	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -35,6 +34,20 @@ func (b *Base) format() string {
 
 // call connects, runs fn, and prints what it returns with columns.
 func (b *Base) call(fn func(ctx context.Context, c *client.Client) (any, []client.Column, error)) error {
+	var v any
+	var columns []client.Column
+	err := b.connected(func(ctx context.Context, c *client.Client) (err error) {
+		v, columns, err = fn(ctx, c)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return client.Print(b.writer(), b.format(), v, columns...)
+}
+
+// connected connects and runs fn until it returns or a signal stops it.
+func (b *Base) connected(fn func(ctx context.Context, c *client.Client) error) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	c, err := b.Connect(ctx)
@@ -42,15 +55,7 @@ func (b *Base) call(fn func(ctx context.Context, c *client.Client) (any, []clien
 		return err
 	}
 	defer c.Close()
-	v, columns, err := fn(ctx, c)
-	if err != nil {
-		return err
-	}
-	out := b.out
-	if out == nil {
-		out = os.Stdout
-	}
-	return client.Print(out, b.format(), v, columns...)
+	return fn(ctx, c)
 }
 
 // get prints the answer of GET path.

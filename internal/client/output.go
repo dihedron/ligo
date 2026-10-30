@@ -52,7 +52,7 @@ func Print(w io.Writer, format string, v any, columns ...Column) error {
 	for _, r := range rows {
 		cells := make([]string, len(columns))
 		for i, c := range columns {
-			cells[i] = cell(lookup(r, c.Path))
+			cells[i] = cell(Lookup(r, c.Path))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(cells, "\t"))
 	}
@@ -62,8 +62,8 @@ func Print(w io.Writer, format string, v any, columns ...Column) error {
 	return tw.Flush()
 }
 
-// lookup follows a dotted path through maps.
-func lookup(v any, path string) any {
+// Lookup follows a dotted path, such as metadata.name, through maps.
+func Lookup(v any, path string) any {
 	for _, k := range strings.Split(path, ".") {
 		m, ok := v.(map[string]any)
 		if !ok {

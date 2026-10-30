@@ -173,9 +173,10 @@ func (cmd *AuditVerify) Execute([]string) error {
 		client.Column{Header: "FIRST BROKEN", Path: "firstBroken"})
 }
 
-// Maintenance: ligo maintenance status (on and off come with the write
-// commands).
+// Maintenance: ligo maintenance on|off|status.
 type Maintenance struct {
+	On     MaintenanceOn     `command:"on" description:"Enable maintenance mode on all replicas (requires admin.full_access)."`
+	Off    MaintenanceOff    `command:"off" description:"Disable maintenance mode (requires admin.full_access)."`
 	Status MaintenanceStatus `command:"status" description:"Show maintenance mode and the number of in-flight bindings."`
 }
 
@@ -209,20 +210,25 @@ func (cmd *MaintenanceStatus) Execute([]string) error {
 	})
 }
 
-// Governance: ligo governance show (check comes with the write commands).
+// Governance: ligo governance show|check.
 type Governance struct {
-	Show GovernanceShow `command:"show" description:"Show the governance policy in force and its SHA-256."`
+	Show  GovernanceShow  `command:"show" description:"Show the governance policy in force and its SHA-256."`
+	Check GovernanceCheck `command:"check" description:"Evaluate a planned change: scopes, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
 }
 
 type GovernanceShow struct{ Base }
 
 func (cmd *GovernanceShow) Execute([]string) error { return cmd.get(path("governance"), nil) }
 
-// ChangeRequest: ligo cr list|get (the decisions come with the write
-// commands).
+// ChangeRequest: ligo cr list|get|approve|decline|withdraw|ratify|revert.
 type ChangeRequest struct {
-	List ChangeRequestList `command:"list" alias:"ls" description:"List change requests."`
-	Get  ChangeRequestGet  `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
+	List     ChangeRequestList     `command:"list" alias:"ls" description:"List change requests."`
+	Get      ChangeRequestGet      `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
+	Approve  ChangeRequestApprove  `command:"approve" description:"Approve one or more sides of a PENDING change request; applies it when every required side is approved (four-eyes)."`
+	Decline  ChangeRequestDecline  `command:"decline" description:"Decline one or more sides of a PENDING change request."`
+	Withdraw ChangeRequestWithdraw `command:"withdraw" description:"Withdraw own PENDING change request."`
+	Ratify   ChangeRequestRatify   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
+	Revert   ChangeRequestRevert   `command:"revert" description:"Revert an open break-glass change now."`
 }
 
 type ChangeRequestList struct {
@@ -257,10 +263,12 @@ func (cmd *ChangeRequestGet) Execute([]string) error {
 	return cmd.get(path("change-requests", cmd.Args.ID), nil)
 }
 
-// BreakGlass: ligo break-glass list (apply and delete come with the write
-// commands).
+// BreakGlass: ligo break-glass apply|delete|list (Basic credentials only,
+// §7.2.3).
 type BreakGlass struct {
-	List BreakGlassList `command:"list" alias:"ls" description:"List open and recent break-glass changes."`
+	Apply  BreakGlassApply  `command:"apply" description:"Emergency create or update from a manifest."`
+	Delete BreakGlassDelete `command:"delete" description:"Emergency revocation (not reverted on expiry)."`
+	List   BreakGlassList   `command:"list" alias:"ls" description:"List open and recent break-glass changes."`
 }
 
 type BreakGlassList struct {
