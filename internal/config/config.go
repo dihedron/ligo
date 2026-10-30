@@ -422,6 +422,12 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Plugins.RPCTimeout == 0 {
+		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6
+	}
+	if c.Plugins.MaxConcurrentRPCsPerInstance == 0 {
+		c.Plugins.MaxConcurrentRPCsPerInstance = 4 // §5.3 rule 7
+	}
 	if c.Authorization.Approval.RequireDistinctApproversAcrossScopes == nil {
 		c.Authorization.Approval.RequireDistinctApproversAcrossScopes = new(bool)
 		*c.Authorization.Approval.RequireDistinctApproversAcrossScopes = true

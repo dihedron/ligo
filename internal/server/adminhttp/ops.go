@@ -69,20 +69,7 @@ func (s *Server) putMaintenance(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, &changerequests.Error{Status: 422, Slug: "validation-failed", Detail: "reason: required to enable, at most 512 characters"})
 		return
 	}
-	action := "SYSTEM_MAINTENANCE_DISABLED"
-	if body.Enabled {
-		action = "SYSTEM_MAINTENANCE_ENABLED"
-	}
-	err := pgx.BeginFunc(r.Context(), s.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `UPDATE system_settings SET maintenance_mode = $1, maintenance_reason = nullif($2, ''),
-			changed_by = $3, changed_at = now()`, body.Enabled, body.Reason, c.ID()); err != nil {
-			return err
-		}
-		snap, _ := json.Marshal(map[string]string{"reason": body.Reason})
-		_, err := audit.Append(r.Context(), tx, audit.Entry{Action: action, Actor: c.ID(), ActorGroups: c.Principal.Groups, Snapshot: snap})
-		return err
-	})
-	if err != nil {
+	if err := changerequests.SetMaintenance(r.Context(), s.DB, c.ID(), c.Principal.Groups, body.Enabled, body.Reason); err != nil {
 		s.fail(w, r, err)
 		return
 	}

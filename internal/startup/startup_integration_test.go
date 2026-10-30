@@ -205,6 +205,7 @@ func TestConfigLoaded(t *testing.T) {
 	if len(loaded) != 1 || !strings.Contains(loaded[0], c.policy.SHA256()) || !strings.Contains(loaded[0], `"requiredScopes"`) {
 		t.Fatalf("CONFIG_LOADED: %v", loaded)
 	}
+	before = v.lastAudit(t) // the first load compared with whatever started last, maybe another test's configuration
 	if err := c.configLoaded(ctx); err != nil || len(v.audited(t, before, "CONFIG_GOVERNANCE_POLICY_CHANGED")) != 0 {
 		t.Errorf("same policy reported as changed (%v)", err)
 	}
@@ -391,10 +392,10 @@ func TestPlatforms(t *testing.T) {
 	ctx := context.Background()
 	x := v.x
 	c := v.checks(t)
-	before := v.lastAudit(t)
 	if err := c.configLoaded(ctx); err != nil {
 		t.Fatal(err)
 	}
+	before := v.lastAudit(t) // after the first load, which compared with whatever started last
 	c = v.checks(t)
 	pl := &c.Config.PlatformProviders[0].Platforms[0]
 	pl.NetworkFlows = nil

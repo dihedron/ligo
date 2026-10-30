@@ -186,7 +186,8 @@ func TestDefaults(t *testing.T) {
 	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
-		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" {
+		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
+		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 {
 		t.Errorf("defaults: %+v", cfg)
 	}
 	if err := Validate(cfg, Options{}); err == nil {

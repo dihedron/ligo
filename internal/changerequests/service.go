@@ -275,6 +275,25 @@ func Maintenance(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// SetMaintenance turns maintenance mode on or off and audits it in one
+// transaction; the UPDATE waits for the changes that already passed the
+// check (§10.3).
+func SetMaintenance(ctx context.Context, db *pgxpool.Pool, actor string, groups []string, enabled bool, reason string) error {
+	action := "SYSTEM_MAINTENANCE_DISABLED"
+	if enabled {
+		action = "SYSTEM_MAINTENANCE_ENABLED"
+	}
+	return pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE system_settings SET maintenance_mode = $1, maintenance_reason = nullif($2, ''),
+			changed_by = $3, changed_at = now()`, enabled, reason, actor); err != nil {
+			return err
+		}
+		snap, _ := json.Marshal(map[string]string{"reason": reason})
+		_, err := audit.Append(ctx, tx, audit.Entry{Action: action, Actor: actor, ActorGroups: groups, Snapshot: snap})
+		return err
+	})
+}
+
 // SystemFailed records r, a system request whose validation failed before
 // it could apply, as FAILED_TO_APPLY, with extra audit entries (§6.3: a
 // revert that no longer validates is a failed revert).
