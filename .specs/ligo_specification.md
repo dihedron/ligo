@@ -4008,6 +4008,8 @@ ligo/
 
 The `ligo` binary uses `github.com/jessevdk/go-flags` with command/subcommand struct embedding. (Informative: these are the same conventions as `github.com/dihedron/openstack-spiffe` and `github.com/dihedron/lxd-spiffe`. The struct listing below is the authoritative definition; implementers need not consult those repositories.) Every subcommand implements `flags.Commander` (`Execute(args []string) error`).
 
+- **Server verification (Normative).** With `--ca-cert`, the Admin server's certificate is verified against that bundle and the URL's host name (`tls_source: file`). Without it and with `--spiffe-socket`, it is verified against the X.509 bundle of the socket for the client SVID's trust domain, and its SPIFFE ID MUST equal `--server-id` (`tls_source: spiffe`); any other ID is refused, so that no other workload of the trust domain can pose as the Admin API. Without either, the system roots and the host name apply.
+- **Output (Normative).** Every command writes its result to standard output as `table` (aligned columns), `json` or `yaml` (`--output`) and needs no terminal, so that automation can parse it; errors, including the server's problem details, go to standard error with a non-zero exit status. Interactive views, such as a review queue of pending change requests, are separate commands, never the default of a scriptable one.
 - **Credentials (Normative).** The CLI MUST NOT accept a password as a flag value or environment variable, because those are visible in the process list, shell history and the process environment. The password is read from `--password-file` (which MUST NOT be group- or world-readable; the CLI refuses otherwise), or prompted for on a terminal without echo. Automation SHOULD authenticate with an X.509-SVID (`--spiffe-socket`) instead of LDAP.
 
 **Normative** (CLI struct hierarchy and struct tags):
@@ -4025,6 +4027,7 @@ type ClientOptions struct {
 	ServerURL    string `short:"s" long:"server" env:"LIGO_SERVER_URL" default:"https://localhost:9443" description:"Admin server base URL."`
 	CACert       string `long:"ca-cert" env:"LIGO_CA_CERT" description:"Path to CA certificate bundle for verifying the Admin server."`
 	SpiffeSocket string `long:"spiffe-socket" env:"LIGO_SPIFFE_SOCKET" description:"SPIRE Workload API socket path for mTLS X.509-SVID authentication."`
+	ServerID     string `long:"server-id" env:"LIGO_SERVER_ID" description:"SPIFFE ID the Admin server's SVID must have when it is verified with the socket's bundle (no --ca-cert); default spiffe://<the client SVID's trust domain>/ns/sys/sa/ligo."`
 	Username     string `short:"u" long:"username" env:"LIGO_USERNAME" description:"LDAP username (only when server allow_basic_auth is enabled)."`
 	PasswordFile string `long:"password-file" env:"LIGO_PASSWORD_FILE" description:"File containing the LDAP password (only when server allow_basic_auth is enabled). If omitted and no SPIFFE socket is set, the password is prompted for without echo."`
 }
@@ -4050,6 +4053,14 @@ type Options struct {
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
 	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
+	Migrate MigrateCommand      `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
+}
+
+// MigrateCommand applies the embedded, forward-only migrations as
+// ligo_migrator; the DSN is read from the environment variable it names,
+// never from the command line, and MUST use sslmode=verify-full.
+type MigrateCommand struct {
+	DSNEnv string `long:"dsn-env" default:"LIGO_MIGRATOR_DSN" description:"Environment variable holding the ligo_migrator DSN."`
 }
 
 // ResourceArgs names one resource: `ligo get binding payments-ledger-workers-ledger`.
@@ -4546,7 +4557,7 @@ type GovCheckCommand struct {
   3. roll out the new version;
   4. `ligo maintenance off`.
 - This avoids depending on cross-version workflow recovery (EXT-09).
-- Migrations are forward-only and run by `ligo_migrator` before rollout.
+- Migrations are forward-only and run by `ligo_migrator` before rollout, with `ligo migrate` (§8.4), which applies the migrations embedded in the new binary in order, each in its own transaction, under an advisory lock, and refuses to start if an applied migration's content changed.
 
 ### 10.4 Backup and disaster recovery
 - `public` and `dbos` live in the same database and MUST be backed up together (PITR).

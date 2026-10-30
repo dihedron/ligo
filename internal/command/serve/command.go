@@ -25,6 +25,7 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/pluginmgr"
@@ -50,13 +51,19 @@ type Serve struct {
 	AcceptScopeChanges    bool   `long:"accept-scope-changes" description:"Re-scope sources, targets and bindings whose stored scopes no longer match the configuration (§8.2 rule 17; audited, pending change requests fail)."`
 
 	insecureDB bool // the tests' database container has no TLS; never set by a flag
+	level      slog.Level
+}
+
+// SetGlobals receives the root's --log-level.
+func (cmd *Serve) SetGlobals(g *client.Globals) {
+	_ = cmd.level.UnmarshalText([]byte(g.LogLevel)) // the parser allows debug, info, warn and error only
 }
 
 // Execute runs until SIGINT or SIGTERM, then shuts down in order.
 func (cmd *Serve) Execute([]string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	log := slog.New(pluginsdk.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, nil)))
+	log := slog.New(pluginsdk.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cmd.level})))
 	if err := cmd.run(ctx, log); err != nil {
 		log.Error("ligo serve", "error", err)
 		return err
