@@ -21,6 +21,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/adminauth"
+	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
@@ -94,6 +95,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := config.Validate(cfg, config.Options{InsecureDev: cmd.InsecureDev}); err != nil {
 		return err
 	}
+	// every audited event is announced from now on, startup's included (§7.5)
+	audit.Hook = (&notify.Outbox{Webhooks: cfg.Notifications.Webhooks}).Audited
+	defer func() { audit.Hook = nil }()
 
 	// 2. database, and the checks that need it
 	pg := cfg.Storage.Postgres
