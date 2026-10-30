@@ -361,6 +361,26 @@ type pluginConfig struct {
 	} `yaml:"bootstrap_credential"`
 }
 
+// AllowedEndpoints returns the platform's allowed_endpoints (§5.7).
+func (p *Platform) AllowedEndpoints() []string {
+	pc, _ := hostKeys(&p.Config) // validated at load
+	return pc.AllowedEndpoints
+}
+
+// PrivilegeBounds returns the platform's privilege bounds in the plugin's
+// terms (§3.4), or nil.
+// shortcut: grantable_roles is the only bound the database plugins know;
+// read others here when a plugin type declares them
+func (p *Platform) PrivilegeBounds() map[string]any {
+	var b struct {
+		GrantableRoles []string `yaml:"grantable_roles"`
+	}
+	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || b.GrantableRoles == nil {
+		return nil
+	}
+	return map[string]any{"grantableRoles": b.GrantableRoles}
+}
+
 // hostKeys decodes the keys ligo reads from a plugin's config node.
 func hostKeys(n *yaml.Node) (pluginConfig, error) {
 	var pc pluginConfig

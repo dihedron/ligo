@@ -2,7 +2,9 @@
 // step 2): the CONFIG_LOADED audit and the governance policy's changes,
 // references to platforms and plugins that no longer exist (rules 10 and
 // 11), names of existing resources (rule 16), scope drift and re-scoping
-// (rule 17), and interconnection violations (rule 18).
+// (rule 17), and interconnection violations (rule 18); after the plugins
+// start (step 5), the store strategies (rule 10) and the platforms' current
+// bounds (rule 19).
 package startup
 
 import (
@@ -11,16 +13,20 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"uuid"
 
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
+	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -81,8 +87,9 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		return err
 	}
 	var previous struct {
-		Policy       json.RawMessage `json:"policy"`
-		PolicySHA256 string          `json:"policySha256"`
+		Policy       json.RawMessage           `json:"policy"`
+		PolicySHA256 string                    `json:"policySha256"`
+		Platforms    map[string]platformBounds `json:"platforms"`
 	}
 	var prev json.RawMessage
 	err = c.DB.QueryRow(ctx, "SELECT snapshot FROM audit_log WHERE action = 'CONFIG_LOADED' ORDER BY id DESC LIMIT 1").Scan(&prev)
@@ -95,8 +102,20 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		}
 	}
 	sha := c.policy.SHA256()
+	platforms := map[string]platformBounds{}
+	for _, pp := range c.Config.PlatformProviders {
+		for i := range pp.Platforms {
+			p := &pp.Platforms[i]
+			platforms[p.Name] = platformBounds{PrivilegeBounds: p.PrivilegeBounds(), AllowedEndpoints: p.AllowedEndpoints(), NetworkFlows: p.NetworkFlows}
+		}
+	}
 	entries := []audit.Entry{{Action: "CONFIG_LOADED", Actor: actor, Snapshot: snapshot(map[string]any{"configSha256": c.ConfigSHA256,
-		"policy": json.RawMessage(canonical), "policySha256": sha})}}
+		"policy": json.RawMessage(canonical), "policySha256": sha, "platforms": platforms})}}
+	changed, err := platformChanges(previous.Platforms, platforms)
+	if err != nil {
+		return err
+	}
+	entries = append(entries, changed...)
 	if previous.Policy != nil && previous.PolicySHA256 != sha {
 		changes, err := changerequests.Diff(previous.Policy, canonical)
 		if err != nil {
@@ -116,6 +135,43 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 	}
 	c.Logger.Info("configuration loaded", "config_sha256", c.ConfigSHA256, "policy_sha256", sha)
 	return appendTx(ctx, c.DB, entries...)
+}
+
+// platformBounds is what rule 19 compares between starts.
+type platformBounds struct {
+	PrivilegeBounds  map[string]any `json:"privilegeBounds"`
+	AllowedEndpoints []string       `json:"allowedEndpoints"`
+	NetworkFlows     []flows.Flow   `json:"networkFlows"`
+}
+
+// platformChanges audits CONFIG_PLATFORM_CHANGED for each platform whose
+// bounds, endpoints or flows differ from the previous start's (rule 19);
+// new platforms are no change.
+func platformChanges(previous, current map[string]platformBounds) ([]audit.Entry, error) {
+	var entries []audit.Entry
+	for _, name := range slices.Sorted(maps.Keys(current)) {
+		old, ok := previous[name]
+		if !ok {
+			continue
+		}
+		a, err := json.Marshal(old)
+		if err != nil {
+			return nil, err
+		}
+		b, err := json.Marshal(current[name])
+		if err != nil {
+			return nil, err
+		}
+		changes, err := changerequests.Diff(a, b)
+		if err != nil {
+			return nil, err
+		}
+		if len(changes) > 0 {
+			entries = append(entries, audit.Entry{Action: "CONFIG_PLATFORM_CHANGED", Actor: actor,
+				Snapshot: snapshot(map[string]any{"platform": name, "changes": changes})})
+		}
+	}
+	return entries, nil
 }
 
 // platform returns the configured platform called name and its type.
@@ -545,4 +601,89 @@ func (c *Checks) interconnects(ctx context.Context) error {
 		return nil
 	}
 	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_INTERCONNECT_VIOLATIONS", Actor: actor, Snapshot: snapshot(map[string]any{"bindings": found})})
+}
+
+// Platforms is the part of rule 19 that needs the plugins: every ACTIVE or
+// DEPRECATED access level is re-checked against its platform's current
+// privilege bounds (ValidateTarget, without check_existence), and every
+// target flow against its platform's allowed_endpoints. Violations are
+// logged and audited in one SYSTEM_PRIVILEGE_BOUND_VIOLATIONS entry, never
+// changed: their bindings fail in EnsureTarget until the owner acts, and
+// the flows are left out of effective flows.
+// shortcut: one ValidateTarget call per level, to name the level that
+// fails; batch per target if startup grows slow with many targets.
+// shortcut: no ligo_privilege_bound_violations gauge until metrics (phase 10).
+func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget) error {
+	rows, err := c.DB.Query(ctx, `SELECT t.name, t.platform, t.definition, l.name, l.grants FROM targets t
+		JOIN target_access_levels l ON l.target_id = t.id
+		WHERE t.state <> 'RETIRED' AND l.state IN ('ACTIVE', 'DEPRECATED') ORDER BY t.name, l.name`)
+	if err != nil {
+		return err
+	}
+	type level struct {
+		target, platform, name string
+		definition, grants     []byte
+	}
+	levels, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (level, error) {
+		var l level
+		return l, r.Scan(&l.target, &l.platform, &l.definition, &l.name, &l.grants)
+	})
+	if err != nil {
+		return err
+	}
+	type violation struct {
+		Target string   `json:"target"`
+		Level  string   `json:"level,omitempty"`
+		Flow   string   `json:"flow,omitempty"`
+		Errors []string `json:"errors"`
+	}
+	var found []violation
+	for _, l := range levels {
+		if p, _ := c.platform(l.platform); p == nil {
+			continue // rule 10
+		}
+		resp, err := validate(ctx, &pluginv1.ValidateTargetRequest{Instance: l.platform, DefinitionJson: l.definition,
+			AccessLevels: []*pluginv1.AccessLevelInput{{Name: l.name, GrantsJson: l.grants}}})
+		if err != nil {
+			return fmt.Errorf("startup: ValidateTarget of %s level %s on %s: %w", l.target, l.name, l.platform, err)
+		}
+		if !resp.GetValid() {
+			found = append(found, violation{Target: l.target, Level: l.name, Errors: resp.GetErrors()})
+		}
+	}
+	rows, err = c.DB.Query(ctx, `SELECT t.name, t.platform, f.name, f.purpose, f.protocol, f.destination, f.ports::text, f.tls
+		FROM targets t JOIN target_network_flows f ON f.target_id = t.id WHERE t.state <> 'RETIRED' ORDER BY t.name, f.name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var target, platform, ports string
+		var f flows.Flow
+		if err := rows.Scan(&target, &platform, &f.Name, &f.Purpose, &f.Protocol, &f.Destination, &ports, &f.TLS); err != nil {
+			return err
+		}
+		p, _ := c.platform(platform)
+		if p == nil {
+			continue // rule 10
+		}
+		if f.Ports, err = flows.ParseMultirange(ports); err != nil {
+			return err
+		}
+		allow, err := flows.ParseAllowlist(p.AllowedEndpoints())
+		if err != nil {
+			return err
+		}
+		if err := allow.CheckFlow(f); err != nil {
+			found = append(found, violation{Target: target, Flow: f.Name, Errors: []string{err.Error()}})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	c.Logger.Warn("access levels or flows outside their platform's current bounds", "violations", len(found))
+	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS", Actor: actor, Snapshot: snapshot(map[string]any{"violations": found})})
 }

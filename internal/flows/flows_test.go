@@ -261,3 +261,20 @@ func TestPortsYAML(t *testing.T) {
 		t.Errorf("got ports %s, serverName %q", out, f.ServerName)
 	}
 }
+
+// TestWithin: flows that a tightened allowlist no longer covers are left
+// out (§8.2 rule 19).
+func TestWithin(t *testing.T) {
+	al, err := ParseAllowlist([]string{"db.internal:5432"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fs []Flow
+	if err := json.Unmarshal([]byte(`[{"name":"db","purpose":"DATA","protocol":"TCP","destination":"db.internal","ports":[5432],"tls":true},
+		{"name":"old","purpose":"DATA","protocol":"TCP","destination":"old.internal","ports":[5432],"tls":true}]`), &fs); err != nil {
+		t.Fatal(err)
+	}
+	if got := al.Within(fs); len(got) != 1 || got[0].Name != "db" {
+		t.Errorf("within: %+v", got)
+	}
+}

@@ -874,12 +874,25 @@ func TestCatalogAPI(t *testing.T) {
 		fmt.Sprint(outcome["sides"]) != "[TARGET]" {
 		t.Errorf("card: %d %+v", card.code, card.body)
 	}
+	// a flow outside oracle-prod's allowed_endpoints, left there by a tightened allowlist, is left out (§8.2 rule 19)
+	if _, err := v.owner.Exec(ctx, `insert into target_network_flows (target_id, name, protocol, destination, ports, tls)
+		select id, f.name, 'TCP', f.dest, f.ports::int4multirange, true from targets,
+		(values ('ledger', 'ledger-db.prod.internal', '{[1522,1523)}'), ('legacy', 'legacy.prod.internal', '{[1521,1522)}')) as f(name, dest, ports)
+		where targets.name = $1`, "tgt-"+x); err != nil {
+		t.Fatal(err)
+	}
 	flows := v.do(t, viewer, "GET", "/v1/admin/catalog/targets/tgt-"+x+"/flows", nil)
 	fs, _ := flows.body["networkFlows"].([]any)
+	var declared []string
 	for _, f := range fs {
-		if strings.HasPrefix(f.(map[string]any)["declaredBy"].(string), "secret-store:") {
+		m := f.(map[string]any)
+		declared = append(declared, fmt.Sprint(m["declaredBy"], "/", m["name"]))
+		if strings.HasPrefix(m["declaredBy"].(string), "secret-store:") {
 			t.Errorf("a secret store flow: %v", f)
 		}
+	}
+	if got := strings.Join(declared, ","); !strings.Contains(got, "target:tgt-"+x+"/ledger") || strings.Contains(got, "legacy") {
+		t.Errorf("target flows: %s", got)
 	}
 	if flows.code != 200 || len(fs) == 0 || fs[len(fs)-1].(map[string]any)["declaredBy"] != "ligo" {
 		t.Errorf("flows: %+v", flows.body)

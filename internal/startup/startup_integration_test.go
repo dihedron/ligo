@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"uuid"
 
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/sources"
@@ -70,6 +72,7 @@ func setup(t *testing.T) *env {
 		_, _ = owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from bindings where name like $1", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id in (select id from targets where name like $1)", "%"+v.x)
+		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+v.x)
 	})
@@ -377,5 +380,56 @@ func TestWiring(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "binding=b-"+x) || strings.Contains(logs.String(), "binding=same-"+x) {
 		t.Errorf("warnings: %s", logs.String())
+	}
+}
+
+// TestPlatforms: a platform whose flows changed since the previous start
+// is audited; levels outside the current privilege bounds and flows outside
+// the allowed endpoints are reported in one entry (rule 19).
+func TestPlatforms(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	c := v.checks(t)
+	before := v.lastAudit(t)
+	if err := c.configLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c = v.checks(t)
+	pl := &c.Config.PlatformProviders[0].Platforms[0]
+	pl.NetworkFlows = nil
+	if err := c.configLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.audited(t, before, "CONFIG_PLATFORM_CHANGED"); len(got) != 1 || !strings.Contains(got[0], `"platform": "`+pl.Name+`"`) ||
+		!strings.Contains(got[0], `"field": "networkFlows"`) {
+		t.Errorf("platform changed: %v", got)
+	}
+
+	tgt := v.target(t, "tgt-"+x, "oracle-prod", "dc/corp-prod", "dc/corp-prod")
+	v.exec(t, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'admin', '{"roles":["DBA"]}', '["role:DBA"]')`, tgt)
+	v.exec(t, `insert into target_network_flows (target_id, name, protocol, destination, ports, tls) values
+		($1, 'ledger', 'TCP', 'ledger-db.prod.internal', '{[1522,1523)}', true), ($1, 'legacy', 'TCP', 'legacy.prod.internal', '{[1521,1522)}', false)`, tgt)
+	bounds := c.Config.PlatformProviders[0].Platforms[0].PrivilegeBounds()["grantableRoles"].([]string)
+	validate := func(_ context.Context, req *pluginv1.ValidateTargetRequest) (*pluginv1.ValidateTargetResponse, error) {
+		var g struct {
+			Roles []string `json:"roles"`
+		}
+		_ = json.Unmarshal(req.GetAccessLevels()[0].GetGrantsJson(), &g)
+		for _, r := range g.Roles {
+			if !slices.Contains(bounds, r) {
+				return &pluginv1.ValidateTargetResponse{Errors: []string{r + " is not grantable"}}, nil
+			}
+		}
+		return &pluginv1.ValidateTargetResponse{Valid: true}, nil
+	}
+	before = v.lastAudit(t)
+	if err := c.Platforms(ctx, validate); err != nil {
+		t.Fatal(err)
+	}
+	got := v.audited(t, before, "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS")
+	if len(got) != 1 || !strings.Contains(got[0], `"level": "admin"`) || !strings.Contains(got[0], "DBA is not grantable") ||
+		!strings.Contains(got[0], `"flow": "legacy"`) || strings.Contains(got[0], `"level": "read"`) || strings.Contains(got[0], `"flow": "ledger"`) {
+		t.Errorf("violations: %v", got)
 	}
 }

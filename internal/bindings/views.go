@@ -254,7 +254,8 @@ func (s *Service) Flows(ctx context.Context, v *View) ([]flows.Flow, error) {
 	}
 	m := v.Metadata
 	store := m.Wiring.SecretStore.Instance
-	return flows.Effective(v.Target, target, m.Platform, s.Rules.PlatformFlows[m.Platform], store, s.Rules.StoreFlows[store], s.Rules.Ligo), nil
+	return flows.Effective(v.Target, s.Rules.Allow[m.Platform].Within(target), m.Platform, s.Rules.PlatformFlows[m.Platform], store,
+		s.Rules.StoreFlows[store], s.Rules.Ligo), nil
 }
 
 // Diff compares an UPDATE's payload with the binding's current desired

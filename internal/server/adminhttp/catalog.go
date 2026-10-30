@@ -81,7 +81,7 @@ func (s *Server) catalogFlows(w http.ResponseWriter, r *http.Request) {
 	}
 	m, rules := v.Metadata, s.Bindings.Rules
 	reply(w, http.StatusOK, map[string]any{"target": m.Name,
-		"networkFlows": flows.Effective(m.Name, v.NetworkFlows, m.Platform, rules.PlatformFlows[m.Platform], "", nil, rules.Ligo)})
+		"networkFlows": flows.Effective(m.Name, rules.Allow[m.Platform].Within(v.NetworkFlows), m.Platform, rules.PlatformFlows[m.Platform], "", nil, rules.Ligo)})
 }
 
 // catalogSources: the sources visible to the caller beyond their own.

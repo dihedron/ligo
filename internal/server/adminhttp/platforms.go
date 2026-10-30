@@ -87,14 +87,7 @@ func platformOf(typ string, p *config.Platform) platformDTO {
 	for _, c := range p.Contacts {
 		d.Contacts = append(d.Contacts, sources.Contact{Name: c.Name, Email: c.Email})
 	}
-	// shortcut: grantable_roles is the only privilege bound the database
-	// plugins know; read others here when a plugin type declares them
-	var bounds struct {
-		GrantableRoles []string `yaml:"grantable_roles"`
-	}
-	if p.Config.Decode(&bounds) == nil && bounds.GrantableRoles != nil {
-		d.PrivilegeBounds = map[string]any{"grantableRoles": bounds.GrantableRoles}
-	}
+	d.PrivilegeBounds = p.PrivilegeBounds()
 	if d.AllowedSourceTrustDomains == nil {
 		d.AllowedSourceTrustDomains = []string{}
 	}
