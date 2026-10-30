@@ -1,8 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/pem"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,24 +29,51 @@ func TestConfigValid(t *testing.T) {
 	}
 }
 
-// TestCertificate: the admin certificate comes from the configured files.
+// TestCertificate: the admin certificate comes from the configured files
+// and is reloaded from them (SIGHUP); a pair that fails to load keeps the
+// old one.
 func TestCertificate(t *testing.T) {
 	dir := t.TempDir()
 	ca := spiffetest.NewCA(t, "prod.internal")
-	svid := ca.SVID(t, "spiffe://prod.internal/ns/sys/sa/ligo")
 	certFile, keyFile := filepath.Join(dir, "admin.crt"), filepath.Join(dir, "admin.key")
-	_ = os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: svid.GetX509Svid()}), 0o600)
-	_ = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: svid.GetX509SvidKey()}), 0o600)
-	get, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: certFile, TLSKeyFile: keyFile}, nil)
+	write := func(id string) []byte {
+		svid := ca.SVID(t, id)
+		_ = os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: svid.GetX509Svid()}), 0o600)
+		_ = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: svid.GetX509SvidKey()}), 0o600)
+		return svid.GetX509Svid()
+	}
+	first := write("spiffe://prod.internal/ns/sys/sa/ligo")
+	get, reload, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: certFile, TLSKeyFile: keyFile}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c, err := get(nil); err != nil || len(c.Certificate) != 1 {
+	if c, err := get(nil); err != nil || !bytes.Equal(c.Certificate[0], first) {
 		t.Errorf("file certificate: %v", err)
 	}
-	if _, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: filepath.Join(dir, "none")}, nil); err == nil {
+	renewed := write("spiffe://prod.internal/ns/sys/sa/ligo")
+	log := slog.New(slog.DiscardHandler)
+	reloadAll(log, reload)
+	if c, _ := get(nil); !bytes.Equal(c.Certificate[0], renewed) {
+		t.Error("the renewed certificate was not reloaded")
+	}
+	_ = os.WriteFile(keyFile, []byte("broken"), 0o600)
+	if err := reload(); err == nil {
+		t.Error("a broken key file reloaded")
+	}
+	if c, _ := get(nil); !bytes.Equal(c.Certificate[0], renewed) {
+		t.Error("a failed reload replaced the certificate")
+	}
+	if _, _, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: filepath.Join(dir, "none")}, nil); err == nil {
 		t.Error("a missing certificate file")
 	}
+	if _, reload, err := certificate(config.AdminListener{TLSSource: "spiffe"}, nil); err != nil || reload != nil {
+		t.Errorf("SPIRE rotates its own certificate: %v", err)
+	}
+}
+
+// reloadAll is SIGHUP with only a certificate to reload.
+func reloadAll(log *slog.Logger, reloadCert func() error) {
+	reload(log, &config.Config{}, reloadCert, nil)
 }
 
 // TestLDAP: the directory reads its bind password from the environment,
@@ -64,6 +93,22 @@ func TestLDAP(t *testing.T) {
 	if err != nil || d.BindPassword != "pw" || d.RootCAs == nil || len(d.Groups) != 2 {
 		t.Errorf("directory: %+v (%v)", d, err)
 	}
+	// SIGHUP reloads a renewed CA file; a broken one keeps the old CAs
+	renewed := spiffetest.NewCA(t, "ldap-renewed")
+	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: renewed.Cert.Raw}), 0o600)
+	before := d.RootCAs
+	reload(slog.New(slog.DiscardHandler), cfg, nil, d)
+	if d.RootCAs == before {
+		t.Error("the renewed CA file was not reloaded")
+	}
+	reloaded := d.RootCAs
+	_ = os.WriteFile(caFile, []byte("broken"), 0o600)
+	reload(slog.New(slog.DiscardHandler), cfg, nil, d)
+	if d.RootCAs != reloaded {
+		t.Error("a broken CA file replaced the CAs")
+	}
+	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: renewed.Cert.Raw}), 0o600)
+
 	cfg.AdminAuth.LDAP.CACertFile = filepath.Join(dir, "none")
 	if _, err := ldap(cfg); err == nil {
 		t.Error("a missing CA file")

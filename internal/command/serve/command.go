@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"uuid"
@@ -273,30 +274,40 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 		Plugins: adminhttp.PlatformPlugins(plugins)}, nil
 }
 
-// listen serves the admin API until ctx ends, then drains it.
+// listen serves the admin API until ctx ends, then drains it; SIGHUP
+// reloads the certificate files, everything else needs a restart.
 func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, s *adminhttp.Server) error {
 	l := cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
+	var directory *adminauth.LDAP
 	if l.AllowBasicAuth {
-		directory, err := ldap(cfg)
-		if err != nil {
+		var err error
+		if directory, err = ldap(cfg); err != nil {
 			return err
 		}
 		s.LDAP = directory
 	}
-	cert, err := certificate(l, zones)
+	cert, reloadCert, err := certificate(l, zones)
 	if err != nil {
 		return err
 	}
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
 	srv := &http.Server{Addr: l.ListenAddress, Handler: s.Handler(), TLSConfig: s.TLSConfig(cert), ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)}
 	failed := make(chan error, 1)
 	go func() { failed <- srv.ListenAndServeTLS("", "") }()
 	log.Info("serving", "admin", l.ListenAddress)
-	select {
-	case err := <-failed:
-		return fmt.Errorf("serve: admin listener: %w", err)
-	case <-ctx.Done():
+	for done := false; !done; {
+		select {
+		case err := <-failed:
+			return fmt.Errorf("serve: admin listener: %w", err)
+		case <-hup:
+			reload(log, cfg, reloadCert, directory)
+		case <-ctx.Done():
+			done = true
+		}
 	}
 	log.Info("shutting down")
 	shutdown, cancel := context.WithTimeout(context.Background(), drain)
@@ -307,15 +318,45 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	return nil
 }
 
-// certificate is the admin listener's: the core identity's SVID, or the
-// configured files (§7.1).
-func certificate(l config.AdminListener, zones *identity.Zones) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), error) {
-	if l.TLSSource == "file" {
-		pair, err := tls.LoadX509KeyPair(l.TLSCertFile, l.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("serve: admin_listener: %w", err)
+// reload is SIGHUP: it reloads the admin listener's certificate files and
+// the directory's CA file; a file that fails to load keeps the old one.
+func reload(log *slog.Logger, cfg *config.Config, reloadCert func() error, directory *adminauth.LDAP) {
+	if reloadCert != nil {
+		if err := reloadCert(); err != nil {
+			log.Error("SIGHUP: the admin certificate is unchanged", "error", err)
+		} else {
+			log.Info("SIGHUP: admin certificate reloaded", "file", cfg.Server.AdminListener.TLSCertFile)
 		}
-		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &pair, nil }, nil
+	}
+	if file := cfg.AdminAuth.LDAP.CACertFile; directory != nil && file != "" {
+		roots, err := caPool(file)
+		if err != nil {
+			log.Error("SIGHUP: the directory's CA is unchanged", "error", err)
+			return
+		}
+		directory.SetRootCAs(roots)
+		log.Info("SIGHUP: directory CA reloaded", "file", file)
+	}
+}
+
+// certificate is the admin listener's: the core identity's SVID, rotated
+// by SPIRE, or the configured files, which the returned function reloads
+// (nil for SPIRE).
+func certificate(l config.AdminListener, zones *identity.Zones) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), func() error, error) {
+	if l.TLSSource == "file" {
+		var current atomic.Pointer[tls.Certificate]
+		load := func() error {
+			pair, err := tls.LoadX509KeyPair(l.TLSCertFile, l.TLSKeyFile)
+			if err != nil {
+				return fmt.Errorf("serve: admin_listener: %w", err)
+			}
+			current.Store(&pair)
+			return nil
+		}
+		if err := load(); err != nil {
+			return nil, nil, err
+		}
+		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return current.Load(), nil }, load, nil
 	}
 	return func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		svid, err := zones.GetX509SVID()
@@ -327,7 +368,20 @@ func certificate(l config.AdminListener, zones *identity.Zones) (func(*tls.Clien
 			chain = append(chain, c.Raw)
 		}
 		return &tls.Certificate{Certificate: chain, PrivateKey: svid.PrivateKey, Leaf: svid.Certificates[0]}, nil
-	}, nil
+	}, nil, nil
+}
+
+// caPool reads a PEM file of CA certificates.
+func caPool(file string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(file) //nolint:gosec // the path comes from the operator's configuration
+	if err != nil {
+		return nil, fmt.Errorf("serve: admin_auth.ldap.ca_cert_file: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("serve: admin_auth.ldap.ca_cert_file %s: no certificate", file)
+	}
+	return roots, nil
 }
 
 // ldap is the directory of admin_auth.ldap, for allow_basic_auth.
@@ -339,13 +393,8 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 	}
 	var roots *x509.CertPool
 	if c.CACertFile != "" {
-		pem, err := os.ReadFile(c.CACertFile)
-		if err != nil {
-			return nil, fmt.Errorf("serve: admin_auth.ldap.ca_cert_file: %w", err)
-		}
-		roots = x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("serve: admin_auth.ldap.ca_cert_file %s: no certificate", c.CACertFile)
+		if roots, err = caPool(c.CACertFile); err != nil {
+			return nil, err
 		}
 	}
 	var groups []string

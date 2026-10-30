@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dihedron/ligo/internal/authz"
@@ -44,11 +45,20 @@ type directory interface {
 type LDAP struct {
 	Config       config.LDAP
 	BindPassword string         // from service_bind_password_env
-	RootCAs      *x509.CertPool // from ca_cert_file
+	RootCAs      *x509.CertPool // from ca_cert_file; SetRootCAs replaces it while serving
 	Groups       []string       // the ldap_group_dn of the authorization bindings
 	Timeout      time.Duration  // per connection and request; default 10s
 
+	mu   sync.RWMutex                                 // guards RootCAs
 	dial func(ctx context.Context) (directory, error) // tests
+}
+
+// SetRootCAs replaces the CAs that verify the directory, for the next
+// connections (a renewed ca_cert_file, reloaded on SIGHUP).
+func (l *LDAP) SetRootCAs(roots *x509.CertPool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.RootCAs = roots
 }
 
 // Authenticate returns the principal of username with the groups among
@@ -167,8 +177,11 @@ func (l *LDAP) connect(ctx context.Context) (directory, error) {
 		return nil, fmt.Errorf("adminauth: %s: ldaps:// only", l.Config.URL)
 	}
 	dialer := &net.Dialer{Timeout: l.timeout()}
+	l.mu.RLock()
+	roots := l.RootCAs
+	l.mu.RUnlock()
 	conn, err := ldap.DialURL(l.Config.URL, ldap.DialWithDialer(dialer),
-		ldap.DialWithTLSConfig(&tls.Config{RootCAs: l.RootCAs, MinVersion: tls.VersionTLS12}))
+		ldap.DialWithTLSConfig(&tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}))
 	if err != nil {
 		return nil, fmt.Errorf("adminauth: %w", err)
 	}

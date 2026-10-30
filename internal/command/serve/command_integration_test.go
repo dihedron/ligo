@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"uuid"
@@ -146,6 +147,16 @@ func TestServe(t *testing.T) {
 	}
 	if !m.MaintenanceMode {
 		t.Error("--maintenance did not turn maintenance mode on")
+	}
+	// SIGHUP reloads the certificate files and nothing else: ligo keeps serving
+	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if resp, err := client.Get("https://" + admin + "/v1/admin/maintenance"); err != nil || resp.StatusCode != http.StatusOK {
+		t.Errorf("after SIGHUP: %v", err)
+	} else {
+		_ = resp.Body.Close()
 	}
 
 	stop()

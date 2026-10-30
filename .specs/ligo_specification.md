@@ -3956,6 +3956,8 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 4. Terminate all `go-plugin` subprocesses.
 5. Close SPIRE Workload API clients and PostgreSQL connection pools.
 
+**Certificate reload (`SIGHUP`, Normative):** `SIGHUP` reloads the certificate files only: the admin listener's `tls_cert_file` and `tls_key_file` (with `tls_source: file`) and `admin_auth.ldap.ca_cert_file`. New TLS handshakes and LDAP connections use them; open connections are unaffected. A file that fails to load keeps the previous certificate and is logged at `ERROR`. Every other change of `server.yaml`, the certificate paths included, takes effect only through a (rolling) restart, so that the startup checks and audits above always apply. With `tls_source: spiffe` there is nothing to reload: SPIRE rotates the SVID. A systemd unit maps `systemctl reload ligo` to it with `ExecReload=/bin/kill -HUP $MAINPID`.
+
 ### 8.3 Repository layout
 
 **Illustrative.**
