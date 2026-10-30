@@ -3387,7 +3387,7 @@ Source change requests carry `ownerScope`; target change requests carry `ownerSc
 3. Timeouts: idle 30m, absolute 8h. Group membership is re-checked against LDAP every `authz_recheck_interval` (default 5m). Losing all roles revokes the session.
 4. Every non-`GET` `/ui/*` request MUST carry an `X-CSRF-Token` header equal to the session's `csrf_token` (constant-time compare). It MUST also carry `Sec-Fetch-Site: same-origin`, or an `Origin` header equal to the listener's configured external origin.
 5. `POST /ui/logout` sets `revoked_at` and clears `__Host-ligo_session` (`Max-Age=0`).
-6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `api_per_principal_rps`. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password.
+6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `api_per_principal_rps`. The login limits count failed logins only (refused credentials, on the UI login or on a Basic API request): while either is exhausted, every login or Basic request from that address or for that user gets `429`, the right password included; successful Basic requests count only against `api_per_principal_rps`, so that the CLI, which sends Basic credentials on every request, is not throttled by them. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password.
 
 ### 7.4 HTMX Web GUI
 

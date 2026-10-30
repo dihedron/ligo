@@ -373,15 +373,20 @@ func TestAuthentication(t *testing.T) {
 		t.Errorf("API rate limit: %v", codes)
 	}
 
+	// the login limits count refused credentials only: a CLI user's requests pass, failures lock out
 	b := setup(t, config.AdminListener{AllowBasicAuth: true, RateLimit: config.AdminRateLimit{LoginPerUserPerMin: 2}})
-	if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "pw"); r.code != 200 {
-		t.Errorf("Basic olivia: %+v", r)
+	for i := range 3 {
+		if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "pw"); r.code != 200 {
+			t.Errorf("Basic olivia, request %d: %+v", i, r)
+		}
 	}
-	if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "nope"); r.code != 401 || r.header.Get("WWW-Authenticate") == "" {
-		t.Errorf("wrong password: %+v", r)
+	for range 2 {
+		if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "nope"); r.code != 401 || r.header.Get("WWW-Authenticate") == "" {
+			t.Errorf("wrong password: %+v", r)
+		}
 	}
-	if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "nope"); r.code != 429 {
-		t.Errorf("beyond the login limit: %d", r.code)
+	if r := b.do(t, b.client(t, ""), "GET", "/v1/admin/maintenance", nil, "olivia", "pw"); r.code != 429 {
+		t.Errorf("beyond the login limit, even the right password: %d", r.code)
 	}
 	if r := b.do(t, b.client(t, bgID), "GET", "/v1/admin/change-requests", nil); r.code != 403 {
 		t.Errorf("break_glass alone lists requests: %d", r.code)

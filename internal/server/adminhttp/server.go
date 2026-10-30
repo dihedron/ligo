@@ -208,12 +208,18 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 	case r.TLS != nil && len(r.TLS.VerifiedChains) > 0 && s.Listener.ClientSVIDAuth.Enabled:
 		p, err = adminauth.SVID(r.TLS, s.Listener.ClientSVIDAuth.AcceptedTrustDomains)
 	case basic && s.basicAllowed():
+		// the login limits count refused credentials only (§7.2.1): once
+		// either is exhausted, Basic requests of that address or user wait
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 		rl := s.Listener.RateLimit
-		if !s.limits.allow("ip:"+ip, perMinute(rl.LoginPerIPPerMin, 10)) || !s.limits.allow("user:"+user, perMinute(rl.LoginPerUserPerMin, 5)) {
+		ipRate, userRate := perMinute(rl.LoginPerIPPerMin, 10), perMinute(rl.LoginPerUserPerMin, 5)
+		if s.limits.exhausted("ip:"+ip, ipRate) || s.limits.exhausted("user:"+user, userRate) {
 			return changerequests.Caller{}, errLoginLimited
 		}
-		p, err = s.LDAP.Authenticate(r.Context(), user, password)
+		if p, err = s.LDAP.Authenticate(r.Context(), user, password); errors.Is(err, adminauth.ErrInvalidCredentials) {
+			s.limits.spend("ip:"+ip, ipRate)
+			s.limits.spend("user:"+user, userRate)
+		}
 	default:
 		err = adminauth.ErrInvalidCredentials
 	}
@@ -259,9 +265,8 @@ type limiter struct {
 	buckets map[string]*bucket
 }
 
-func (l *limiter) allow(key string, r rate) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// refill returns key's bucket, refilled up to now; l.mu is held.
+func (l *limiter) refill(key string, r rate) *bucket {
 	now := time.Now()
 	if l.buckets == nil || len(l.buckets) > 100_000 {
 		l.buckets = map[string]*bucket{} // shortcut: forgets every bucket when the map grows past 100k keys; prune by age if that ever matters
@@ -273,11 +278,34 @@ func (l *limiter) allow(key string, r rate) bool {
 	}
 	b.tokens = min(r.burst, b.tokens+now.Sub(b.at).Seconds()*r.perSecond)
 	b.at = now
+	return b
+}
+
+// allow takes a token from key's bucket, if one is left.
+func (l *limiter) allow(key string, r rate) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.refill(key, r)
 	if b.tokens < 1 {
 		return false
 	}
 	b.tokens--
 	return true
+}
+
+// exhausted reports whether key's bucket has no token left, taking none.
+func (l *limiter) exhausted(key string, r rate) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.refill(key, r).tokens < 1
+}
+
+// spend takes a token from key's bucket, down to none.
+func (l *limiter) spend(key string, r rate) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.refill(key, r)
+	b.tokens = max(0, b.tokens-1)
 }
 
 // viewer: any role but break_glass alone (§7.2.2).

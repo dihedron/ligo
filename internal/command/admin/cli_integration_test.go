@@ -134,7 +134,7 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &adminhttp.Server{Listener: config.AdminListener{AllowBasicAuth: true, RateLimit: config.AdminRateLimit{LoginPerIPPerMin: 1000, LoginPerUserPerMin: 1000}}, Config: cfg, LDAP: directory{}, Authz: az, DB: pools.App,
+	s := &adminhttp.Server{Listener: config.AdminListener{AllowBasicAuth: true}, Config: cfg, LDAP: directory{}, Authz: az, DB: pools.App,
 		Requests: requests, Bindings: bs, Sources: ss, Targets: ts, Catalog: &catalog.Reader{DB: pools.App, Policy: policy}, Logger: slog.New(slog.DiscardHandler)}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
