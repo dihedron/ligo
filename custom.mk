@@ -21,6 +21,17 @@ lint: ## check that the code is clean (gofmt, go vet, golangci-lint); every buil
 	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION)\." || echo "warning: golangci-lint is not v$(GOLANGCI_LINT_VERSION), which CI runs: its findings may differ" >&2
 	@golangci-lint run --build-tags integration ./...
 
+# REDOCLY_VERSION is the Redocly CLI that lints the OpenAPI document, here
+# and in CI; telemetry off
+REDOCLY_VERSION := 1.34.3
+
+.PHONY: openapi-lint
+openapi-lint: ## lint api/openapi/admin.v1alpha1.yaml with Redocly CLI, as CI does; warnings fail too (needs npx)
+	@command -v npx >/dev/null 2>&1 || { echo "npx is not installed: install Node.js" >&2; exit 1; }
+	@out="$$(REDOCLY_TELEMETRY=off REDOCLY_SUPPRESS_UPDATE_NOTICE=true npx --yes @redocly/cli@$(REDOCLY_VERSION) lint api/openapi/admin.v1alpha1.yaml 2>&1)"; status=$$?; \
+		echo "$$out" | grep -v "^npm notice"; \
+		[ $$status -eq 0 ] && ! echo "$$out" | grep -q "You have [0-9]* warning"
+
 .PHONY: compile
 compile: lint go-dev ## build for the default linux/amd64 platform
 
