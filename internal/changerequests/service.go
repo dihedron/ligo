@@ -108,6 +108,29 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 	return s.file(ctx, filed{res, r})
 }
 
+// CreateDependent files a source CREATE and the binding CREATE that names
+// it, in one transaction (§7.2.4 "Inline source"): the binding depends on
+// the source's request, and applies with it when both are complete at
+// creation, or later once the source's request is applied.
+func (s *Service) CreateDependent(ctx context.Context, c Caller, approvalReference string, source, binding Filing) error {
+	items := make([]filed, 2)
+	for i, f := range []Filing{source, binding} {
+		res, err := s.resource(f.Request)
+		if err != nil {
+			return err
+		}
+		if f.Request.Sides, err = BuildSides(f.Candidates, c, s.Policy, approvalReference); err != nil {
+			return err
+		}
+		if err := s.stamp(c, f.Request, approvalReference); err != nil {
+			return err
+		}
+		items[i] = filed{res, f.Request}
+	}
+	binding.Request.DependsOn = &source.Request.ID
+	return s.file(ctx, items...)
+}
+
 // stamp fills r's identity, requester, hashes and expiry.
 func (s *Service) stamp(c Caller, r *Request, approvalReference string) error {
 	var err error
@@ -201,6 +224,11 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 		}
 	}
 	return s.file(ctx, items...)
+}
+
+// appliedIn reports whether the request id of items was applied.
+func appliedIn(items []filed, id uuid.UUID) bool {
+	return slices.ContainsFunc(items, func(it filed) bool { return it.r.ID == id && it.r.Status == "APPLIED" })
 }
 
 // filed is a request and its resource.
@@ -349,7 +377,9 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 					decider = sd.DecidedBy
 				}
 			}
-			if !Complete(r.Consent, r.Sides) {
+			// a dependent request waits for its source's (§7.2.4); it cannot be
+			// complete without it: its SOURCE side has the source's scope
+			if !Complete(r.Consent, r.Sides) || r.DependsOn != nil && !appliedIn(items, *r.DependsOn) {
 				continue
 			}
 			var err error
@@ -384,6 +414,9 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	}
 	if payloadSHA256 != r.PayloadSHA256 {
 		return nil, refuse(409, "payload-mismatch", "the change request changed since it was displayed")
+	}
+	if err := s.dependencyApplied(ctx, r); err != nil {
+		return nil, err
 	}
 	names, err := SelectSides(r, c, s.Policy, true, side)
 	if err != nil {
@@ -438,6 +471,22 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	}
 	applied(ctx, res, r)
 	return r, applyErr
+}
+
+// dependencyApplied refuses to decide a request whose inline source's
+// request is not applied yet (§7.2.4).
+func (s *Service) dependencyApplied(ctx context.Context, r *Request) error {
+	if r.DependsOn == nil {
+		return nil
+	}
+	var status string
+	if err := s.DB.QueryRow(ctx, "SELECT status FROM change_requests WHERE id = $1", *r.DependsOn).Scan(&status); err != nil {
+		return err
+	}
+	if status != "APPLIED" {
+		return refuse(409, "dependency-pending", "the change request %s that registers its source is %s", *r.DependsOn, status)
+	}
+	return nil
 }
 
 // Decline declines the caller's sides; the request is REJECTED when its
