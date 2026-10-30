@@ -13,7 +13,8 @@ info:
     `nextPageToken` of the previous page as `pageToken`. Field names are
     lowerCamelCase (§7.2.3 "JSON naming").
   license:
-    name: Apache-2.0
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
 servers:
   - url: https://ligo.example.org:9443
 security:
@@ -21,14 +22,23 @@ security:
   - basic: []
 tags:
   - name: sources
+    description: "Sources: groups of client workloads, by SPIFFE ID regex (§3.2)."
   - name: targets
+    description: "Targets: resources on platforms, with access levels and flows (§3.3)."
   - name: platforms
+    description: "Platforms from server.yaml, read-only (§3.4)."
   - name: catalog
+    description: "The catalog of targets a caller could request (§7.2.4)."
   - name: bindings
+    description: "Bindings of a source to a target at one access level (§3.5)."
   - name: change-requests
+    description: "Change requests and their sides (§7.2.3)."
   - name: governance
+    description: "The governance policy and its dry run (ADR-13, ADR-14)."
   - name: break-glass
+    description: "Break-glass changes of bindings (ADR-12)."
   - name: operations
+    description: "Maintenance mode and the audit chain (§10.3, §4.3)."
 
 paths:
   # --- sources -------------------------------------------------------------
@@ -38,7 +48,7 @@ paths:
       operationId: createSource
       summary: File the registration of a source (SOURCE/CREATE).
       requestBody: { $ref: "#/components/requestBodies/Resource" }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [sources]
       operationId: listSources
@@ -51,7 +61,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/test:
     post:
       tags: [sources]
@@ -69,29 +79,29 @@ paths:
                 svidRegex: { type: string }
                 spiffeIds: { type: array, items: { type: string } }
                 currentSource: { type: string, description: "A source whose narrowing to check." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [sources]
       operationId: getSource
       summary: A source (§3.2) and its last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [sources]
       operationId: updateSource
       summary: File a change of a source (SOURCE/UPDATE); a regex change must narrow.
       requestBody: { $ref: "#/components/requestBodies/Resource" }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}/deprecate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [sources], operationId: deprecateSource, summary: File the deprecation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [sources], operationId: deprecateSource, summary: File the deprecation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/sources/{name}/reactivate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [sources], operationId: reactivateSource, summary: File the reactivation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [sources], operationId: reactivateSource, summary: File the reactivation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/sources/{name}/retire:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [sources], operationId: retireSource, summary: File the retirement of a source (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [sources], operationId: retireSource, summary: File the retirement of a source (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/sources/{name}/bindings:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -99,10 +109,10 @@ paths:
       operationId: listSourceBindings
       summary: The source's bindings visible to the caller.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [sources], operationId: sourceAudit, summary: The audit entries of a source., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [sources], operationId: sourceAudit, summary: The audit entries of a source., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- targets -------------------------------------------------------------
   /v1/admin/targets:
@@ -111,7 +121,7 @@ paths:
       operationId: createTarget
       summary: File the publication of a target (TARGET/CREATE).
       requestBody: { $ref: "#/components/requestBodies/Resource" }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [targets]
       operationId: listTargets
@@ -125,38 +135,38 @@ paths:
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [targets]
       operationId: getTarget
       summary: A target (§3.3) and its last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [targets]
       operationId: updateTarget
       summary: File a change of a target (TARGET/UPDATE); a grants change must narrow.
       requestBody: { $ref: "#/components/requestBodies/Resource" }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/deprecate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [targets], operationId: deprecateTarget, summary: File the deprecation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: deprecateTarget, summary: File the deprecation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/reactivate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [targets], operationId: reactivateTarget, summary: File the reactivation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: reactivateTarget, summary: File the reactivation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/retire:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [targets], operationId: retireTarget, summary: File the retirement of a target (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: retireTarget, summary: File the retirement of a target (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/access-levels/{level}/deprecate:
     parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
-    post: { tags: [targets], operationId: deprecateAccessLevel, summary: File the deprecation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: deprecateAccessLevel, summary: File the deprecation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/access-levels/{level}/reactivate:
     parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
-    post: { tags: [targets], operationId: reactivateAccessLevel, summary: File the reactivation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: reactivateAccessLevel, summary: File the reactivation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/access-levels/{level}/retire:
     parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
-    post: { tags: [targets], operationId: retireAccessLevel, summary: File the retirement of an access level (refused while bindings use it)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [targets], operationId: retireAccessLevel, summary: File the retirement of an access level (refused while bindings use it)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/bindings:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -164,7 +174,7 @@ paths:
       operationId: listTargetBindings
       summary: The target's bindings visible to the caller.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/bindings/revoke:
     parameters: [{ $ref: "#/components/parameters/name" }]
     post:
@@ -183,10 +193,10 @@ paths:
                 sourceScope: { type: string, description: "A scope pattern." }
                 comment: { type: string }
                 approvalReference: { type: string }
-      responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- platforms and catalog ------------------------------------------------
   /v1/admin/platforms:
@@ -194,14 +204,14 @@ paths:
       tags: [platforms]
       operationId: listPlatforms
       summary: The configured platforms (§3.4) with their health.
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/platforms/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [platforms]
       operationId: getPlatform
       summary: One platform with its health and uiSchemas; 503 if its plugin cannot be reached.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets:
     get:
       tags: [catalog]
@@ -217,28 +227,28 @@ paths:
         - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [catalog]
       operationId: getCatalogTarget
       summary: A target's card with the governance outcome for each of the caller's sources.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [catalog]
       operationId: getCatalogTargetFlows
       summary: The target's effective flows without a secret store (§3.6).
-      responses: { "200": { $ref: "#/components/responses/Flows" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Flows" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/sources:
     get:
       tags: [catalog]
       operationId: listCatalogSources
       summary: The sources visible to the caller beyond their own.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- bindings --------------------------------------------------------------
   /v1/admin/bindings:
@@ -252,7 +262,8 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Filed" }
         "202": { $ref: "#/components/responses/Filed" }
-        default: { $ref: "#/components/responses/Problem" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
     get:
       tags: [bindings]
       operationId: listBindings
@@ -271,20 +282,20 @@ paths:
         - { name: propagationPending, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/bindings/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [bindings]
       operationId: getBinding
       summary: A binding (§3.5) with its stage states (no secrets) and last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [bindings]
       operationId: updateBinding
       summary: File a change of a binding (BINDING/UPDATE); consent ANY if every change removes access.
       requestBody: { $ref: "#/components/requestBodies/Resource" }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     delete:
       tags: [bindings]
       operationId: deleteBinding
@@ -300,19 +311,19 @@ paths:
               properties:
                 approvalReference: { type: string }
                 automationContext: { type: object }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/bindings/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, default: { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/retry:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/rotate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- change requests ---------------------------------------------------------
   /v1/admin/change-requests:
@@ -329,10 +340,10 @@ paths:
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/change-requests/{id}:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/approve:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post:
@@ -350,19 +361,19 @@ paths:
                 payloadSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
                 comment: { type: string }
                 side: { type: string }
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/change-requests/{id}/decline:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests], operationId: declineChangeRequest, summary: Decline the caller's side(s)., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests], operationId: declineChangeRequest, summary: Decline the caller's side(s)., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/withdraw:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/ratify:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/revert:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- governance --------------------------------------------------------------
   /v1/admin/governance:
@@ -381,7 +392,8 @@ paths:
                 properties:
                   policy: { type: object }
                   sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
-        default: { $ref: "#/components/responses/Problem" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
   /v1/admin/governance/evaluate:
     post:
       tags: [governance]
@@ -424,7 +436,8 @@ paths:
                       - type: "null"
                       - { type: object, properties: { rule: { type: string }, action: { enum: [allow, deny] } } }
                   sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
-        default: { $ref: "#/components/responses/Problem" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
 
   # --- break-glass -------------------------------------------------------------
   /v1/admin/break-glass:
@@ -449,13 +462,13 @@ paths:
                 justification: { type: string }
                 incidentReference: { type: string }
                 ttl: { type: string, examples: ["4h"] }
-      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [break-glass]
       operationId: listBreakGlass
       summary: Open and recent break-glass changes.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- operations --------------------------------------------------------------
   /v1/admin/maintenance:
@@ -477,7 +490,8 @@ paths:
                   changedAt: { type: [string, "null"], format: date-time }
                   inFlight: { type: integer }
                   propagationQueued: { type: integer }
-        default: { $ref: "#/components/responses/Problem" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
     put:
       tags: [operations]
       operationId: putMaintenance
@@ -492,13 +506,13 @@ paths:
               properties:
                 enabled: { type: boolean }
                 reason: { type: string, description: "Required when enabling." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/audit/verify:
     get:
       tags: [operations]
       operationId: verifyAudit
       summary: Verify the hash chain of the audit log.
-      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
 components:
   securitySchemes:
