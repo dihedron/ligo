@@ -9,7 +9,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 )
 
-func (s *Server) requestRoutes(mux *http.ServeMux) {
+func (s *Server) requestRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/change-requests", s.listRequests)
 	mux.HandleFunc("GET /v1/admin/change-requests/{id}", s.getRequest)
 	mux.HandleFunc("POST /v1/admin/change-requests/{id}/approve", s.approve)

@@ -41,7 +41,7 @@ func (p managed) UISchemas(ctx context.Context, platform string) (resp *pluginv1
 	return resp, err
 }
 
-func (s *Server) platformRoutes(mux *http.ServeMux) {
+func (s *Server) platformRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/platforms", s.listPlatforms)
 	mux.HandleFunc("GET /v1/admin/platforms/{name}", s.getPlatform)
 }

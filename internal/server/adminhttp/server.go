@@ -62,8 +62,22 @@ type Directory interface {
 }
 
 // Handler routes the admin API behind authentication and rate limiting.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+func (s *Server) Handler() http.Handler { return s.middleware(s.routes()) }
+
+// router records the patterns it routes, which the OpenAPI document must
+// list (api/openapi/admin.v1alpha1.yaml).
+type router struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func (m *router) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	m.patterns = append(m.patterns, pattern)
+	m.ServeMux.HandleFunc(pattern, h)
+}
+
+func (s *Server) routes() *router {
+	mux := &router{ServeMux: http.NewServeMux()}
 	s.requestRoutes(mux)
 	s.opsRoutes(mux)
 	s.sourceRoutes(mux)
@@ -72,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 	s.platformRoutes(mux)
 	s.catalogRoutes(mux)
 	s.governanceRoutes(mux)
-	return s.middleware(mux)
+	return mux
 }
 
 // TLSConfig is the listener's: TLS 1.3, the server certificate from cert,

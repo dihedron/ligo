@@ -8,7 +8,7 @@ import (
 	"github.com/dihedron/ligo/internal/targets"
 )
 
-func (s *Server) catalogRoutes(mux *http.ServeMux) {
+func (s *Server) catalogRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/catalog/targets", s.catalogTargets)
 	mux.HandleFunc("GET /v1/admin/catalog/targets/{name}", s.catalogTarget)
 	mux.HandleFunc("GET /v1/admin/catalog/targets/{name}/flows", s.catalogFlows)

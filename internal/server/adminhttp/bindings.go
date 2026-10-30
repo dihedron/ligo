@@ -18,7 +18,7 @@ type Workflows interface {
 	Rotate(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error)
 }
 
-func (s *Server) bindingRoutes(mux *http.ServeMux) {
+func (s *Server) bindingRoutes(mux *router) {
 	mux.HandleFunc("POST /v1/admin/bindings", s.createBinding)
 	mux.HandleFunc("PUT /v1/admin/bindings/{name}", s.updateBinding)
 	mux.HandleFunc("DELETE /v1/admin/bindings/{name}", s.deleteBinding)

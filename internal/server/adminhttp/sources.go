@@ -8,7 +8,7 @@ import (
 	"github.com/dihedron/ligo/internal/sources"
 )
 
-func (s *Server) sourceRoutes(mux *http.ServeMux) {
+func (s *Server) sourceRoutes(mux *router) {
 	mux.HandleFunc("POST /v1/admin/sources", s.createSource)
 	mux.HandleFunc("PUT /v1/admin/sources/{name}", s.updateSource)
 	mux.HandleFunc("POST /v1/admin/sources/{name}/{op}", s.sourceState)

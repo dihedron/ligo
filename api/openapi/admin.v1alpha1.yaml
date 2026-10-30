@@ -1,0 +1,600 @@
+# The admin REST API of ligo (§7.2). It MUST be kept consistent with §7.2:
+# internal/server/adminhttp's contract test checks that its paths and
+# methods are exactly the routes the server registers.
+openapi: 3.1.0
+info:
+  title: ligo admin API
+  version: v1alpha1
+  description: |
+    Administrators authenticate with an X.509-SVID of an accepted trust domain
+    or, if `allow_basic_auth`, LDAP Basic credentials (§7.2.1). Every error is
+    an RFC 9457 problem whose `type` is `urn:ligo:problem:<slug>` (§7.2.3).
+    Lists use keyset pagination: `pageSize` (1 to 200, default 50) and the
+    `nextPageToken` of the previous page as `pageToken`. Field names are
+    lowerCamelCase (§7.2.3 "JSON naming").
+  license:
+    name: Apache-2.0
+servers:
+  - url: https://ligo.example.org:9443
+security:
+  - svid: []
+  - basic: []
+tags:
+  - name: sources
+  - name: targets
+  - name: platforms
+  - name: catalog
+  - name: bindings
+  - name: change-requests
+  - name: governance
+  - name: break-glass
+  - name: operations
+
+paths:
+  # --- sources -------------------------------------------------------------
+  /v1/admin/sources:
+    post:
+      tags: [sources]
+      operationId: createSource
+      summary: File the registration of a source (SOURCE/CREATE).
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+    get:
+      tags: [sources]
+      operationId: listSources
+      summary: The sources visible to the caller.
+      parameters:
+        - $ref: "#/components/parameters/scope"
+        - { name: trustDomain, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/state"
+        - $ref: "#/components/parameters/label"
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/sources/test:
+    post:
+      tags: [sources]
+      operationId: testSourceRegex
+      summary: Test an SVID regex (Appendix A); stores nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trustDomain, svidRegex]
+              properties:
+                trustDomain: { type: string }
+                svidRegex: { type: string }
+                spiffeIds: { type: array, items: { type: string } }
+                currentSource: { type: string, description: "A source whose narrowing to check." }
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/sources/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [sources]
+      operationId: getSource
+      summary: A source (§3.2) and its last 20 audit entries.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [sources]
+      operationId: updateSource
+      summary: File a change of a source (SOURCE/UPDATE); a regex change must narrow.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/sources/{name}/deprecate:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [sources], operationId: deprecateSource, summary: File the deprecation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/sources/{name}/reactivate:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [sources], operationId: reactivateSource, summary: File the reactivation of a source., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/sources/{name}/retire:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [sources], operationId: retireSource, summary: File the retirement of a source (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/sources/{name}/bindings:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [sources, bindings]
+      operationId: listSourceBindings
+      summary: The source's bindings visible to the caller.
+      parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/sources/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [sources], operationId: sourceAudit, summary: The audit entries of a source., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+
+  # --- targets -------------------------------------------------------------
+  /v1/admin/targets:
+    post:
+      tags: [targets]
+      operationId: createTarget
+      summary: File the publication of a target (TARGET/CREATE).
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+    get:
+      tags: [targets]
+      operationId: listTargets
+      summary: The targets the caller owns or administers.
+      parameters:
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/platform"
+        - $ref: "#/components/parameters/platformType"
+        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/label"
+        - $ref: "#/components/parameters/state"
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/targets/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [targets]
+      operationId: getTarget
+      summary: A target (§3.3) and its last 20 audit entries.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [targets]
+      operationId: updateTarget
+      summary: File a change of a target (TARGET/UPDATE); a grants change must narrow.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/targets/{name}/deprecate:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [targets], operationId: deprecateTarget, summary: File the deprecation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/reactivate:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [targets], operationId: reactivateTarget, summary: File the reactivation of a target., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/retire:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [targets], operationId: retireTarget, summary: File the retirement of a target (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/access-levels/{level}/deprecate:
+    parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
+    post: { tags: [targets], operationId: deprecateAccessLevel, summary: File the deprecation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/access-levels/{level}/reactivate:
+    parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
+    post: { tags: [targets], operationId: reactivateAccessLevel, summary: File the reactivation of an access level., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/access-levels/{level}/retire:
+    parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
+    post: { tags: [targets], operationId: retireAccessLevel, summary: File the retirement of an access level (refused while bindings use it)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/bindings:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [targets, bindings]
+      operationId: listTargetBindings
+      summary: The target's bindings visible to the caller.
+      parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/targets/{name}/bindings/revoke:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post:
+      tags: [targets, bindings]
+      operationId: revokeTargetBindings
+      summary: Bulk revocation for containment; one DELETE change request (consent ANY) per matching binding.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comment]
+              properties:
+                source: { type: string }
+                sourceScope: { type: string, description: "A scope pattern." }
+                comment: { type: string }
+                approvalReference: { type: string }
+      responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/targets/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+
+  # --- platforms and catalog ------------------------------------------------
+  /v1/admin/platforms:
+    get:
+      tags: [platforms]
+      operationId: listPlatforms
+      summary: The configured platforms (§3.4) with their health.
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/platforms/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [platforms]
+      operationId: getPlatform
+      summary: One platform with its health and uiSchemas; 503 if its plugin cannot be reached.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/catalog/targets:
+    get:
+      tags: [catalog]
+      operationId: searchCatalog
+      summary: The targets the caller could request (§7.2.4).
+      parameters:
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/platform"
+        - $ref: "#/components/parameters/platformType"
+        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/label"
+        - { name: state, in: query, description: "ACTIVE (default), or DEPRECATED to include deprecated targets.", schema: { type: string, enum: [ACTIVE, DEPRECATED] } }
+        - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/catalog/targets/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [catalog]
+      operationId: getCatalogTarget
+      summary: A target's card with the governance outcome for each of the caller's sources.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/catalog/targets/{name}/flows:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [catalog]
+      operationId: getCatalogTargetFlows
+      summary: The target's effective flows without a secret store (§3.6).
+      responses: { "200": { $ref: "#/components/responses/Flows" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/catalog/sources:
+    get:
+      tags: [catalog]
+      operationId: listCatalogSources
+      summary: The sources visible to the caller beyond their own.
+      parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+
+  # --- bindings --------------------------------------------------------------
+  /v1/admin/bindings:
+    post:
+      tags: [bindings]
+      operationId: createBinding
+      summary: File a binding (BINDING/CREATE), with an optional inlineSource.
+      parameters:
+        - { name: wait, in: query, description: "true: wait up to 10 s for an applied binding to settle.", schema: { type: boolean } }
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses:
+        "200": { $ref: "#/components/responses/Filed" }
+        "202": { $ref: "#/components/responses/Filed" }
+        default: { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [bindings]
+      operationId: listBindings
+      summary: The bindings visible to the caller.
+      parameters:
+        - { name: source, in: query, schema: { type: string } }
+        - { name: target, in: query, schema: { type: string } }
+        - { name: accessLevel, in: query, schema: { type: string } }
+        - $ref: "#/components/parameters/platform"
+        - $ref: "#/components/parameters/platformType"
+        - { name: phase, in: query, schema: { type: string } }
+        - { name: trustDomain, in: query, schema: { type: string } }
+        - { name: zone, in: query, schema: { type: string } }
+        - { name: scope, in: query, description: "A scope pattern matched against any of the three scopes.", schema: { type: string } }
+        - { name: expiringBefore, in: query, schema: { type: string, format: date-time } }
+        - { name: propagationPending, in: query, schema: { type: boolean } }
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/bindings/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [bindings]
+      operationId: getBinding
+      summary: A binding (§3.5) with its stage states (no secrets) and last 20 audit entries.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [bindings]
+      operationId: updateBinding
+      summary: File a change of a binding (BINDING/UPDATE); consent ANY if every change removes access.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+    delete:
+      tags: [bindings]
+      operationId: deleteBinding
+      summary: File the revocation of a binding (BINDING/DELETE, consent ANY).
+      parameters:
+        - { name: expectedRevision, in: query, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approvalReference: { type: string }
+                automationContext: { type: object }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/bindings/{name}/flows:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/bindings/{name}/retry:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/bindings/{name}/rotate:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/bindings/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } } }
+
+  # --- change requests ---------------------------------------------------------
+  /v1/admin/change-requests:
+    get:
+      tags: [change-requests]
+      operationId: listChangeRequests
+      summary: The change requests visible to the caller.
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
+        - { name: resourceName, in: query, schema: { type: string } }
+        - { name: zone, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string } }
+        - { name: awaitingMe, in: query, schema: { type: boolean } }
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/change-requests/{id}:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/change-requests/{id}/approve:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post:
+      tags: [change-requests]
+      operationId: approveChangeRequest
+      summary: Approve the caller's side(s); applies the change once the consent rule holds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payloadSha256]
+              properties:
+                payloadSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+                comment: { type: string }
+                side: { type: string }
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/change-requests/{id}/decline:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post: { tags: [change-requests], operationId: declineChangeRequest, summary: Decline the caller's side(s)., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/change-requests/{id}/withdraw:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/change-requests/{id}/ratify:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/change-requests/{id}/revert:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now., responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } } }
+
+  # --- governance --------------------------------------------------------------
+  /v1/admin/governance:
+    get:
+      tags: [governance]
+      operationId: getGovernance
+      summary: The governance policy in force, as the canonical JSON its SHA-256 is computed over (§8.2).
+      responses:
+        "200":
+          description: The policy and its hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy, sha256]
+                properties:
+                  policy: { type: object }
+                  sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        default: { $ref: "#/components/responses/Problem" }
+  /v1/admin/governance/evaluate:
+    post:
+      tags: [governance]
+      operationId: evaluateGovernance
+      summary: Dry run of a planned creation; stores nothing and calls no plugin.
+      requestBody:
+        required: true
+        description: 'A binding (`resourceType: BINDING`), or a source or target body (`kind: Source` or `Target`).'
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [resourceType, source, target, accessLevel]
+                  properties:
+                    resourceType: { const: BINDING }
+                    name: { type: string }
+                    source:
+                      oneOf:
+                        - { type: string, description: "A source name." }
+                        - { type: object, required: [trustDomain, svidRegex], properties: { trustDomain: { type: string }, svidRegex: { type: string } } }
+                    target: { type: string }
+                    accessLevel: { type: string }
+                - { type: object, required: [kind], properties: { kind: { enum: [Source, Target] } } }
+      responses:
+        "200":
+          description: The governance outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resourceType: { enum: [BINDING, SOURCE, TARGET] }
+                  name: { type: string }
+                  scopes: { type: object, additionalProperties: { type: string } }
+                  namePrefix: { type: object, properties: { valid: { type: boolean }, detail: { type: string } } }
+                  consent: { enum: [ALL, ANY] }
+                  interconnect:
+                    oneOf:
+                      - type: "null"
+                      - { type: object, properties: { rule: { type: string }, action: { enum: [allow, deny] } } }
+                  sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+        default: { $ref: "#/components/responses/Problem" }
+
+  # --- break-glass -------------------------------------------------------------
+  /v1/admin/break-glass:
+    post:
+      tags: [break-glass]
+      operationId: breakGlass
+      summary: Break-glass change of a binding (ADR-12); LDAP Basic credentials on the request, never an SVID.
+      security: [{ basic: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, justification, incidentReference]
+              properties:
+                operation: { enum: [CREATE, UPDATE, DELETE] }
+                binding: { type: object }
+                name: { type: string }
+                expectedRevision: { type: integer, format: int64 }
+                inlineSource: { type: object }
+                justification: { type: string }
+                incidentReference: { type: string }
+                ttl: { type: string, examples: ["4h"] }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, default: { $ref: "#/components/responses/Problem" } }
+    get:
+      tags: [break-glass]
+      operationId: listBreakGlass
+      summary: Open and recent break-glass changes.
+      parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
+      responses: { "200": { $ref: "#/components/responses/Page" }, default: { $ref: "#/components/responses/Problem" } }
+
+  # --- operations --------------------------------------------------------------
+  /v1/admin/maintenance:
+    get:
+      tags: [operations]
+      operationId: getMaintenance
+      summary: The maintenance setting and what the drain waits for (§10.3).
+      responses:
+        "200":
+          description: The setting.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  maintenanceMode: { type: boolean }
+                  reason: { type: string }
+                  changedBy: { type: string }
+                  changedAt: { type: [string, "null"], format: date-time }
+                  inFlight: { type: integer }
+                  propagationQueued: { type: integer }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [operations]
+      operationId: putMaintenance
+      summary: Enable or disable maintenance mode (admin.full_access).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                reason: { type: string, description: "Required when enabling." }
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+  /v1/admin/audit/verify:
+    get:
+      tags: [operations]
+      operationId: verifyAudit
+      summary: Verify the hash chain of the audit log.
+      responses: { "200": { $ref: "#/components/responses/Object" }, default: { $ref: "#/components/responses/Problem" } }
+
+components:
+  securitySchemes:
+    svid:
+      type: mutualTLS
+      description: An X.509-SVID of an accepted trust domain (client_svid_auth).
+    basic:
+      type: http
+      scheme: basic
+      description: LDAP credentials, if allow_basic_auth.
+  parameters:
+    name: { name: name, in: path, required: true, schema: { type: string } }
+    id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    level: { name: level, in: path, required: true, schema: { type: string } }
+    pageSize: { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    pageToken: { name: pageToken, in: query, schema: { type: string } }
+    q: { name: q, in: query, description: "Matched in names, display names and descriptions.", schema: { type: string } }
+    scope: { name: scope, in: query, description: "A scope pattern.", schema: { type: string } }
+    state: { name: state, in: query, schema: { type: string, enum: [ACTIVE, DEPRECATED, RETIRED] } }
+    label: { name: label, in: query, description: "key=value", schema: { type: string } }
+    platform: { name: platform, in: query, schema: { type: string } }
+    platformType: { name: platformType, in: query, schema: { type: string } }
+  requestBodies:
+    Resource:
+      required: true
+      description: The resource (§3.2, §3.3, §3.5) plus expectedRevision (updates), approvalReference and automationContext.
+      content: { application/json: { schema: { type: object } } }
+    StateChange:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [expectedRevision]
+            properties:
+              expectedRevision: { type: integer, format: int64 }
+              approvalReference: { type: string }
+              automationContext: { type: object }
+    Decision:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [comment]
+            properties:
+              comment: { type: string }
+              side: { type: string }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, examples: ["urn:ligo:problem:not-found"] }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+    Side:
+      type: object
+      properties:
+        side: { type: string, examples: [TARGET, SOURCE, OWNER, PLATFORM, "PARTY:security"] }
+        scope: { type: string }
+        basis: { enum: [AUTO, DELEGATED, HUMAN] }
+        decision: { type: [string, "null"] }
+        decidedBy: { type: string }
+  responses:
+    Problem:
+      description: An RFC 9457 problem.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    Object:
+      description: The resource or result.
+      content: { application/json: { schema: { type: object } } }
+    Page:
+      description: A page of items.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { type: object } }
+              nextPageToken: { type: [string, "null"] }
+    Filed:
+      description: The change request and, once applied, the resource.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              changeRequest: { type: object }
+              resource: { type: [object, "null"] }
+    Flows:
+      description: Effective network flows, in order of declaration.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }

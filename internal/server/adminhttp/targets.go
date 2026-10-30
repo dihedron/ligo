@@ -9,7 +9,7 @@ import (
 	"github.com/dihedron/ligo/internal/targets"
 )
 
-func (s *Server) targetRoutes(mux *http.ServeMux) {
+func (s *Server) targetRoutes(mux *router) {
 	mux.HandleFunc("POST /v1/admin/targets", s.createTarget)
 	mux.HandleFunc("PUT /v1/admin/targets/{name}", s.updateTarget)
 	mux.HandleFunc("POST /v1/admin/targets/{name}/{op}", s.targetState)

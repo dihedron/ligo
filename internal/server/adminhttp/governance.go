@@ -13,7 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/targets"
 )
 
-func (s *Server) governanceRoutes(mux *http.ServeMux) {
+func (s *Server) governanceRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/governance", s.getGovernance)
 	mux.HandleFunc("POST /v1/admin/governance/evaluate", s.evaluate)
 }

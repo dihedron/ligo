@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Server) opsRoutes(mux *http.ServeMux) {
+func (s *Server) opsRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/maintenance", s.getMaintenance)
 	mux.HandleFunc("PUT /v1/admin/maintenance", s.putMaintenance)
 	mux.HandleFunc("GET /v1/admin/audit/verify", s.verifyAudit)
