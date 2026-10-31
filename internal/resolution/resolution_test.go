@@ -49,21 +49,28 @@ func TestINV01(t *testing.T) {
 		row("a-narrowed", "ledger2", p+`ledger-[0-9]+$`, p+`ledger-[0-9]$`),
 		row("c-other", "orders", p+`orders$`, p+`orders$`),
 	)
-	got, err := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-12"), "")
+	got, err := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-12"), "", "")
 	if err != nil || len(got) != 1 || got[0].Name != "b-ledger" {
 		t.Errorf("ledger-12: %v %v, want only b-ledger (a-narrowed's source no longer matches)", names(got), err)
 	}
-	got, _ = c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "")
+	got, _ = c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "", "")
 	if want := []string{"a-narrowed", "b-ledger"}; len(got) != 2 || got[0].Name != want[0] || got[1].Name != want[1] {
 		t.Errorf("ledger-1: %v, want %v sorted by name", names(got), want)
 	}
-	got, _ = c.Resolve(id(t, "spiffe://prod.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "")
+	got, _ = c.Resolve(id(t, "spiffe://prod.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "", "")
 	if len(got) != 0 {
 		t.Errorf("other trust domain: %v", names(got))
 	}
-	got, _ = c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "ledger2")
+	got, _ = c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "ledger2", "")
 	if len(got) != 1 || got[0].Name != "a-narrowed" {
 		t.Errorf("?target=ledger2: %v", names(got))
+	}
+	pg := row("d-pg", "ledger", p+`ledger-[0-9]+$`, p+`ledger-[0-9]+$`)
+	pg.PlatformType = "postgres.v1"
+	c = cache(t, row("b-ledger", "ledger", p+`ledger-[0-9]+$`, p+`ledger-[0-9]+$`), pg)
+	got, _ = c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/ledger-1"), "", "postgres.v1")
+	if len(got) != 1 || got[0].Name != "d-pg" {
+		t.Errorf("?platformType=postgres.v1: %v", names(got))
 	}
 }
 
@@ -75,7 +82,7 @@ func TestINV15(t *testing.T) {
 		row("bad-current", "t2", p+`x$`, `^spiffe://cloud\.internal/x|.*$`),
 		row("good", "t3", p+`x$`, p+`x$`),
 	)
-	got, _ := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), "")
+	got, _ := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), "", "")
 	if len(got) != 1 || got[0].Name != "good" || c.InvalidRegexes() != 2 {
 		t.Errorf("got %v, %d invalid; want only good, 2 invalid", names(got), c.InvalidRegexes())
 	}
@@ -87,7 +94,7 @@ func TestINV25(t *testing.T) {
 	expired, later := now.Add(-time.Second), now.Add(time.Hour)
 	a, b := row("expired", "t1", p+`x$`, p+`x$`), row("valid", "t2", p+`x$`, p+`x$`)
 	a.ExpiresAt, b.ExpiresAt = &expired, &later
-	got, _ := cache(t, a, b).Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), "")
+	got, _ := cache(t, a, b).Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), "", "")
 	if len(got) != 1 || got[0].Name != "valid" {
 		t.Errorf("got %v, want only valid", names(got))
 	}
@@ -98,11 +105,11 @@ func TestINV25(t *testing.T) {
 func TestStale(t *testing.T) {
 	c := cache(t, row("b", "t", p+`x$`, p+`x$`))
 	c.now = func() time.Time { return now.Add(5*time.Minute + time.Second) }
-	if _, err := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), ""); !errors.Is(err, ErrStale) {
+	if _, err := c.Resolve(id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x"), "", ""); !errors.Is(err, ErrStale) {
 		t.Errorf("stale cache: %v, want ErrStale", err)
 	}
 	empty := New(nil, Options{MaxStaleness: time.Minute})
-	if _, err := empty.Resolve(id(t, "spiffe://cloud.internal/x"), ""); !errors.Is(err, ErrStale) {
+	if _, err := empty.Resolve(id(t, "spiffe://cloud.internal/x"), "", ""); !errors.Is(err, ErrStale) {
 		t.Errorf("never loaded: %v, want ErrStale", err)
 	}
 }
@@ -114,11 +121,11 @@ func TestUpsertEvict(t *testing.T) {
 	caller := id(t, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/x")
 	r.TargetName = "t2"
 	c.upsert(r)
-	if got, _ := c.Resolve(caller, "t2"); len(got) != 1 {
+	if got, _ := c.Resolve(caller, "t2", ""); len(got) != 1 {
 		t.Errorf("after upsert: %v", names(got))
 	}
 	c.evict(r.ID)
-	if got, _ := c.Resolve(caller, ""); len(got) != 0 {
+	if got, _ := c.Resolve(caller, "", ""); len(got) != 0 {
 		t.Errorf("after evict: %v", names(got))
 	}
 }

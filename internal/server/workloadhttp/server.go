@@ -15,6 +15,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/ratelimit"
@@ -34,6 +35,8 @@ type Bundles interface {
 type Server struct {
 	Listener config.WorkloadListener
 	Bundles  Bundles
+	Cache    Resolver
+	Rules    *bindings.Rules // the platforms', secret stores' and ligo's flows
 	Logger   *slog.Logger
 
 	limits ratelimit.Limiter
@@ -52,9 +55,17 @@ func (s *Server) TLSConfig(cert func(*tls.ClientHelloInfo) (*tls.Certificate, er
 }
 
 // Handler routes the workload API behind authentication and rate limiting.
-func (s *Server) Handler() http.Handler { return s.middleware(http.NewServeMux()) }
+func (s *Server) Handler() http.Handler { return s.middleware(s.routes()) }
 
-type callerKey struct{}
+type (
+	callerKey    struct{}
+	requestIDKey struct{}
+)
+
+func requestID(r *http.Request) string {
+	id, _ := r.Context().Value(requestIDKey{}).(string)
+	return id
+}
 
 // Caller is the authenticated SPIFFE ID of a request.
 func Caller(r *http.Request) spiffeid.ID {
@@ -81,7 +92,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			problem(w, http.StatusTooManyRequests, "rate-limited", "too many requests")
 		default:
 			rec := &status{ResponseWriter: w, code: http.StatusOK}
-			next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), callerKey{}, id)))
+			next.ServeHTTP(rec, r.WithContext(context.WithValue(context.WithValue(r.Context(), callerKey{}, id), requestIDKey{}, rid)))
 			s.Logger.Info("request", "request_id", rid, "caller", id.String(), "method", r.Method, "path", r.URL.Path,
 				"status", rec.code, "duration", time.Since(start))
 			return

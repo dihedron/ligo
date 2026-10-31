@@ -4,6 +4,7 @@ package resolution
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestRefresh(t *testing.T) {
 
 	caller := spiffeid.RequireFromString("spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/" + suffix + "-12")
 	served := func() bool {
-		got, err := c.Resolve(caller, "")
+		got, err := c.Resolve(caller, "", "")
 		return err == nil && len(got) == 1 && got[0].ID == binding
 	}
 	eventually(t, "binding served", served)
@@ -127,7 +128,7 @@ func TestRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "updated snapshot", func() bool {
-		got, _ := c.Resolve(caller, "")
+		got, _ := c.Resolve(caller, "", "")
 		return len(got) == 1 && string(got[0].Spec) == `{"host": "ledger-db-2"}`
 	})
 
@@ -149,5 +150,40 @@ func TestRefresh(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil && ctx.Err() == nil {
 		t.Errorf("Run: %v", err)
+	}
+}
+
+// TestTargetFlows reads a binding's target flows from v_active_binding_flows
+// as ligo_reader, with their ports and description (§4.5 rule 6).
+func TestTargetFlows(t *testing.T) {
+	ctx := context.Background()
+	owner := pool(t, "MIGRATOR")
+	conn, err := owner.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = migrate.Apply(ctx, conn.Conn(), migrations.FS)
+	conn.Release() // before any Fatal: the pool's Close waits for every acquired connection
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := uuid.NewV7().String()[24:]
+	_, binding := fixture(t, owner, suffix, `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/`+suffix+`$`)
+	if _, err := owner.Exec(ctx, `insert into target_network_flows (target_id, name, protocol, destination, ports, tls, server_name, description)
+		select id, 'ledger', 'TCP', 'ledger-db.prod.internal', '{[1522,1523),[2000,2011)}', true, 'ledger-db.prod.internal', 'the listener'
+		from targets where name = $1`, "t-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.Background(), "delete from target_network_flows where target_id in (select id from targets where name = $1)", "t-"+suffix)
+	})
+	got, err := New(pool(t, "READER"), Options{}).TargetFlows(ctx, []uuid.UUID{binding, uuid.NewV7()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(got[binding])
+	if want := `[{"name":"ledger","purpose":"DATA","protocol":"TCP","destination":"ledger-db.prod.internal","ports":[1522,"2000-2010"],"tls":true,` +
+		`"serverName":"ledger-db.prod.internal","description":"the listener"}]`; len(got) != 1 || string(b) != want {
+		t.Errorf("flows: %d bindings, %s", len(got), b)
 	}
 }

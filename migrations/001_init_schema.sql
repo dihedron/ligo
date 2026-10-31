@@ -714,7 +714,7 @@ WHERE b.active_revision IS NOT NULL
 -- Target-declared flows of served bindings. Platform, secret-store and ligo
 -- flows come from the configuration and are added by the application (ADR-16).
 CREATE VIEW v_active_binding_flows AS
-SELECT b.id AS binding_id, f.name, f.purpose, f.protocol, f.destination, f.ports, f.tls, f.server_name
+SELECT b.id AS binding_id, f.name, f.purpose, f.protocol, f.destination, f.ports, f.tls, f.server_name, f.description
 FROM bindings b
 JOIN target_network_flows f ON f.target_id = b.target_id
 JOIN sources s ON s.id = b.source_id
