@@ -14,11 +14,49 @@
   </dl></section>
   <section class="card"><h2>Definition</h2><pre>{{pretty .Definition}}</pre></section>
 </div>
+{{if ne .Metadata.State "RETIRED"}}<div id="target-errors" class="errors"></div>
+<div class="actions">
+  <a class="button" href="/ui/targets/{{.Metadata.Name}}/edit-form">Edit</a>
+  {{if eq .Metadata.State "ACTIVE"}}<form hx-post="/ui/targets/{{.Metadata.Name}}/deprecate" hx-confirm="Deprecate {{.Metadata.Name}}? Existing bindings keep working; no new ones."
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Deprecate</button></form>{{end}}
+  {{if eq .Metadata.State "DEPRECATED"}}<form hx-post="/ui/targets/{{.Metadata.Name}}/reactivate" hx-confirm="Reactivate {{.Metadata.Name}}?"
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Reactivate</button></form>{{end}}
+  <form hx-post="/ui/targets/{{.Metadata.Name}}/retire" hx-confirm="Retire {{.Metadata.Name}}? {{.Status.Bindings}} binding(s) still use it and must be revoked first."
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Retire</button></form>
+</div>{{end}}
 <h2>Access levels</h2>
 {{template "levels-table" .AccessLevels}}
+{{if ne .Metadata.State "RETIRED"}}<div class="actions">{{range .AccessLevels}}{{$level := .Name}}
+  {{if eq .State "ACTIVE"}}<form hx-post="/ui/targets/{{$.Content.Target.Metadata.Name}}/access-levels/{{$level}}/deprecate" hx-confirm="Deprecate the level {{$level}}?"
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{$.Content.Target.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Deprecate {{$level}}</button></form>{{end}}
+  {{if eq .State "DEPRECATED"}}<form hx-post="/ui/targets/{{$.Content.Target.Metadata.Name}}/access-levels/{{$level}}/reactivate"
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{$.Content.Target.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Reactivate {{$level}}</button></form>
+  <form hx-post="/ui/targets/{{$.Content.Target.Metadata.Name}}/access-levels/{{$level}}/retire" hx-confirm="Retire the level {{$level}}?"
+    hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{$.Content.Target.Metadata.Revision}}"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Retire {{$level}}</button></form>{{end}}
+{{end}}</div>{{end}}
 <h2>Network flows</h2>
 {{template "flows-table" .NetworkFlows}}{{end}}
 <h2>Who can reach this</h2>
 {{template "bindings-table" .Bindings}}
+{{with .Target}}{{if ne .Metadata.State "RETIRED"}}<section class="card">
+  <h3>Revoke bindings</h3>
+  <p class="muted">Containment: revoke every binding of a source, or of a source scope, on this target. Each revocation is a change request with consent ANY.</p>
+  <div id="revoke-errors" class="errors"></div>
+  <form hx-post="/ui/targets/{{.Metadata.Name}}/bindings/revoke" hx-confirm="Revoke every matching binding of {{.Metadata.Name}}?"
+    hx-status:409="target:#revoke-errors swap:innerHTML" hx-status:422="target:#revoke-errors swap:innerHTML" {{hxnonce}}>
+    <div class="grid">
+      <div class="field"><label for="rv-source">Source</label><input id="rv-source" name="source"></div>
+      <div class="field"><label for="rv-scope">or source scope pattern</label><input id="rv-scope" name="sourceScope"></div>
+    </div>
+    <div class="field"><label for="rv-comment">Why (required)</label><textarea id="rv-comment" name="comment" required></textarea></div>
+    <div class="actions"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Revoke</button></div>
+  </form>
+</section>{{end}}{{end}}
 {{template "trail" .Audit}}
 {{end}}{{end}}

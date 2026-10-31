@@ -1,4 +1,5 @@
 {{define "content"}}{{with .Content}}<h1>Targets</h1>
+<p class="actions"><a class="button" href="/ui/targets/new-form">Publish a target</a></p>
 <form class="card" method="get" action="/ui/targets">
   <div class="grid">
     <div class="field"><label for="f-q">Name</label><input id="f-q" name="q" value="{{.Filter.Q}}"></div>

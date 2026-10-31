@@ -5,6 +5,7 @@ package ui
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
@@ -87,6 +88,34 @@ func (healthy) Health(context.Context, string) (*pluginv1.HealthResponse, error)
 	return &pluginv1.HealthResponse{Serving: true}, nil
 }
 
+// UISchemas: a schema to fill in, and roles to grant.
+func (healthy) UISchemas(context.Context, string) (*pluginv1.GetUISchemasResponse, error) {
+	return &pluginv1.GetUISchemasResponse{
+		TargetDefinition: &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "schema", Label: "Schema",
+			FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_TEXT, Required: true}}},
+		AccessLevelGrants: &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "roles", Label: "Roles",
+			FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_MULTISELECT, Options: []*pluginv1.UIFieldOption{{Label: "read only", Value: "LEDGER_RO_ROLE"},
+				{Label: "read write", Value: "LEDGER_RW_ROLE"}}}}},
+	}, nil
+}
+
+// validateTarget accepts any definition; a level's privileges are its roles.
+func validateTarget(_ context.Context, req *pluginv1.ValidateTargetRequest) (*pluginv1.ValidateTargetResponse, error) {
+	resp := &pluginv1.ValidateTargetResponse{Valid: true, NormalizedDefinitionJson: req.GetDefinitionJson()}
+	for _, l := range req.GetAccessLevels() {
+		var g struct {
+			Roles []string `json:"roles"`
+		}
+		_ = json.Unmarshal(l.GetGrantsJson(), &g)
+		var privileges []string
+		for _, r := range g.Roles {
+			privileges = append(privileges, "role:"+r)
+		}
+		resp.AccessLevels = append(resp.AccessLevels, &pluginv1.NormalizedAccessLevel{Name: l.GetName(), GrantsJson: l.GetGrantsJson(), Privileges: privileges})
+	}
+	return resp, nil
+}
+
 type sessionEnv struct {
 	srv   *httptest.Server
 	owner *pgxpool.Pool
@@ -163,7 +192,7 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Targets = &targets.Service{DB: pools.App, Rules: tgtRules, Requests: s.Requests}
+	s.Targets = &targets.Service{DB: pools.App, Rules: tgtRules, Requests: s.Requests, Validate: validateTarget}
 	s.Requests.Resources["SOURCE"], s.Requests.Resources["TARGET"] = s.Sources, s.Targets
 	s.Catalog = &catalog.Reader{DB: pools.App, Policy: s.Requests.Policy}
 	s.Config, s.Plugins = cfg, healthy{}
@@ -738,23 +767,110 @@ func TestSourceForms(t *testing.T) {
 	}
 }
 
-// approve approves every pending side of a request as the approver of dc/*.
+// approve approves every pending side of a request, each by another
+// approver of dc/* (distinct approvers across scopes).
 func (v *sessionEnv) approve(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	dora := changerequests.Caller{Principal: authz.Principal{Name: "dora"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{approvers}})}
-	cr, err := v.s.Requests.Get(ctx, dora, id)
+	approver := func(name string) changerequests.Caller {
+		return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{approvers}})}
+	}
+	cr, err := v.s.Requests.Get(ctx, approver("dora"), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sd := range cr.Sides {
+	for i, sd := range cr.Sides {
 		if sd.Decision == "" {
-			if cr, err = v.s.Requests.Approve(ctx, dora, id, cr.PayloadSHA256, sd.Name, "ui"); err != nil {
+			if cr, err = v.s.Requests.Approve(ctx, approver(fmt.Sprintf("dora%d", i)), id, cr.PayloadSHA256, sd.Name, "ui"); err != nil {
 				t.Fatalf("approve %s of %s: %v", sd.Name, id, err)
 			}
 		}
 	}
 	if cr.Status != "APPLIED" {
 		t.Fatalf("request %s: %s", id, cr.Status)
+	}
+}
+
+// TestTargetForms: a target published from the platform's forms (with a
+// second level added), previewed, changed, a level deprecated, bulk
+// revocation refused without bindings, then the target retired.
+func TestTargetForms(t *testing.T) {
+	v := sessionSetup(t)
+	x := uuid.NewV7().String()[24:]
+	name := "uit-" + x
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name = $1", name)
+		_, _ = v.owner.Exec(ctx, "delete from target_access_levels where target_id in (select id from targets where name = $1)", name)
+		_, _ = v.owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name = $1)", name)
+		_, _ = v.owner.Exec(ctx, "delete from targets where name = $1", name)
+	})
+	v.dir.groups[v.user] = []string{operators}
+	b := v.browser(t)
+	b.signIn("right")
+	b.page()
+	filed := func(resp *http.Response, body, what string) {
+		t.Helper()
+		id, ok := strings.CutPrefix(resp.Header.Get("HX-Redirect"), "/ui/change-requests/")
+		if resp.StatusCode != 200 || !ok {
+			t.Fatalf("%s: %d %v %s", what, resp.StatusCode, resp.Header.Get("HX-Redirect"), body)
+		}
+		v.approve(t, uuid.MustParse(id))
+	}
+	if _, form := b.do("GET", "/ui/targets/new-form", nil, "HX-Request", ""); !strings.Contains(form, "<option>oracle-prod</option>") {
+		t.Fatal("new target form")
+	}
+	_, fields := b.do("GET", "/ui/platforms/fields?platform=oracle-prod", nil)
+	if !strings.Contains(fields, `name="def.schema"`) || !strings.Contains(fields, `name="level.0.name"`) || !strings.Contains(fields, `value="LEDGER_RO_ROLE"`) ||
+		!strings.Contains(fields, `hx-get="/ui/platforms/oracle-prod/fields?level=1"`) {
+		t.Errorf("platform fields: %s", fields)
+	}
+	if _, more := b.do("GET", "/ui/platforms/oracle-prod/fields?level=1", nil); !strings.Contains(more, `name="level.1.grant.roles"`) ||
+		!strings.Contains(more, "fields?level=2") {
+		t.Errorf("one more level: %s", more)
+	}
+	if resp, _ := b.do("GET", "/ui/platforms/nope/fields", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown platform: %d", resp.StatusCode)
+	}
+	form := url.Values{"name": {name}, "platform": {"oracle-prod"}, "scope": {"dc/corp-prod/ledger"}, "def.schema": {"LEDGER"},
+		"level.0.name": {"read"}, "level.0.grant.roles": {"LEDGER_RO_ROLE"}, "level.1.name": {"write"},
+		"level.1.grant.roles": {"LEDGER_RO_ROLE", "LEDGER_RW_ROLE"}, "visibility": {"PUBLIC"}, "networkFlows": {"[]"}}
+	if _, check := b.do("POST", "/ui/targets/preview", form); !strings.Contains(check, "OWNER") || !strings.Contains(check, "PLATFORM") ||
+		!strings.Contains(check, "dc/corp-prod/ledger") {
+		t.Errorf("preview: %s", check)
+	}
+	bad := url.Values{}
+	for k, vs := range form {
+		bad[k] = vs
+	}
+	bad.Set("networkFlows", "{not json")
+	if resp, _ := b.do("POST", "/ui/targets", bad); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("bad flows: %d", resp.StatusCode)
+	}
+	resp, body := b.do("POST", "/ui/targets", form)
+	filed(resp, body, "publish")
+	_, page := b.do("GET", "/ui/targets/"+name, nil, "HX-Request", "")
+	if !strings.Contains(page, "role:LEDGER_RW_ROLE") || !strings.Contains(page, "/access-levels/write/deprecate") {
+		t.Errorf("target page: %s", page)
+	}
+	_, edit := b.do("GET", "/ui/targets/"+name+"/edit-form", nil, "HX-Request", "")
+	if !strings.Contains(edit, `name="platform" value="oracle-prod" readonly`) || !strings.Contains(edit, `name="def.schema" type="text" value="LEDGER"`) ||
+		!strings.Contains(edit, `name="level.1.name" value="write"`) || !strings.Contains(edit, "No binding uses this target.") {
+		t.Errorf("edit form: %s", edit)
+	}
+	form.Set("description", "the ledger schema")
+	form.Set("expectedRevision", "1")
+	resp, body = b.do("PUT", "/ui/targets/"+name, form)
+	filed(resp, body, "update")
+	resp, body = b.do("POST", "/ui/targets/"+name+"/access-levels/write/deprecate", url.Values{"expectedRevision": {"2"}})
+	filed(resp, body, "deprecate a level")
+	if resp, body := b.do("POST", "/ui/targets/"+name+"/bindings/revoke", url.Values{"source": {"nobody"}, "comment": {"incident"}}); resp.StatusCode < 400 ||
+		resp.Header.Get("HX-Redirect") != "" {
+		t.Errorf("bulk revocation without bindings: %d %s", resp.StatusCode, body)
+	}
+	resp, body = b.do("POST", "/ui/targets/"+name+"/retire", url.Values{"expectedRevision": {"3"}})
+	filed(resp, body, "retire")
+	if resp, _ := b.do("GET", "/ui/targets/"+name, nil, "HX-Request", ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("a retired target: %d", resp.StatusCode)
 	}
 }

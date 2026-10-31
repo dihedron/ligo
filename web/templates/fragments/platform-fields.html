@@ -1,0 +1,7 @@
+{{define "platform-fields"}}<div id="platform-fields">
+  <fieldset class="card"><legend>Definition on {{.Platform}}</legend>
+    {{range .Definition}}{{template "ui-field" .}}{{else}}<p class="muted">The platform asks for no definition fields.</p>{{end}}
+  </fieldset>
+  {{range .Levels}}{{template "level-block" .}}{{end}}
+  <button type="button" class="button-secondary" hx-get="/ui/platforms/{{.Platform}}/fields?level={{.Next}}" hx-target="this" hx-swap="outerHTML" {{hxnonce}}>Add an access level</button>
+</div>{{end}}

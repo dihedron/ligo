@@ -3448,10 +3448,12 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `POST` | `/ui/sources/{name}/{deprecate,reactivate,retire}` | State changes (with confirmation; retire lists the remaining bindings). |
 | `GET` | `/ui/targets` · `/ui/targets/{name}` | Targets the user owns or administers; detail with definition, access levels, flows, bindings ("who can reach this") and audit trail. |
 | `GET` | `/ui/targets/new-form` · `/ui/targets/{name}/edit-form` | Target forms. The platform select triggers `hx-get="/ui/platforms/{name}/fields"`, which renders the definition and grants forms from `GetUISchemas`. |
+| `POST` | `/ui/targets/preview` | Renders the governance outcome of the target form's name, platform and scope (scopes, name prefix, sides), as `POST /v1/admin/governance/evaluate`. |
 | `POST` · `PUT` | `/ui/targets` · `/ui/targets/{name}` | Submit a target change request; `200 OK` with `HX-Redirect`. |
 | `POST` | `/ui/targets/{name}/{deprecate,reactivate,retire}`, `/ui/targets/{name}/access-levels/{level}/{deprecate,reactivate,retire}` | State changes. |
 | `POST` | `/ui/targets/{name}/bindings/revoke` | Bulk revocation by source or source scope (containment), with confirmation. |
 | `GET` | `/ui/platforms` · `/ui/platforms/{name}/fields` | Platforms (read-only) and their forms. |
+| `GET` | `/ui/platforms/fields?platform={name}` | The same forms, for the target form's platform select, which cannot put its value in the path. |
 | `GET` | `/ui/bindings` | Dashboard: filterable table (source, target, level, phase, expiry), phase badges, pending-change-request and propagation indicators. |
 | `GET` | `/ui/bindings/wizard` | Binding wizard (§7.2.4), started from the catalog (`?target=`) or from a target's page to offer a binding (`?offer=1`). Each step is a fragment; the review step renders `/ui/bindings/governance-preview`. |
 | `GET` | `/ui/bindings/{name}` | Detail view: source, target, level, snapshot, effective flows, stage states, audit trail. |

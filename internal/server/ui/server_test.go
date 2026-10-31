@@ -275,6 +275,9 @@ func samples() map[string]any {
 	cr := &changerequests.Request{ID: id, ResourceType: "BINDING", ResourceName: "b", Operation: "UPDATE", Status: "PENDING", Payload: []byte(`{}`),
 		Sides: []changerequests.Side{{Name: "SOURCE", Scope: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
 	trail := []Entry{{Action: "BINDING_CREATED", Actor: "olga", Revision: new(int64), OccurredAt: now}}
+	fields := []Field{{Name: "def.a", Type: "text", Pattern: "^x$"}, {Name: "def.b", Type: "checkbox", Checked: true},
+		{Name: "def.c", Type: "select", Options: []Option{{Value: "1", Selected: true}}}, {Name: "def.d", Type: "multiselect", Options: []Option{{Value: "1"}}},
+		{Name: "def.e", Type: "textarea", Help: "h"}, {Name: "def.f", Type: "number", Required: true}}
 	approved := "APPROVED"
 	gov := &preview.Evaluation{Scopes: map[string]string{"owner": "dc/x"}, NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL",
 		Interconnect: &preview.Interconnect{Rule: "r", Action: "allow"}, Sides: []preview.Side{{Side: "OWNER", Scope: "dc/x", Decision: &approved}}}
@@ -296,6 +299,11 @@ func samples() map[string]any {
 		"governance":      gov,
 		"source-check":    SourceCheck{Test: &sources.TestResult{Valid: true, Matches: map[string]bool{"spiffe://x/y": true}, Narrowing: &sources.TestNarrowing{Narrower: true, Witness: "w"}, Overlaps: []sources.TestOverlap{{Source: "o"}}}, Governance: gov, Error: "e"},
 		"source-form":     SourceForm{Edit: true, Revision: 2, Source: src.Source, TrustDomains: []string{"prod.internal"}, Samples: "spiffe://x/y"},
+		"ui-field":        fields[0],
+		"level-block":     LevelBlock{Platform: "p", Index: 1, Name: "read", Grants: fields, Next: 2},
+		"platform-fields": PlatformFields{Platform: "p", Definition: fields, Levels: []LevelBlock{{Platform: "p", Grants: fields}}, Next: 1},
+		"target-check":    TargetCheck{Governance: gov, Error: "e"},
+		"target-form":     TargetForm{Edit: true, Target: tgt.Target, Fields: &PlatformFields{Platform: "p", Definition: fields, Next: 1}, Reapplied: []*bindings.View{v}},
 		"status-row":      row,
 		"trail":           trail,
 		"bindings-table":  []*bindings.View{v},

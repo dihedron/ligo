@@ -1,0 +1,11 @@
+{{define "ui-field"}}<div class="field">
+  {{if eq .Type "checkbox"}}<label><input type="checkbox" name="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+  {{else}}<label for="f-{{.Name}}">{{.Label}}{{if .Required}} *{{end}}</label>
+  {{if eq .Type "select"}}<select id="f-{{.Name}}" name="{{.Name}}"{{if .Required}} required{{end}}>{{if not .Required}}<option value=""></option>{{end}}
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+  {{else if eq .Type "multiselect"}}<select id="f-{{.Name}}" name="{{.Name}}" multiple{{if .Required}} required{{end}}>
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+  {{else if eq .Type "textarea"}}<textarea id="f-{{.Name}}" name="{{.Name}}" placeholder="{{.Placeholder}}"{{if .Required}} required{{end}}>{{.Value}}</textarea>
+  {{else}}<input id="f-{{.Name}}" name="{{.Name}}" type="{{.Type}}" value="{{.Value}}" placeholder="{{.Placeholder}}"{{with .Pattern}} pattern="{{.}}"{{end}}{{if .Required}} required{{end}}>{{end}}{{end}}
+  {{with .Help}}<span class="hint">{{.}}</span>{{end}}
+</div>{{end}}

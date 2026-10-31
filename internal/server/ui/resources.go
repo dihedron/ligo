@@ -6,18 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 )
-
-// Health asks a platform's plugin whether it serves (adminhttp.Plugins).
-type Health interface {
-	Health(ctx context.Context, platform string) (*pluginv1.HealthResponse, error)
-}
 
 // SourcesPage is the sources list's data.
 type SourcesPage struct {

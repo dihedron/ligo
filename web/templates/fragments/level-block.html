@@ -1,0 +1,7 @@
+{{define "level-block"}}<fieldset class="card">
+  <legend>Access level</legend>
+  <div class="field"><label for="l{{.Index}}-name">Level name</label><input id="l{{.Index}}-name" name="level.{{.Index}}.name" value="{{.Name}}"></div>
+  <div class="field"><label for="l{{.Index}}-desc">Description</label><input id="l{{.Index}}-desc" name="level.{{.Index}}.description" value="{{.Description}}"></div>
+  {{range .Grants}}{{template "ui-field" .}}{{end}}
+</fieldset>
+{{if .Next}}<button type="button" class="button-secondary" hx-get="/ui/platforms/{{.Platform}}/fields?level={{.Next}}" hx-target="this" hx-swap="outerHTML" {{hxnonce}}>Add an access level</button>{{end}}{{end}}

@@ -60,7 +60,7 @@ type Server struct {
 	Sources  *sources.Service
 	Targets  *targets.Service
 	Catalog  *catalog.Reader
-	Plugins  Health
+	Plugins  Plugins
 	Config   *config.Config // the platforms, read-only
 
 	pages *pages
@@ -117,6 +117,16 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /ui/sources/{name}/{op}", s.sourceState)
 	mux.HandleFunc("GET /ui/targets", s.targetList)
 	mux.HandleFunc("GET /ui/targets/{name}", s.target)
+	mux.HandleFunc("GET /ui/targets/new-form", s.targetNewForm)
+	mux.HandleFunc("GET /ui/targets/{name}/edit-form", s.targetEditForm)
+	mux.HandleFunc("POST /ui/targets/preview", s.targetPreview)
+	mux.HandleFunc("POST /ui/targets", s.targetSubmit)
+	mux.HandleFunc("PUT /ui/targets/{name}", s.targetSubmit)
+	mux.HandleFunc("POST /ui/targets/{name}/{op}", s.targetState)
+	mux.HandleFunc("POST /ui/targets/{name}/access-levels/{level}/{op}", s.targetState)
+	mux.HandleFunc("POST /ui/targets/{name}/bindings/revoke", s.revokeOn)
+	mux.HandleFunc("GET /ui/platforms/{name}/fields", s.platformFieldsFragment)
+	mux.HandleFunc("GET /ui/platforms/fields", s.platformFieldsFragment)
 	mux.HandleFunc("GET /ui/platforms", s.platforms)
 	mux.HandleFunc("GET /ui/catalog", s.catalogSearch)
 	mux.HandleFunc("GET /ui/catalog/{target}", s.catalogCard)
