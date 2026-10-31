@@ -238,6 +238,7 @@ func (s *Server) Control() *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /acl/{id}", s.putACL)
 	mux.HandleFunc("DELETE /acl/{id}", s.deleteACL)
+	mux.HandleFunc("GET /users/{name}", s.getUser)
 	mux.HandleFunc("PUT /users/{name}", s.putUser)
 	mux.HandleFunc("DELETE /users/{name}", s.deleteUser)
 	return &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second,
@@ -303,6 +304,19 @@ func (s *Server) putUser(w http.ResponseWriter, r *http.Request) {
 		s.Log.Info("user set", "user", name)
 		return nil
 	})
+}
+
+// getUser answers 204 if the user exists, 404 if not: target-echo keeps a
+// user's password unless it is new or rotated.
+func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	_, ok := s.st.Users[r.PathValue("name")]
+	s.mu.RUnlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {

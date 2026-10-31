@@ -164,8 +164,14 @@ func TestPasswordMode(t *testing.T) {
 	if got, _ := v.talk(t, boundID, "auth bnd_x secret", "hello"); got != "denied" {
 		t.Errorf("before the user exists: %q", got)
 	}
+	if code, _ := v.controlCall(t, pluginID, "GET", "/users/bnd_x", ""); code != 404 {
+		t.Errorf("GET a missing user: %d", code)
+	}
 	if code, err := v.controlCall(t, pluginID, "PUT", "/users/bnd_x", `{"password":"secret"}`); err != nil || code != 204 {
 		t.Fatalf("PUT user: %d %v", code, err)
+	}
+	if code, _ := v.controlCall(t, pluginID, "GET", "/users/bnd_x", ""); code != 204 {
+		t.Errorf("GET the user: %d", code)
 	}
 	for _, bad := range []string{"/users/bad-name", "/users/bnd_y"} {
 		body := `{"password":"secret"}`

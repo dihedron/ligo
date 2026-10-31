@@ -15,6 +15,8 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"google.golang.org/grpc/codes"
 )
@@ -32,6 +34,10 @@ type Instance struct {
 	Credential *pluginsdk.BootstrapCredential // nil without a bootstrap_credential
 	JWT        pluginsdk.JWTSource            // the instance's JWT-SVID for OpenBao
 	Roots      *x509.CertPool                 // the lab CA
+	// X509 and Bundles are the instance's X.509-SVID and the agent's
+	// bundles, read at each call, for mTLS with other workloads.
+	X509    func(context.Context) (*x509svid.SVID, error)
+	Bundles func(context.Context) (*x509bundle.Set, error)
 }
 
 // Configure selects each instance's SVID and prepares its bootstrap
@@ -59,6 +65,7 @@ func Configure(ctx context.Context, r *pluginv1.ConfigureInstancesRequest) (map[
 		if err != nil {
 			return nil, nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
 		}
+		inst.X509, inst.Bundles = sel.SelectX509SVID, client.FetchX509Bundles
 		instances[in.GetName()] = inst
 		out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: svid.ID.String()})
 	}
