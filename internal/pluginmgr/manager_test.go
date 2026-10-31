@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -314,6 +315,9 @@ func TestManagerOutputValidators(t *testing.T) {
 	}
 	if m.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, "svid-prod") != nil {
 		t.Error("an identity provider has a validator")
+	}
+	if got := m.Strategies("none.v1"); !slices.Equal(got, []string{"svid"}) || m.Strategies("svid.v1") != nil {
+		t.Errorf("strategies: %v", got)
 	}
 }
 

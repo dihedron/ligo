@@ -1,6 +1,7 @@
 package governance
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -104,7 +105,7 @@ func TestPolicyHash(t *testing.T) {
 		t.Errorf("hashes differ for the same policy: %s %s", ha, hb)
 	}
 	canonical, err := a.Canonical()
-	if err != nil || !strings.Contains(string(canonical), `"max_ttl":28800`) || !strings.Contains(string(canonical), `"required_scopes":["dc/corp-prod/*","cloud/fin-01/*"]`) {
+	if err != nil || !strings.Contains(string(canonical), `"maxTtlSeconds":28800`) || !strings.Contains(string(canonical), `"requiredScopes":["dc/corp-prod/*","cloud/fin-01/*"]`) {
 		t.Errorf("canonical policy: (%s, %v)", canonical, err)
 	}
 	b.Interconnects.Rules[0].Action = "allow"
@@ -180,5 +181,19 @@ func TestPatternsOverlap(t *testing.T) {
 		if got := PatternsOverlap(v.a, v.b); got != v.want {
 			t.Errorf("PatternsOverlap(%q, %q) = %v", v.a, v.b, got)
 		}
+	}
+}
+
+// TestPolicyRoundTrip: the canonical policy reads back to an equal policy,
+// as startup does with the previous CONFIG_LOADED entry.
+func TestPolicyRoundTrip(t *testing.T) {
+	p := examplePolicy()
+	data, err := p.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Policy
+	if err := json.Unmarshal(data, &back); err != nil || back.SHA256() != p.SHA256() || len(Loosening(p, &back)) != 0 {
+		t.Errorf("round trip: %v, %s != %s", err, back.SHA256(), p.SHA256())
 	}
 }

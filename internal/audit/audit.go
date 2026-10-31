@@ -113,6 +113,20 @@ func (e *Entry) hash(prev string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+type requestIDKey struct{}
+
+// WithRequestID tags the entries appended under ctx with the id of the API
+// request that caused them.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, id)
+}
+
+// Hook, when set, runs first in Append, in the entry's transaction: ligo
+// serve announces the entries that are notification events (§7.5), whose
+// outbox rows go before the audit row (§4.3 lock order). It is set once at
+// startup, before any transaction.
+var Hook func(ctx context.Context, tx pgx.Tx, e Entry) error
+
 // Append adds an entry to the chain in tx and returns its id. It MUST be the
 // last operation of the transaction before COMMIT (§4.3, lock ordering): the
 // chain's lock is held until then. The entry is also logged, for the SIEM.
@@ -120,7 +134,15 @@ func Append(ctx context.Context, tx pgx.Tx, e Entry) (int64, error) {
 	if e.OccurredAt.IsZero() {
 		e.OccurredAt = time.Now()
 	}
+	if e.RequestID == "" {
+		e.RequestID, _ = ctx.Value(requestIDKey{}).(string)
+	}
 	e.OccurredAt = e.OccurredAt.UTC().Truncate(time.Microsecond)
+	if Hook != nil {
+		if err := Hook(ctx, tx, e); err != nil {
+			return 0, err
+		}
+	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('ligo_audit_chain'))"); err != nil {
 		return 0, fmt.Errorf("audit: lock: %w", err)
 	}

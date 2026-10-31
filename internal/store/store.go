@@ -95,6 +95,23 @@ func poolConfig(dsn string, timeout time.Duration, allowInsecure bool) (*pgxpool
 	return cfg, nil
 }
 
+// Migrator connects as ligo_migrator, for ligo migrate: verify-full, as
+// the pools (allowInsecure for the tests' containers only).
+func Migrator(ctx context.Context, dsn string, allowInsecure bool) (*pgx.Conn, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if tls := cfg.TLSConfig; !allowInsecure && (tls == nil || tls.InsecureSkipVerify || len(cfg.Fallbacks) > 0) {
+		return nil, ErrInsecureConnection
+	}
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return conn, nil
+}
+
 // Querier is a pool or a transaction.
 type Querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

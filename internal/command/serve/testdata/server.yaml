@@ -1,0 +1,42 @@
+# ligo serve's integration test: one zone, built-in plugins only, local-kek
+service:
+  application_version: "test"
+  instance_id_env: "LIGO_INSTANCE_ID"
+  workload_advertise: { destination: "ligo.prod.internal", port: 8443, server_name: "ligo.prod.internal" }
+zones:
+  - { name: prod, trust_domain: prod.internal, spiffe_workload_socket: "unix:///replaced/by/the/test" }
+core_identity:
+  zone: prod
+  svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"' }
+server:
+  workload_listener:
+    listen_address: "127.0.0.1:0"
+    tls_source: spiffe
+    auth_modes: [x509_svid]
+    accepted_trust_domains: [prod.internal]
+  admin_listener:
+    listen_address: "127.0.0.1:0"
+    tls_source: spiffe
+    client_svid_auth: { enabled: true, accepted_trust_domains: [prod.internal] }
+authorization:
+  bindings:
+    - { spiffe_id: "spiffe://prod.internal/ops/vera", role: viewer, scopes: ["*"] }
+  approval:
+    change_request_ttl: 72h
+governance:
+  source_scopes: []
+  interconnects: { default_cross_scope: deny }
+storage:
+  postgres: { app_dsn_env: LIGO_TEST_PG_APP_DSN, reader_dsn_env: LIGO_TEST_PG_READER_DSN, dbos_dsn_env: LIGO_TEST_PG_DBOS_DSN }
+reconciliation: { enabled: true, interval: 1h }
+break_glass:
+  min_justification_length: 20
+secret_sealing:
+  provider: local-kek
+  local_kek_file: "/replaced/by/the/test"
+plugins:
+  directory: "/nonexistent"
+identity_providers:
+  - { type: svid.v1, builtin: true, instances: [ { name: svid-prod, zone: prod } ] }
+secret_stores:
+  - { type: none.v1, builtin: true, instances: [ { name: none-prod, zone: prod } ] }

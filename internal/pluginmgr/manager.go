@@ -290,6 +290,24 @@ func wirePlatform(in *pluginv1.InstanceDescriptor, platform *pluginv1.PlatformPr
 	return nil
 }
 
+// Strategies returns the secret storage strategies a secret store type
+// declared in Describe, for the startup check of existing bindings (§8.2
+// rule 10).
+func (m *Manager) Strategies(storeType string) []string {
+	var out []string
+	for _, p := range m.procs {
+		if p.spec.Kind != pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE || p.spec.Type != storeType {
+			continue
+		}
+		for _, st := range p.described.GetSecretStore().GetSecretStorageStrategies() {
+			if !slices.Contains(out, st.GetName()) {
+				out = append(out, st.GetName())
+			}
+		}
+	}
+	return out
+}
+
 // buildValidators compiles, for each platform and store instance, its
 // plugin's output schema with the instance's allowed_endpoints (§5.7).
 func (m *Manager) buildValidators() error {

@@ -84,6 +84,9 @@ func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller,
 	if err != nil {
 		return nil, err
 	}
+	if req.InlineSource != nil {
+		return nil, invalid("inlineSource belongs to the break-glass request, not to its binding")
+	}
 	b := req.Binding
 	var filings []changerequests.Filing
 	var inline *sources.Source

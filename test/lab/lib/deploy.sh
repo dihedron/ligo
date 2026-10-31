@@ -32,6 +32,8 @@ env_ligo1() {
 		"LIGO_TEST_BAO_PROD_AUDIENCE=https://bao-prod.ligo.lab" \
 		"LIGO_TEST_LDAP_URL=$LDAP_URL" \
 		"LIGO_TEST_LDAP_BASE=$LDAP_BASE" \
+		"LIGO_TEST_LDAP_BIND_PASS=$(ldap_password ligo-admin-auth)" \
+		"LIGO_TEST_LDAP_OLIVIA_PASS=$(ldap_password olivia)" \
 		"LIGO_TEST_PLUGIN_DIR=$LIGO1_PLUGINS"
 	local name
 	for name in "${LAB_PLUGINS[@]}"; do
@@ -41,9 +43,15 @@ env_ligo1() {
 	return 0
 }
 
-# cmd_deploy: builds the lab tests (static, linux/amd64) and copies them to
-# ligo1, owned by ligo.
+# cmd_deploy: the lab tests and the plugins.
 cmd_deploy() {
+	deploy_tests
+	deploy_plugins
+}
+
+# deploy_tests: builds the lab tests (static, linux/amd64) and copies them to
+# ligo1, owned by ligo.
+deploy_tests() {
 	require_lab
 	inner_exists ligo1 || die "ligo1 does not exist: lab.sh up --scenario identity"
 	section "Deploy"
@@ -62,7 +70,6 @@ cmd_deploy() {
 	done
 	inner_exec ligo1 chown -R ligo:ligo "$LIGO1_TESTS"
 	info "copied $(find "$out" -name '*.test' | wc -l) test binaries to ligo1:$LIGO1_TESTS"
-	deploy_plugins
 }
 
 # deploy_plugins: builds the lab plugins and installs them on ligo1 as
@@ -73,6 +80,10 @@ deploy_plugins() {
 	local out="$LAB_STATE_DIR/plugins" uid name sum
 	rm -rf "${out:?}" && mkdir -p "$out"
 	uid="$(env_get .ligo1.ligo_uid)"
+	if inner_exec ligo1 systemctl -q is-active ligo 2>/dev/null; then
+		inner_exec ligo1 systemctl stop ligo
+		warn "the ligo service is stopped: its plugins are replaced; lab.sh serve install starts it again"
+	fi
 	inner_exec ligo1 install -d -o root -g root -m 0755 /usr/lib/ligo "$LIGO1_PLUGINS"
 	for name in "${LAB_PLUGINS[@]}"; do
 		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out/$name" "./test/lab/plugins/$name") ||

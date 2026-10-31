@@ -19,3 +19,8 @@ linters:
       - path: (_test\.go$|^test/)
         linters:
           - gosec
+      # go-flags reads a flag's allowed values from repeated choice tags
+      # (§8.4), which reflect.StructTag.Get would not see
+      - text: 'SA5008: duplicate struct tag "choice"'
+        linters:
+          - staticcheck

@@ -30,6 +30,8 @@ source "$LAB_DIR/lib/deploy.sh"
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
 source "$LAB_DIR/lib/snapshot.sh"
+# shellcheck source=lib/serve.sh
+source "$LAB_DIR/lib/serve.sh"
 
 usage() {
 	cat <<USAGE
@@ -51,6 +53,9 @@ commands:
   test [-run REGEX] [pkg...]
                             run "go test -tags integration" (default ./...)
                             with that environment
+  serve install|start|stop|reload|status|logs|test
+                            ligo serve on ligo1 (database ligo_serve), and
+                            its e2e with reload, stop and start
   spire <prod|test> [args]  spire-server on that zone's server
   bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
   ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
@@ -212,6 +217,7 @@ main() {
 	env) cmd_env "$@" ;;
 	deploy) cmd_deploy ;;
 	test) cmd_test "$@" ;;
+	serve) cmd_serve "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
 	bao) require_lab && bao "$@" ;;

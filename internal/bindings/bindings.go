@@ -14,6 +14,7 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/regexpolicy"
@@ -67,14 +68,34 @@ type Rules struct {
 	NamePrefixes []governance.NamePrefix
 	Regex        regexpolicy.Policy
 	MaxExpiry    time.Duration
+	// the flows declared by platforms and secret store instances, and
+	// ligo's own (ADR-16), for the effective flows of a binding
+	PlatformFlows, StoreFlows map[string][]flows.Flow
+	Ligo                      flows.Flow
+	// Allow is each platform's allowed_endpoints: target flows outside it
+	// are left out of effective flows (§8.2 rule 19)
+	Allow map[string]flows.Allowlist
 }
 
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
+	wa := cfg.Service.WorkloadAdvertise
 	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy,
-		MaxExpiry: cfg.Bindings.MaxExpiry}
+		MaxExpiry: cfg.Bindings.MaxExpiry, PlatformFlows: map[string][]flows.Flow{}, StoreFlows: map[string][]flows.Flow{},
+		Ligo: flows.LigoFlow(wa.Destination, wa.Port, wa.ServerName), Allow: map[string]flows.Allowlist{}}
+	for _, ss := range cfg.SecretStores {
+		for _, in := range ss.Instances {
+			r.StoreFlows[in.Name] = in.NetworkFlows
+		}
+	}
 	for _, pp := range cfg.PlatformProviders {
 		for _, p := range pp.Platforms {
+			r.PlatformFlows[p.Name] = p.NetworkFlows
+			allow, err := flows.ParseAllowlist(p.AllowedEndpoints())
+			if err != nil {
+				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
+			}
+			r.Allow[p.Name] = allow
 			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Zone: p.Zone, Scope: p.Scope,
 				AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix,
 				IdentityProviderType: p.IdentityProvider.Type, IdentityProviderInstance: p.IdentityProvider.Instance,

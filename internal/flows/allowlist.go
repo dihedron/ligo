@@ -102,6 +102,19 @@ func (al Allowlist) CheckFlow(f Flow) error {
 	return nil
 }
 
+// Within returns the flows of fs that lie within the allowlist: flows that a
+// tightened allowlist no longer covers are left out of effective flows
+// (§8.2 rule 19).
+func (al Allowlist) Within(fs []Flow) []Flow {
+	var out []Flow
+	for _, f := range fs {
+		if al.CheckFlow(f) == nil {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // CheckEndpoint checks that host (a DNS name or an address) on port lies
 // within the allowlist; port 0 (none given) is allowed only by an entry
 // without a port, which allows any (§5.7).

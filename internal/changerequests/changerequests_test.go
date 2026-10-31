@@ -294,3 +294,20 @@ func TestRatifiableSides(t *testing.T) {
 		})
 	}
 }
+
+func TestDiff(t *testing.T) {
+	changes, err := Diff(
+		[]byte(`{"a":1,"b":{"x":1,"y":2},"c":"gone"}`),
+		[]byte(`{"a":2,"b":{"y":2,"x":1},"d":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range changes {
+		got = append(got, c.Field+":"+string(c.Old)+">"+string(c.New))
+	}
+	want := "a:1>2 c:\"gone\">null d:null>true" // b differs only in key order
+	if strings.Join(got, " ") != want {
+		t.Errorf("Diff = %q, want %q", strings.Join(got, " "), want)
+	}
+}

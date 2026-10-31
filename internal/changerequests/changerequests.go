@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -123,6 +124,7 @@ type Request struct {
 	DistinctApprovers bool
 	Status            string
 	RequestedBy       string
+	RequestedAt       time.Time
 	ExpiresAt         time.Time
 	Sides             []Side
 }
@@ -149,7 +151,10 @@ type Side struct {
 	Basis            string
 	Decision         string // "", APPROVED, DECLINED
 	DecidedBy        string
+	DecidedAt        *time.Time
 	RatifiedBy       string // BREAK_GLASS sides (ADR-12)
+	RatifiedAt       *time.Time
+	RatificationNote string
 }
 
 // Candidate is a side a request needs, before its basis is known; Platform
@@ -168,21 +173,85 @@ type Candidate struct {
 func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approvalReference string) ([]Side, error) {
 	var sides []Side
 	for _, cand := range candidates {
-		s := Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
-		if c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
-			s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
-		} else if g := c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+		s, g := side(cand, c, p)
+		if g != nil {
 			if approvalReference == "" {
 				return nil, refuse(422, "validation-failed", "side %s is approved by delegation: approvalReference is required", cand.Side)
 			}
 			if g.ApprovalReference != nil && !g.ApprovalReference.MatchString(approvalReference) {
 				return nil, refuse(422, "validation-failed", "approvalReference %q does not match the delegation's approval_reference_pattern", approvalReference)
 			}
-			s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
 		}
 		sides = append(sides, s)
 	}
 	return sides, nil
+}
+
+// PreviewSides are the sides BuildSides would build, without checking the
+// approval reference (POST /v1/admin/governance/evaluate).
+func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side {
+	sides := []Side{}
+	for _, cand := range candidates {
+		s, _ := side(cand, c, p)
+		sides = append(sides, s)
+	}
+	return sides
+}
+
+// side decides how cand is decided; g is the delegating grant of a
+// DELEGATED side.
+func side(cand Candidate, c Caller, p *governance.Policy) (s Side, g *authz.Grant) {
+	s = Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
+	if c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
+		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
+	} else if g = c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+		s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
+	} else {
+		g = nil
+	}
+	return s, g
+}
+
+// Change is a top-level field of a resource that a request changes.
+type Change struct {
+	Field string          `json:"field"`
+	Old   json.RawMessage `json:"old"`
+	New   json.RawMessage `json:"new"`
+}
+
+// Diff lists the top-level fields of payload whose canonical JSON differs
+// from current's, in field order (§7.2.3, the diff of a change request).
+func Diff(current, payload json.RawMessage) ([]Change, error) {
+	var old, proposed map[string]json.RawMessage
+	if err := json.Unmarshal(current, &old); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &proposed); err != nil {
+		return nil, err
+	}
+	fields := slices.Collect(maps.Keys(old))
+	for f := range proposed {
+		if _, ok := old[f]; !ok {
+			fields = append(fields, f)
+		}
+	}
+	slices.Sort(fields)
+	changes := []Change{}
+	for _, f := range fields {
+		a, _ := jcs.Transform(orNull(old[f]))
+		b, _ := jcs.Transform(orNull(proposed[f]))
+		if !bytes.Equal(a, b) {
+			changes = append(changes, Change{Field: f, Old: orNull(old[f]), New: orNull(proposed[f])})
+		}
+	}
+	return changes, nil
+}
+
+func orNull(v json.RawMessage) json.RawMessage {
+	if v == nil {
+		return json.RawMessage("null")
+	}
+	return v
 }
 
 // BreakGlassSides builds the sides of a break-glass change (§7.2.3): a side

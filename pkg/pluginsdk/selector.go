@@ -87,6 +87,12 @@ func (s *InstanceSVIDSelector) SelectX509SVID(ctx context.Context) (*x509svid.SV
 	if err != nil {
 		return nil, fmt.Errorf("fetching x509 svids: %w", err)
 	}
+	return s.Pick(svids)
+}
+
+// Pick returns the single SVID of svids matching the instance expression,
+// which must belong to the zone's trust domain.
+func (s *InstanceSVIDSelector) Pick(svids []*x509svid.SVID) (*x509svid.SVID, error) {
 	var match *x509svid.SVID
 	for _, c := range svids {
 		env := SVIDEvalEnv{

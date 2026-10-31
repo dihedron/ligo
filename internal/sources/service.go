@@ -62,7 +62,7 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), scope)
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
-		return nil, invalid("metadata.name %q is in use", src.Metadata.Name)
+		return nil, refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", src.Metadata.Name)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (s *Service) Inline(ctx context.Context, body []byte) (*changerequests.Requ
 		return nil, nil, nil, err
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
-		return nil, nil, nil, invalid("metadata.name %q is in use", src.Metadata.Name)
+		return nil, nil, nil, refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", src.Metadata.Name)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil, err
 	}
@@ -372,7 +372,7 @@ func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, actor strin
 		null(s.DisplayName), null(s.Description), jsonb(s.Labels, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"),
 		s.Visibility.Mode, jsonb(s.Visibility.VisibleTo, "[]"), actor)
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_sources_name" {
-		return invalid("metadata.name %q is in use", s.Metadata.Name)
+		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", s.Metadata.Name)
 	}
 	return err
 }

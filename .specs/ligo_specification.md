@@ -29,7 +29,7 @@ The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHOULD**, **SHO
 | `FW-nn` | Future work: a design option recorded for later, not part of this version (Section 13) |
 
 ### 0.4 Naming convention
-The application is named **`ligo`**, Latin for "I bind". It manages four kinds of things:
+The application is named **`ligo`**, Latin for "I bind", and is pronounced "lee-go". It manages four kinds of things:
 
 | Entity | Meaning | Where it lives | Example |
 | :--- | :--- | :--- | :--- |
@@ -93,6 +93,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | API versions (§0.4, §3, §5.9, §7, §8.3) | No 3.x API was released, so the first released versions restart at the beginning: the plugin contract is `ligo.plugin.v1` (`api/proto/plugin/v1`, Go package `pluginv1`), matching its handshake `ProtocolVersion: 1`, and the resource, workload, admin and schema versions are `v1alpha1` (`ligo.dihedron.org/v1alpha1`, `ligo.workload.v1alpha1`, `admin.v1alpha1.yaml`, `api/schemas/v1alpha1`). |
 | Output validation (§5.7, INV-13) | Made precise: an output schema that is empty or does not compile is refused at startup; the size limit is checked first, then the schema with its annotated endpoints, then `declared_endpoints`; an endpoint without a port is allowed only by an `allowed_endpoints` entry without a port, since a URL scheme does not imply a default port. |
 | Declining a side (§7.2.3, §7.4, §8.4) | `/reject` becomes `/decline`, in the API, the UI and the CLI (`ligo cr decline`): a side is `DECLINED`, and the request becomes `REJECTED` as a consequence. |
+| External assumptions (§12) | EXT-13 verified on `go-ldap/ldap/v3` v3.4.15: `EscapeFilter` and `EscapeDN` are both available. |
 | Break-glass revert (§6.3) | A revert withdraws the binding's pending change request first, as an expiry revocation does: the revert supersedes it, and a pending request would block the revert's insert (`uq_cr_one_pending_per_resource`). |
 | Source pipeline errors (§7.2.3) | The source pipeline names its errors: a name in use is `422 validation-failed`, a stale `expectedRevision` `409 revision-conflict`, a pending request `409 change-request-pending`, a state change other than deprecate, reactivate or retire `409 invalid-transition`. |
 | Target pipeline (§7.2.3) | `ValidateTarget` refusing a target, or returning non-canonical `privileges` or levels out of order, is `422 validation-failed`. |
@@ -698,10 +699,11 @@ Platforms are read-only through the API. Their representation is derived from `s
   ],
   "identityProvider": { "type": "openldap.v1", "instance": "ldap-prod" },
   "secretStore": { "type": "vault.v1", "instance": "vault-prod" },
-  "uiSchemas": { "target": "…", "binding": "…" }
+  "health": { "serving": true, "message": "…" },
+  "uiSchemas": { "targetDefinition": { "fields": [] }, "accessLevelGrants": { "fields": [] }, "bindingParameters": { "fields": [] } }
 }
 ```
-`privilegeBounds` is the platform's privilege upper bound in the plugin's terms (for Oracle and PostgreSQL, `grantableRoles`). `uiSchemas` are the forms returned by `GetUISchemas` (§5.9). A platform is visible to every authenticated principal with any role, because the catalog needs it; its configuration beyond these fields is not.
+`privilegeBounds` is the platform's privilege upper bound in the plugin's terms (for Oracle and PostgreSQL, `grantableRoles`). `health` is the platform plugin's `Health` answer (`serving`, and its `public_message` as `message`); a plugin that cannot be reached within 2 s is shown as not serving. `uiSchemas` are the three forms returned by `GetUISchemas` (§5.9), in the Protobuf JSON mapping of `UIForm`; only `GET /v1/admin/platforms/{name}` carries them. A platform is visible to every authenticated principal with any role, because the catalog needs it; its configuration beyond these fields is not.
 
 ### 3.5 Binding (admin representation)
 
@@ -2137,10 +2139,10 @@ The audit action vocabulary (**Normative**) is (`resource_type` and `resource_na
 - Operator actions: `RETRY_REQUESTED`, `ROTATE_REQUESTED`
 - Cleanup: `CLEANUP_SKIPPED_NOT_OWNER`
 - Sessions: `SESSION_LOGIN`, `SESSION_LOGIN_FAILED`, `SESSION_LOGOUT`, `SESSION_REVOKED`
-- Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, and the governance policy with its SHA-256, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
+- Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, the governance policy with its SHA-256, and each platform's privilege bounds, allowed endpoints and flows, which the next start compares for rule 19, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
 - Governance: `SOURCE_RESCOPED`, `TARGET_RESCOPED`, `BINDING_RESCOPED` (snapshot: old and new scopes, §8.2 rule 17)
 - Break-glass: `BREAK_GLASS_USED`, `BREAK_GLASS_RATIFIED` (one per ratified side; the snapshot says whether the change is now fully ratified), `BREAK_GLASS_REVERT_STARTED`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE` (snapshots include justification, incident reference and expiry)
-- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19)
+- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
 
 ### 4.3 Audit hash chain & lock ordering
 Every audit insert MUST run inside a database transaction that:
@@ -3107,6 +3109,8 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 
 #### 7.2.3 Admin REST endpoints
 
+**JSON naming (Normative).** Every JSON body that `ligo` accepts or returns, on the admin and workload APIs, in audit snapshots and in webhook payloads, names its fields in lowerCamelCase (`policySha256`, `targetScopes`); a duration is a whole number of seconds in a field ending in `Seconds` (`ttlSeconds`). Configuration keys in `server.yaml` stay snake_case. Enumerated values keep their own spelling (`PENDING`, `path_template`). Bodies defined by a third party, such as plugin configuration or Vault requests, keep that party's names.
+
 **Sources.**
 
 | Method | Path | Role | Description |
@@ -3165,8 +3169,8 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 governance-policy-changed`, `409 dependency-pending`, `422 validation-failed`, `409 binding-busy`, `409 change-request-not-pending`. |
 | `POST` | `/v1/admin/change-requests/{id}/decline` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
 | `POST` | `/v1/admin/change-requests/{id}/withdraw` | requester | Allowed only while `PENDING`. Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. Withdrawing an inline source's `CREATE` fails the binding `CREATE` that depends on it. |
-| `GET` | `/v1/admin/governance` | viewer | The governance policy in force (source-scope extractors, approval-required scopes, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_scopes`) and its SHA-256 (§8.2). |
-| `POST` | `/v1/admin/governance/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the scopes, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. |
+| `GET` | `/v1/admin/governance` | viewer | The governance policy in force (source-scope extractors, approval-required scopes, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_scopes`) and its SHA-256 (§8.2): `{"policy": {…}, "sha256": "<64 hex>"}`. `policy` is the canonical JSON the hash is computed over, so a client can verify `sha256` and compare it with a change request's `policySha256`. |
+| `POST` | `/v1/admin/governance/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the scopes, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. Response: `{"resourceType", "name", "scopes": {"source", "target", "platform"} (bindings) or {"owner", "platform"?} (sources, targets), "namePrefix": {"valid", "detail"?}, "consent", "interconnect": {"rule", "action": "allow"\|"deny"} or null (same-scope bindings, sources, targets), "sides": [{"side", "scope", "basis", "decision", "decidedBy"?}]}`; `sides` is empty when the policy denies. It evaluates creations only; the other checks of the pipelines (regex policy, trust domains, plugin validation, RBAC) run when the request is filed. |
 | `GET` | `/v1/admin/maintenance` | viewer | `{"maintenanceMode": bool, "reason": "...", "changedBy": "...", "changedAt": "...", "inFlight": N, "propagationQueued": M}`. `inFlight` is the number of bindings in `PROVISIONING` or `DELETING`; the drain of §10.3 is complete when it reaches 0. |
 | `PUT` | `/v1/admin/maintenance` | `admin.full_access` | Body: `{"enabled": bool, "reason": "..."}` (`reason` required when enabling). Updates `system_settings` and audits `SYSTEM_MAINTENANCE_ENABLED`/`_DISABLED` in one transaction. Idempotent. |
 | `POST` | `/v1/admin/break-glass` | `break_glass` (people only) | Break-glass change of a binding (ADR-12). Body: `{"operation": "CREATE\|UPDATE\|DELETE", "binding": {…create/update body…} or "name" + "expectedRevision" for DELETE, "inlineSource": {…source body…} (CREATE only, optional), "justification": "…", "incidentReference": "…", "ttl": "4h"}`. Requires Basic credentials on this request (API) or password re-entry (UI); group membership is re-checked against LDAP. The person MUST hold `break_glass` on every side that would otherwise need a decision (ADR-12). Applied immediately; `409 break-glass-open` if the binding already has an open break-glass change; `429 break-glass-limit` if a side's break-glass policy has `max_open` open changes. Rejected with `422` if no side needs a decision (use a normal change there). |
@@ -3383,7 +3387,7 @@ Source change requests carry `ownerScope`; target change requests carry `ownerSc
 3. Timeouts: idle 30m, absolute 8h. Group membership is re-checked against LDAP every `authz_recheck_interval` (default 5m). Losing all roles revokes the session.
 4. Every non-`GET` `/ui/*` request MUST carry an `X-CSRF-Token` header equal to the session's `csrf_token` (constant-time compare). It MUST also carry `Sec-Fetch-Site: same-origin`, or an `Origin` header equal to the listener's configured external origin.
 5. `POST /ui/logout` sets `revoked_at` and clears `__Host-ligo_session` (`Max-Age=0`).
-6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `api_per_principal_rps`. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password.
+6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `api_per_principal_rps`. The login limits count failed logins only (refused credentials, on the UI login or on a Basic API request): while either is exhausted, every login or Basic request from that address or for that user gets `429`, the right password included; successful Basic requests count only against `api_per_principal_rps`, so that the CLI, which sends Basic credentials on every request, is not throttled by them. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password.
 
 ### 7.4 HTMX Web GUI
 
@@ -3916,7 +3920,7 @@ platform_providers:                       # plugin types and the platforms that 
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`, checked after every plugin has described itself and before any `ConfigureInstances` (§5.2). The schema MUST compile as JSON Schema 2020-12: a plugin with an empty or invalid schema is refused. An omitted `config` is validated as `{}`. A failure names the instance and the schema location that failed.
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`.
-10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited).
+10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
 12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone.
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
@@ -3928,7 +3932,7 @@ platform_providers:                       # plugin types and the platforms that 
     - `governance.source_scopes` has exactly one entry for each trust domain listed in any `allowed_source_trust_domains`, and no entry for any other trust domain. `static` entries have a valid scope path; `path_template` entries satisfy the rules of §3.9 (verified with the Appendix D code).
     - Interconnection rule names are unique and match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (`default` is reserved); `action` is `allow` or `deny`; `default_cross_scope` is `allow` or `deny`; `additional_approvals` appear only on `allow` rules, with unique names matching `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$` and a valid scope path; `distinct_approvers` is a boolean.
     - Every `name_prefixes` entry has `resources` ⊆ {`source`, `target`, `binding`}. A placeholder `{n}` greater than the number of segments of a scope the entry matches is an error when that scope is used (at creation, `422 validation-failed`), and at startup for the scopes of existing resources. A resolved prefix MUST match `^[a-z0-9][-a-z0-9]{0,31}$`.
-    - The **governance policy** is the RFC 8785 (JCS) canonical JSON of `authorization.approval.required_scopes`, `require_distinct_approvers_across_scopes`, `governance.source_scopes`, `governance.name_prefixes`, `governance.interconnects`, `break_glass.policies` and the sorted list of `(platform, scope, target_scopes)` triples. Its SHA-256 is stored on every change request (`policy_sha256`) and in `CONFIG_LOADED`.
+    - The **governance policy** is the RFC 8785 (JCS) canonical JSON of `authorization.approval.required_scopes`, `require_distinct_approvers_across_scopes`, `governance.source_scopes`, `governance.name_prefixes`, `governance.interconnects`, `break_glass.policies` and the sorted list of `(platform, scope, target_scopes)` triples, with lowerCamelCase field names and durations in whole seconds (§7.2.3 "JSON naming"). Its SHA-256 is stored on every change request (`policy_sha256`) and in `CONFIG_LOADED`.
 17. **Scope drift** (checked after the database is connected). For every source that is not `RETIRED`, the scope derived from its regex with the current extractor MUST equal its stored scope. For every target that is not `RETIRED`, its stored `platform_scope` MUST equal its platform's `scope`, and its scope MUST still match the platform's `target_scopes`. For every binding, the three scopes MUST equal those of its source, its target and its target's platform. Otherwise startup fails, naming the resources, unless `--accept-scope-changes` is given. With that flag, `ligo` re-scopes, in one transaction per source or target together with its bindings (`SET LOCAL ligo.rescope = 'on'`, the only way the immutability triggers allow a scope change): update the scopes, move every `PENDING` change request of the affected resources and bindings to `FAILED_TO_APPLY` (`apply_error = "re-scoped"`), and audit `SOURCE_RESCOPED`, `TARGET_RESCOPED` and `BINDING_RESCOPED` with the old and new scopes. A source whose regex no longer resolves at all, and a target whose scope no longer matches its platform's `target_scopes`, are fatal errors even with the flag: their owners must retire them, or the configuration must be corrected.
 18. **Interconnection violations** (checked after rule 17). Every cross-scope binding is evaluated against the current interconnection policy. Bindings the policy would deny are logged at `WARN`, listed in one `SYSTEM_INTERCONNECT_VIOLATIONS` audit entry (announced by webhook), and counted in `ligo_interconnect_violations`. They are not changed (ADR-14 rule 6).
 19. **Platforms** (checked after rule 18, once plugins are running). Every platform's and secret store's `network_flows` follow the flow schema (§3.3) with destinations inside their `allowed_endpoints` (§5.7); `service.workload_advertise` is set. A change of a platform's privilege bounds, endpoints or flows since the previous `CONFIG_LOADED` is audited `CONFIG_PLATFORM_CHANGED`. Every `ACTIVE` or `DEPRECATED` access level is re-checked against its platform's current privilege bounds (with `ValidateTarget`, without `check_existence`); levels now outside the bounds are listed in `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (audit and webhook, gauge `ligo_privilege_bound_violations`). They are not changed: re-applying their bindings fails in `EnsureTarget` (§5.8 rule 3) until the target owner narrows or retires the level. Every target flow is re-checked against its platform's current `allowed_endpoints`; flows outside it are omitted from effective flow lists and reported in the same entry.
@@ -3951,6 +3955,8 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 3. Shut down the DBOS executor so in-flight steps finish checkpointing cleanly.
 4. Terminate all `go-plugin` subprocesses.
 5. Close SPIRE Workload API clients and PostgreSQL connection pools.
+
+**Certificate reload (`SIGHUP`, Normative):** `SIGHUP` reloads the certificate files only: the admin listener's `tls_cert_file` and `tls_key_file` (with `tls_source: file`) and `admin_auth.ldap.ca_cert_file`. New TLS handshakes and LDAP connections use them; open connections are unaffected. A file that fails to load keeps the previous certificate and is logged at `ERROR`. Every other change of `server.yaml`, the certificate paths included, takes effect only through a (rolling) restart, so that the startup checks and audits above always apply. With `tls_source: spiffe` there is nothing to reload: SPIRE rotates the SVID. A systemd unit maps `systemctl reload ligo` to it with `ExecReload=/bin/kill -HUP $MAINPID`.
 
 ### 8.3 Repository layout
 
@@ -4002,6 +4008,8 @@ ligo/
 
 The `ligo` binary uses `github.com/jessevdk/go-flags` with command/subcommand struct embedding. (Informative: these are the same conventions as `github.com/dihedron/openstack-spiffe` and `github.com/dihedron/lxd-spiffe`. The struct listing below is the authoritative definition; implementers need not consult those repositories.) Every subcommand implements `flags.Commander` (`Execute(args []string) error`).
 
+- **Server verification (Normative).** With `--ca-cert`, the Admin server's certificate is verified against that bundle and the URL's host name (`tls_source: file`). Without it and with `--spiffe-socket`, it is verified against the X.509 bundle of the socket for the client SVID's trust domain, and its SPIFFE ID MUST equal `--server-id` (`tls_source: spiffe`); any other ID is refused, so that no other workload of the trust domain can pose as the Admin API. Without either, the system roots and the host name apply. With `--username`, the CLI sends LDAP Basic credentials and presents no SVID: `--spiffe-socket` then only verifies the server, so that a person can reach a server whose certificate comes from SPIRE.
+- **Output (Normative).** Every command writes its result to standard output as `table` (aligned columns), `json` or `yaml` (`--output`) and needs no terminal, so that automation can parse it; errors, including the server's problem details, go to standard error with a non-zero exit status. Interactive views, such as a review queue of pending change requests, are separate commands, never the default of a scriptable one.
 - **Credentials (Normative).** The CLI MUST NOT accept a password as a flag value or environment variable, because those are visible in the process list, shell history and the process environment. The password is read from `--password-file` (which MUST NOT be group- or world-readable; the CLI refuses otherwise), or prompted for on a terminal without echo. Automation SHOULD authenticate with an X.509-SVID (`--spiffe-socket`) instead of LDAP.
 
 **Normative** (CLI struct hierarchy and struct tags):
@@ -4019,6 +4027,7 @@ type ClientOptions struct {
 	ServerURL    string `short:"s" long:"server" env:"LIGO_SERVER_URL" default:"https://localhost:9443" description:"Admin server base URL."`
 	CACert       string `long:"ca-cert" env:"LIGO_CA_CERT" description:"Path to CA certificate bundle for verifying the Admin server."`
 	SpiffeSocket string `long:"spiffe-socket" env:"LIGO_SPIFFE_SOCKET" description:"SPIRE Workload API socket path for mTLS X.509-SVID authentication."`
+	ServerID     string `long:"server-id" env:"LIGO_SERVER_ID" description:"SPIFFE ID the Admin server's SVID must have when it is verified with the socket's bundle (no --ca-cert); default spiffe://<the client SVID's trust domain>/ns/sys/sa/ligo."`
 	Username     string `short:"u" long:"username" env:"LIGO_USERNAME" description:"LDAP username (only when server allow_basic_auth is enabled)."`
 	PasswordFile string `long:"password-file" env:"LIGO_PASSWORD_FILE" description:"File containing the LDAP password (only when server allow_basic_auth is enabled). If omitted and no SPIFFE socket is set, the password is prompted for without echo."`
 }
@@ -4044,6 +4053,14 @@ type Options struct {
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
 	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
+	Migrate MigrateCommand      `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
+}
+
+// MigrateCommand applies the embedded, forward-only migrations as
+// ligo_migrator; the DSN is read from the environment variable it names,
+// never from the command line, and MUST use sslmode=verify-full.
+type MigrateCommand struct {
+	DSNEnv string `long:"dsn-env" default:"LIGO_MIGRATOR_DSN" description:"Environment variable holding the ligo_migrator DSN."`
 }
 
 // ResourceArgs names one resource: `ligo get binding payments-ledger-workers-ledger`.
@@ -4131,6 +4148,7 @@ type ChangeRequestCommand struct {
 	Withdraw CRWithdrawCommand `command:"withdraw" description:"Withdraw own PENDING change request."`
 	Ratify   CRRatifyCommand   `command:"ratify" description:"Ratify one side of a break-glass change (approver, not the requester)."`
 	Revert   CRRevertCommand   `command:"revert" description:"Revert an open break-glass change now."`
+	Review   CRReviewCommand   `command:"review" description:"Interactive queue of the change requests awaiting you: read them and approve or decline several at once (needs a terminal)."`
 }
 
 type CRListCommand struct {
@@ -4185,6 +4203,16 @@ type CRRevertCommand struct {
 	Args struct {
 		ID string `positional-arg-name:"cr-id" description:"Break-glass change request UUID."`
 	} `positional-args:"yes" required:"yes"`
+}
+
+// CRReviewCommand is interactive (§8.4 "Output"): the requests awaiting the
+// caller, oldest first, with details and diffs; several are approved side
+// by side with the payloadSha256 that was shown, or declined with a reason.
+type CRReviewCommand struct {
+	ClientOptions
+	Scope string `long:"scope" description:"Only requests with a scope matching this pattern."`
+	Kind  string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
+	Zone  string `short:"z" long:"zone" description:"Only requests of this zone."`
 }
 
 type CRWithdrawCommand struct {
@@ -4540,7 +4568,7 @@ type GovCheckCommand struct {
   3. roll out the new version;
   4. `ligo maintenance off`.
 - This avoids depending on cross-version workflow recovery (EXT-09).
-- Migrations are forward-only and run by `ligo_migrator` before rollout.
+- Migrations are forward-only and run by `ligo_migrator` before rollout, with `ligo migrate` (§8.4), which applies the migrations embedded in the new binary in order, each in its own transaction, under an advisory lock, and refuses to start if an applied migration's content changed.
 
 ### 10.4 Backup and disaster recovery
 - `public` and `dbos` live in the same database and MUST be backed up together (PITR).
@@ -4766,6 +4794,8 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | EXT-19 | Go `regexp/syntax` | `syntax.Compile` of a simplified `syntax.Perl` parse produces only the instruction kinds handled by Appendix D.3 (`Alt`, `AltMatch`, `Capture`, `Nop`, `EmptyWidth`, `Rune`, `Rune1`, `RuneAny`, `RuneAnyNotNL`, `Match`, `Fail`); `Inst.MatchRune` handles `InstRune` only (not `RuneAny*`, which D.3 matches itself); `^` and `$` compile to `EmptyBeginText` and `EmptyEndText`. Verified with Go 1.24.7 by the D.3 tests. | Extend the D.3 instruction switch; any unknown instruction makes the check return `ErrUnsupported` (fail closed). |
 
 **Verified on `dbos-transact-golang` v1.8.0** (`internal/workflows/ext_integration_test.go`, run on the lab): EXT-01 holds (`RunAsStep`; steps are not retried unless `WithStepMaxRetries` is set, so §6.1 rule 3 needs no option). EXT-02 holds (`WithWorkflowID`; the default reuse policy returns the existing workflow without running its steps again). EXT-03 holds (`RetrieveWorkflow` and `GetStatus`; an unknown ID is an error; `dbos.workflow_status` is readable with SQL). EXT-05: cron schedules exist (`CreateSchedule`), but `ligo` keeps its internal ticker and advisory locks. EXT-06 holds: finished workflows are listed by age (`ListWorkflows` with `WithFilterCreatedBefore`) and deleted (`DeleteWorkflows`), which the retention job uses. EXT-07 holds (JSON serialization of DTOs by default). EXT-08 holds (its own DSN and the schema `dbos` owned by `ligo_dbos`, without access to `public`). EXT-09 holds (recovery re-enqueues only the workflows of the executor's application version).
+
+**Verified on `go-ldap/ldap/v3` v3.4.15:** EXT-13 holds, and the DN helper exists too: `ldap.EscapeFilter` escapes the username in `user_filter` and the user DN in `group_membership_filter`; `ldap.EscapeDN` (RFC 4514) is available, so `adminauth` implements no escaping of its own. go-ldap requires `golang.org/x/crypto` (for `md4`, used by NTLM), which govulncheck flags at module level with GO-2026-5932: the deprecated `openpgp` package of that module is unsafe by design. Nothing in `ligo` or go-ldap imports `openpgp`, govulncheck reports the code unaffected, and no fixed version exists; the advisory is accepted and goes away when `x/crypto` drops the package.
 
 ---
 

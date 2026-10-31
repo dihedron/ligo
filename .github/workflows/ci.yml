@@ -91,6 +91,11 @@ jobs:
       - name: Lint and build
         run: make
 
+      # Node and npx come with the runner; the Redocly CLI version is pinned
+      # in custom.mk (REDOCLY_VERSION)
+      - name: Lint the OpenAPI document (make openapi-lint)
+        run: make openapi-lint
+
       # the roles and the database of §4.1, as operations create them
       - name: Create the database roles
         run: >-

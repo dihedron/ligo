@@ -15,6 +15,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/outputvalidation"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/sealing"
@@ -264,6 +265,9 @@ func (e *Engine) input(ctx context.Context, bindingID uuid.UUID) (ApplyInput, st
 // and operation, a new workflow ID (INV-09).
 func (e *Engine) Retry(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		if err := changerequests.Maintenance(ctx, tx); err != nil { // §10.3: no retry in maintenance
+			return err
+		}
 		var name, op string
 		var revision, attempt int64
 		err := tx.QueryRow(ctx, `UPDATE bindings SET attempt = attempt + 1, current_step = 'INIT', status_message = '',
@@ -273,7 +277,7 @@ func (e *Engine) Retry(ctx context.Context, bindingID uuid.UUID, actor string) (
 			workflow_id = format('ligo:%s:%s:r%s:a%s', lower(operation::text), id, revision, attempt + 1)
 			WHERE id = $1 AND phase IN ('FAILED', 'DELETE_FAILED') RETURNING name, operation, revision, attempt`, bindingID, actor).Scan(&name, &op, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("workflows: binding %s is neither FAILED nor DELETE_FAILED", bindingID)
+			return &changerequests.Error{Status: 409, Slug: "invalid-transition", Detail: fmt.Sprintf("binding %s is neither FAILED nor DELETE_FAILED", bindingID)}
 		}
 		if err != nil {
 			return err

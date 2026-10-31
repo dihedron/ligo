@@ -49,6 +49,9 @@ func (s *Service) Applied(ctx context.Context, r *changerequests.Request) {
 type request struct {
 	Binding
 	changerequests.Common
+	// InlineSource is a source create body registered with a CREATE
+	// (§7.2.4 "Inline source").
+	InlineSource json.RawMessage `json:"inlineSource,omitempty"`
 }
 
 func decode(body []byte) (*request, error) {
@@ -72,11 +75,43 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	b := req.Binding
+	if req.InlineSource != nil {
+		return s.createInline(ctx, c, req)
+	}
 	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll, nil)
 	if err != nil {
 		return nil, err
 	}
 	return s.file(ctx, c, "CREATE", changerequests.ConsentAll, nil, &b, res, &req.Common)
+}
+
+// createInline files the CREATE of a new source and the binding's CREATE
+// that depends on it, with the sides the new source's scope gives
+// (§7.2.4); the caller must be able to register the source.
+func (s *Service) createInline(ctx context.Context, c changerequests.Caller, req *request) (*changerequests.Request, error) {
+	var source changerequests.Filing
+	var inline *sources.Source
+	var err error
+	if source.Request, source.Candidates, inline, err = s.Sources.Inline(ctx, req.InlineSource); err != nil {
+		return nil, err
+	}
+	b := req.Binding
+	if b.Source != inline.Metadata.Name {
+		return nil, invalid("source %q is not the inline source %q", b.Source, inline.Metadata.Name)
+	}
+	if !c.Grants.ActsFor(inline.Metadata.Scope, "") {
+		return nil, refuse(403, "forbidden", "%s is no operator of %s, the inline source's scope", c.ID(), inline.Metadata.Scope)
+	}
+	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll, inline)
+	if err != nil {
+		return nil, err
+	}
+	r, sides, err := compose("CREATE", changerequests.ConsentAll, nil, &b, res, &req.Common, nil)
+	if err != nil {
+		return nil, err
+	}
+	err = s.Requests.CreateDependent(ctx, c, req.ApprovalReference, source, changerequests.Filing{Request: r, Candidates: sides})
+	return r, pendingError(err, b.Name)
 }
 
 // Update files a change of a binding (PUT /v1/admin/bindings/{name}):
@@ -89,6 +124,9 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	}
 	if req.ExpectedRevision == nil {
 		return nil, invalid("expectedRevision is required")
+	}
+	if req.InlineSource != nil {
+		return nil, invalid("inlineSource is only for a CREATE")
 	}
 	cur, err := s.current(ctx, c, name)
 	if err != nil {
@@ -415,15 +453,22 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	}
 	sides := anySides
 	if consent == changerequests.ConsentAll {
-		sides = []changerequests.Candidate{{Side: "TARGET", Scope: res.targetScope, Platform: res.platform.Name}}
-		if res.sourceScope != res.targetScope {
-			sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: res.sourceScope, Platform: res.platform.Name})
-		}
-		for _, a := range res.decision.AdditionalApprovals {
-			sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: res.platform.Name})
-		}
+		sides = Candidates(res.sourceScope, res.targetScope, res.platform.Name, res.decision)
 	}
 	return r, sides, nil
+}
+
+// Candidates are the sides of a binding change with consent ALL: TARGET,
+// SOURCE when the scopes differ, and the parties of the deciding rule.
+func Candidates(sourceScope, targetScope, platform string, d governance.Decision) []changerequests.Candidate {
+	sides := []changerequests.Candidate{{Side: "TARGET", Scope: targetScope, Platform: platform}}
+	if sourceScope != targetScope {
+		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: sourceScope, Platform: platform})
+	}
+	for _, a := range d.AdditionalApprovals {
+		sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: platform})
+	}
+	return sides
 }
 
 // Revalidate re-runs the pipeline, plugin included, on the stored request
