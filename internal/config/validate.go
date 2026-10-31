@@ -14,6 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"go.yaml.in/yaml/v3"
@@ -47,9 +48,9 @@ func (c *checker) failf(rule int, format string, args ...any) {
 }
 
 // Validate applies the static rules of §8.2: 1, 2, 5, 6, 7 (format), 9, 12,
-// 13, 14, 16 and the static part of 19. Rule 15 (theme) is checked with the
-// UI; rules 3, 4, 8 and the rest of 19 once plugins run; rules 10, 11, 17
-// and 18 once the database is connected.
+// 13, 14, 16, the static parts of 15 and 19. Rule 15's files are checked by
+// theme.Load; rules 3, 4, 8 and the rest of 19 once plugins run; rules 10,
+// 11, 17 and 18 once the database is connected.
 func Validate(cfg *Config, opts Options) error {
 	if opts.LookupEnv == nil {
 		opts.LookupEnv = os.LookupEnv
@@ -63,7 +64,30 @@ func Validate(cfg *Config, opts Options) error {
 	c.breakGlass(cfg, opts)
 	c.governance(cfg)
 	c.platformFlows(cfg)
+	c.theme(cfg)
 	return errors.Join(c.errs...)
+}
+
+// theme checks the static part of rule 15: the default mode, and every
+// color a known token with a CSS hex value (§7.6).
+func (c *checker) theme(cfg *Config) {
+	th := cfg.UI.Theme
+	if !slices.Contains(theme.Modes, th.DefaultMode) {
+		c.failf(15, "ui.theme.default_mode %q is not one of %v", th.DefaultMode, theme.Modes)
+	}
+	for mode, colors := range th.Colors {
+		if mode != "light" && mode != "dark" {
+			c.failf(15, "ui.theme.colors: unknown mode %q", mode)
+		}
+		for name, value := range colors {
+			if !slices.Contains(theme.Tokens, name) {
+				c.failf(15, "ui.theme.colors.%s: unknown token %q", mode, name)
+			}
+			if !theme.ValidColor(value) {
+				c.failf(15, "ui.theme.colors.%s.%s: %q is not a CSS hex color", mode, name, value)
+			}
+		}
+	}
 }
 
 // zones checks rule 1 for zones and returns them by name.

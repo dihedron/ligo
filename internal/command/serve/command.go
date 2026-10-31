@@ -39,6 +39,7 @@ import (
 	"github.com/dihedron/ligo/internal/startup"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
+	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 )
@@ -97,6 +98,12 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := config.Validate(cfg, config.Options{InsecureDev: cmd.InsecureDev}); err != nil {
 		return err
 	}
+	t := cfg.UI.Theme
+	look, err := theme.Load(theme.Files{Directory: t.Directory, CSS: t.CSSFile, Logo: t.LogoFile, LogoDark: t.LogoDarkFile,
+		Favicon: t.FaviconFile, Fonts: t.FontsDir, Colors: t.Colors}, theme.Options{Logger: log})
+	if err != nil {
+		return err
+	}
 	// every audited event is announced from now on, startup's included (§7.5)
 	audit.Hook = (&notify.Outbox{Webhooks: cfg.Notifications.Webhooks}).Audited
 	defer func() { audit.Hook = nil }()
@@ -124,7 +131,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, Extractors: srcRules.Extractors,
+	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, ThemeSHA256: look.Hashes(), Extractors: srcRules.Extractors,
 		AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptScopeChanges: cmd.AcceptScopeChanges, Logger: log}
 	if err := checks.Run(ctx); err != nil {
 		return err

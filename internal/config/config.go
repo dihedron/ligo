@@ -255,7 +255,7 @@ type Backoff struct {
 	Max     time.Duration `yaml:"max"`
 }
 
-// UI is checked in phase 9 (§7.6, §8.2 rule 15).
+// UI is the admin UI's appearance (§7.6, §8.2 rule 15).
 type UI struct {
 	Theme Theme `yaml:"theme"`
 }
@@ -466,6 +466,15 @@ func (c *Config) applyDefaults() {
 	}
 	if wl.ResolutionCache.MaxStaleness == 0 {
 		wl.ResolutionCache.MaxStaleness = 5 * time.Minute
+	}
+	if c.UI.Theme.DefaultMode == "" {
+		c.UI.Theme.DefaultMode = "system" // §7.6
+	}
+	if c.UI.Theme.ProductName == "" {
+		c.UI.Theme.ProductName = "ligo"
+	}
+	if c.UI.Theme.Directory == "" {
+		c.UI.Theme.Directory = "/etc/ligo/theme"
 	}
 	if c.Bindings.MaxExpiry == 0 {
 		c.Bindings.MaxExpiry = 8760 * time.Hour

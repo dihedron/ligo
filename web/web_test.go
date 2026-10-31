@@ -1,22 +1,21 @@
-package web
+package web_test
 
 import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io/fs"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/dihedron/ligo/internal/theme"
+	"github.com/dihedron/ligo/web"
 )
 
 // TestVendored: every vendored file has the SHA-256 that static/VERSIONS
 // records, so an upgrade is a reviewed change of both (§7.4).
 func TestVendored(t *testing.T) {
-	versions, err := FS.Open("static/VERSIONS")
+	versions, err := web.FS.Open("static/VERSIONS")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +30,7 @@ func TestVendored(t *testing.T) {
 		if len(f) != 4 {
 			t.Fatalf("VERSIONS: %q is not name version path sha256", line)
 		}
-		data, err := fs.ReadFile(FS, "static/"+f[2])
+		data, err := fs.ReadFile(web.FS, "static/"+f[2])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,38 +44,23 @@ func TestVendored(t *testing.T) {
 	}
 }
 
-var (
-	block = regexp.MustCompile(`(?s)(:root(?:\[data-theme="dark"\])?|:root:not\(\[data-theme="light"\]\))\s*\{([^}]*)\}`)
-	token = regexp.MustCompile(`--color-([a-z-]+):\s*(#[0-9a-fA-F]+);`)
-)
-
 // TestPalettes: the built-in light and dark palettes meet WCAG 2.1 AA for
-// every text token on its background (§7.6), and both dark blocks agree.
+// every text token on its background (§7.6).
 func TestPalettes(t *testing.T) {
-	css, err := fs.ReadFile(FS, "static/styles.css")
+	palettes, err := theme.Builtin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	palettes := map[string]map[string]string{}
-	for _, m := range block.FindAllStringSubmatch(string(css), -1) {
-		p := map[string]string{}
-		for _, tk := range token.FindAllStringSubmatch(m[2], -1) {
-			p[tk[1]] = tk[2]
-		}
-		if len(p) > 0 {
-			palettes[m[1]] = p
-		}
-	}
-	light, dark, system := palettes[":root"], palettes[`:root[data-theme="dark"]`], palettes[`:root:not([data-theme="light"])`]
-	if light == nil || dark == nil || fmt.Sprint(dark) != fmt.Sprint(system) {
-		t.Fatalf("palettes: light %v, dark %v, system dark %v", light, dark, system)
-	}
-	for name, p := range map[string]map[string]string{"light": light, "dark": dark} {
-		pairs := append([][2]string{{"text-muted", "bg"}, {"text-muted", "surface"}}, theme.Pairs...)
-		for _, pair := range pairs {
+	for mode, p := range palettes {
+		for _, pair := range append([][2]string{{"text-muted", "bg"}, {"text-muted", "surface"}}, theme.Pairs...) {
 			ratio, err := theme.Contrast(p[pair[0]], p[pair[1]])
 			if err != nil || ratio < theme.MinContrast {
-				t.Errorf("%s: --color-%s on --color-%s: %.2f %v", name, pair[0], pair[1], ratio, err)
+				t.Errorf("%s: --color-%s on --color-%s: %.2f %v", mode, pair[0], pair[1], ratio, err)
+			}
+		}
+		for _, tk := range theme.Tokens {
+			if !theme.ValidColor(p[tk]) {
+				t.Errorf("%s: --color-%s is missing", mode, tk)
 			}
 		}
 	}
