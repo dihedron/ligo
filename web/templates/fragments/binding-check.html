@@ -1,0 +1,1 @@
+{{define "binding-check"}}<div id="binding-check">{{with .Governance}}{{template "governance" .}}{{end}}{{with .Error}}<div class="alert alert-warning" role="status">{{.}}</div>{{end}}</div>{{end}}

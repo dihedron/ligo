@@ -286,6 +286,9 @@ func samples() map[string]any {
 	src.Metadata.Name, src.Metadata.State, src.Metadata.PendingChangeRequestID = "s", "ACTIVE", &id
 	tgt := &targets.View{Target: targets.Target{Definition: []byte(`{}`), DocumentationURL: "https://docs.example", AccessLevels: []targets.AccessLevel{{Name: "read"}}}}
 	tgt.Metadata.Name, tgt.Metadata.State = "t", "ACTIVE"
+	wz := Wizard{Step: 5, Offer: true, Target: tgt, Levels: []targets.AccessLevel{{Name: "read"}}, Level: "read",
+		Sources: []SourceChoice{{Name: "s", Allowed: true}, {Name: "d", Rule: "r"}}, Source: "s", TrustDomains: []string{"prod.internal"},
+		Params: fields, Name: "s-t", Flows: []flows.Flow{{Name: "f"}}, Targets: []catalog.Target{{Name: "t"}}}
 	return map[string]any{
 		"login":    map[string]string{"Prelogin": "p"},
 		"bindings": Dashboard{Phases: phases, Bindings: []*bindings.View{v}, Next: "b", AwaitingMe: []*changerequests.Request{cr}},
@@ -304,6 +307,10 @@ func samples() map[string]any {
 		"platform-fields": PlatformFields{Platform: "p", Definition: fields, Levels: []LevelBlock{{Platform: "p", Grants: fields}}, Next: 1},
 		"target-check":    TargetCheck{Governance: gov, Error: "e"},
 		"target-form":     TargetForm{Edit: true, Target: tgt.Target, Fields: &PlatformFields{Platform: "p", Definition: fields, Next: 1}, Reapplied: []*bindings.View{v}},
+		"binding-check":   TargetCheck{Governance: gov},
+		"wizard-form":     wz,
+		"wizard":          wz,
+		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Labels: "a=b"},
 		"status-row":      row,
 		"trail":           trail,
 		"bindings-table":  []*bindings.View{v},

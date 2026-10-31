@@ -1,0 +1,45 @@
+{{define "wizard-form"}}<form id="wizard" class="card" hx-get="/ui/bindings/wizard" hx-target="#wizard" hx-swap="outerHTML" {{hxnonce}}>
+  {{if .Offer}}<input type="hidden" name="offer" value="1">{{end}}
+  <div id="wizard-errors" class="errors"></div>
+  <fieldset><legend>1. Target</legend>
+    {{with .Target}}<input type="hidden" name="target" value="{{.Metadata.Name}}">
+      <p><strong>{{.Metadata.Name}}</strong> on {{.Metadata.Platform}} ({{.Metadata.Scope}}) <a href="/ui/bindings/wizard{{if $.Offer}}?offer=1{{end}}">choose another</a></p>
+    {{else}}<div class="field"><label for="w-q">Search the catalog</label><input id="w-q" name="q"></div>
+      {{range .Targets}}<label class="field"><span><input type="radio" name="target" value="{{.Name}}"> {{.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}} <span class="muted">{{.Platform}}, {{.Scope}}</span></span></label>
+      {{else}}<p class="muted">No target matches.</p>{{end}}
+      <div class="actions"><button type="submit" name="step" value="1" class="button-secondary">Search</button><button type="submit" name="step" value="2">Next</button></div>{{end}}
+  </fieldset>
+  {{if ge .Step 2}}<fieldset><legend>2. Access level</legend>
+    <div class="field"><label for="w-level">Level</label><select id="w-level" name="accessLevel">
+      {{range .Levels}}<option value="{{.Name}}"{{if eq .Name $.Level}} selected{{end}}>{{.Name}}{{with .Description}}: {{.}}{{end}}</option>{{end}}</select></div>
+    {{if eq .Step 2}}<div class="actions"><button type="submit" name="step" value="3">Next</button></div>{{end}}
+  </fieldset>{{end}}
+  {{if ge .Step 3}}<fieldset><legend>3. Source</legend>
+    {{range .Sources}}<label class="field"><span><input type="radio" name="source" value="{{.Name}}"{{if eq .Name $.Source}} checked{{end}}{{if not .Allowed}} disabled{{end}}>
+      {{.Name}} <span class="muted">{{.Scope}}</span>{{if not .Allowed}} <span class="badge badge-danger">denied{{with .Rule}} by {{.}}{{end}}</span>{{end}}</span></label>
+    {{else}}<p class="muted">{{if .Offer}}No source is visible to you.{{else}}You act for no source scope.{{end}}</p>{{end}}
+    {{if not .Offer}}<label class="field"><span><input type="checkbox" name="sourceMode" value="inline"{{if .UseInline}} checked{{end}}> Register a new source with the binding</span></label>
+    <div class="grid">
+      <div class="field"><label for="w-iname">New source name</label><input id="w-iname" name="inline.name" value="{{.Inline.Name}}"></div>
+      <div class="field"><label for="w-itd">Trust domain</label><select id="w-itd" name="inline.trustDomain">{{range .TrustDomains}}<option{{if eq . $.Inline.TrustDomain}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+    </div>
+    <div class="field"><label for="w-iregex">SVID regex</label><input id="w-iregex" name="inline.svidRegex" class="mono" value="{{.Inline.SVIDRegex}}"></div>
+    <div class="field"><label for="w-isamples">Sample SPIFFE IDs (one per line)</label><textarea id="w-isamples" name="inline.samples" class="mono">{{.Inline.Samples}}</textarea></div>{{end}}
+    {{if eq .Step 3}}<div class="actions"><button type="submit" name="step" value="4">Next</button></div>{{end}}
+  </fieldset>{{end}}
+  {{if ge .Step 4}}<fieldset><legend>4. Details</legend>
+    {{range .Params}}{{template "ui-field" .}}{{end}}
+    <div class="field"><label for="w-purpose">Purpose</label><input id="w-purpose" name="purpose" value="{{.Purpose}}"></div>
+    <div class="field"><label for="w-labels">Labels (key=value per line)</label><textarea id="w-labels" name="labels">{{.Labels}}</textarea></div>
+    <div class="field"><label for="w-exp">Expires (UTC, optional)</label><input id="w-exp" name="expiresAt" type="datetime-local" value="{{.ExpiresAt}}"></div>
+    {{if eq .Step 4}}<div class="actions"><button type="submit" name="step" value="5">Review</button></div>{{end}}
+  </fieldset>{{end}}
+  {{if ge .Step 5}}<fieldset><legend>5. Review</legend>
+    <div class="field"><label for="w-name">Binding name</label><input id="w-name" name="name" value="{{.Name}}" required></div>
+    <div hx-post="/ui/bindings/governance-preview" hx-trigger="load" hx-include="#wizard" hx-target="this" hx-swap="innerHTML" {{hxnonce}}><p class="muted">Checking the governance outcome…</p></div>
+    <h3>Effective network flows</h3>
+    {{template "flows-table" .Flows}}
+    <div class="actions"><button type="button" hx-post="/ui/bindings" hx-include="#wizard" hx-target="#wizard-errors" hx-swap="innerHTML"
+      hx-status:409="target:#wizard-errors swap:innerHTML" hx-status:422="target:#wizard-errors swap:innerHTML" {{hxnonce}}>Submit the request</button></div>
+  </fieldset>{{end}}
+</form>{{end}}

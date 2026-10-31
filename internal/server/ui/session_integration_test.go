@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"io"
 	"net/http"
@@ -79,6 +80,19 @@ func (d *directory) Lookup(_ context.Context, user string) (authz.Principal, err
 		return authz.Principal{}, adminauth.ErrInvalidCredentials
 	}
 	return authz.Principal{Name: user, Groups: slices.Clone(d.groups[user])}, nil
+}
+
+// workflows records the retries and rotations started.
+type workflows struct{ calls []string }
+
+func (f *workflows) Retry(_ context.Context, _ uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
+	f.calls = append(f.calls, "retry "+actor)
+	return nil, nil
+}
+
+func (f *workflows) Rotate(_ context.Context, _ uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
+	f.calls = append(f.calls, "rotate "+actor)
+	return nil, nil
 }
 
 // healthy is every platform's plugin, serving.
@@ -194,8 +208,9 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	}
 	s.Targets = &targets.Service{DB: pools.App, Rules: tgtRules, Requests: s.Requests, Validate: validateTarget}
 	s.Requests.Resources["SOURCE"], s.Requests.Resources["TARGET"] = s.Sources, s.Targets
+	s.Bindings.Sources = s.Sources // inline sources (§7.2.4), as ligo serve wires it
 	s.Catalog = &catalog.Reader{DB: pools.App, Policy: s.Requests.Policy}
-	s.Config, s.Plugins = cfg, healthy{}
+	s.Config, s.Plugins, s.Workflows = cfg, healthy{}, &workflows{}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user, s: s}
@@ -872,5 +887,122 @@ func TestTargetForms(t *testing.T) {
 	filed(resp, body, "retire")
 	if resp, _ := b.do("GET", "/ui/targets/"+name, nil, "HX-Request", ""); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("a retired target: %d", resp.StatusCode)
+	}
+}
+
+// TestWizard: the binding wizard step by step, its governance preview and
+// submission; an inline source the binding depends on (AC-74); then the
+// binding edited, retried, rotated and revoked from its page.
+func TestWizard(t *testing.T) {
+	v := sessionSetup(t)
+	ctx := context.Background()
+	x := fixture(t, v)
+	v.dir.groups[v.user] = []string{operators}
+	b := v.browser(t)
+	b.signIn("right")
+	b.page()
+	if resp, page := b.do("GET", "/ui/bindings/wizard", nil, "HX-Request", ""); resp.StatusCode != 200 || !strings.Contains(page, `value="tgt-`+x+`"`) {
+		t.Fatalf("wizard: %d", resp.StatusCode)
+	}
+	step := func(n int, extra url.Values) string {
+		t.Helper()
+		q := url.Values{"target": {"tgt-" + x}, "step": {fmt.Sprint(n)}}
+		for k, vs := range extra {
+			q[k] = vs
+		}
+		resp, frag := b.do("GET", "/ui/bindings/wizard?"+q.Encode(), nil)
+		if resp.StatusCode != 200 || !strings.HasPrefix(frag, `<form id="wizard"`) {
+			t.Fatalf("step %d: %d %s", n, resp.StatusCode, frag)
+		}
+		return frag
+	}
+	if f := step(2, nil); !strings.Contains(f, `<option value="read"`) || !strings.Contains(f, `name="step" value="3"`) {
+		t.Errorf("step 2: %s", f)
+	}
+	if f := step(3, url.Values{"accessLevel": {"read"}}); !strings.Contains(f, `value="src-`+x+`"`) || strings.Contains(f, `value="src-`+x+`" disabled`) {
+		t.Errorf("step 3: %s", f)
+	}
+	if f := step(5, url.Values{"accessLevel": {"read"}}); strings.Contains(f, "5. Review") {
+		t.Error("the review without a source")
+	}
+	review := step(5, url.Values{"accessLevel": {"read"}, "source": {"src-" + x}})
+	name := "src-" + x + "-tgt-" + x
+	if !strings.Contains(review, `name="name" value="`+name+`"`) || !strings.Contains(review, "/ui/bindings/governance-preview") ||
+		!strings.Contains(review, "ligo-workload-api") {
+		t.Errorf("review: %s", review)
+	}
+	form := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "source": {"src-" + x}, "name": {name}, "purpose": {"reporting"}}
+	if _, check := b.do("POST", "/ui/bindings/governance-preview", form); !strings.Contains(check, "TARGET") {
+		t.Errorf("preview: %s", check)
+	}
+	resp, body := b.do("POST", "/ui/bindings", form)
+	id, ok := strings.CutPrefix(resp.Header.Get("HX-Redirect"), "/ui/change-requests/")
+	if resp.StatusCode != 200 || !ok {
+		t.Fatalf("submit: %d %v %s", resp.StatusCode, resp.Header, body)
+	}
+	v.approve(t, uuid.MustParse(id))
+
+	// AC-74: a new source registered with the binding; the binding cannot be approved first
+	inline := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "sourceMode": {"inline"}, "inline.name": {"new-" + x},
+		"inline.trustDomain": {"prod.internal"}, "inline.svidRegex": {`^spiffe://prod\.internal/ns/new/sa/` + x + `$`},
+		"inline.samples": {"spiffe://prod.internal/ns/new/sa/" + x}, "name": {"new-" + x + "-tgt-" + x}}
+	resp, body = b.do("POST", "/ui/bindings", inline)
+	id, ok = strings.CutPrefix(resp.Header.Get("HX-Redirect"), "/ui/change-requests/")
+	if resp.StatusCode != 200 || !ok {
+		t.Fatalf("submit with an inline source: %d %s", resp.StatusCode, body)
+	}
+	dora := changerequests.Caller{Principal: authz.Principal{Name: "dora"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{approvers}})}
+	cr, err := v.s.Requests.Get(ctx, dora, uuid.MustParse(id))
+	if err != nil || cr.ResourceType != "BINDING" || cr.DependsOn == nil {
+		t.Fatalf("the binding's request: %+v %v", cr, err)
+	}
+	if _, err := v.s.Requests.Approve(ctx, dora, cr.ID, cr.PayloadSHA256, cr.Sides[0].Name, ""); err == nil || !strings.Contains(err.Error(), "dependency-pending") {
+		t.Errorf("AC-74: approving before the source: %v", err)
+	}
+
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	_, edit := b.do("GET", "/ui/bindings/"+name+"/edit-form", nil, "HX-Request", "")
+	if !strings.Contains(edit, `<option value="read" selected>`) || !strings.Contains(edit, `value="reporting"`) {
+		t.Errorf("edit form: %s", edit)
+	}
+	_, page := b.do("GET", "/ui/bindings/"+name, nil, "HX-Request", "")
+	if !strings.Contains(page, `hx-post="/ui/bindings/`+name+`/retry"`) || !strings.Contains(page, `hx-delete="/ui/bindings/`+name+`"`) {
+		t.Errorf("binding page actions: %s", page)
+	}
+	if resp, row := b.do("POST", "/ui/bindings/"+name+"/rotate", url.Values{}); resp.StatusCode != 200 || !strings.Contains(row, `id="status-row"`) {
+		t.Errorf("rotate: %d %s", resp.StatusCode, row)
+	}
+	if resp, _ := b.do("POST", "/ui/bindings/"+name+"/retry", url.Values{}); resp.StatusCode != 200 {
+		t.Errorf("retry: %d", resp.StatusCode)
+	}
+	if got := fmt.Sprint(v.s.Workflows.(*workflows).calls); got != "[rotate "+v.user+" retry "+v.user+"]" {
+		t.Errorf("workflows: %s", got)
+	}
+	viewer := v.browser(t)
+	viewer.signInAs("a"+v.user, "right") // an approver, not an operator
+	viewer.page()
+	if resp, _ := viewer.do("POST", "/ui/bindings/"+name+"/retry", url.Values{}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("retry by a non-operator: %d", resp.StatusCode)
+	}
+	edited := url.Values{"accessLevel": {"read"}, "purpose": {"audits"}, "expectedRevision": {"1"}}
+	resp, body = b.do("PUT", "/ui/bindings/"+name, edited)
+	if resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") == "" {
+		t.Errorf("update: %d %s", resp.StatusCode, body)
+	}
+	if id, ok := strings.CutPrefix(resp.Header.Get("HX-Redirect"), "/ui/change-requests/"); ok {
+		v.approve(t, uuid.MustParse(id))
+	}
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	var rev int64
+	if err := v.owner.QueryRow(ctx, "select revision from bindings where name = $1", name).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = b.do("DELETE", "/ui/bindings/"+name+"?expectedRevision="+fmt.Sprint(rev), nil)
+	if resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") == "" {
+		t.Errorf("revoke: %d %s", resp.StatusCode, body)
 	}
 }

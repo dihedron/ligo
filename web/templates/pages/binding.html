@@ -17,6 +17,15 @@
   </dl></section>
 </div>{{end}}
 {{template "status-row" .Row}}
+{{with .Binding}}{{if not (or (eq .Status.Phase "DELETING") (eq .Status.Phase "PENDING"))}}<div id="binding-errors" class="errors"></div>
+<div class="actions">
+  <a class="button" href="/ui/bindings/{{.Metadata.Name}}/edit-form">Edit</a>
+  <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/retry" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Retry</button>
+  <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/rotate" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Rotate</button>
+  <form hx-delete="/ui/bindings/{{.Metadata.Name}}" hx-confirm="Revoke {{.Metadata.Name}}? The workloads lose this access once it is deleted."
+    hx-status:409="target:#binding-errors swap:innerHTML" hx-status:422="target:#binding-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Revoke</button></form>
+</div>{{end}}{{end}}
 <h2>Effective network flows</h2>
 {{template "flows-table" .Flows}}
 <h2>Stages</h2>

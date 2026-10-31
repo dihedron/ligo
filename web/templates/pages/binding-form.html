@@ -1,0 +1,16 @@
+{{define "content"}}{{with .Content}}{{with .Binding}}<h1>Edit {{.Metadata.Name}}</h1>
+<p class="muted">{{.Source}} → {{.Target}}</p>{{end}}
+<div id="binding-errors" class="errors"></div>
+<form id="binding" class="card" hx-put="/ui/bindings/{{.Binding.Metadata.Name}}" hx-status:409="target:#binding-errors swap:innerHTML"
+  hx-status:422="target:#binding-errors swap:innerHTML" {{hxnonce}}>
+  <input type="hidden" name="expectedRevision" value="{{.Binding.Metadata.Revision}}">
+  <div class="field"><label for="b-level">Access level</label><select id="b-level" name="accessLevel">
+    {{range .Levels}}<option value="{{.Name}}"{{if .Current}} selected{{end}}>{{.Name}}{{if .Unilateral}} (fewer privileges: unilateral){{end}}</option>{{end}}</select>
+    <span class="hint">A level with fewer privileges needs no consent from the other side.</span></div>
+  {{range .Params}}{{template "ui-field" .}}{{end}}
+  <div class="field"><label for="b-purpose">Purpose</label><input id="b-purpose" name="purpose" value="{{.Binding.Purpose}}"></div>
+  <div class="field"><label for="b-labels">Labels (key=value per line)</label><textarea id="b-labels" name="labels">{{.Labels}}</textarea></div>
+  <div class="field"><label for="b-exp">Expires (UTC, optional)</label><input id="b-exp" name="expiresAt" type="datetime-local" value="{{.Expires}}"></div>
+  <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>Submit the change</button>
+    <a class="button button-secondary" href="/ui/bindings/{{.Binding.Metadata.Name}}">Cancel</a></div>
+</form>{{end}}{{end}}

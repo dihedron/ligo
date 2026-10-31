@@ -55,13 +55,14 @@ type Server struct {
 	Logins   *ratelimit.Logins // shared with the admin API's Basic credentials
 
 	// the services the admin API uses, with the session's caller
-	Bindings *bindings.Service
-	Requests *changerequests.Service
-	Sources  *sources.Service
-	Targets  *targets.Service
-	Catalog  *catalog.Reader
-	Plugins  Plugins
-	Config   *config.Config // the platforms, read-only
+	Bindings  *bindings.Service
+	Requests  *changerequests.Service
+	Sources   *sources.Service
+	Targets   *targets.Service
+	Catalog   *catalog.Reader
+	Plugins   Plugins
+	Config    *config.Config // the platforms, read-only
+	Workflows Workflows
 
 	pages *pages
 }
@@ -104,6 +105,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/bindings", s.dashboard)
 	mux.HandleFunc("GET /ui/bindings/{name}", s.binding)
 	mux.HandleFunc("GET /ui/bindings/{name}/status-row", s.bindingStatus)
+	mux.HandleFunc("GET /ui/bindings/wizard", s.wizard)
+	mux.HandleFunc("POST /ui/bindings/governance-preview", s.bindingPreview)
+	mux.HandleFunc("POST /ui/bindings", s.bindingCreate)
+	mux.HandleFunc("GET /ui/bindings/{name}/edit-form", s.bindingEditForm)
+	mux.HandleFunc("PUT /ui/bindings/{name}", s.bindingUpdate)
+	mux.HandleFunc("DELETE /ui/bindings/{name}", s.bindingDelete)
+	mux.HandleFunc("POST /ui/bindings/{name}/{op}", s.bindingOperate)
 	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)
 	mux.HandleFunc("GET /ui/change-requests/{id}", s.changeRequest)
 	mux.HandleFunc("POST /ui/change-requests/{id}/{action}", s.decide)

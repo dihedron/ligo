@@ -341,6 +341,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	s.Logins = logins
 	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
 	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg
+	u.Workflows = s.Workflows
 	if directory != nil {
 		u.LDAP = directory
 	}

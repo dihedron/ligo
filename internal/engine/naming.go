@@ -99,3 +99,18 @@ func ResolvePrefix(kind Kind, scope string, prefixes []governance.NamePrefix) (s
 	}
 	return "", nil
 }
+
+// SuggestName is the binding name the UI and the CLI propose (§3.8):
+// <source>-<target> after the resolved name prefix, truncated to 63
+// characters with a 6-character hash suffix when needed.
+func SuggestName(source, target, prefix string) string {
+	name := source + "-" + target
+	if !strings.HasPrefix(name, prefix) {
+		name = prefix + name
+	}
+	if len(name) > 63 {
+		sum := sha256.Sum256([]byte(name))
+		name = strings.TrimRight(name[:56], "-") + "-" + fmt.Sprintf("%x", sum[:3])
+	}
+	return name
+}

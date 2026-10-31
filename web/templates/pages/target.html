@@ -17,6 +17,7 @@
 {{if ne .Metadata.State "RETIRED"}}<div id="target-errors" class="errors"></div>
 <div class="actions">
   <a class="button" href="/ui/targets/{{.Metadata.Name}}/edit-form">Edit</a>
+  {{if eq .Metadata.State "ACTIVE"}}<a class="button button-secondary" href="/ui/bindings/wizard?target={{.Metadata.Name}}&amp;offer=1">Offer a binding</a>{{end}}
   {{if eq .Metadata.State "ACTIVE"}}<form hx-post="/ui/targets/{{.Metadata.Name}}/deprecate" hx-confirm="Deprecate {{.Metadata.Name}}? Existing bindings keep working; no new ones."
     hx-status:409="target:#target-errors swap:innerHTML" hx-status:422="target:#target-errors swap:innerHTML" {{hxnonce}}>
     <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Deprecate</button></form>{{end}}
