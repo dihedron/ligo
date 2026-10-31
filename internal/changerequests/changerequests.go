@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -228,10 +229,7 @@ func Diff(current, payload json.RawMessage) ([]Change, error) {
 	if err := json.Unmarshal(payload, &proposed); err != nil {
 		return nil, err
 	}
-	fields := make([]string, 0, len(old)+len(proposed))
-	for f := range old {
-		fields = append(fields, f)
-	}
+	fields := slices.Collect(maps.Keys(old))
 	for f := range proposed {
 		if _, ok := old[f]; !ok {
 			fields = append(fields, f)
