@@ -31,6 +31,7 @@ import (
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
+	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/resolution"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
@@ -326,12 +327,21 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
-	if al.AllowBasicAuth {
+	if al.AllowBasicAuth || cfg.AdminAuth.LDAP.URL != "" { // Basic credentials, and the UI's login
 		var err error
 		if directory, err = ldap(cfg); err != nil {
 			return err
 		}
+	}
+	if al.AllowBasicAuth {
 		s.LDAP = directory
+	}
+	// the UI's sessions share the directory, the roles and the failed-login limits with the API (§7.3)
+	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin}
+	s.Logins = logins
+	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
+	if directory != nil {
+		u.LDAP = directory
 	}
 	workloadCert, reloadWorkload, err := certificate("workload_listener", wl.TLSSource, wl.TLSCertFile, wl.TLSKeyFile, zones)
 	if err != nil {
@@ -382,6 +392,17 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	}
 	wg.Wait()
 	return stopErr
+}
+
+// noDirectory refuses every UI login when admin_auth.ldap is not set.
+type noDirectory struct{}
+
+func (noDirectory) Authenticate(context.Context, string, string) (authz.Principal, error) {
+	return authz.Principal{}, adminauth.ErrInvalidCredentials
+}
+
+func (noDirectory) Lookup(context.Context, string) (authz.Principal, error) {
+	return authz.Principal{}, adminauth.ErrInvalidCredentials
 }
 
 // admin serves the admin API and, under /ui/, the web UI, which

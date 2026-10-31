@@ -63,8 +63,11 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("%s: Cache-Control %q", path, hd.Get("Cache-Control"))
 		}
 		wantCode := 200
-		if path == "/ui/nope" || path == "/ui/static/ext/" || path == "/ui/static/VERSIONS" {
+		switch path {
+		case "/ui/static/ext/", "/ui/static/VERSIONS":
 			wantCode = 404
+		case "/ui/nope":
+			wantCode = http.StatusSeeOther // behind the session: anonymous requests go to the login page first
 		}
 		if rec.Code != wantCode {
 			t.Errorf("%s: %d, want %d", path, rec.Code, wantCode)

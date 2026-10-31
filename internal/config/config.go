@@ -467,6 +467,15 @@ func (c *Config) applyDefaults() {
 	if wl.ResolutionCache.MaxStaleness == 0 {
 		wl.ResolutionCache.MaxStaleness = 5 * time.Minute
 	}
+	if ss := &c.Server.AdminListener.Session; ss.IdleTimeout == 0 {
+		ss.IdleTimeout = 30 * time.Minute // §7.3 rule 3
+	}
+	if ss := &c.Server.AdminListener.Session; ss.AbsoluteTimeout == 0 {
+		ss.AbsoluteTimeout = 8 * time.Hour
+	}
+	if ss := &c.Server.AdminListener.Session; ss.AuthzRecheckInterval == 0 {
+		ss.AuthzRecheckInterval = 5 * time.Minute
+	}
 	if c.UI.Theme.DefaultMode == "" {
 		c.UI.Theme.DefaultMode = "system" // §7.6
 	}

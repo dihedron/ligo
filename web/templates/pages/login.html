@@ -1,0 +1,18 @@
+{{define "content"}}<div class="login">
+  <div class="card">
+    <h1>Sign in to {{.Product}}</h1>
+    <div id="login-errors" class="errors"></div>
+    <form id="login" hx-post="/ui/login" hx-status:409="target:#login-errors swap:innerHTML" hx-status:422="target:#login-errors swap:innerHTML" {{hxnonce}}>
+      <input type="hidden" name="prelogin" value="{{with .Content}}{{.Prelogin}}{{end}}">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="actions"><button type="submit">Sign in</button></div>
+    </form>
+  </div>
+</div>{{end}}

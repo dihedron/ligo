@@ -61,9 +61,33 @@ func (l *LDAP) SetRootCAs(roots *x509.CertPool) {
 
 // Authenticate returns the principal of username with the groups among
 // Groups it belongs to; a refused login is ErrInvalidCredentials, a
-// directory that cannot be reached another error.
+// directory failure another error.
 func (l *LDAP) Authenticate(ctx context.Context, username, password string) (authz.Principal, error) {
-	if password == "" || !usernameRE.MatchString(username) {
+	if password == "" {
+		return authz.Principal{}, ErrInvalidCredentials // before dialing (T-04)
+	}
+	return l.principal(ctx, username, func(conn directory, userDN string) error {
+		if err := conn.Bind(userDN, password); err != nil {
+			if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
+				return ErrInvalidCredentials
+			}
+			return fmt.Errorf("adminauth: user bind: %w", err)
+		}
+		return nil
+	})
+}
+
+// Lookup returns the principal of username with its groups now, without
+// its password: the UI re-checks a session's roles with it (§7.3 rule 3).
+// A user the directory no longer has is ErrInvalidCredentials.
+func (l *LDAP) Lookup(ctx context.Context, username string) (authz.Principal, error) {
+	return l.principal(ctx, username, nil)
+}
+
+// principal finds exactly one user as the service, runs verify (the user's
+// bind) if any, and reads the user's groups as the service.
+func (l *LDAP) principal(ctx context.Context, username string, verify func(directory, string) error) (authz.Principal, error) {
+	if !usernameRE.MatchString(username) {
 		return authz.Principal{}, ErrInvalidCredentials // before dialing (T-04)
 	}
 	conn, err := l.connect(ctx)
@@ -83,14 +107,13 @@ func (l *LDAP) Authenticate(ctx context.Context, username, password string) (aut
 		return authz.Principal{}, ErrInvalidCredentials // none, or ambiguous
 	}
 	userDN := res.Entries[0].DN
-	if err := conn.Bind(userDN, password); err != nil {
-		if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
-			return authz.Principal{}, ErrInvalidCredentials
+	if verify != nil {
+		if err := verify(conn, userDN); err != nil {
+			return authz.Principal{}, err
 		}
-		return authz.Principal{}, fmt.Errorf("adminauth: user bind: %w", err)
-	}
-	if err := conn.Bind(l.Config.ServiceBindDN, l.BindPassword); err != nil { // groups are read as the service
-		return authz.Principal{}, fmt.Errorf("adminauth: service bind: %w", err)
+		if err := conn.Bind(l.Config.ServiceBindDN, l.BindPassword); err != nil { // groups are read as the service
+			return authz.Principal{}, fmt.Errorf("adminauth: service bind: %w", err)
+		}
 	}
 	p := authz.Principal{Name: username}
 	for _, g := range l.Groups {

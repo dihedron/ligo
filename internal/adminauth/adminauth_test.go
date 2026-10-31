@@ -160,6 +160,27 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
+// TestLookup: a user's groups now, without a password, as the service
+// (§7.3 rule 3); a user the directory no longer has is refused.
+func TestLookup(t *testing.T) {
+	ctx := context.Background()
+	d := directoryOf()
+	l := authenticator(d, false, ops, viewers)
+	if p, err := l.Lookup(ctx, "olivia"); err != nil || p.Name != "olivia" || !slices.Equal(p.Groups, []string{ops}) {
+		t.Fatalf("olivia: %+v %v", p, err)
+	}
+	d.entries[ops]["member"] = nil // removed from her group
+	if p, err := l.Lookup(ctx, "olivia"); err != nil || len(p.Groups) != 0 {
+		t.Errorf("after removal: %+v %v", p, err)
+	}
+	delete(d.entries, olivia)
+	for _, user := range []string{"olivia", "olivia)(uid=*"} {
+		if _, err := l.Lookup(ctx, user); !errors.Is(err, ErrInvalidCredentials) {
+			t.Errorf("%q: %v", user, err)
+		}
+	}
+}
+
 // TestNestedGroups: with nested_groups, membership through groups of
 // groups counts, one search per level; without, only direct membership.
 func TestNestedGroups(t *testing.T) {

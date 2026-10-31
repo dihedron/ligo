@@ -15,9 +15,13 @@ import (
 	"strings"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // htmxConfig is the <meta name="htmx-config"> of every page (§7.4).
@@ -37,6 +41,13 @@ type Server struct {
 	Theme       *theme.Theme
 	ThemeConfig config.Theme
 	Logger      *slog.Logger
+
+	// sessions (§7.3)
+	DB       *pgxpool.Pool // the app pool
+	LDAP     Directory
+	Authz    *authz.Authorizer
+	Listener config.AdminListener
+	Logins   *ratelimit.Logins // shared with the admin API's Basic credentials
 
 	pages *pages
 }
@@ -64,7 +75,22 @@ func (s *Server) Handler() http.Handler {
 		files.ServeHTTP(w, r)
 	})
 	mux.Handle("GET /ui/theme/", s.Theme.Handler())
+	mux.HandleFunc("GET /ui/login", s.loginPage)
+	mux.HandleFunc("POST /ui/login", s.login)
+	mux.Handle("/ui/", s.authed(s.routes()))
 	return s.secure(mux)
+}
+
+// routes are the pages and actions of a signed-in user.
+func (s *Server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ui/{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/ui/bindings", http.StatusSeeOther) })
+	mux.HandleFunc("POST /ui/logout", s.logout)
+	mux.HandleFunc("POST /ui/preferences/theme", s.preference)
+	mux.HandleFunc("GET /ui/bindings", func(w http.ResponseWriter, r *http.Request) {
+		s.page(w, r, http.StatusOK, "bindings", s.frame(r, "Bindings", "/ui/bindings"))
+	})
+	return mux
 }
 
 type nonceKey struct{}
@@ -95,8 +121,9 @@ func (s *Server) secure(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("Cache-Control", "no-store")
-		h.Set("X-Request-Id", uuid.NewV7().String())
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), nonceKey{}, n)))
+		id := uuid.NewV7().String()
+		h.Set("X-Request-Id", id)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(audit.WithRequestID(r.Context(), id), nonceKey{}, n)))
 	})
 }
 

@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 	"uuid"
 
@@ -51,7 +52,12 @@ type Server struct {
 	Plugins   Plugins // the platforms' health and forms
 	Logger    *slog.Logger
 
-	limits ratelimit.Limiter
+	// Logins are the failed-login limits, shared with the UI's login (§7.3
+	// rule 6); the listener's rate_limit when nil.
+	Logins *ratelimit.Logins
+
+	limits     ratelimit.Limiter
+	loginsOnce sync.Once
 }
 
 // Directory authenticates LDAP users: *adminauth.LDAP.
@@ -184,14 +190,11 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 		// the login limits count refused credentials only (§7.2.1): once
 		// either is exhausted, Basic requests of that address or user wait
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		rl := s.Listener.RateLimit
-		ipRate, userRate := perMinute(rl.LoginPerIPPerMin, 10), perMinute(rl.LoginPerUserPerMin, 5)
-		if s.limits.Exhausted("ip:"+ip, ipRate) || s.limits.Exhausted("user:"+user, userRate) {
+		if s.logins().Limited(ip, user) {
 			return changerequests.Caller{}, errLoginLimited
 		}
 		if p, err = s.LDAP.Authenticate(r.Context(), user, password); errors.Is(err, adminauth.ErrInvalidCredentials) {
-			s.limits.Spend("ip:"+ip, ipRate)
-			s.limits.Spend("user:"+user, userRate)
+			s.logins().Failed(ip, user)
 		}
 	default:
 		err = adminauth.ErrInvalidCredentials
@@ -217,11 +220,16 @@ func (s *Server) apiRate(c changerequests.Caller) ratelimit.Rate {
 	return ratelimit.Rate{PerSecond: rps, Burst: 2 * rps}
 }
 
-func perMinute(n, fallback int) ratelimit.Rate {
-	if n <= 0 {
-		n = fallback
-	}
-	return ratelimit.Rate{PerSecond: float64(n) / 60, Burst: float64(n)}
+// logins are the failed-login limits, shared with the UI when Logins is
+// set, else the listener's own.
+func (s *Server) logins() *ratelimit.Logins {
+	s.loginsOnce.Do(func() {
+		if s.Logins == nil {
+			rl := s.Listener.RateLimit
+			s.Logins = &ratelimit.Logins{PerIPPerMin: rl.LoginPerIPPerMin, PerUserPerMin: rl.LoginPerUserPerMin}
+		}
+	})
+	return s.Logins
 }
 
 // viewer: any role but break_glass alone (§7.2.2).
