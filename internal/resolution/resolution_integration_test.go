@@ -101,10 +101,11 @@ func TestRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrate.Apply(ctx, conn.Conn(), migrations.FS); err != nil {
+	_, err = migrate.Apply(ctx, conn.Conn(), migrations.FS)
+	conn.Release() // before any Fatal: the pool's Close waits for every acquired connection
+	if err != nil {
 		t.Fatal(err)
 	}
-	conn.Release()
 
 	suffix := uuid.NewV7().String()[24:]
 	tenant := `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + suffix + `-[0-9]+$`
