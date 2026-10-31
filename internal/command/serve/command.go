@@ -359,7 +359,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	failed := make(chan error, 2)
 	servers := map[string]*http.Server{
 		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
-		"admin":    {Addr: al.ListenAddress, Handler: admin(s, u), TLSConfig: s.TLSConfig(adminCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: adminHandler(s, u), TLSConfig: s.TLSConfig(adminCert)},
 	}
 	for name, srv := range servers {
 		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
@@ -407,9 +407,9 @@ func (noDirectory) Lookup(context.Context, string) (authz.Principal, error) {
 	return authz.Principal{}, adminauth.ErrInvalidCredentials
 }
 
-// admin serves the admin API and, under /ui/, the web UI, which
+// adminHandler serves the admin API and, under /ui/, the web UI, which
 // authenticates with its own sessions (§7.3).
-func admin(s *adminhttp.Server, u *ui.Server) http.Handler {
+func adminHandler(s *adminhttp.Server, u *ui.Server) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/ui/", u.Handler())
 	mux.Handle("/", s.Handler())
