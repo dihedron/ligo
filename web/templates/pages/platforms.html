@@ -1,0 +1,9 @@
+{{define "content"}}<h1>Platforms</h1>
+<p class="muted">Platforms are configured in server.yaml by the platform team (ADR-15).</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Platform</th><th>Type</th><th>Zone</th><th>Scope</th><th>Target scopes</th><th>Wiring</th><th>Health</th></tr></thead>
+  <tbody>{{range .Content}}<tr><td>{{.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</td><td>{{.Type}}</td><td>{{.Zone}}</td>
+    <td>{{.Scope}}</td><td>{{range .TargetScopes}}<div>{{.}}</div>{{end}}</td><td>{{.IdentityProvider}} → {{.SecretStore}}</td>
+    <td><span class="badge{{if .Serving}} badge-success{{else}} badge-danger{{end}}">{{.Health}}</span></td></tr>
+  {{else}}<tr><td colspan="7" class="muted">No platforms.</td></tr>{{end}}</tbody>
+</table></div>{{end}}

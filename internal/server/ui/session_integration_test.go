@@ -23,11 +23,14 @@ import (
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/ratelimit"
+	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -74,6 +77,13 @@ func (d *directory) Lookup(_ context.Context, user string) (authz.Principal, err
 		return authz.Principal{}, adminauth.ErrInvalidCredentials
 	}
 	return authz.Principal{Name: user, Groups: slices.Clone(d.groups[user])}, nil
+}
+
+// healthy is every platform's plugin, serving.
+type healthy struct{}
+
+func (healthy) Health(context.Context, string) (*pluginv1.HealthResponse, error) {
+	return &pluginv1.HealthResponse{Serving: true}, nil
 }
 
 type sessionEnv struct {
@@ -143,6 +153,19 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	}}
 	s.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": s.Bindings}}
 	s.Bindings.Requests = s.Requests
+	srcRules, err := sources.NewRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Sources = &sources.Service{DB: pools.App, Rules: srcRules, Requests: s.Requests}
+	tgtRules, err := targets.NewRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Targets = &targets.Service{DB: pools.App, Rules: tgtRules, Requests: s.Requests}
+	s.Requests.Resources["SOURCE"], s.Requests.Resources["TARGET"] = s.Sources, s.Targets
+	s.Catalog = &catalog.Reader{DB: pools.App, Policy: s.Requests.Policy}
+	s.Config, s.Plugins = cfg, healthy{}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user, s: s}
@@ -527,6 +550,24 @@ func TestPages(t *testing.T) {
 		if resp, _ := viewer.do("GET", path, nil, "HX-Request", ""); resp.StatusCode != http.StatusNotFound {
 			t.Errorf("%s: %d", path, resp.StatusCode)
 		}
+	}
+	for path, want := range map[string]string{
+		"/ui/sources?q=src-" + x: `href="/ui/sources/src-` + x + `"`,
+		"/ui/sources/src-" + x:   `href="/ui/bindings/` + name + `"`,
+		"/ui/targets/tgt-" + x:   "Who can reach this",
+		"/ui/platforms":          "oracle-prod",
+		"/ui/catalog?q=tgt-" + x: `href="/ui/catalog/tgt-` + x + `"`,
+		"/ui/catalog/tgt-" + x:   `data-copy="flows-json"`,
+		"/ui/sources/nope-" + x:  "Not Found",
+		"/ui/catalog/nope-" + x:  "Not Found",
+	} {
+		_, body := viewer.do("GET", path, nil, "HX-Request", "")
+		if !strings.Contains(body, want) {
+			t.Errorf("%s lacks %s", path, want)
+		}
+	}
+	if _, body := approver.do("GET", "/ui/targets?q=tgt-"+x, nil, "HX-Request", ""); !strings.Contains(body, `href="/ui/targets/tgt-`+x+`"`) {
+		t.Error("the approver of dc/* does not list the target")
 	}
 	g := v.browser(t)
 	g.signInAs("g"+v.user, "right")

@@ -32,6 +32,7 @@ func funcs() template.FuncMap {
 		"when":       when,
 		"pretty":     pretty,
 		"badge":      badge,
+		"list":       func(v ...string) []string { return v },
 	}
 }
 

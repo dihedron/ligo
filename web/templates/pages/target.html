@@ -1,0 +1,24 @@
+{{define "content"}}{{with .Content}}{{with .Target}}<h1>{{.Metadata.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</h1>
+<div class="grid">
+  <section class="card"><h2>Target</h2><dl class="fields">
+    <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, zone {{.Metadata.Zone}})</dd>
+    <dt>Scope</dt><dd>{{.Metadata.Scope}} (platform {{.Metadata.PlatformScope}})</dd>
+    <dt>State</dt><dd><span class="{{badge .Metadata.State}}">{{.Metadata.State}}</span></dd>
+    <dt>Revision</dt><dd>{{.Metadata.Revision}}</dd><dt>Visibility</dt><dd>{{.Visibility.Mode}}</dd>
+    {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
+    {{with .DocumentationURL}}<dt>Documentation</dt><dd><a href="{{.}}" rel="noopener noreferrer">{{.}}</a></dd>{{end}}
+    {{with .Contacts}}<dt>Contacts</dt><dd>{{range .}}<div>{{.Name}} &lt;{{.Email}}&gt;</div>{{end}}</dd>{{end}}
+    {{range $k, $v := .Labels}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
+    <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
+    {{with .Metadata.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}
+  </dl></section>
+  <section class="card"><h2>Definition</h2><pre>{{pretty .Definition}}</pre></section>
+</div>
+<h2>Access levels</h2>
+{{template "levels-table" .AccessLevels}}
+<h2>Network flows</h2>
+{{template "flows-table" .NetworkFlows}}{{end}}
+<h2>Who can reach this</h2>
+{{template "bindings-table" .Bindings}}
+{{template "trail" .Audit}}
+{{end}}{{end}}

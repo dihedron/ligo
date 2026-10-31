@@ -18,9 +18,12 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/ratelimit"
+	"github.com/dihedron/ligo/internal/sources"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +57,11 @@ type Server struct {
 	// the services the admin API uses, with the session's caller
 	Bindings *bindings.Service
 	Requests *changerequests.Service
+	Sources  *sources.Service
+	Targets  *targets.Service
+	Catalog  *catalog.Reader
+	Plugins  Health
+	Config   *config.Config // the platforms, read-only
 
 	pages *pages
 }
@@ -98,6 +106,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/bindings/{name}/status-row", s.bindingStatus)
 	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)
 	mux.HandleFunc("GET /ui/change-requests/{id}", s.changeRequest)
+	mux.HandleFunc("GET /ui/sources", s.sourceList)
+	mux.HandleFunc("GET /ui/sources/{name}", s.source)
+	mux.HandleFunc("GET /ui/targets", s.targetList)
+	mux.HandleFunc("GET /ui/targets/{name}", s.target)
+	mux.HandleFunc("GET /ui/platforms", s.platforms)
+	mux.HandleFunc("GET /ui/catalog", s.catalogSearch)
+	mux.HandleFunc("GET /ui/catalog/{target}", s.catalogCard)
 	return mux
 }
 

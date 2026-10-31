@@ -15,9 +15,12 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/sources"
+	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
 	"golang.org/x/net/html"
@@ -271,6 +274,11 @@ func samples() map[string]any {
 	cr := &changerequests.Request{ID: id, ResourceType: "BINDING", ResourceName: "b", Operation: "UPDATE", Status: "PENDING", Payload: []byte(`{}`),
 		Sides: []changerequests.Side{{Name: "SOURCE", Scope: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
 	trail := []Entry{{Action: "BINDING_CREATED", Actor: "olga", Revision: new(int64), OccurredAt: now}}
+	src := &sources.View{Source: sources.Source{DisplayName: "d", Labels: map[string]string{"k": "v"}, Contacts: []sources.Contact{{Name: "n", Email: "e"}},
+		Identity: sources.Identity{SampleSPIFFEIDs: []string{"spiffe://x/y"}}}}
+	src.Metadata.Name, src.Metadata.State, src.Metadata.PendingChangeRequestID = "s", "ACTIVE", &id
+	tgt := &targets.View{Target: targets.Target{Definition: []byte(`{}`), DocumentationURL: "https://docs.example", AccessLevels: []targets.AccessLevel{{Name: "read"}}}}
+	tgt.Metadata.Name, tgt.Metadata.State = "t", "ACTIVE"
 	return map[string]any{
 		"login":    map[string]string{"Prelogin": "p"},
 		"bindings": Dashboard{Phases: phases, Bindings: []*bindings.View{v}, Next: "b", AwaitingMe: []*changerequests.Request{cr}},
@@ -282,5 +290,15 @@ func samples() map[string]any {
 		"alert":           Alert{Message: "m"},
 		"status-row":      row,
 		"trail":           trail,
+		"bindings-table":  []*bindings.View{v},
+		"flows-table":     []flows.Flow{{Name: "f", Ports: []flows.Port{{Low: 1, High: 1}}}},
+		"levels-table":    []targets.AccessLevel{{Name: "read", Privileges: []string{"role:R"}, State: "ACTIVE"}},
+		"sources":         SourcesPage{Sources: []*sources.View{src}, Next: "s"},
+		"source":          SourcePage{Source: src, Bindings: []*bindings.View{v}, Audit: trail},
+		"targets":         TargetsPage{Targets: []*targets.View{tgt}, Next: "t"},
+		"target":          TargetPage{Target: tgt, Bindings: []*bindings.View{v}, Audit: trail},
+		"platforms":       []PlatformRow{{Name: "p", Serving: true, Health: "serving", TargetScopes: []string{"dc/x/*"}}},
+		"catalog":         CatalogPage{Types: []string{"oracle.v1"}, Targets: []catalog.Target{{Name: "t", State: "DEPRECATED"}}, Next: "t"},
+		"catalog-card":    CardPage{Target: tgt, Flows: []flows.Flow{{Name: "f"}}, FlowsJSON: "{}", Outcomes: []catalog.Outcome{{Source: "s", Allowed: true, Sides: []string{"TARGET"}}}},
 	}
 }

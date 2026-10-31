@@ -1,0 +1,6 @@
+{{define "bindings-table"}}<div class="table-wrap"><table>
+  <thead><tr><th>Binding</th><th>Source</th><th>Target</th><th>Level</th><th>Phase</th><th>Expires</th></tr></thead>
+  <tbody>{{range .}}<tr><td><a href="/ui/bindings/{{.Metadata.Name}}">{{.Metadata.Name}}</a></td><td>{{.Source}}</td><td>{{.Target}}</td>
+    <td>{{.AccessLevel}}</td><td><span class="{{badge .Status.Phase}}">{{.Status.Phase}}</span></td><td>{{when .ExpiresAt}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">No bindings.</td></tr>{{end}}</tbody>
+</table></div>{{end}}

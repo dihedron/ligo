@@ -1,0 +1,19 @@
+{{define "content"}}{{with .Content}}<h1>Targets</h1>
+<form class="card" method="get" action="/ui/targets">
+  <div class="grid">
+    <div class="field"><label for="f-q">Name</label><input id="f-q" name="q" value="{{.Filter.Q}}"></div>
+    <div class="field"><label for="f-platform">Platform</label><input id="f-platform" name="platform" value="{{.Filter.Platform}}"></div>
+    <div class="field"><label for="f-scope">Scope pattern</label><input id="f-scope" name="scope" value="{{.Filter.Scope}}"></div>
+    <div class="field"><label for="f-state">State</label><select id="f-state" name="state"><option value="">ACTIVE or DEPRECATED</option>
+      {{range $s := list "ACTIVE" "DEPRECATED" "RETIRED"}}<option{{if eq $s $.Content.Filter.State}} selected{{end}}>{{$s}}</option>{{end}}</select></div>
+  </div>
+  <div class="actions"><button type="submit">Filter</button><a class="button button-secondary" href="/ui/targets">Clear</a></div>
+</form>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Platform</th><th>Scope</th><th>State</th><th>Bindings</th></tr></thead>
+  <tbody>{{range .Targets}}<tr><td><a href="/ui/targets/{{.Metadata.Name}}">{{.Metadata.Name}}</a>{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</td>
+    <td>{{.Metadata.Platform}}</td><td>{{.Metadata.Scope}}</td><td><span class="{{badge .Metadata.State}}">{{.Metadata.State}}</span></td><td>{{.Status.Bindings}}</td></tr>
+  {{else}}<tr><td colspan="5" class="muted">No targets.</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Next}}<p><a href="/ui/targets?after={{.}}&amp;q={{$.Content.Filter.Q}}&amp;platform={{$.Content.Filter.Platform}}&amp;scope={{$.Content.Filter.Scope}}&amp;state={{$.Content.Filter.State}}">Next page</a></p>{{end}}
+{{end}}{{end}}

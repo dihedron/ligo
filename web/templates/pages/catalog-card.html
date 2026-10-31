@@ -1,0 +1,26 @@
+{{define "content"}}{{with .Content}}{{with .Target}}<h1>{{.Metadata.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</h1>
+{{if eq .Metadata.State "DEPRECATED"}}<div class="alert alert-warning" role="status">This target is deprecated: no new bindings.</div>{{end}}
+<section class="card"><dl class="fields">
+  <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}})</dd><dt>Scope</dt><dd>{{.Metadata.Scope}}</dd>
+  {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
+  {{with .DocumentationURL}}<dt>Documentation</dt><dd><a href="{{.}}" rel="noopener noreferrer">{{.}}</a></dd>{{end}}
+  {{with .Contacts}}<dt>Contacts</dt><dd>{{range .}}<div>{{.Name}} &lt;{{.Email}}&gt;</div>{{end}}</dd>{{end}}
+</dl>
+{{if eq .Metadata.State "ACTIVE"}}<div class="actions"><a class="button" href="/ui/bindings/wizard?target={{.Metadata.Name}}">Request access</a></div>{{end}}
+</section>
+<h2>Access levels</h2>
+{{template "levels-table" .AccessLevels}}{{end}}
+<h2>Network flows</h2>
+<p class="muted">Before a binding exists, the flows leave out the secret store, which the binding's platform wiring adds.</p>
+{{template "flows-table" .Flows}}
+<div class="actions"><button type="button" class="button-secondary" data-copy="flows-json">Copy for verification</button></div>
+<pre id="flows-json" hidden>{{.FlowsJSON}}</pre>
+<h2>For my sources</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Source</th><th>Scope</th><th>Outcome</th><th>Sides a binding needs</th></tr></thead>
+  <tbody>{{range .Outcomes}}<tr><td>{{.Source}}</td><td>{{.SourceScope}}</td>
+    <td>{{if .Allowed}}<span class="badge badge-success">allowed</span>{{else}}<span class="badge badge-danger">denied</span>{{end}}{{with .Rule}} <span class="muted">rule {{.}}</span>{{end}}</td>
+    <td>{{range .Sides}}<span class="badge">{{.}}</span> {{end}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">You act for no source scope.</td></tr>{{end}}</tbody>
+</table></div>
+{{end}}{{end}}

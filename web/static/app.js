@@ -34,6 +34,21 @@
     showError('The server could not complete the request (' + response.status + '). Request ID: ' + id + '.');
   });
 
+  // "Copy" buttons copy the text of the element their data-copy names.
+  document.addEventListener('click', function (evt) {
+    var button = evt.target.closest('button[data-copy]');
+    if (!button) {
+      return;
+    }
+    var source = document.getElementById(button.getAttribute('data-copy'));
+    if (!source || !navigator.clipboard) {
+      return;
+    }
+    navigator.clipboard.writeText(source.textContent).then(function () {
+      button.textContent = 'Copied';
+    });
+  });
+
   document.addEventListener('htmx:error', function () {
     showError('The request could not be sent. Check the connection and try again.');
   });
