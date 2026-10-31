@@ -16,6 +16,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -98,8 +99,8 @@ func (c *Cache) Ready() bool {
 }
 
 // Resolve returns the bindings of the caller (§4.5 rule 5), sorted by name,
-// optionally only those to target.
-func (c *Cache) Resolve(caller spiffeid.ID, target string) ([]Binding, error) {
+// optionally only those to target and of platformType.
+func (c *Cache) Resolve(caller spiffeid.ID, target, platformType string) ([]Binding, error) {
 	now := c.now()
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -109,7 +110,7 @@ func (c *Cache) Resolve(caller spiffeid.ID, target string) ([]Binding, error) {
 	id := caller.String()
 	var out []Binding
 	for _, b := range c.byDomain[caller.TrustDomain().Name()] {
-		if target != "" && b.TargetName != target {
+		if target != "" && b.TargetName != target || platformType != "" && b.PlatformType != platformType {
 			continue
 		}
 		if b.ExpiresAt != nil && !now.Before(*b.ExpiresAt) {
@@ -118,6 +119,38 @@ func (c *Cache) Resolve(caller spiffeid.ID, target string) ([]Binding, error) {
 		if b.active.MatchString(id) && b.source.MatchString(id) {
 			out = append(out, *b)
 		}
+	}
+	return out, nil
+}
+
+// TargetFlows reads the target flows of the bindings ids from
+// v_active_binding_flows (§4.5 rule 6), per binding.
+func (c *Cache) TargetFlows(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]flows.Flow, error) {
+	list := make([]string, len(ids))
+	for i, id := range ids {
+		list[i] = id.String()
+	}
+	rows, err := c.pool.Query(ctx, `SELECT binding_id, name, purpose, protocol, destination, ports::text, tls, coalesce(server_name, ''),
+		coalesce(description, '') FROM v_active_binding_flows WHERE binding_id = ANY($1::uuid[])`, list)
+	if err != nil {
+		return nil, fmt.Errorf("resolution: target flows: %w", err)
+	}
+	out := map[uuid.UUID][]flows.Flow{}
+	_, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (struct{}, error) {
+		var id uuid.UUID
+		var f flows.Flow
+		var ports string
+		if err := row.Scan(&id, &f.Name, &f.Purpose, &f.Protocol, &f.Destination, &ports, &f.TLS, &f.ServerName, &f.Description); err != nil {
+			return struct{}{}, err
+		}
+		if f.Ports, err = flows.ParseMultirange(ports); err != nil {
+			return struct{}{}, err
+		}
+		out[id] = append(out[id], f)
+		return struct{}{}, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolution: target flows: %w", err)
 	}
 	return out, nil
 }

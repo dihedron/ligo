@@ -2073,7 +2073,7 @@ WHERE b.active_revision IS NOT NULL
 -- Target-declared flows of served bindings. Platform, secret-store and ligo
 -- flows come from the configuration and are added by the application (ADR-16).
 CREATE VIEW v_active_binding_flows AS
-SELECT b.id AS binding_id, f.name, f.purpose, f.protocol, f.destination, f.ports, f.tls, f.server_name
+SELECT b.id AS binding_id, f.name, f.purpose, f.protocol, f.destination, f.ports, f.tls, f.server_name, f.description
 FROM bindings b
 JOIN target_network_flows f ON f.target_id = b.target_id
 JOIN sources s ON s.id = b.source_id
@@ -2971,7 +2971,7 @@ An applied change of a source or target that affects provisioning is carried int
    - The caller's trust domain MUST be in `accepted_trust_domains`.
 
 **Controls.**
-- Per-caller-SPIFFE-ID token-bucket rate limit (`rate_limit.per_svid_rps`, `burst`). Exceeding it returns `429`.
+- Per-caller-SPIFFE-ID token-bucket rate limit (`rate_limit.per_svid_rps`, default 5, and `burst`, default 20). Exceeding it returns `429`.
 - The `Authorization` header and client certificates MUST be redacted from access logs.
 - Every resolution is logged at `INFO` with `request_id`, the caller SPIFFE ID, the returned binding ids and revisions, and the ETag (T-13).
 
@@ -3922,7 +3922,7 @@ platform_providers:                       # plugin types and the platforms that 
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`.
 10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
-12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone.
+12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone. `workload_listener.auth_modes` is not empty and lists only `x509_svid` and `jwt_svid`; `jwt_svid` requires `expected_jwt_audience`.
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
 14. Every `break_glass` binding uses `ldap_group_dn` (never `spiffe_id`); every scope pattern it lists appears in the `scopes` of a `break_glass.policies` entry; every policy has `5m ≤ default_ttl ≤ max_ttl ≤ 24h` and `max_open ≥ 1`; `min_justification_length ≥ 20` (the database minimum); `incident_reference_pattern`, if set, is a fully anchored RE2. Every webhook URL is `https://`, every `hmac_secret_env` is set, and every webhook `scopes` entry is a valid scope pattern.
 15. Theme (§7.6): `ui.theme.default_mode` is `system`, `light` or `dark`; every explicitly configured theme file exists; every theme file found has an allowed extension, is within its size limit, matches its type by content, is owned by root and is not writable by the `ligo` user; every key in `ui.theme.colors.light|dark` is a known token name without the `--color-` prefix, and every value is a CSS hex color (`#rgb`, `#rrggbb` or `#rrggbbaa`). A missing optional file or theme directory is not an error.
@@ -3956,7 +3956,7 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 4. Terminate all `go-plugin` subprocesses.
 5. Close SPIRE Workload API clients and PostgreSQL connection pools.
 
-**Certificate reload (`SIGHUP`, Normative):** `SIGHUP` reloads the certificate files only: the admin listener's `tls_cert_file` and `tls_key_file` (with `tls_source: file`) and `admin_auth.ldap.ca_cert_file`. New TLS handshakes and LDAP connections use them; open connections are unaffected. A file that fails to load keeps the previous certificate and is logged at `ERROR`. Every other change of `server.yaml`, the certificate paths included, takes effect only through a (rolling) restart, so that the startup checks and audits above always apply. With `tls_source: spiffe` there is nothing to reload: SPIRE rotates the SVID. A systemd unit maps `systemctl reload ligo` to it with `ExecReload=/bin/kill -HUP $MAINPID`.
+**Certificate reload (`SIGHUP`, Normative):** `SIGHUP` reloads the certificate files only: the workload and admin listeners' `tls_cert_file` and `tls_key_file` (with `tls_source: file`) and `admin_auth.ldap.ca_cert_file`. New TLS handshakes and LDAP connections use them; open connections are unaffected. A file that fails to load keeps the previous certificate and is logged at `ERROR`. Every other change of `server.yaml`, the certificate paths included, takes effect only through a (rolling) restart, so that the startup checks and audits above always apply. With `tls_source: spiffe` there is nothing to reload: SPIRE rotates the SVID. A systemd unit maps `systemctl reload ligo` to it with `ExecReload=/bin/kill -HUP $MAINPID`.
 
 ### 8.3 Repository layout
 

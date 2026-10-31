@@ -92,6 +92,12 @@ type WorkloadListener struct {
 	ResolutionCache       ResolutionCache   `yaml:"resolution_cache"`
 }
 
+// Workload authentication modes (§7.1), in the order they are evaluated.
+const (
+	AuthX509SVID = "x509_svid"
+	AuthJWTSVID  = "jwt_svid"
+)
+
 type FederatedDomain struct {
 	TrustDomain string `yaml:"trust_domain"`
 	ViaZone     string `yaml:"via_zone"`
@@ -441,6 +447,25 @@ func (c *Config) applyDefaults() {
 				p.TargetScopes = []string{p.Scope + "/*"}
 			}
 		}
+	}
+	wl := &c.Server.WorkloadListener
+	if wl.MaxTokenTTL == 0 {
+		wl.MaxTokenTTL = 15 * time.Minute // §7.1
+	}
+	if wl.ClockSkew == 0 {
+		wl.ClockSkew = 30 * time.Second
+	}
+	if wl.RateLimit.PerSVIDRPS == 0 {
+		wl.RateLimit.PerSVIDRPS = 5
+	}
+	if wl.RateLimit.Burst == 0 {
+		wl.RateLimit.Burst = 20
+	}
+	if wl.ResolutionCache.FullReloadInterval == 0 {
+		wl.ResolutionCache.FullReloadInterval = 30 * time.Second // §4.5
+	}
+	if wl.ResolutionCache.MaxStaleness == 0 {
+		wl.ResolutionCache.MaxStaleness = 5 * time.Minute
 	}
 	if c.Bindings.MaxExpiry == 0 {
 		c.Bindings.MaxExpiry = 8760 * time.Hour

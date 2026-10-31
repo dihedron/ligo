@@ -13,7 +13,11 @@ has_snapshot() { lxc query "/1.0/instances/lxd/snapshots/$SNAPSHOT?project=$LAB_
 
 lab_snapshot() {
 	section "Snapshot"
-	local names
+	local names tables
+	# the baseline's database is empty: a reset must not bring back an old migration 001
+	tables="$(pg_psql migrator -tAc "select count(*) from pg_tables where schemaname in ('public', 'dbos')")" ||
+		die "pg: cannot count the tables of the ligo database"
+	[ "$tables" = 0 ] || die "the ligo database has $tables tables: recreate it empty before the snapshot"
 	names="$(inner_names)"
 	lab_stop
 	lxd_once 120 delete lxd/"$SNAPSHOT" >/dev/null 2>&1 || true

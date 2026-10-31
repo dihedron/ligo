@@ -40,7 +40,9 @@ type admin struct {
 	user, pass string
 }
 
-func newAdmin(t *testing.T, who string) *admin {
+// ligoTLS accepts only ligo's core identity as the server, verified with
+// the prod.lab bundle, and presents who's minted SVID if who is not "".
+func ligoTLS(t *testing.T, who string) *tls.Config {
 	t.Helper()
 	dir := e2eEnv(t, "LIGO_E2E_DIR")
 	bundle, err := os.ReadFile(filepath.Join(dir, "olga-bundle.pem"))
@@ -74,15 +76,25 @@ func newAdmin(t *testing.T, who string) *admin {
 			}
 			return nil
 		}}
-	a := &admin{t: t, base: e2eEnv(t, "LIGO_E2E_ADMIN")}
-	if who == "olivia" {
-		a.user, a.pass = "olivia", e2eEnv(t, "LIGO_TEST_LDAP_OLIVIA_PASS")
-	} else {
+	if who != "" {
 		pair, err := tls.LoadX509KeyPair(filepath.Join(dir, who+"-svid.pem"), filepath.Join(dir, who+"-key.pem"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		cfg.Certificates = []tls.Certificate{pair}
+	}
+	return cfg
+}
+
+func newAdmin(t *testing.T, who string) *admin {
+	t.Helper()
+	a := &admin{t: t, base: e2eEnv(t, "LIGO_E2E_ADMIN")}
+	var cfg *tls.Config
+	if who == "olivia" {
+		a.user, a.pass = "olivia", e2eEnv(t, "LIGO_TEST_LDAP_OLIVIA_PASS")
+		cfg = ligoTLS(t, "")
+	} else {
+		cfg = ligoTLS(t, who)
 	}
 	a.client = &http.Client{Timeout: 90 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
 	return a
@@ -219,8 +231,8 @@ func TestServeE2EApply(t *testing.T) {
 }
 
 // TestServeE2ERestarted: after reload, stop and start, the binding is still
-// ACTIVE; olga revokes it, dora approves, it is deleted; the audit chain
-// verifies.
+// ACTIVE; olga revokes it, dora approves, it is deleted and its workload no
+// longer receives it (AC-12); the audit chain verifies.
 func TestServeE2ERestarted(t *testing.T) {
 	olga, dora := newAdmin(t, "olga"), newAdmin(t, "dora")
 	_, _, binding := names(t)
@@ -232,6 +244,7 @@ func TestServeE2ERestarted(t *testing.T) {
 	}
 	approveAll(t, dora, filed)
 	phase(t, olga, binding, "")
+	revoked(t)
 	if code, v := olga.do("GET", "/v1/admin/audit/verify", nil); code != http.StatusOK || v["valid"] != true {
 		t.Errorf("audit verify: %d %v", code, v)
 	}

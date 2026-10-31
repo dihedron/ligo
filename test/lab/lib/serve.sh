@@ -241,8 +241,9 @@ server:
   workload_listener:
     listen_address: "0.0.0.0:8443"
     tls_source: spiffe
-    auth_modes: [x509_svid]
+    auth_modes: [x509_svid, jwt_svid]
     accepted_trust_domains: [prod.lab]
+    expected_jwt_audience: "spiffe://prod.lab/ns/sys/sa/ligo"
   admin_listener:
     listen_address: "0.0.0.0:9443"
     tls_source: spiffe
@@ -302,6 +303,8 @@ secret_stores:
           db_connection: lab-pg
           ca_file: /etc/ligo-lab/ca.crt
           allowed_endpoints: ["bao-prod.ligo.lab:$BAO_PORT"]
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "bao-prod.ligo.lab", ports: [$BAO_PORT], tls: true, server_name: "bao-prod.ligo.lab" }
 platform_providers:
   - type: postgres.v1
     binary: target-postgres
@@ -312,6 +315,8 @@ platform_providers:
         scope: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger"
         allowed_source_trust_domains: [prod.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
         identity_provider: { type: target-local.v1, instance: local-prod }
         secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
         svid_selector: { match_expr: 'path == "/ligo/plugin/target-postgres"', jwt_audience: ["$aud"] }
@@ -332,24 +337,30 @@ platform_providers:
 YAML
 }
 
-# serve_admins: mints the X.509-SVIDs of olga (operator) and dora (approver)
-# on spire-prod for one hour, with the prod.lab bundle, into ligo1:$LIGO1_E2E
-# for the user ligo.
+# serve_admins: mints on spire-prod, for one hour, with the prod.lab bundle,
+# into ligo1:$LIGO1_E2E for the user ligo: the X.509-SVIDs of olga
+# (operator) and dora (approver), and of the e2e's workload w$E2E_SUFFIX,
+# which its source matches, and v$E2E_SUFFIX, which it does not; and a
+# JWT-SVID of the workload for ligo's workload listener, within its
+# max_token_ttl.
 serve_admins() {
-	local who dir="/root/e2e"
+	local who dir="/root/e2e" f
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
-	for who in olga dora; do
+	for who in "${!ids[@]}"; do
 		inner_exec spire-prod mkdir -m 0700 "$dir/$who"
-		spire prod x509 mint -spiffeID "spiffe://prod.lab/ops/$who" -ttl 1h -write "$dir/$who" >/dev/null 2>&1 ||
+		spire prod x509 mint -spiffeID "spiffe://prod.lab/${ids[$who]}" -ttl 1h -write "$dir/$who" >/dev/null 2>&1 ||
 			die "spire-prod: cannot mint the SVID of $who"
 	done
 	inner_exec ligo1 sh -c "rm -rf $LIGO1_E2E && install -d -o ligo -g ligo -m 0700 $LIGO1_E2E"
-	for who in olga dora; do
-		local f
+	for who in "${!ids[@]}"; do
 		for f in svid.pem key.pem bundle.pem; do
 			inner_exec spire-prod cat "$dir/$who/$f" | inner_exec ligo1 sh -c "cat >$LIGO1_E2E/$who-$f && chown ligo:ligo $LIGO1_E2E/$who-$f && chmod 0600 $LIGO1_E2E/$who-$f"
 		done
 	done
+	spire prod jwt mint -spiffeID "spiffe://prod.lab/${ids[workload]}" -audience "spiffe://prod.lab/ns/sys/sa/ligo" -ttl 10m |
+		inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/workload-jwt && chown ligo:ligo $LIGO1_E2E/workload-jwt && chmod 0600 $LIGO1_E2E/workload-jwt" ||
+		die "spire-prod: cannot mint the JWT-SVID of the workload"
 	inner_exec spire-prod rm -rf "$dir"
 }
 
@@ -360,7 +371,8 @@ serve_e2e() {
 	while IFS= read -r line; do
 		envs+=(--env "$line")
 	done < <(env_ligo1)
-	envs+=(--env "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
+	envs+=(--env "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" --env "LIGO_E2E_WORKLOAD=https://ligo1.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
+		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO1_TESTS" "${envs[@]}" -- \
 		"$LIGO1_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
 }
@@ -370,9 +382,10 @@ serve_e2e() {
 serve_test() {
 	deploy_tests # not the plugins: the running service holds them, and server.yaml their hashes
 	section "e2e of ligo serve"
-	serve_admins
 	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
 	serve_e2e '^TestServeE2EApply$' || die "TestServeE2EApply failed"
+	serve_e2e '^TestServeE2EWorkload$' || die "TestServeE2EWorkload failed"
 	local since
 	since="$(inner_exec ligo1 date '+%Y-%m-%d %H:%M:%S')"
 	inner_exec ligo1 systemctl reload ligo
