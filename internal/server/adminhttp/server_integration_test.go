@@ -395,6 +395,30 @@ func TestAuthentication(t *testing.T) {
 
 // TestRequestsAPI: list, show and decide change requests; refusals are
 // problems; audit entries carry the request's id and page by keyset.
+// TestViewerRequired: every read route refuses a principal without a
+// viewer grant (break_glass alone) before it reads anything.
+func TestViewerRequired(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	glass := v.client(t, bgID)
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/v1/admin/bindings"},
+		{"GET", "/v1/admin/catalog/targets"},
+		{"GET", "/v1/admin/catalog/sources"},
+		{"GET", "/v1/admin/governance"},
+		{"POST", "/v1/admin/governance/evaluate"},
+		{"GET", "/v1/admin/maintenance"},
+		{"GET", "/v1/admin/audit/verify"},
+		{"GET", "/v1/admin/platforms/oracle-prod"},
+		{"GET", "/v1/admin/sources"},
+		{"POST", "/v1/admin/sources/test"},
+		{"GET", "/v1/admin/targets"},
+	} {
+		if r := v.do(t, glass, route.method, route.path, map[string]any{}); r.code != 403 || r.slug() != "urn:ligo:problem:forbidden" {
+			t.Errorf("%s %s: %d %s", route.method, route.path, r.code, r.slug())
+		}
+	}
+}
+
 func TestRequestsAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	dora, olga := v.client(t, appID), v.client(t, opID)
@@ -688,12 +712,25 @@ func TestBindingsAPI(t *testing.T) {
 	if r := v.do(t, dora, "POST", "/v1/admin/change-requests/"+v.request.ID.String()+"/approve", map[string]string{"payloadSha256": v.request.PayloadSHA256}); r.code != 200 {
 		t.Fatalf("approve: %+v", r)
 	}
+	// a stage the workflow ensured and a target flow within oracle-prod's allowed endpoints
+	if _, err := v.owner.Exec(ctx, `insert into binding_stage_state (binding_id, stage, provider_type, provider_instance, status, revision, workflow_id)
+		select id, 'TARGET', 'oracle.v1', 'oracle-prod', 'ENSURED', 1, 'ligo:apply:test' from bindings where name = $1`, v.name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.owner.Exec(ctx, `insert into target_network_flows (target_id, name, protocol, destination, ports, tls, server_name)
+		select id, 'ledger', 'TCP', 'ledger-db.prod.internal', '{[1522,1523)}', true, 'ledger-db.prod.internal' from targets where name = $1`,
+		"tgt-"+x); err != nil {
+		t.Fatal(err)
+	}
 	got := v.do(t, viewer, "GET", "/v1/admin/bindings/"+v.name, nil)
 	st, _ := got.body["status"].(map[string]any)
 	req, _ := got.body["requested"].(map[string]any)
 	if got.code != 200 || got.body["kind"] != "Binding" || st["phase"] != "PROVISIONING" || got.body["active"] != nil ||
-		req["svidRegex"] == "" || got.body["stages"] == nil || len(got.body["audit"].([]any)) == 0 {
+		req["svidRegex"] == "" || len(got.body["audit"].([]any)) == 0 {
 		t.Fatalf("get: %+v", got.body)
+	}
+	if stages, _ := got.body["stages"].([]any); len(stages) != 1 || stages[0].(map[string]any)["status"] != "ENSURED" {
+		t.Errorf("stages: %v", got.body["stages"])
 	}
 	for path, n := range map[string]int{"/v1/admin/bindings?source=src-" + x: 1, "/v1/admin/bindings?source=src-" + x + "&phase=ACTIVE": 0,
 		"/v1/admin/bindings?scope=dc/*&target=tgt-" + x: 1, "/v1/admin/sources/src-" + x + "/bindings": 1, "/v1/admin/targets/tgt-" + x + "/bindings": 1,
@@ -709,7 +746,8 @@ func TestBindingsAPI(t *testing.T) {
 		t.Errorf("bad expiringBefore: %d", r.code)
 	}
 	flows := v.do(t, viewer, "GET", "/v1/admin/bindings/"+v.name+"/flows", nil)
-	if fs, _ := flows.body["networkFlows"].([]any); flows.code != 200 || len(fs) == 0 || fs[len(fs)-1].(map[string]any)["declaredBy"] != "ligo" {
+	if fs, _ := flows.body["networkFlows"].([]any); flows.code != 200 || len(fs) < 2 || fs[len(fs)-1].(map[string]any)["declaredBy"] != "ligo" ||
+		fs[0].(map[string]any)["declaredBy"] != "target:tgt-"+x || fs[0].(map[string]any)["name"] != "ledger" {
 		t.Errorf("flows: %+v", flows.body)
 	}
 
