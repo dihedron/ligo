@@ -43,7 +43,7 @@ func TestCertificate(t *testing.T) {
 		return svid.GetX509Svid()
 	}
 	first := write("spiffe://prod.internal/ns/sys/sa/ligo")
-	get, reload, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: certFile, TLSKeyFile: keyFile}, nil)
+	get, reload, err := certificate("admin_listener", "file", certFile, keyFile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,17 +63,17 @@ func TestCertificate(t *testing.T) {
 	if c, _ := get(nil); !bytes.Equal(c.Certificate[0], renewed) {
 		t.Error("a failed reload replaced the certificate")
 	}
-	if _, _, err := certificate(config.AdminListener{TLSSource: "file", TLSCertFile: filepath.Join(dir, "none")}, nil); err == nil {
+	if _, _, err := certificate("admin_listener", "file", filepath.Join(dir, "none"), "", nil); err == nil {
 		t.Error("a missing certificate file")
 	}
-	if _, reload, err := certificate(config.AdminListener{TLSSource: "spiffe"}, nil); err != nil || reload != nil {
+	if _, reload, err := certificate("admin_listener", "spiffe", "", "", nil); err != nil || reload != nil {
 		t.Errorf("SPIRE rotates its own certificate: %v", err)
 	}
 }
 
 // reloadAll is SIGHUP with only a certificate to reload.
 func reloadAll(log *slog.Logger, reloadCert func() error) {
-	reload(log, &config.Config{}, reloadCert, nil)
+	reload(log, &config.Config{}, map[string]func() error{"admin": reloadCert}, nil)
 }
 
 // TestLDAP: the directory reads its bind password from the environment,

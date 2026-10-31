@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -30,9 +31,9 @@ import (
 )
 
 // config writes testdata/server.yaml with the test's socket, key file,
-// admin address and a fresh application version (DBOS recovers only its
-// own version's workflows).
-func testConfig(t *testing.T, socket, kek, admin string) string {
+// listener addresses and a fresh application version (DBOS recovers only
+// its own version's workflows).
+func testConfig(t *testing.T, socket, kek, admin string, workload ...string) string {
 	t.Helper()
 	data, err := os.ReadFile("testdata/server.yaml")
 	if err != nil {
@@ -41,6 +42,7 @@ func testConfig(t *testing.T, socket, kek, admin string) string {
 	s := strings.NewReplacer(`spiffe_workload_socket: "unix:///replaced/by/the/test"`, `spiffe_workload_socket: "`+socket+`"`,
 		`local_kek_file: "/replaced/by/the/test"`, `local_kek_file: "`+kek+`"`,
 		"admin_listener:\n    listen_address: \"127.0.0.1:0\"", "admin_listener:\n    listen_address: \""+admin+"\"",
+		"workload_listener:\n    listen_address: \"127.0.0.1:0\"", "workload_listener:\n    listen_address: \""+append(workload, "127.0.0.1:0")[0]+"\"",
 		`application_version: "test"`, `application_version: "serve-`+uuid.NewV7().String()+`"`).Replace(string(data))
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	if err := os.WriteFile(path, []byte(s), 0o600); err != nil {
@@ -85,14 +87,17 @@ func TestServe(t *testing.T) {
 	if err := os.WriteFile(kek, make([]byte, 32), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	free := func() string {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = l.Close() }()
+		return l.Addr().String()
 	}
-	admin := l.Addr().String()
-	_ = l.Close()
+	admin, wl := free(), free()
 
-	cmd := &Serve{ConfigFile: testConfig(t, socket, kek, admin), InsecureDev: true, MaintenanceMode: true, insecureDB: os.Getenv("CI") != ""}
+	cmd := &Serve{ConfigFile: testConfig(t, socket, kek, admin, wl), InsecureDev: true, MaintenanceMode: true, insecureDB: os.Getenv("CI") != ""}
 	running, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- cmd.run(running, slog.New(slog.DiscardHandler)) }()
@@ -148,6 +153,16 @@ func TestServe(t *testing.T) {
 	if !m.MaintenanceMode {
 		t.Error("--maintenance did not turn maintenance mode on")
 	}
+	// the workload listener resolves vera's bindings from the loaded cache: none
+	if resp, err := client.Get("https://" + wl + "/v1/bindings"); err != nil {
+		t.Errorf("workload listener: %v", err)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != `{"callerSpiffeId":"spiffe://prod.internal/ops/vera","items":[]}` {
+			t.Errorf("GET /v1/bindings: %d %s", resp.StatusCode, body)
+		}
+	}
 	// SIGHUP reloads the certificate files and nothing else: ligo keeps serving
 	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
 		t.Fatal(err)
@@ -170,6 +185,9 @@ func TestServe(t *testing.T) {
 	}
 	if _, err := client.Get("https://" + admin + "/v1/admin/maintenance"); err == nil {
 		t.Error("the admin listener still serves after shutdown")
+	}
+	if _, err := client.Get("https://" + wl + "/v1/bindings"); err == nil {
+		t.Error("the workload listener still serves after shutdown")
 	}
 }
 

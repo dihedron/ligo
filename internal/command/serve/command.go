@@ -31,8 +31,10 @@ import (
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
+	"github.com/dihedron/ligo/internal/resolution"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
+	"github.com/dihedron/ligo/internal/server/workloadhttp"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/startup"
 	"github.com/dihedron/ligo/internal/store"
@@ -191,13 +193,25 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 
-	// 7. the workload resolution cache starts with the workload listener (phase 8)
+	// 7. the workload resolution cache: loaded once, then kept fresh by
+	// LISTEN and full reloads (§4.5)
+	rc := cfg.Server.WorkloadListener.ResolutionCache
+	cache := resolution.New(pools.Reader, resolution.Options{FullReloadInterval: rc.FullReloadInterval, MaxStaleness: rc.MaxStaleness,
+		Policy: cfg.RegexPolicy})
+	if err := cache.Load(ctx); err != nil {
+		return fmt.Errorf("serve: resolution cache: %w", err)
+	}
 
-	// 8. the background loops
+	// 8. the background loops, the cache's LISTEN subscriber with them
 	loops, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	defer func() { cancel(); wg.Wait() }()
 	run := func(f func(context.Context)) { wg.Go(func() { f(loops) }) }
+	run(func(ctx context.Context) {
+		if err := cache.Run(ctx); err != nil {
+			log.Error("resolution cache", "error", err)
+		}
+	})
 	rotation := map[string]time.Duration{}
 	for _, pp := range cfg.PlatformProviders {
 		for _, pl := range pp.Platforms {
@@ -216,8 +230,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 	run(dispatcher.Run)
 
-	// 9. the admin listener (the workload listener comes in phase 8)
-	return cmd.listen(ctx, log, cfg, zones, s)
+	// 9. the workload and admin listeners
+	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
+	return cmd.listen(ctx, log, cfg, zones, w, s)
 }
 
 // sealer is secret_sealing's provider, checked for key availability.
@@ -291,37 +306,53 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 		Plugins: adminhttp.PlatformPlugins(plugins)}, nil
 }
 
-// listen serves the admin API until ctx ends, then drains it; SIGHUP
-// reloads the certificate files, everything else needs a restart.
-func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, s *adminhttp.Server) error {
-	l := cfg.Server.AdminListener
+// listen serves the workload and admin APIs until ctx ends, then drains
+// both; SIGHUP reloads the certificate files, everything else needs a
+// restart.
+func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
+	s *adminhttp.Server) error {
+	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
-	if l.AllowBasicAuth {
+	if al.AllowBasicAuth {
 		var err error
 		if directory, err = ldap(cfg); err != nil {
 			return err
 		}
 		s.LDAP = directory
 	}
-	cert, reloadCert, err := certificate(l, zones)
+	workloadCert, reloadWorkload, err := certificate("workload_listener", wl.TLSSource, wl.TLSCertFile, wl.TLSKeyFile, zones)
+	if err != nil {
+		return err
+	}
+	adminCert, reloadAdmin, err := certificate("admin_listener", al.TLSSource, al.TLSCertFile, al.TLSKeyFile, zones)
 	if err != nil {
 		return err
 	}
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
-	srv := &http.Server{Addr: l.ListenAddress, Handler: s.Handler(), TLSConfig: s.TLSConfig(cert), ReadHeaderTimeout: 10 * time.Second,
-		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)}
-	failed := make(chan error, 1)
-	go func() { failed <- srv.ListenAndServeTLS("", "") }()
-	log.Info("serving", "admin", l.ListenAddress)
+	failed := make(chan error, 2)
+	servers := map[string]*http.Server{
+		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: s.Handler(), TLSConfig: s.TLSConfig(adminCert)},
+	}
+	for name, srv := range servers {
+		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
+		go func() {
+			if err := srv.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
+				failed <- fmt.Errorf("serve: %s listener: %w", name, err)
+			}
+		}()
+	}
+	log.Info("serving", "workload", wl.ListenAddress, "admin", al.ListenAddress)
+	var stopErr error
 	for done := false; !done; {
 		select {
-		case err := <-failed:
-			return fmt.Errorf("serve: admin listener: %w", err)
+		case stopErr = <-failed:
+			done = true
 		case <-hup:
-			reload(log, cfg, reloadCert, directory)
+			reload(log, cfg, map[string]func() error{"workload": reloadWorkload, "admin": reloadAdmin}, directory)
 		case <-ctx.Done():
 			done = true
 		}
@@ -329,20 +360,29 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	log.Info("shutting down")
 	shutdown, cancel := context.WithTimeout(context.Background(), drain)
 	defer cancel()
-	if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Warn("admin listener drain", "error", err)
+	var wg sync.WaitGroup
+	for name, srv := range servers {
+		wg.Go(func() {
+			if err := srv.Shutdown(shutdown); err != nil {
+				log.Warn("listener drain", "listener", name, "error", err)
+			}
+		})
 	}
-	return nil
+	wg.Wait()
+	return stopErr
 }
 
-// reload is SIGHUP: it reloads the admin listener's certificate files and
-// the directory's CA file; a file that fails to load keeps the old one.
-func reload(log *slog.Logger, cfg *config.Config, reloadCert func() error, directory *adminauth.LDAP) {
-	if reloadCert != nil {
+// reload is SIGHUP: it reloads the listeners' certificate files and the
+// directory's CA file; a file that fails to load keeps the old one.
+func reload(log *slog.Logger, cfg *config.Config, certs map[string]func() error, directory *adminauth.LDAP) {
+	for listener, reloadCert := range certs {
+		if reloadCert == nil {
+			continue
+		}
 		if err := reloadCert(); err != nil {
-			log.Error("SIGHUP: the admin certificate is unchanged", "error", err)
+			log.Error("SIGHUP: the certificate is unchanged", "listener", listener, "error", err)
 		} else {
-			log.Info("SIGHUP: admin certificate reloaded", "file", cfg.Server.AdminListener.TLSCertFile)
+			log.Info("SIGHUP: certificate reloaded", "listener", listener)
 		}
 	}
 	if file := cfg.AdminAuth.LDAP.CACertFile; directory != nil && file != "" {
@@ -356,16 +396,16 @@ func reload(log *slog.Logger, cfg *config.Config, reloadCert func() error, direc
 	}
 }
 
-// certificate is the admin listener's: the core identity's SVID, rotated
-// by SPIRE, or the configured files, which the returned function reloads
-// (nil for SPIRE).
-func certificate(l config.AdminListener, zones *identity.Zones) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), func() error, error) {
-	if l.TLSSource == "file" {
+// certificate is a listener's: the core identity's SVID, rotated by
+// SPIRE, or the configured files, which the returned function reloads (nil
+// for SPIRE).
+func certificate(listener, source, certFile, keyFile string, zones *identity.Zones) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), func() error, error) {
+	if source == "file" {
 		var current atomic.Pointer[tls.Certificate]
 		load := func() error {
-			pair, err := tls.LoadX509KeyPair(l.TLSCertFile, l.TLSKeyFile)
+			pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
-				return fmt.Errorf("serve: admin_listener: %w", err)
+				return fmt.Errorf("serve: %s: %w", listener, err)
 			}
 			current.Store(&pair)
 			return nil
