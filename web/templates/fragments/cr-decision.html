@@ -1,12 +1,22 @@
 {{define "cr-decision"}}<div id="cr-decision">
+{{with .Request}}<section class="card"><dl class="fields">
+  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span></dd>
+  <dt>Requested</dt><dd>{{when .RequestedAt}} by {{.RequestedBy}}</dd>
+  <dt>Expires</dt><dd>{{when .ExpiresAt}}</dd>
+  {{with .Consent}}<dt>Consent</dt><dd>{{.}}</dd>{{end}}
+  {{with .InterconnectRule}}<dt>Interconnection rule</dt><dd>{{.}}</dd>{{end}}
+  <dt>Distinct approvers</dt><dd>{{if .DistinctApprovers}}required{{else}}not required{{end}}</dd>
+  {{with .ApprovalReference}}<dt>Reference</dt><dd>{{.}}</dd>{{end}}
+  {{with .Justification}}<dt>Justification</dt><dd>{{.}}</dd>{{end}}
+  <dt>Payload SHA-256</dt><dd class="mono">{{.PayloadSHA256}}</dd>
+</dl></section>{{end}}
 <h2>Sides</h2>
 <div class="table-wrap"><table>
   <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
   <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
-    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">awaiting</span>{{end}}</td>
+    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">AWAITING</span>{{end}}</td>
     <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
-<p>Status: <span class="{{badge .Request.Status}}">{{.Request.Status}}</span></p>
 {{if or .Eligible .CanWithdraw}}<div id="cr-errors" class="errors"></div>{{end}}
 {{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target="#cr-decision" hx-swap="outerHTML"
   hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>

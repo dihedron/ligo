@@ -697,8 +697,36 @@ func TestTargetsAPI(t *testing.T) {
 	if r.code != 202 || len(crs) != 1 || len(r.body["errors"].([]any)) != 0 {
 		t.Fatalf("revoke: %+v", r)
 	}
-	if c := crs[0].(map[string]any); c["operation"] != "DELETE" || c["consent"] != "ANY" || c["resourceName"] != v.name {
+	c := crs[0].(map[string]any)
+	if c["operation"] != "DELETE" || c["consent"] != "ANY" || c["resourceName"] != v.name {
 		t.Errorf("revocation: %v", c)
+	}
+	// awaitingMe lists only PENDING requests. This is a guard only: the bug it covers (consent ANY leaving an
+	// undecided side on an applied request) needs two human sides with different scopes, which this fixture
+	// does not have; the lab's `cr list --awaiting-me` shows it
+	awaiting := func() bool {
+		t.Helper()
+		l := v.do(t, dora, "GET", "/v1/admin/change-requests?awaitingMe=true", nil)
+		for _, it := range l.body["items"].([]any) {
+			if it.(map[string]any)["id"] == c["id"] {
+				return true
+			}
+		}
+		return false
+	}
+	if !awaiting() {
+		t.Error("the pending revocation is not in the approver's queue")
+	}
+	sides, _ := c["awaitingApproval"].([]any)
+	if len(sides) == 0 {
+		t.Fatalf("no side awaits: %v", c)
+	}
+	if a := v.do(t, dora, "POST", "/v1/admin/change-requests/"+c["id"].(string)+"/approve",
+		map[string]any{"payloadSha256": c["payloadSha256"], "side": sides[0]}); a.code != 200 {
+		t.Fatalf("approve: %+v", a)
+	}
+	if awaiting() {
+		t.Error("the applied revocation is still in the approver's queue")
 	}
 }
 
