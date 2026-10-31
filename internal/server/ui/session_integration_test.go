@@ -534,7 +534,7 @@ func TestPages(t *testing.T) {
 		t.Errorf("queue: %d", resp.StatusCode)
 	}
 	if resp, body := approver.do("GET", "/ui/change-requests/"+cr.ID.String(), nil, "HX-Request", ""); resp.StatusCode != 200 ||
-		!strings.Contains(body, cr.PayloadSHA256) || !strings.Contains(body, "awaiting") {
+		!strings.Contains(body, cr.PayloadSHA256) || !strings.Contains(body, "AWAITING") {
 		t.Errorf("request detail: %d", resp.StatusCode)
 	}
 	for _, sd := range cr.Sides {
@@ -680,6 +680,9 @@ func TestDecisions(t *testing.T) {
 	if resp, body := approver.do("POST", base+"/approve", url.Values{"payloadSha256": {strings.Repeat("0", 64)}, "side": {cr.Sides[0].Name}}); resp.StatusCode != http.StatusConflict ||
 		resp.Header.Get("HX-Retarget") != "" || !strings.Contains(body, `class="alert`) {
 		t.Errorf("stale hash: %d %v", resp.StatusCode, resp.Header)
+	}
+	if strings.Count(page, "<dt>Status</dt>") != 1 || strings.Contains(page, "Status: <span") {
+		t.Error("the status must appear once, inside the swapped block")
 	}
 	resp, frag := approver.do("POST", base+"/approve", url.Values{"payloadSha256": {cr.PayloadSHA256}, "side": {cr.Sides[0].Name}})
 	if resp.StatusCode != 200 || !strings.HasPrefix(frag, `<div id="cr-decision">`) || !strings.Contains(frag, ">APPROVED<") || strings.Contains(frag, "<html") {
@@ -904,6 +907,11 @@ func TestWizard(t *testing.T) {
 	if resp, page := b.do("GET", "/ui/bindings/wizard", nil, "HX-Request", ""); resp.StatusCode != 200 || !strings.Contains(page, `value="tgt-`+x+`"`) {
 		t.Fatalf("wizard: %d", resp.StatusCode)
 	}
+	// "Request access" from the catalog: a target and no step starts at the level, with a way forward
+	if resp, f := b.do("GET", "/ui/bindings/wizard?target=tgt-"+x, nil, "HX-Request", ""); resp.StatusCode != 200 || !strings.Contains(f, "2. Access level") ||
+		!strings.Contains(f, `"step":"3"`) {
+		t.Errorf("a preselected target: %d %s", resp.StatusCode, f)
+	}
 	step := func(n int, extra url.Values) string {
 		t.Helper()
 		q := url.Values{"target": {"tgt-" + x}, "step": {fmt.Sprint(n)}}
@@ -916,7 +924,7 @@ func TestWizard(t *testing.T) {
 		}
 		return frag
 	}
-	if f := step(2, nil); !strings.Contains(f, `<option value="read"`) || !strings.Contains(f, `name="step" value="3"`) {
+	if f := step(2, nil); !strings.Contains(f, `<option value="read"`) || !strings.Contains(f, `"step":"3"`) {
 		t.Errorf("step 2: %s", f)
 	}
 	if f := step(3, url.Values{"accessLevel": {"read"}}); !strings.Contains(f, `value="src-`+x+`"`) || strings.Contains(f, `value="src-`+x+`" disabled`) {

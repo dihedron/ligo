@@ -92,6 +92,7 @@ func (s *Server) wizard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err == nil && wz.Target != nil {
+		wz.Step = max(wz.Step, 2) // a target chosen before (the catalog's "Request access") starts at the level
 		for _, l := range wz.Target.AccessLevels {
 			if l.State == "" || l.State == "ACTIVE" {
 				wz.Levels = append(wz.Levels, l)

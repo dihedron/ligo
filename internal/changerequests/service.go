@@ -594,6 +594,10 @@ func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, boo
 				continue
 			}
 			if f.AwaitingMe {
+				// only a PENDING request awaits anyone: with consent ANY an applied one keeps sides nobody needs to decide
+				if r.Status != "PENDING" {
+					continue
+				}
 				if names, err := SelectSides(r, c, s.Policy, true, ""); err != nil || len(names) == 0 {
 					continue
 				}
