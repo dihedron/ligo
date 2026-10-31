@@ -1,0 +1,42 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"{{with .ThemeMode}} data-theme="{{.}}"{{end}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content="{{htmxConfig}}">
+{{with .CSRF}}<meta name="csrf-token" content="{{.}}">
+{{end}}<title>{{if .Title}}{{.Title}} · {{end}}{{.Product}}</title>
+<link rel="stylesheet" href="/ui/static/styles.css">
+{{if .Assets.Tokens}}<link rel="stylesheet" href="/ui/theme/tokens.css">
+{{end}}{{if .Assets.CSS}}<link rel="stylesheet" href="/ui/theme/theme.css">
+{{end}}{{if .Assets.Favicon}}<link rel="icon" href="/ui/theme/favicon">
+{{else}}<link rel="icon" href="/ui/static/favicon.svg">
+{{end}}</head>
+<body>
+<header class="app-header">
+  <a class="brand" href="/ui/bindings">{{if .Assets.Logo}}<img class="logo-light{{if .Assets.LogoDark}} has-dark{{end}}" src="/ui/theme/logo" alt="{{.Product}}">{{if .Assets.LogoDark}}<img class="logo-dark" src="/ui/theme/logo-dark" alt="{{.Product}}">{{end}}{{else}}{{.Product}}{{end}}</a>
+  {{if .User}}<nav class="app-nav" aria-label="Main">
+    {{range .Nav}}<a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>
+    {{end}}</nav>
+  <div class="app-user"><span>{{.User}}</span>{{template "theme-switch" .}}</div>{{end}}
+</header>
+{{with .Maintenance}}<div class="banner banner-warning" role="status">Maintenance mode is on{{with .Reason}}: {{.}}{{end}}. Changes are disabled.</div>
+{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}</li>{{end}}</ul></div>
+{{end}}<div id="error-banner" class="banner banner-danger" role="alert" hidden></div>
+<main id="main">
+<div id="page-errors" class="errors"></div>
+{{template "content" .}}
+</main>
+<script src="/ui/static/htmx.min.js" nonce="{{nonce}}"></script>
+<script src="/ui/static/ext/hx-csp.min.js" nonce="{{nonce}}"></script>
+<script src="/ui/static/app.js" nonce="{{nonce}}"></script>
+</body>
+</html>
+{{end}}
+
+{{define "theme-switch"}}<form class="theme-switch" hx-post="/ui/preferences/theme" hx-trigger="change" {{hxnonce}}>
+  <label for="theme-mode" class="muted">Appearance</label>
+  <select id="theme-mode" name="mode">
+    {{range modes}}<option value="{{.}}"{{if eq . $.ThemeChoice}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form>{{end}}

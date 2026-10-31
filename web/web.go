@@ -1,10 +1,10 @@
-// Package web holds the admin UI's static files, embedded in the binary
-// (§7.4); the templates join them with the UI frame.
+// Package web holds the admin UI's templates and static files, embedded in
+// the binary (§7.4).
 package web
 
 import "embed"
 
-// FS holds static/.
+// FS holds templates/ and static/.
 //
-//go:embed static
+//go:embed templates static
 var FS embed.FS

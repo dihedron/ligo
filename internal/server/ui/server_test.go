@@ -1,0 +1,244 @@
+package ui
+
+import (
+	"encoding/base64"
+	"html/template"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/theme"
+	"github.com/dihedron/ligo/web"
+	"golang.org/x/net/html"
+)
+
+func newServer(t *testing.T) *Server {
+	t.Helper()
+	th, err := theme.Load(theme.Files{Directory: t.TempDir(), Colors: map[string]map[string]string{"light": {"primary": "#1f4e8c"}}}, theme.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(th, config.Theme{DefaultMode: "system", ProductName: "ligo"}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+var cspNonce = regexp.MustCompile(`script-src 'self' 'nonce-([A-Za-z0-9+/=]+)'`)
+
+// TestSecurityHeaders: every /ui/ response, found or not, carries the §7.4
+// headers with its own 16-byte nonce; theme assets alone are cacheable.
+func TestSecurityHeaders(t *testing.T) {
+	h := newServer(t).Handler()
+	seen := map[string]bool{}
+	for _, path := range []string{"/ui/static/htmx.min.js", "/ui/static/ext/hx-csp.min.js", "/ui/static/app.js", "/ui/static/styles.css",
+		"/ui/nope", "/ui/static/ext/", "/ui/static/VERSIONS", "/ui/theme/tokens.css"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		hd := rec.Header()
+		m := cspNonce.FindStringSubmatch(hd.Get("Content-Security-Policy"))
+		if m == nil {
+			t.Fatalf("%s: CSP %q", path, hd.Get("Content-Security-Policy"))
+		}
+		if raw, err := base64.StdEncoding.DecodeString(m[1]); err != nil || len(raw) != 16 || seen[m[1]] {
+			t.Errorf("%s: nonce %q not fresh 16 bytes", path, m[1])
+		}
+		seen[m[1]] = true
+		if hd.Get("Content-Security-Policy") != policy(m[1]) || hd.Get("X-Content-Type-Options") != "nosniff" ||
+			hd.Get("Referrer-Policy") != "no-referrer" || hd.Get("Strict-Transport-Security") != "max-age=31536000" || hd.Get("X-Request-Id") == "" {
+			t.Errorf("%s: headers %v", path, hd)
+		}
+		want := "no-store"
+		if strings.HasPrefix(path, "/ui/theme/") {
+			want = "public, max-age=3600"
+		}
+		if hd.Get("Cache-Control") != want {
+			t.Errorf("%s: Cache-Control %q", path, hd.Get("Cache-Control"))
+		}
+		wantCode := 200
+		if path == "/ui/nope" || path == "/ui/static/ext/" || path == "/ui/static/VERSIONS" {
+			wantCode = 404
+		}
+		if rec.Code != wantCode {
+			t.Errorf("%s: %d, want %d", path, rec.Code, wantCode)
+		}
+	}
+}
+
+// fixture registers a test page using the layout, and renders it for r.
+func render(t *testing.T, s *Server, r *http.Request, p Page) (*httptest.ResponseRecorder, string) {
+	t.Helper()
+	if _, ok := s.pages.page["test"]; !ok {
+		if err := s.pages.add("test", `{{define "content"}}<button hx-get="/ui/x" {{hxnonce}}>go</button>{{end}}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := httptest.NewRecorder()
+	s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.page(w, r, 200, "test", p) })).ServeHTTP(rec, r)
+	m := cspNonce.FindStringSubmatch(rec.Header().Get("Content-Security-Policy"))
+	return rec, m[1]
+}
+
+// TestLayout: the page's scripts and hx-* elements carry the response's
+// nonce; the htmx-config, the CSRF meta, the banners and the color mode
+// follow the data and the cookie (§7.4, §7.6).
+func TestLayout(t *testing.T) {
+	s := newServer(t)
+	rec, n := render(t, s, httptest.NewRequest("GET", "/ui/test", nil), Page{Title: "Test", CSRF: "tok", User: "olga",
+		Nav: []NavItem{{Path: "/ui/bindings", Label: "Bindings", Current: true}}, Maintenance: &Maintenance{Reason: "upgrade"},
+		BreakGlass: []OpenBreakGlass{{Name: "bg-1", ExpiresIn: "2h"}}})
+	body := rec.Body.String()
+	// the nonce is base64: html/template may write its + as &#43;, so compare parsed attributes
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scripts []string
+	for node := range doc.Descendants() {
+		if node.Type == html.ElementNode && node.Data == "script" {
+			attrs := map[string]string{}
+			for _, a := range node.Attr {
+				attrs[a.Key] = a.Val
+			}
+			if attrs["nonce"] != n {
+				t.Errorf("script %s: nonce %q, want %q", attrs["src"], attrs["nonce"], n)
+			}
+			scripts = append(scripts, attrs["src"])
+		}
+	}
+	if strings.Join(scripts, " ") != "/ui/static/htmx.min.js /ui/static/ext/hx-csp.min.js /ui/static/app.js" {
+		t.Errorf("scripts: %v", scripts)
+	}
+	for _, want := range []string{
+		`<button hx-get="/ui/x" hx-nonce="` + template.HTMLEscapeString(n) + `">go</button>`,
+		`<meta name="csrf-token" content="tok">`,
+		`<meta name="htmx-config" content="{&#34;defaultTimeout&#34;:90000,&#34;extensions&#34;:&#34;hx-csp&#34;,&#34;history&#34;:true,` +
+			`&#34;implicitInheritance&#34;:false,&#34;includeIndicatorCSS&#34;:false,&#34;mode&#34;:&#34;same-origin&#34;,&#34;noSwap&#34;:[204,304,&#34;5xx&#34;]}">`,
+		`<link rel="stylesheet" href="/ui/theme/tokens.css">`, `<title>Test · ligo</title>`, `<html lang="en">`,
+		"Maintenance mode is on: upgrade.", "<li>bg-1, expires in 2h</li>", `aria-current="page"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+	if strings.Contains(body, "/ui/theme/theme.css") || strings.Contains(body, "/ui/theme/logo") {
+		t.Error("absent theme files are referenced")
+	}
+	for cookie, want := range map[string]string{"dark": ` data-theme="dark"`, "light": ` data-theme="light"`, "system": `<html lang="en">`,
+		"sepia": `<html lang="en">`} {
+		r := httptest.NewRequest("GET", "/ui/test", nil)
+		r.AddCookie(&http.Cookie{Name: "__Host-ligo_theme", Value: cookie})
+		if rec, _ := render(t, s, r, Page{User: "olga"}); !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("cookie %s: no %s", cookie, want)
+		}
+	}
+	s.ThemeConfig.DefaultMode = "dark"
+	if rec, _ := render(t, s, httptest.NewRequest("GET", "/ui/test", nil), Page{}); !strings.Contains(rec.Body.String(), ` data-theme="dark"`) {
+		t.Error("default_mode dark")
+	}
+}
+
+// TestAlertAndRedirect: 409/422 alerts land in the form's container, others
+// are retargeted to the page's; mutations navigate with HX-Redirect.
+func TestAlertAndRedirect(t *testing.T) {
+	s := newServer(t)
+	for code, retarget := range map[int]string{409: "", 422: "", 403: "#page-errors"} {
+		rec := httptest.NewRecorder()
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.alert(w, r, code, "No <b>way</b>") })).ServeHTTP(rec,
+			httptest.NewRequest("POST", "/ui/x", nil))
+		body := rec.Body.String()
+		if rec.Code != code || rec.Header().Get("HX-Retarget") != retarget || !strings.Contains(body, "No &lt;b&gt;way&lt;/b&gt;") ||
+			!strings.Contains(body, rec.Header().Get("X-Request-Id")) {
+			t.Errorf("%d: %v %s", code, rec.Header(), body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	redirect(rec, "/ui/bindings")
+	if rec.Code != 200 || rec.Header().Get("HX-Redirect") != "/ui/bindings" {
+		t.Errorf("redirect: %d %v", rec.Code, rec.Header())
+	}
+}
+
+// TestTemplates renders every page and fragment: each element with an hx-*
+// attribute carries hx-nonce, the response's nonce, which templates write
+// only through hxnonce; fragments contain no <script> (§7.4, T-05).
+func TestTemplates(t *testing.T) {
+	err := fs.WalkDir(web.FS, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		src, _ := fs.ReadFile(web.FS, path)
+		if strings.Contains(string(src), "hx-nonce") {
+			t.Errorf("%s writes hx-nonce by hand; use {{hxnonce}}", path)
+		}
+		if strings.HasPrefix(path, "templates/fragments/") && strings.Contains(strings.ToLower(string(src)), "<script") {
+			t.Errorf("%s: a fragment contains <script>", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newServer(t)
+	full := Page{Title: "t", CSRF: "c", User: "u", Nav: []NavItem{{Path: "/ui/a", Label: "a"}}, Maintenance: &Maintenance{},
+		BreakGlass: []OpenBreakGlass{{Name: "b"}}}
+	check := func(what string, rec *httptest.ResponseRecorder) {
+		n := cspNonce.FindStringSubmatch(rec.Header().Get("Content-Security-Policy"))[1]
+		doc, err := html.Parse(strings.NewReader(rec.Body.String()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for node := range doc.Descendants() {
+			if node.Type != html.ElementNode {
+				continue
+			}
+			hx, nonce := false, ""
+			for _, a := range node.Attr {
+				switch {
+				case a.Key == "hx-nonce":
+					nonce = a.Val
+				case strings.HasPrefix(a.Key, "hx-"):
+					hx = true
+				}
+			}
+			if hx && nonce != n {
+				t.Errorf("%s: <%s> has hx-* attributes and hx-nonce %q, want %q", what, node.Data, nonce, n)
+			}
+		}
+	}
+	if err := s.pages.add("probe", `{{define "content"}}{{end}}`); err != nil {
+		t.Fatal(err)
+	}
+	for name := range s.pages.page {
+		rec := httptest.NewRecorder()
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.page(w, r, 200, name, full) })).ServeHTTP(rec,
+			httptest.NewRequest("GET", "/ui/x", nil))
+		if rec.Code != 200 {
+			t.Errorf("page %s: %d", name, rec.Code)
+		}
+		check("page "+name, rec)
+	}
+	for _, tmpl := range s.pages.fragment.Templates() {
+		name := tmpl.Name()
+		if name == "ui" || strings.HasSuffix(name, ".html") {
+			continue
+		}
+		rec := httptest.NewRecorder()
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.fragment(w, r, 200, name, map[string]any{}) })).ServeHTTP(rec,
+			httptest.NewRequest("GET", "/ui/x", nil))
+		if rec.Code != 200 {
+			t.Errorf("fragment %s: %d", name, rec.Code)
+		}
+		check("fragment "+name, rec)
+		if b, _ := io.ReadAll(rec.Body); strings.Contains(strings.ToLower(string(b)), "<script") {
+			t.Errorf("fragment %s renders <script>", name)
+		}
+	}
+}

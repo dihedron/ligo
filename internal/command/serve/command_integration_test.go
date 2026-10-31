@@ -153,6 +153,16 @@ func TestServe(t *testing.T) {
 	if !m.MaintenanceMode {
 		t.Error("--maintenance did not turn maintenance mode on")
 	}
+	// the web UI shares the admin listener, with its own headers and no API authentication
+	if resp, err := (&http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13,
+		InsecureSkipVerify: true}}}).Get("https://" + admin + "/ui/static/app.js"); err != nil { //nolint:gosec // only the UI's headers are under test
+		t.Errorf("UI: %v", err)
+	} else {
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "'nonce-") {
+			t.Errorf("GET /ui/static/app.js: %d %v", resp.StatusCode, resp.Header)
+		}
+	}
 	// the workload listener resolves vera's bindings from the loaded cache: none
 	if resp, err := client.Get("https://" + wl + "/v1/bindings"); err != nil {
 		t.Errorf("workload listener: %v", err)

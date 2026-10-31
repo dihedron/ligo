@@ -3434,6 +3434,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | `GET` | `/ui/login` | Login page (sets the pre-login cookie). |
+| `GET` | `/ui/static/{htmx.min.js,ext/hx-csp.min.js,app.js,styles.css,favicon.svg}` | The embedded static files, public, under the §7.4 headers (`Cache-Control: no-store`); no directory listings. |
 | `GET` | `/ui/theme/{tokens.css,theme.css,logo,logo-dark,favicon,fonts/*}` | Theme assets, public and cacheable (§7.6). |
 | `POST` | `/ui/preferences/theme` | Set the color mode cookie (`system`, `light`, `dark`); returns `200 OK` with `HX-Refresh: true`. |
 | `POST` | `/ui/login` | Authenticate; clears pre-login cookie; `200 OK` with `HX-Redirect: /ui/bindings`. |

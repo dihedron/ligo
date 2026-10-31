@@ -34,6 +34,7 @@ import (
 	"github.com/dihedron/ligo/internal/resolution"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
+	"github.com/dihedron/ligo/internal/server/ui"
 	"github.com/dihedron/ligo/internal/server/workloadhttp"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/startup"
@@ -239,7 +240,11 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 
 	// 9. the workload and admin listeners
 	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
-	return cmd.listen(ctx, log, cfg, zones, w, s)
+	u, err := ui.New(look, cfg.UI.Theme, log)
+	if err != nil {
+		return err
+	}
+	return cmd.listen(ctx, log, cfg, zones, w, s, u)
 }
 
 // sealer is secret_sealing's provider, checked for key availability.
@@ -317,7 +322,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 // both; SIGHUP reloads the certificate files, everything else needs a
 // restart.
 func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
-	s *adminhttp.Server) error {
+	s *adminhttp.Server, u *ui.Server) error {
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
@@ -342,7 +347,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	failed := make(chan error, 2)
 	servers := map[string]*http.Server{
 		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
-		"admin":    {Addr: al.ListenAddress, Handler: s.Handler(), TLSConfig: s.TLSConfig(adminCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: admin(s, u), TLSConfig: s.TLSConfig(adminCert)},
 	}
 	for name, srv := range servers {
 		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
@@ -377,6 +382,15 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	}
 	wg.Wait()
 	return stopErr
+}
+
+// admin serves the admin API and, under /ui/, the web UI, which
+// authenticates with its own sessions (§7.3).
+func admin(s *adminhttp.Server, u *ui.Server) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/ui/", u.Handler())
+	mux.Handle("/", s.Handler())
+	return mux
 }
 
 // reload is SIGHUP: it reloads the listeners' certificate files and the
