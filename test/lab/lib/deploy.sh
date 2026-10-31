@@ -8,7 +8,7 @@ LIGO1_TESTS=/home/ligo/tests
 # LIGO1_PLUGINS is ligo1's plugins.directory; LAB_PLUGINS are the lab's
 # plugins (test/lab/plugins), in the zone prod.
 LIGO1_PLUGINS=/usr/lib/ligo/plugins
-LAB_PLUGINS=(labprobe target-postgres store-vault)
+LAB_PLUGINS=(labprobe target-postgres store-vault target-echo)
 
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {

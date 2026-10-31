@@ -22,12 +22,13 @@ One line each way over TLS. The client sends a line of text; the server answers 
 
 ## Lab wiring
 
-`lab.sh echo install|status|logs|client` sets the echo target up after `lab.sh serve install`:
+`lab.sh echo install|status|logs|client|smoke` sets the echo target up after `lab.sh serve install`:
 - two server instances on `ligo1` as the user `echo`: `echo-svid.service` (data `:7101`, control `:7102`) and `echo-local.service` (data `:7201`, control `:7202`), and the SPIRE entries of the server (`unix:uid` of `echo`) and of `target-echo` (as the other plugins);
 - in ligo's configuration (`serve_config`) the platforms `echo-svid` (`svid.v1`, secret store `none.v1`) and `echo-local` (`target-local.v1`, secret store `vault-prod`, `vault-static`), both of `echo.v1`, owned by `dc/corp-prod`;
 - two attested users on `ligo1`, `echo-bound` and `echo-unbound`, whose SPIRE entries (children of the node alias, `unix:uid`) give them `spiffe://prod.lab/ns/echo/sa/bound` and `spiffe://prod.lab/ns/echo/sa/unbound`;
 - the targets `echo-svid-target` and `echo-local-target` (scope `dc/corp-prod/echo`, one access level `echo`), published and approved by `install` through the CLI as `ligo-ops` and `ligo-approver`;
 - the manifests the guide applies, in `test/lab/echo/manifests/`: the source `echo-bound-src` (`^spiffe://prod\.lab/ns/echo/sa/bound$`) and one binding of it to each target;
+- `lab.sh echo smoke` runs the guide's CLI part for both targets, scripted, and retires the source at the end, so the guide starts clean;
 - `lab.sh echo client <user> <target> [args]` runs `echo-client` on `ligo1` as that user; `lab.sh cli <user> <ligo args…>` runs the `ligo` CLI on `ligo1` as that user (`ligo-ops`, `ligo-approver`), with stdin passed through for manifests.
 
 For the web UI, `lab.sh serve install` also:
@@ -73,6 +74,8 @@ test/lab/lab.sh cli ligo-ops get binding echo-bound-svid                        
 7. Open **Bindings → `echo-bound-svid`**: the status row follows the provisioning until `ACTIVE`.
 
 ### 3. With the binding
+
+The client first prints the binding it found (`binding echo-bound-svid: svid mode, ligo1.ligo.lab:7101`), then the server's answer.
 
 ```bash
 test/lab/lab.sh echo client echo-bound echo-svid-target --message "hello from the bound workload"

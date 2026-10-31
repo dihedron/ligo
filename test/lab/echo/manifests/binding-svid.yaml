@@ -1,0 +1,2 @@
+# The echo guide's binding to the echo server that admits SVIDs.
+{kind: Binding, name: echo-bound-svid, source: echo-bound-src, target: echo-svid-target, accessLevel: echo, purpose: "echo guide"}
