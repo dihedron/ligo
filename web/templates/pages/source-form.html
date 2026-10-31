@@ -1,0 +1,29 @@
+{{define "content"}}{{with .Content}}<h1>{{if .Edit}}Edit {{.Source.Metadata.Name}}{{else}}Register a source{{end}}</h1>
+<div id="source-errors" class="errors"></div>
+<form id="source" class="card"{{if .Edit}} hx-put="/ui/sources/{{.Source.Metadata.Name}}"{{else}} hx-post="/ui/sources"{{end}}
+  hx-status:409="target:#source-errors swap:innerHTML" hx-status:422="target:#source-errors swap:innerHTML" {{hxnonce}}>
+  {{if .Edit}}<input type="hidden" name="expectedRevision" value="{{.Revision}}">{{end}}
+  <div class="field"><label for="s-name">Name</label>
+    <input id="s-name" name="name" value="{{.Source.Metadata.Name}}" required{{if .Edit}} readonly{{end}}></div>
+  <div class="field"><label for="s-td">Trust domain</label>
+    {{if .Edit}}<input id="s-td" name="trustDomain" value="{{.Source.Identity.TrustDomain}}" readonly>
+    {{else}}<select id="s-td" name="trustDomain">{{range .TrustDomains}}<option>{{.}}</option>{{end}}</select>{{end}}</div>
+  <div class="field"><label for="s-regex">SVID regex</label>
+    <input id="s-regex" name="svidRegex" class="mono" value="{{.Source.Identity.SVIDRegex}}" required
+      hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>
+    <span class="hint">Fully anchored, ^…$ (Appendix A). The tester below shows the scope, the samples it matches and the governance outcome.</span></div>
+  <div class="field"><label for="s-samples">Sample SPIFFE IDs (one per line)</label>
+    <textarea id="s-samples" name="samples" class="mono"
+      hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>{{.Samples}}</textarea></div>
+  <div id="source-check"></div>
+  <div class="field"><label for="s-display">Display name</label><input id="s-display" name="displayName" value="{{.Source.DisplayName}}"></div>
+  <div class="field"><label for="s-desc">Description</label><textarea id="s-desc" name="description">{{.Source.Description}}</textarea></div>
+  <div class="field"><label for="s-vis">Visibility</label><select id="s-vis" name="visibility">
+    {{range $m := list "PRIVATE" "LISTED" "PUBLIC"}}<option{{if eq $m $.Content.Source.Visibility.Mode}} selected{{end}}>{{$m}}</option>{{end}}</select></div>
+  <div class="field"><label for="s-visto">Visible to scopes (one per line)</label><textarea id="s-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
+  <div class="field"><label for="s-labels">Labels (key=value per line)</label><textarea id="s-labels" name="labels">{{.Labels}}</textarea></div>
+  <div class="field"><label for="s-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="s-contacts" name="contacts">{{.Contacts}}</textarea></div>
+  <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>{{if .Edit}}Submit the change{{else}}Submit the registration{{end}}</button>
+    <a class="button button-secondary" href="/ui/sources{{if .Edit}}/{{.Source.Metadata.Name}}{{end}}">Cancel</a></div>
+</form>
+{{end}}{{end}}

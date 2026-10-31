@@ -1,0 +1,11 @@
+{{define "governance"}}<section class="card" aria-live="polite">
+  <h3>Governance</h3>
+  <dl class="fields">
+    {{range $k, $v := .Scopes}}<dt>{{$k}} scope</dt><dd>{{$v}}</dd>{{end}}
+    <dt>Name prefix</dt><dd>{{if .NamePrefix.Valid}}<span class="badge badge-success">valid</span>{{else}}<span class="badge badge-danger">invalid</span> {{.NamePrefix.Detail}}{{end}}</dd>
+    <dt>Consent</dt><dd>{{.Consent}}</dd>
+    {{with .Interconnect}}<dt>Interconnection</dt><dd>{{if eq .Action "deny"}}<span class="badge badge-danger">denied</span>{{else}}<span class="badge badge-success">allowed</span>{{end}} by rule {{.Rule}}</dd>{{end}}
+  </dl>
+  {{if .Sides}}<p>Sides that will need a decision:</p>
+  <ul>{{range .Sides}}<li>{{.Side}} ({{.Scope}}): {{if .Decision}}approved automatically ({{.Basis}}){{else}}{{.Basis}} decision{{end}}</li>{{end}}</ul>{{end}}
+</section>{{end}}

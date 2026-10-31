@@ -660,3 +660,101 @@ func TestDecisions(t *testing.T) {
 		t.Errorf("approving a withdrawn request: %d", resp.StatusCode)
 	}
 }
+
+// TestSourceForms: the regex tester with the governance outcome, then a
+// source registered, changed, deprecated and retired from the UI, each
+// navigation an HX-Redirect and each refusal a 409 or 422 in the form.
+func TestSourceForms(t *testing.T) {
+	v := sessionSetup(t)
+	x := uuid.NewV7().String()[24:]
+	name := "uis-" + x
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name = $1", name)
+		_, _ = v.owner.Exec(ctx, "delete from sources where name = $1", name)
+	})
+	v.dir.groups[v.user] = []string{operators}
+	b := v.browser(t)
+	b.signIn("right")
+	b.page()
+	if _, form := b.do("GET", "/ui/sources/new-form", nil, "HX-Request", ""); !strings.Contains(form, "<option>prod.internal</option>") ||
+		!strings.Contains(form, `hx-post="/ui/sources/test"`) {
+		t.Fatal("new source form")
+	}
+	regex := `^spiffe://prod\.internal/ns/uis/sa/` + x + `$`
+	form := url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "visibility": {"PRIVATE"},
+		"samples": {"spiffe://prod.internal/ns/uis/sa/" + x + "\nspiffe://prod.internal/ns/other/sa/x"}, "labels": {"team=ledger"}}
+	resp, check := b.do("POST", "/ui/sources/test", form)
+	if resp.StatusCode != 200 || !strings.Contains(check, "dc/corp-prod") || !strings.Contains(check, ">matches<") ||
+		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Governance") || !strings.Contains(check, "OWNER") {
+		t.Errorf("tester: %d %s", resp.StatusCode, check)
+	}
+	form.Set("samples", "spiffe://prod.internal/ns/uis/sa/"+x) // the service requires every sample to match
+	bad := url.Values{"trustDomain": {"prod.internal"}, "svidRegex": {"spiffe://unanchored"}}
+	if _, check := b.do("POST", "/ui/sources/test", bad); !strings.Contains(check, "not valid") {
+		t.Errorf("invalid regex: %s", check)
+	}
+	if resp, _ := b.do("POST", "/ui/sources", url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "labels": {"nokey"}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("bad labels: %d", resp.StatusCode)
+	}
+	// dc/corp-prod needs an approver (required_scopes dc/corp-prod/*): each change redirects to its request
+	filed := func(resp *http.Response, body, what string) {
+		t.Helper()
+		target := resp.Header.Get("HX-Redirect")
+		id, ok := strings.CutPrefix(target, "/ui/change-requests/")
+		if resp.StatusCode != 200 || !ok {
+			t.Fatalf("%s: %d %s %s", what, resp.StatusCode, target, body)
+		}
+		v.approve(t, uuid.MustParse(id))
+	}
+	resp, reg := b.do("POST", "/ui/sources", form)
+	filed(resp, reg, "register")
+	if resp, body := b.do("POST", "/ui/sources", form); resp.StatusCode != http.StatusConflict || resp.Header.Get("HX-Retarget") != "" || !strings.Contains(body, `class="alert`) {
+		t.Errorf("the same name again: %d %v", resp.StatusCode, resp.Header)
+	}
+	_, edit := b.do("GET", "/ui/sources/"+name+"/edit-form", nil, "HX-Request", "")
+	if !strings.Contains(edit, `name="name" value="`+name+`" required readonly`) || !strings.Contains(edit, `name="expectedRevision" value="1"`) ||
+		!strings.Contains(edit, "team=ledger") {
+		t.Errorf("edit form: %s", edit)
+	}
+	form.Set("description", "the ledger workers")
+	form.Set("expectedRevision", "7")
+	if resp, _ := b.do("PUT", "/ui/sources/"+name, form); resp.StatusCode != http.StatusConflict {
+		t.Errorf("stale revision: %d", resp.StatusCode)
+	}
+	form.Set("expectedRevision", "1")
+	resp, body := b.do("PUT", "/ui/sources/"+name, form)
+	filed(resp, body, "update")
+	_, page := b.do("GET", "/ui/sources/"+name, nil, "HX-Request", "")
+	if !strings.Contains(page, "the ledger workers") || !strings.Contains(page, `hx-post="/ui/sources/`+name+`/deprecate"`) {
+		t.Errorf("source page after the update: %s", page)
+	}
+	resp, body = b.do("POST", "/ui/sources/"+name+"/deprecate", url.Values{"expectedRevision": {"2"}})
+	filed(resp, body, "deprecate")
+	resp, body = b.do("POST", "/ui/sources/"+name+"/retire", url.Values{"expectedRevision": {"3"}})
+	filed(resp, body, "retire")
+	if resp, _ := b.do("GET", "/ui/sources/"+name, nil, "HX-Request", ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("a retired source: %d", resp.StatusCode)
+	}
+}
+
+// approve approves every pending side of a request as the approver of dc/*.
+func (v *sessionEnv) approve(t *testing.T, id uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	dora := changerequests.Caller{Principal: authz.Principal{Name: "dora"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{approvers}})}
+	cr, err := v.s.Requests.Get(ctx, dora, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sd := range cr.Sides {
+		if sd.Decision == "" {
+			if cr, err = v.s.Requests.Approve(ctx, dora, id, cr.PayloadSHA256, sd.Name, "ui"); err != nil {
+				t.Fatalf("approve %s of %s: %v", sd.Name, id, err)
+			}
+		}
+	}
+	if cr.Status != "APPLIED" {
+		t.Fatalf("request %s: %s", id, cr.Status)
+	}
+}

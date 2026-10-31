@@ -1,4 +1,5 @@
 {{define "content"}}{{with .Content}}<h1>Sources</h1>
+<p class="actions"><a class="button" href="/ui/sources/new-form">Register a source</a></p>
 <form class="card" method="get" action="/ui/sources">
   <div class="grid">
     <div class="field"><label for="f-q">Name</label><input id="f-q" name="q" value="{{.Filter.Q}}"></div>

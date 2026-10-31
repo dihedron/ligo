@@ -13,7 +13,20 @@
     <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
     {{with .Metadata.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}
   </dl></section>
-</div>{{end}}
+</div>
+{{if ne .Metadata.State "RETIRED"}}<div id="source-errors" class="errors"></div>
+<div class="actions">
+  <a class="button" href="/ui/sources/{{.Metadata.Name}}/edit-form">Edit</a>
+  {{if eq .Metadata.State "ACTIVE"}}<form hx-post="/ui/sources/{{.Metadata.Name}}/deprecate" hx-confirm="Deprecate {{.Metadata.Name}}? Existing bindings keep working; no new ones."
+    hx-status:409="target:#source-errors swap:innerHTML" hx-status:422="target:#source-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Deprecate</button></form>{{end}}
+  {{if eq .Metadata.State "DEPRECATED"}}<form hx-post="/ui/sources/{{.Metadata.Name}}/reactivate" hx-confirm="Reactivate {{.Metadata.Name}}?"
+    hx-status:409="target:#source-errors swap:innerHTML" hx-status:422="target:#source-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-secondary"{{if $.Maintenance}} disabled{{end}}>Reactivate</button></form>{{end}}
+  <form hx-post="/ui/sources/{{.Metadata.Name}}/retire" hx-confirm="Retire {{.Metadata.Name}}? {{.Status.Bindings}} binding(s) still use it and must be revoked first."
+    hx-status:409="target:#source-errors swap:innerHTML" hx-status:422="target:#source-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Retire</button></form>
+</div>{{end}}{{end}}
 <h2>Bindings</h2>
 {{template "bindings-table" .Bindings}}
 {{template "trail" .Audit}}

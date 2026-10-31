@@ -19,6 +19,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/preview"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/internal/theme"
@@ -274,6 +275,9 @@ func samples() map[string]any {
 	cr := &changerequests.Request{ID: id, ResourceType: "BINDING", ResourceName: "b", Operation: "UPDATE", Status: "PENDING", Payload: []byte(`{}`),
 		Sides: []changerequests.Side{{Name: "SOURCE", Scope: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
 	trail := []Entry{{Action: "BINDING_CREATED", Actor: "olga", Revision: new(int64), OccurredAt: now}}
+	approved := "APPROVED"
+	gov := &preview.Evaluation{Scopes: map[string]string{"owner": "dc/x"}, NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL",
+		Interconnect: &preview.Interconnect{Rule: "r", Action: "allow"}, Sides: []preview.Side{{Side: "OWNER", Scope: "dc/x", Decision: &approved}}}
 	src := &sources.View{Source: sources.Source{DisplayName: "d", Labels: map[string]string{"k": "v"}, Contacts: []sources.Contact{{Name: "n", Email: "e"}},
 		Identity: sources.Identity{SampleSPIFFEIDs: []string{"spiffe://x/y"}}}}
 	src.Metadata.Name, src.Metadata.State, src.Metadata.PendingChangeRequestID = "s", "ACTIVE", &id
@@ -289,6 +293,9 @@ func samples() map[string]any {
 		"cr-decision":     Decision{Request: cr, Eligible: []string{"SOURCE"}, CanWithdraw: true, Disabled: true},
 		"error":           Alert{Message: "m"},
 		"alert":           Alert{Message: "m"},
+		"governance":      gov,
+		"source-check":    SourceCheck{Test: &sources.TestResult{Valid: true, Matches: map[string]bool{"spiffe://x/y": true}, Narrowing: &sources.TestNarrowing{Narrower: true, Witness: "w"}, Overlaps: []sources.TestOverlap{{Source: "o"}}}, Governance: gov, Error: "e"},
+		"source-form":     SourceForm{Edit: true, Revision: 2, Source: src.Source, TrustDomains: []string{"prod.internal"}, Samples: "spiffe://x/y"},
 		"status-row":      row,
 		"trail":           trail,
 		"bindings-table":  []*bindings.View{v},
