@@ -1,0 +1,67 @@
+syntax = "proto3";
+package ligo.workload.v1alpha1;
+option go_package = "github.com/dihedron/ligo/api/gen/workload/v1alpha1;workloadv1alpha1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+service WorkloadBindingService {
+  rpc GetBindings(GetBindingsRequest) returns (GetBindingsResponse);
+  rpc GetFlows(GetFlowsRequest) returns (GetFlowsResponse);
+}
+
+message GetBindingsRequest {
+  string target_filter = 1;
+  string platform_type_filter = 2;
+  string known_etag = 3;
+}
+
+message GetBindingsResponse {
+  bool not_modified = 1;          // when true, items is empty
+  string etag = 2;                // identical to the REST ETag for the same caller/filter
+  string caller_spiffe_id = 3;
+  repeated WorkloadBinding items = 4;
+}
+
+message WorkloadBinding {
+  string id = 1;
+  string name = 2;
+  string source = 3;
+  string target = 4;
+  string access_level = 5;
+  string platform_type = 6;
+  string platform = 7;
+  int64 revision = 8;             // active revision
+  google.protobuf.Struct auth = 9;
+  google.protobuf.Struct spec = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message GetFlowsRequest {
+  string target_filter = 1;
+  string known_etag = 2;
+}
+message GetFlowsResponse {
+  bool not_modified = 1;
+  string etag = 2;
+  string caller_spiffe_id = 3;
+  repeated BindingFlows items = 4;
+}
+message BindingFlows {
+  string binding = 1;
+  string source = 2;
+  string target = 3;
+  repeated NetworkFlow flows = 4;
+}
+message PortRange { uint32 low = 1; uint32 high = 2; }   // inclusive
+message NetworkFlow {
+  string name = 1;
+  string purpose = 2;             // DATA | CREDENTIALS | DISCOVERY
+  string protocol = 3;            // TCP | UDP
+  string destination = 4;
+  repeated PortRange ports = 5;
+  bool tls = 6;
+  string server_name = 7;
+  string description = 8;
+  string declared_by = 9;         // target:<name> | platform:<name> | secret-store:<name> | ligo
+}

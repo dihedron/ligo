@@ -107,7 +107,7 @@ vuln: ## check go.mod and the code for known vulnerabilities with govulncheck, l
 	@go run golang.org/x/vuln/cmd/govulncheck@latest -tags 'integration lab' ./...
 
 # PROTOS are the protobuf contracts; the generated Go code is committed
-PROTOS := api/proto/plugin/v1/plugin.proto
+PROTOS := api/proto/plugin/v1/plugin.proto api/proto/workload/v1alpha1/workload.proto
 
 .PHONY: proto
 proto: ## regenerate the Go code of the protobuf contracts into api/gen (needs protoc; protoc-gen-go and protoc-gen-go-grpc are the tools of go.mod)
