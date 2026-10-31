@@ -29,7 +29,7 @@ The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHOULD**, **SHO
 | `FW-nn` | Future work: a design option recorded for later, not part of this version (Section 13) |
 
 ### 0.4 Naming convention
-The application is named **`ligo`**, Latin for "I bind". It manages four kinds of things:
+The application is named **`ligo`**, Latin for "I bind", and is pronounced "lee-go". It manages four kinds of things:
 
 | Entity | Meaning | Where it lives | Example |
 | :--- | :--- | :--- | :--- |
