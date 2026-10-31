@@ -71,6 +71,7 @@ func setup(t *testing.T, modes ...string) *env {
 	})))
 	serverCert := certificate(t, prod, "spiffe://prod.lab/ns/sys/sa/ligo")
 	srv.TLS = s.TLSConfig(func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &serverCert, nil })
+	srv.EnableHTTP2 = true // gRPC shares the port
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	return &env{srv: srv, ca: prod, key: key, s: s, test: test}

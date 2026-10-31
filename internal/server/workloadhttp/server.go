@@ -23,6 +23,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"google.golang.org/grpc/codes"
 )
 
 // Bundles is the composite bundle source of the zones (§7.1).
@@ -55,21 +56,32 @@ func (s *Server) TLSConfig(cert func(*tls.ClientHelloInfo) (*tls.Certificate, er
 }
 
 // Handler routes the workload API behind authentication and rate limiting.
-func (s *Server) Handler() http.Handler { return s.middleware(s.routes()) }
+func (s *Server) Handler() http.Handler {
+	mux, g := s.routes(), s.grpcServer()
+	return s.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isGRPC(r) {
+			g.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+}
 
 type (
 	callerKey    struct{}
 	requestIDKey struct{}
 )
 
-func requestID(r *http.Request) string {
-	id, _ := r.Context().Value(requestIDKey{}).(string)
+func requestID(ctx context.Context) string {
+	id, _ := ctx.Value(requestIDKey{}).(string)
 	return id
 }
 
 // Caller is the authenticated SPIFFE ID of a request.
-func Caller(r *http.Request) spiffeid.ID {
-	id, _ := r.Context().Value(callerKey{}).(spiffeid.ID)
+func Caller(r *http.Request) spiffeid.ID { return caller(r.Context()) }
+
+func caller(ctx context.Context) spiffeid.ID {
+	id, _ := ctx.Value(callerKey{}).(spiffeid.ID)
 	return id
 }
 
@@ -85,13 +97,19 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		start := time.Now()
 		id, err := s.authenticate(r)
 		switch {
+		case err != nil && isGRPC(r):
+			grpcError(w, codes.Unauthenticated, "a valid X.509-SVID or JWT-SVID is required")
 		case err != nil:
 			problem(w, http.StatusUnauthorized, "unauthenticated", "a valid X.509-SVID or JWT-SVID is required")
 		case !s.limits.Allow(id.String(), ratelimit.Rate{PerSecond: s.Listener.RateLimit.PerSVIDRPS, Burst: float64(max(s.Listener.RateLimit.Burst, 1))}):
+			if isGRPC(r) {
+				grpcError(w, codes.ResourceExhausted, "too many requests")
+				break
+			}
 			w.Header().Set("Retry-After", "1")
 			problem(w, http.StatusTooManyRequests, "rate-limited", "too many requests")
 		default:
-			rec := &status{ResponseWriter: w, code: http.StatusOK}
+			rec := &recorder{ResponseWriter: w, code: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(context.WithValue(context.WithValue(r.Context(), callerKey{}, id), requestIDKey{}, rid)))
 			s.Logger.Info("request", "request_id", rid, "caller", id.String(), "method", r.Method, "path", r.URL.Path,
 				"status", rec.code, "duration", time.Since(start))
@@ -164,9 +182,14 @@ func problem(w http.ResponseWriter, code int, slug, detail string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:ligo:problem:" + slug, "title": http.StatusText(code), "status": code, "detail": detail})
 }
 
-type status struct {
+type recorder struct {
 	http.ResponseWriter
 	code int
 }
 
-func (s *status) WriteHeader(code int) { s.code = code; s.ResponseWriter.WriteHeader(code) }
+func (s *recorder) WriteHeader(code int) { s.code = code; s.ResponseWriter.WriteHeader(code) }
+
+// Flush keeps the writer a http.Flusher, which gRPC needs.
+func (s *recorder) Flush() { _ = http.NewResponseController(s.ResponseWriter).Flush() }
+
+func (s *recorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

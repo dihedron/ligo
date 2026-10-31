@@ -130,13 +130,13 @@ func (s *Server) routes() *http.ServeMux {
 func reply[T any](s *Server, w http.ResponseWriter, r *http.Request, doc *Document[T], list []resolution.Binding, err error) {
 	if err != nil {
 		if !errors.Is(err, resolution.ErrStale) {
-			s.Logger.Error("resolution", "request_id", requestID(r), "caller", Caller(r).String(), "error", err)
+			s.Logger.Error("resolution", "request_id", requestID(r.Context()), "caller", Caller(r).String(), "error", err)
 		}
 		w.Header().Set("Retry-After", "5")
 		problem(w, http.StatusServiceUnavailable, "unavailable", "bindings cannot be resolved now")
 		return
 	}
-	s.logResolution(r, list, doc.ETag)
+	s.logResolution(r.Context(), r.URL.Path, list, doc.ETag)
 	w.Header().Set("ETag", doc.ETag)
 	w.Header().Set("Cache-Control", "private, no-store")
 	if r.Header.Get("If-None-Match") == doc.ETag {
@@ -150,10 +150,10 @@ func reply[T any](s *Server, w http.ResponseWriter, r *http.Request, doc *Docume
 
 // logResolution records who received which bindings at which revisions
 // (§7.1 controls, T-13).
-func (s *Server) logResolution(r *http.Request, list []resolution.Binding, etag string) {
+func (s *Server) logResolution(ctx context.Context, path string, list []resolution.Binding, etag string) {
 	served := make([]string, len(list))
 	for i, b := range list {
 		served[i] = fmt.Sprintf("%s@r%d", b.ID, b.ActiveRevision)
 	}
-	s.Logger.Info("resolution", "request_id", requestID(r), "caller", Caller(r).String(), "path", r.URL.Path, "bindings", served, "etag", etag)
+	s.Logger.Info("resolution", "request_id", requestID(ctx), "caller", caller(ctx).String(), "path", path, "bindings", served, "etag", etag)
 }

@@ -19,11 +19,13 @@ var ErrNoSVID = errors.New("identity: no verified X.509-SVID of an accepted trus
 // certificate from cert and, with bundles, client X.509-SVIDs verified
 // against the accepted trust domains' current bundles at every handshake
 // (§7.1). A client without a certificate still connects, for other
-// authentication modes.
+// authentication modes. HTTP/2 is offered for gRPC on the same port.
 func ServerTLS(cert func(*tls.ClientHelloInfo) (*tls.Certificate, error), bundles x509bundle.Source, accepted []string) *tls.Config {
-	return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert,
+	protos := []string{"h2", "http/1.1"}
+	return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert, NextProtos: protos,
 		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
-			c := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert}
+			// the per-client configuration replaces the listener's, ALPN included
+			c := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert, NextProtos: protos}
 			if bundles == nil {
 				return c, nil
 			}
