@@ -86,7 +86,8 @@ func level(name, roles string) *pluginv1.AccessLevelInput {
 func binding() *pluginv1.BindingContext {
 	id := uuid.NewV7()
 	return &pluginv1.BindingContext{BindingId: id.String(), BindingName: "b-" + id.String()[24:], Revision: 1, Attempt: 1,
-		DerivedPrincipalName: "bnd_" + strings.ReplaceAll(id.String(), "-", "")[16:32]}
+		DerivedPrincipalName: "bnd_" + strings.ReplaceAll(id.String(), "-", "")[16:32], SourceTrustDomain: "prod.lab",
+		SourceSvidRegex: `^spiffe://prod\.lab/ns/standins/sa/b` + id.String()[24:] + `$`} // literal: store-vault's per-binding role
 }
 
 // TestLabTargetPostgres: the stand-in validates targets and bindings without

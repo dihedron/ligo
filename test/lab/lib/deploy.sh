@@ -128,6 +128,13 @@ path "database/roles/binding-*" {
 path "sys/leases/revoke-prefix/database/creds/binding-*" {
   capabilities = ["update", "sudo"]
 }
+path "auth/jwt-spiffe/role/binding-*" {
+  capabilities = ["create", "update", "read", "delete"]
+  allowed_parameters = {
+    "token_policies" = ["binding-*"]
+    "*" = []
+  }
+}
 HCL
 	bao prod policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null
 	bao prod write auth/jwt-spiffe/role/ligo-plugin-store-vault role_type=jwt user_claim=sub \

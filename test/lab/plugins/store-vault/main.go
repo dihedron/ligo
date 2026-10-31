@@ -17,11 +17,13 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/dihedron/ligo/test/lab/plugins/labkit"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/grpc/codes"
 )
 
@@ -37,6 +39,9 @@ type config struct {
 	AuthMount    string `json:"auth_mount"`
 	Role         string `json:"role"`
 	DBConnection string `json:"db_connection"` // the database engine's connection, for vault-dynamic
+	// WorkloadJWTAudience is the audience of the workloads' JWT-SVIDs for
+	// their per-binding role (vault-static).
+	WorkloadJWTAudience string `json:"workload_jwt_audience"`
 }
 
 type instance struct {
@@ -55,11 +60,12 @@ type plugin struct {
 const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
 "required":["address","auth_mount","role","db_connection","ca_file"],
 "properties":{"address":{"type":"string"},"auth_mount":{"type":"string"},"role":{"type":"string"},
-"db_connection":{"type":"string"},"ca_file":{"type":"string"}}}`
+"db_connection":{"type":"string"},"ca_file":{"type":"string"},"workload_jwt_audience":{"type":"string"}}}`
 
 const outputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
 "required":["address","policy"],
-"properties":{"address":{"type":"string","x-ligo-endpoint":true},"secretPath":{"type":"string"},"credsPath":{"type":"string"},"policy":{"type":"string"}}}`
+"properties":{"address":{"type":"string","x-ligo-endpoint":true},"secretPath":{"type":"string"},"credsPath":{"type":"string"},"policy":{"type":"string"},
+"authMount":{"type":"string"},"role":{"type":"string"}}}`
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
@@ -173,6 +179,35 @@ func bindingID(b *pluginv1.BindingContext) (string, error) {
 	return "", pluginsdk.Error(codes.InvalidArgument, "INVALID_BINDING", "binding id", false)
 }
 
+// literalID is the SPIFFE ID a regex matches when it matches one only:
+// ^spiffe://…$ with escaped dots and no other metacharacter. OpenBao binds
+// a JWT role to an exact subject, not a regex (lab-only limit,
+// .specs/ligo-echo-target.md).
+func literalID(regex string) (string, bool) {
+	body, anchored := strings.CutPrefix(regex, "^")
+	body, ended := strings.CutSuffix(body, "$")
+	if !anchored || !ended || !strings.HasPrefix(body, "spiffe://") {
+		return "", false
+	}
+	var id strings.Builder
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		switch {
+		case c == '\\' && i+1 < len(body) && body[i+1] == '.':
+			id.WriteByte('.')
+			i++
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', strings.IndexByte("/:-_", c) >= 0:
+			id.WriteByte(c)
+		default:
+			return "", false
+		}
+	}
+	if _, err := spiffeid.FromString(id.String()); err != nil {
+		return "", false
+	}
+	return id.String(), true
+}
+
 func incompatible() error {
 	return pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "the payload does not fit the secret storage strategy", false)
 }
@@ -203,6 +238,11 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 			payload.GetDelegatedRole() != nil || payload.GetStaticSecret() == nil && !payload.GetSecretUnchanged() {
 			return nil, incompatible()
 		}
+		subject, ok := literalID(r.GetBinding().GetSourceSvidRegex())
+		if !ok {
+			return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE",
+				"the lab's store-vault binds workloads by one literal SPIFFE ID: the source's regex must be ^spiffe://…$", false)
+		}
 		readPath = "kv/data/bindings/" + id
 		if s := payload.GetStaticSecret(); s != nil && !payload.GetSecretUnchanged() {
 			if err := in.call(ctx, http.MethodPost, readPath, token, map[string]any{"data": map[string]string{
@@ -215,6 +255,18 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 			return nil, err
 		}
 		auth["secretPath"] = readPath
+		// the workload's own role: its JWT-SVID, and the policy that reads its secret only;
+		// token_policies is a string: OpenBao's allowed_parameters globs (binding-*) refuse a JSON array
+		audience := in.WorkloadJWTAudience
+		if audience == "" {
+			audience = "https://bao-prod.ligo.lab"
+		}
+		if err := in.call(ctx, http.MethodPost, "auth/"+in.AuthMount+"/role/"+policy, token, map[string]any{"role_type": "jwt", "user_claim": "sub",
+			"bound_subject": subject, "bound_audiences": []string{audience}, "token_policies": policy, "token_ttl": "10m", "token_max_ttl": "1h"},
+			false, nil); err != nil {
+			return nil, err
+		}
+		auth["authMount"], auth["role"] = in.AuthMount, policy
 	case "vault-dynamic":
 		d := payload.GetDelegatedRole()
 		if payload.GetMode() != pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC || d == nil || d.GetRoleType() != "database-dynamic" {
@@ -269,6 +321,7 @@ func (p *plugin) CleanupSecretStore(ctx context.Context, r *pluginv1.CleanupSecr
 		{http.MethodDelete, "database/roles/binding-" + id},
 		{http.MethodDelete, "kv/metadata/bindings/" + id},
 		{http.MethodDelete, "sys/policies/acl/binding-" + id},
+		{http.MethodDelete, "auth/" + in.AuthMount + "/role/binding-" + id},
 	}
 	for _, s := range steps {
 		if err := in.call(ctx, s.method, s.path, token, nil, true, nil); err != nil {

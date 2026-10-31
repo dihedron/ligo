@@ -38,7 +38,7 @@ const (
 )
 
 var (
-	idRE   = regexp.MustCompile(`^[0-9a-f-]{36}$`)                  // a binding ID
+	idRE   = regexp.MustCompile(`^[0-9a-f-]{36}$`)              // a binding ID
 	userRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,62}$`) // a derived principal name
 )
 
