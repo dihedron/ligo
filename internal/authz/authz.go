@@ -89,6 +89,12 @@ func (a *Authorizer) For(p Principal) Grants {
 // Grants are the effective grants of a principal: the union of its bindings.
 type Grants []Grant
 
+// Viewer reports whether the grants may read: any role but break_glass
+// alone (§7.2.2).
+func (gs Grants) Viewer() bool {
+	return gs.has(func(g *Grant) bool { return g.Role != config.RoleBreakGlass })
+}
+
 func (gs Grants) has(match func(*Grant) bool) bool {
 	for i := range gs {
 		if match(&gs[i]) {

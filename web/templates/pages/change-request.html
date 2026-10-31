@@ -1,0 +1,22 @@
+{{define "content"}}{{with .Content}}{{with .Request}}<h1>{{if .Kind}}{{.Kind}}{{else}}STANDARD{{end}} {{.Operation}} of {{.ResourceType}} {{.ResourceName}}</h1>
+<section class="card"><dl class="fields">
+  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span></dd>
+  <dt>Requested</dt><dd>{{when .RequestedAt}} by {{.RequestedBy}}</dd>
+  <dt>Expires</dt><dd>{{when .ExpiresAt}}</dd>
+  {{with .Consent}}<dt>Consent</dt><dd>{{.}}</dd>{{end}}
+  {{with .InterconnectRule}}<dt>Interconnection rule</dt><dd>{{.}}</dd>{{end}}
+  <dt>Distinct approvers</dt><dd>{{if .DistinctApprovers}}required{{else}}not required{{end}}</dd>
+  {{with .ApprovalReference}}<dt>Reference</dt><dd>{{.}}</dd>{{end}}
+  {{with .Justification}}<dt>Justification</dt><dd>{{.}}</dd>{{end}}
+  <dt>Payload SHA-256</dt><dd class="mono">{{.PayloadSHA256}}</dd>
+</dl></section>
+<h2>Sides</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
+  <tbody>{{range .Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
+    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">awaiting</span>{{end}}</td>
+    <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>{{end}}
+<h2>{{if .Diff}}Changes{{else}}Payload{{end}}</h2>
+<pre>{{if .Diff}}{{pretty .Diff}}{{else}}{{pretty .Request.Payload}}{{end}}</pre>
+{{end}}{{end}}

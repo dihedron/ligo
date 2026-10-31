@@ -340,6 +340,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin}
 	s.Logins = logins
 	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
+	u.Bindings, u.Requests = s.Bindings, s.Requests
 	if directory != nil {
 		u.LDAP = directory
 	}

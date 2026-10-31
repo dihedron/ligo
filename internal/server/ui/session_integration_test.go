@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -21,6 +22,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/authz"
+	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/store"
@@ -43,7 +46,11 @@ func dsn(t *testing.T, role string) string {
 }
 
 const viewers = "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab"
-const operators = "cn=ligo-operators-prod,ou=groups,dc=ligo,dc=lab"
+const (
+	operators = "cn=ligo-operators-prod,ou=groups,dc=ligo,dc=lab"
+	approvers = "cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab"
+	glass     = "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab"
+)
 
 // directory is a fake LDAP: users with a password and groups.
 type directory struct {
@@ -74,6 +81,7 @@ type sessionEnv struct {
 	owner *pgxpool.Pool
 	dir   *directory
 	user  string
+	s     *Server
 }
 
 func sessionSetup(t *testing.T) *sessionEnv {
@@ -103,18 +111,41 @@ func sessionSetup(t *testing.T) *sessionEnv {
 		_, _ = owner.Exec(context.Background(), "DELETE FROM admin_sessions WHERE username = $1", user)
 	})
 	az, err := authz.New([]config.RoleBinding{{LDAPGroupDN: viewers, Role: config.RoleViewer, Scopes: []string{"*"}},
-		{LDAPGroupDN: operators, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}}})
+		{LDAPGroupDN: operators, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
+		{LDAPGroupDN: approvers, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
+		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &directory{passwords: map[string]string{user: "right"}, groups: map[string][]string{user: {viewers}}}
+	d := &directory{passwords: map[string]string{user: "right", "a" + user: "right", "g" + user: "right"},
+		groups: map[string][]string{user: {viewers}, "a" + user: {approvers}, "g" + user: {glass}}}
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.Background(), "DELETE FROM admin_sessions WHERE username IN ($1, $2)", "a"+user, "g"+user)
+	})
 	s := newServer(t)
 	s.DB, s.LDAP, s.Authz, s.Logins = pools.App, d, az, &ratelimit.Logins{PerIPPerMin: 100, PerUserPerMin: 3}
 	s.Listener = config.AdminListener{ExternalOrigin: "https://ligo.example", Session: config.Session{IdleTimeout: 30 * time.Minute,
 		AbsoluteTimeout: 8 * time.Hour, AuthzRecheckInterval: 5 * time.Minute}}
+	data, err := os.ReadFile("../../../examples/server.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := bindings.NewRules(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Bindings = &bindings.Service{DB: pools.App, Rules: rules, Validate: func(context.Context, *pluginv1.ValidateBindingRequest) (*pluginv1.ValidateBindingResponse, error) {
+		return &pluginv1.ValidateBindingResponse{Valid: true, NormalizedParametersJson: []byte("{}"), RequestedSpecJson: []byte("{}")}, nil
+	}}
+	s.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": s.Bindings}}
+	s.Bindings.Requests = s.Requests
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user}
+	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user, s: s}
 }
 
 // browser is a client with a cookie jar, as the UI's pages would send.
@@ -182,12 +213,18 @@ var (
 // signIn loads the login page and posts the credentials.
 func (b *browser) signIn(password string) *http.Response {
 	b.t.Helper()
+	return b.signInAs(b.env.user, password)
+}
+
+// signInAs signs in as user.
+func (b *browser) signInAs(user, password string) *http.Response {
+	b.t.Helper()
 	_, page := b.do("GET", "/ui/login", nil)
 	m := preloginField.FindStringSubmatch(page)
 	if m == nil {
 		b.t.Fatalf("no pre-login field: %s", page)
 	}
-	resp, _ := b.do("POST", "/ui/login", url.Values{"prelogin": {m[1]}, "username": {b.env.user}, "password": {password}})
+	resp, _ := b.do("POST", "/ui/login", url.Values{"prelogin": {m[1]}, "username": {user}, "password": {password}})
 	return resp
 }
 
@@ -254,7 +291,7 @@ func TestLogin(t *testing.T) {
 		Scan(&stored, &csrf); err != nil || stored != hash(sess.Value) || stored == sess.Value || len(csrf) != 64 {
 		t.Errorf("stored session: %q %q %v", stored, csrf, err)
 	}
-	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, "Signed in as "+v.user) {
+	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, "<span>"+v.user+"</span>") {
 		t.Errorf("signed-in page: %d %s", resp.StatusCode, body)
 	}
 	if v.audits(t, "SESSION_LOGIN") != 1 {
@@ -403,4 +440,97 @@ func mustURL(s string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// TestPages: the dashboard, a binding with its polled status row, and the
+// change-request queue and detail, read through the services with the
+// session's caller (§7.4 routes).
+func TestPages(t *testing.T) {
+	v := sessionSetup(t)
+	ctx := context.Background()
+	x := uuid.NewV7().String()[24:]
+	target := uuid.NewV7()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
+			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/ui/sa/` + x + `$`}},
+		{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
+			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "tgt-" + x}},
+		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
+	} {
+		if _, err := v.owner.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = v.owner.Exec(ctx, "delete from bindings where name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from target_access_levels where target_id = $1", target)
+		_, _ = v.owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
+	})
+	name := "ui-" + x
+	olga := changerequests.Caller{Principal: authz.Principal{Name: "olga"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{operators}})}
+	cr, err := v.s.Bindings.Create(ctx, olga, []byte(`{"name":"`+name+`","source":"src-`+x+`","target":"tgt-`+x+`","accessLevel":"read"}`))
+	if err != nil || cr.Status != "PENDING" {
+		t.Fatalf("file the binding: %v", err)
+	}
+
+	approver := v.browser(t)
+	approver.signInAs("a"+v.user, "right")
+	_, dash := approver.page()
+	if !strings.Contains(dash, "Awaiting my decision") || !strings.Contains(dash, "/ui/change-requests/"+cr.ID.String()) {
+		t.Errorf("dashboard: the approver's queue lacks %s", cr.ID)
+	}
+	if resp, body := approver.do("GET", "/ui/change-requests?awaiting=me", nil, "HX-Request", ""); resp.StatusCode != 200 || !strings.Contains(body, name) {
+		t.Errorf("queue: %d", resp.StatusCode)
+	}
+	if resp, body := approver.do("GET", "/ui/change-requests/"+cr.ID.String(), nil, "HX-Request", ""); resp.StatusCode != 200 ||
+		!strings.Contains(body, cr.PayloadSHA256) || !strings.Contains(body, "awaiting") {
+		t.Errorf("request detail: %d", resp.StatusCode)
+	}
+	for _, sd := range cr.Sides {
+		if sd.Decision != "" {
+			continue
+		}
+		dora := changerequests.Caller{Principal: authz.Principal{Name: "dora"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{approvers}})}
+		if cr, err = v.s.Requests.Approve(ctx, dora, cr.ID, cr.PayloadSHA256, sd.Name, "ui"); err != nil {
+			t.Fatalf("approve %s: %v", sd.Name, err)
+		}
+	}
+
+	viewer := v.browser(t)
+	viewer.signIn("right")
+	if resp, body := viewer.do("GET", "/ui/bindings?target=tgt-"+x, nil, "HX-Request", ""); resp.StatusCode != 200 ||
+		!strings.Contains(body, `href="/ui/bindings/`+name+`"`) {
+		t.Errorf("dashboard: %d", resp.StatusCode)
+	}
+	if _, body := viewer.do("GET", "/ui/bindings?target=tgt-"+x+"&phase=ACTIVE", nil, "HX-Request", ""); strings.Contains(body, `href="/ui/bindings/`+name+`"`) {
+		t.Error("the phase filter kept a PROVISIONING binding")
+	}
+	resp, body := viewer.do("GET", "/ui/bindings/"+name, nil, "HX-Request", "")
+	if resp.StatusCode != 200 || !strings.Contains(body, "src-"+x) || !strings.Contains(body, `hx-trigger="every 2s"`) ||
+		!strings.Contains(body, "Effective network flows") || !strings.Contains(body, "Audit trail") {
+		t.Errorf("binding: %d", resp.StatusCode)
+	}
+	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	if resp, row := viewer.do("GET", "/ui/bindings/"+name+"/status-row", nil); resp.StatusCode != 200 || strings.Contains(row, "hx-trigger") ||
+		!strings.Contains(row, ">ACTIVE<") || strings.Contains(row, "<html") {
+		t.Errorf("terminal status row: %d %s", resp.StatusCode, row)
+	}
+	for _, path := range []string{"/ui/bindings/nope-" + x, "/ui/change-requests/" + uuid.NewV7().String(), "/ui/change-requests/not-an-id"} {
+		if resp, _ := viewer.do("GET", path, nil, "HX-Request", ""); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: %d", path, resp.StatusCode)
+		}
+	}
+	g := v.browser(t)
+	g.signInAs("g"+v.user, "right")
+	if resp, _ := g.do("GET", "/ui/bindings", nil, "HX-Request", ""); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("break_glass alone: %d", resp.StatusCode)
+	}
 }

@@ -2,11 +2,13 @@ package ui
 
 import (
 	"bytes"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
@@ -27,7 +29,61 @@ func funcs() template.FuncMap {
 		"hxnonce":    func() template.HTMLAttr { return "" },
 		"htmxConfig": func() string { return htmxConfig },
 		"modes":      func() []string { return theme.Modes },
+		"when":       when,
+		"pretty":     pretty,
+		"badge":      badge,
 	}
+}
+
+// when is a time in UTC, to the minute; "" for none.
+func when(v any) string {
+	switch t := v.(type) {
+	case time.Time:
+		if t.IsZero() {
+			return ""
+		}
+		return t.UTC().Format("2006-01-02 15:04 UTC")
+	case *time.Time:
+		if t == nil {
+			return ""
+		}
+		return when(*t)
+	}
+	return ""
+}
+
+// pretty indents a JSON value for a <pre>; html/template escapes it.
+func pretty(v any) string {
+	var data []byte
+	switch x := v.(type) {
+	case json.RawMessage:
+		data = x
+	case []byte:
+		data = x
+	default:
+		var err error
+		if data, err = json.Marshal(v); err != nil {
+			return ""
+		}
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, data, "", "  "); err != nil {
+		return string(data)
+	}
+	return out.String()
+}
+
+// badge is a phase's or status's badge class (§7.6 tokens).
+func badge(state string) string {
+	switch state {
+	case "ACTIVE", "APPLIED", "APPROVED":
+		return "badge badge-success"
+	case "FAILED", "DELETE_FAILED", "FAILED_TO_APPLY", "DECLINED", "REVERTED":
+		return "badge badge-danger"
+	case "PROVISIONING", "DELETING", "PENDING":
+		return "badge badge-warning"
+	}
+	return "badge"
 }
 
 // bound returns funcs that give nonce n: templates write hx-nonce through

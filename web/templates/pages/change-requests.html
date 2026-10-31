@@ -1,0 +1,14 @@
+{{define "content"}}{{with .Content}}<h1>Change requests{{if .Awaiting}} awaiting my decision{{end}}</h1>
+<p class="actions"><a class="button{{if not .Awaiting}} button-secondary{{end}}" href="/ui/change-requests?awaiting=me">Awaiting me</a>
+  <a class="button{{if or .Awaiting (ne .Status "PENDING")}} button-secondary{{end}}" href="/ui/change-requests?status=PENDING">Pending</a>
+  <a class="button{{if or .Awaiting .Status}} button-secondary{{end}}" href="/ui/change-requests">All</a></p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Requested</th><th>Kind</th><th>Resource</th><th>Operation</th><th>Status</th><th>By</th><th>Sides</th></tr></thead>
+  <tbody>{{range .Requests}}<tr>
+    <td><a href="/ui/change-requests/{{.ID}}">{{when .RequestedAt}}</a></td><td>{{if .Kind}}{{.Kind}}{{else}}STANDARD{{end}}</td>
+    <td>{{.ResourceType}} {{.ResourceName}}</td><td>{{.Operation}}</td><td><span class="{{badge .Status}}">{{.Status}}</span></td><td>{{.RequestedBy}}</td>
+    <td>{{range .Sides}}<span class="{{badge .Decision}}" title="{{.Scope}}">{{.Name}}{{with .Decision}}: {{.}}{{end}}</span> {{end}}</td>
+  </tr>{{else}}<tr><td colspan="7" class="muted">No change requests.</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Next}}<p><a href="/ui/change-requests?before={{.}}{{if $.Content.Awaiting}}&amp;awaiting=me{{end}}{{with $.Content.Status}}&amp;status={{.}}{{end}}">Next page</a></p>{{end}}
+{{end}}{{end}}

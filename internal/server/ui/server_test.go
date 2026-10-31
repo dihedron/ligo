@@ -11,8 +11,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+	"uuid"
 
+	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
 	"golang.org/x/net/html"
@@ -219,9 +224,12 @@ func TestTemplates(t *testing.T) {
 	if err := s.pages.add("probe", `{{define "content"}}{{end}}`); err != nil {
 		t.Fatal(err)
 	}
+	samples := samples()
 	for name := range s.pages.page {
 		rec := httptest.NewRecorder()
-		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.page(w, r, 200, name, full) })).ServeHTTP(rec,
+		p := full
+		p.Content = samples[name]
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.page(w, r, 200, name, p) })).ServeHTTP(rec,
 			httptest.NewRequest("GET", "/ui/x", nil))
 		if rec.Code != 200 {
 			t.Errorf("page %s: %d", name, rec.Code)
@@ -234,7 +242,11 @@ func TestTemplates(t *testing.T) {
 			continue
 		}
 		rec := httptest.NewRecorder()
-		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.fragment(w, r, 200, name, map[string]any{}) })).ServeHTTP(rec,
+		data, ok := samples[name]
+		if !ok {
+			t.Errorf("fragment %s has no sample data in samples()", name)
+		}
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.fragment(w, r, 200, name, data) })).ServeHTTP(rec,
 			httptest.NewRequest("GET", "/ui/x", nil))
 		if rec.Code != 200 {
 			t.Errorf("fragment %s: %d", name, rec.Code)
@@ -243,5 +255,32 @@ func TestTemplates(t *testing.T) {
 		if b, _ := io.ReadAll(rec.Body); strings.Contains(strings.ToLower(string(b)), "<script") {
 			t.Errorf("fragment %s renders <script>", name)
 		}
+	}
+}
+
+// samples are representative data for every page and fragment, so that
+// TestTemplates renders their hx-* elements.
+func samples() map[string]any {
+	id := uuid.NewV7()
+	now := time.Now()
+	v := &bindings.View{Source: "s", Target: "t", AccessLevel: "read", ExpiresAt: &now, Spec: []byte(`{"host":"db"}`), Auth: []byte(`{}`)}
+	v.Metadata.Name, v.Metadata.ActiveRevision, v.Status.Phase, v.Status.PendingChangeRequestID = "b", new(int64), "PROVISIONING", &id
+	v.Status.BreakGlass = &bindings.BreakGlassStatus{ChangeRequestID: id, ExpiresAt: now}
+	v.Active = &bindings.ViewActive{SVIDRegex: "^x$", Since: now}
+	row := StatusRow{Name: "b", Phase: "PROVISIONING", Polling: true, Steps: []Step{{Number: 1, Name: "Identity", State: "done"}}}
+	cr := &changerequests.Request{ID: id, ResourceType: "BINDING", ResourceName: "b", Operation: "UPDATE", Status: "PENDING", Payload: []byte(`{}`),
+		Sides: []changerequests.Side{{Name: "SOURCE", Scope: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
+	trail := []Entry{{Action: "BINDING_CREATED", Actor: "olga", Revision: new(int64), OccurredAt: now}}
+	return map[string]any{
+		"login":    map[string]string{"Prelogin": "p"},
+		"bindings": Dashboard{Phases: phases, Bindings: []*bindings.View{v}, Next: "b", AwaitingMe: []*changerequests.Request{cr}},
+		"binding": BindingPage{Binding: v, Row: row, Stages: []bindings.Stage{{Stage: "TARGET", Status: "ENSURED"}}, Audit: trail,
+			Flows: []flows.Flow{{Name: "f", Ports: []flows.Port{{Low: 1, High: 1}}, TLS: true}}},
+		"change-requests": Requests{Requests: []*changerequests.Request{cr}, Next: id.String()},
+		"change-request":  RequestPage{Request: cr, Diff: map[string]any{"changes": []any{}}},
+		"error":           Alert{Message: "m"},
+		"alert":           Alert{Message: "m"},
+		"status-row":      row,
+		"trail":           trail,
 	}
 }

@@ -17,6 +17,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
+	"github.com/dihedron/ligo/internal/bindings"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/theme"
@@ -48,6 +50,10 @@ type Server struct {
 	Authz    *authz.Authorizer
 	Listener config.AdminListener
 	Logins   *ratelimit.Logins // shared with the admin API's Basic credentials
+
+	// the services the admin API uses, with the session's caller
+	Bindings *bindings.Service
+	Requests *changerequests.Service
 
 	pages *pages
 }
@@ -87,9 +93,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/ui/bindings", http.StatusSeeOther) })
 	mux.HandleFunc("POST /ui/logout", s.logout)
 	mux.HandleFunc("POST /ui/preferences/theme", s.preference)
-	mux.HandleFunc("GET /ui/bindings", func(w http.ResponseWriter, r *http.Request) {
-		s.page(w, r, http.StatusOK, "bindings", s.frame(r, "Bindings", "/ui/bindings"))
-	})
+	mux.HandleFunc("GET /ui/bindings", s.dashboard)
+	mux.HandleFunc("GET /ui/bindings/{name}", s.binding)
+	mux.HandleFunc("GET /ui/bindings/{name}/status-row", s.bindingStatus)
+	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)
+	mux.HandleFunc("GET /ui/change-requests/{id}", s.changeRequest)
 	return mux
 }
 

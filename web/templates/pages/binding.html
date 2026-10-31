@@ -1,0 +1,38 @@
+{{define "content"}}{{with .Content}}{{with .Binding}}<h1>{{.Metadata.Name}}</h1>
+<div class="grid">
+  <section class="card"><h2>Binding</h2><dl class="fields">
+    <dt>Source</dt><dd>{{.Source}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Access level</dt><dd>{{.AccessLevel}}</dd>
+    <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, zone {{.Metadata.Zone}})</dd>
+    <dt>Scopes</dt><dd>source {{.Metadata.SourceScope}}, target {{.Metadata.TargetScope}}, platform {{.Metadata.PlatformScope}}</dd>
+    <dt>Revision</dt><dd>{{.Metadata.Revision}}{{with .Metadata.ActiveRevision}} (active {{.}}){{end}}</dd>
+    {{with .Purpose}}<dt>Purpose</dt><dd>{{.}}</dd>{{end}}
+    {{with .ExpiresAt}}<dt>Expires</dt><dd>{{when .}}</dd>{{end}}
+    <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
+    {{with .Status.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}
+    {{with .Status.BreakGlass}}<dt>Break-glass</dt><dd><a href="/ui/change-requests/{{.ChangeRequestID}}">open</a>, by {{.RequestedBy}}, {{.IncidentReference}}, expires {{when .ExpiresAt}}</dd>{{end}}
+  </dl></section>
+  <section class="card"><h2>Identity</h2><dl class="fields">
+    <dt>Requested regex</dt><dd class="mono">{{.Requested.SVIDRegex}}</dd>
+    {{with .Active}}<dt>Active regex</dt><dd class="mono">{{.SVIDRegex}}</dd><dt>Active since</dt><dd>{{when .Since}}</dd>{{end}}
+  </dl></section>
+</div>{{end}}
+{{template "status-row" .Row}}
+<h2>Effective network flows</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Purpose</th><th>Destination</th><th>Ports</th><th>TLS</th><th>Declared by</th></tr></thead>
+  <tbody>{{range .Flows}}<tr><td>{{.Name}}</td><td>{{.Purpose}}</td><td class="mono">{{.Protocol}} {{.Destination}}</td><td class="mono">{{pretty .Ports}}</td>
+    <td>{{if .TLS}}yes{{with .ServerName}} ({{.}}){{end}}{{else}}no{{end}}</td><td>{{.DeclaredBy}}</td></tr>{{end}}</tbody>
+</table></div>
+<h2>Stages</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Stage</th><th>Provider</th><th>Status</th><th>Revision</th><th>Updated</th></tr></thead>
+  <tbody>{{range .Stages}}<tr><td>{{.Stage}}</td><td>{{.ProviderType}} / {{.ProviderInstance}}</td><td>{{.Status}}</td><td>{{.Revision}}</td><td>{{when .UpdatedAt}}</td></tr>
+  {{else}}<tr><td colspan="5" class="muted">No stage has run.</td></tr>{{end}}</tbody>
+</table></div>
+<h2>Snapshot</h2>
+<div class="grid">
+  <section class="card"><h3>Specification</h3><pre>{{pretty .Binding.Spec}}</pre></section>
+  <section class="card"><h3>Credential retrieval</h3><pre>{{pretty .Binding.Auth}}</pre></section>
+</div>
+{{template "trail" .Audit}}
+{{end}}{{end}}

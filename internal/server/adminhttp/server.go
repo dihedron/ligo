@@ -233,14 +233,7 @@ func (s *Server) logins() *ratelimit.Logins {
 }
 
 // viewer: any role but break_glass alone (§7.2.2).
-func viewer(c changerequests.Caller) bool {
-	for _, g := range c.Grants {
-		if g.Role != config.RoleBreakGlass {
-			return true
-		}
-	}
-	return false
-}
+func viewer(c changerequests.Caller) bool { return c.Grants.Viewer() }
 
 // problem writes an RFC 9457 problem (§7.2.3 error model).
 func problem(w http.ResponseWriter, code int, slug, detail string) {
