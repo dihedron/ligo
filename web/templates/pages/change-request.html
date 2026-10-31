@@ -10,13 +10,8 @@
   {{with .Justification}}<dt>Justification</dt><dd>{{.}}</dd>{{end}}
   <dt>Payload SHA-256</dt><dd class="mono">{{.PayloadSHA256}}</dd>
 </dl></section>
-<h2>Sides</h2>
-<div class="table-wrap"><table>
-  <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
-  <tbody>{{range .Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
-    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">awaiting</span>{{end}}</td>
-    <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
-</table></div>{{end}}
+{{end}}
+{{template "cr-decision" .Decision}}
 <h2>{{if .Diff}}Changes{{else}}Payload{{end}}</h2>
 <pre>{{if .Diff}}{{pretty .Diff}}{{else}}{{pretty .Request.Payload}}{{end}}</pre>
 {{end}}{{end}}

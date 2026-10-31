@@ -106,6 +106,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/bindings/{name}/status-row", s.bindingStatus)
 	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)
 	mux.HandleFunc("GET /ui/change-requests/{id}", s.changeRequest)
+	mux.HandleFunc("POST /ui/change-requests/{id}/{action}", s.decide)
 	mux.HandleFunc("GET /ui/sources", s.sourceList)
 	mux.HandleFunc("GET /ui/sources/{name}", s.source)
 	mux.HandleFunc("GET /ui/targets", s.targetList)

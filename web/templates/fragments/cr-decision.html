@@ -1,0 +1,28 @@
+{{define "cr-decision"}}<div id="cr-decision">
+<h2>Sides</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
+  <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
+    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">awaiting</span>{{end}}</td>
+    <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+<p>Status: <span class="{{badge .Request.Status}}">{{.Request.Status}}</span></p>
+{{if or .Eligible .CanWithdraw}}<div id="cr-errors" class="errors"></div>{{end}}
+{{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <h3>Decide</h3>
+  <p class="muted">You approve the payload with SHA-256 <span class="mono">{{.Request.PayloadSHA256}}</span>.</p>
+  <input type="hidden" name="payloadSha256" value="{{.Request.PayloadSHA256}}">
+  {{if gt (len .Eligible) 1}}<div class="field"><label for="cr-side">Side</label><select id="cr-side" name="side">
+    {{range .Eligible}}<option>{{.}}</option>{{end}}</select></div>{{else}}<input type="hidden" name="side" value="{{index .Eligible 0}}">
+  <p>Side: {{index .Eligible 0}}</p>{{end}}
+  <div class="field"><label for="cr-comment">Comment (required to decline)</label><textarea id="cr-comment" name="comment"></textarea></div>
+  <div class="actions"><button type="submit"{{if .Disabled}} disabled{{end}}>Approve</button>
+    <button type="button" class="button-danger" hx-post="/ui/change-requests/{{.Request.ID}}/decline" hx-target="#cr-decision" hx-swap="outerHTML"
+      hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}{{if .Disabled}} disabled{{end}}>Decline</button></div>
+</form>{{end}}
+{{if .CanWithdraw}}<form id="cr-withdraw" hx-post="/ui/change-requests/{{.Request.ID}}/withdraw" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <div class="actions"><button type="submit" class="button-secondary">Withdraw my request</button></div>
+</form>{{end}}
+</div>{{end}}

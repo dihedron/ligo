@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"io"
 	"net/http"
@@ -471,30 +472,7 @@ func mustURL(s string) *url.URL {
 func TestPages(t *testing.T) {
 	v := sessionSetup(t)
 	ctx := context.Background()
-	x := uuid.NewV7().String()[24:]
-	target := uuid.NewV7()
-	for _, q := range []struct {
-		sql  string
-		args []any
-	}{
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
-			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/ui/sa/` + x + `$`}},
-		{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
-			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "tgt-" + x}},
-		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
-	} {
-		if _, err := v.owner.Exec(ctx, q.sql, q.args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Cleanup(func() {
-		ctx := context.Background()
-		_, _ = v.owner.Exec(ctx, "delete from bindings where name like $1", "%"+x)
-		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
-		_, _ = v.owner.Exec(ctx, "delete from target_access_levels where target_id = $1", target)
-		_, _ = v.owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
-		_, _ = v.owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
-	})
+	x := fixture(t, v)
 	name := "ui-" + x
 	olga := changerequests.Caller{Principal: authz.Principal{Name: "olga"}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{operators}})}
 	cr, err := v.s.Bindings.Create(ctx, olga, []byte(`{"name":"`+name+`","source":"src-`+x+`","target":"tgt-`+x+`","accessLevel":"read"}`))
@@ -573,5 +551,112 @@ func TestPages(t *testing.T) {
 	g.signInAs("g"+v.user, "right")
 	if resp, _ := g.do("GET", "/ui/bindings", nil, "HX-Request", ""); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("break_glass alone: %d", resp.StatusCode)
+	}
+}
+
+// fixture commits a source and a target in dc/corp-prod, removed with their
+// bindings and requests at the end, and returns their suffix.
+func fixture(t *testing.T, v *sessionEnv) string {
+	t.Helper()
+	ctx := context.Background()
+	x := uuid.NewV7().String()[24:]
+	target := uuid.NewV7()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
+			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/ui/sa/` + x + `$`}},
+		{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
+			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "tgt-" + x}},
+		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
+	} {
+		if _, err := v.owner.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = v.owner.Exec(ctx, "delete from bindings where name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from target_access_levels where target_id = $1", target)
+		_, _ = v.owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
+	})
+	return x
+}
+
+// file files, as user, a binding CREATE of a new source src<n>-x to the
+// fixture's target, PENDING on the target's side.
+func (v *sessionEnv) file(t *testing.T, user string, n int, x string) *changerequests.Request {
+	t.Helper()
+	src, name := fmt.Sprintf("src%d-%s", n, x), fmt.Sprintf("ui%d-%s", n, x)
+	if _, err := v.owner.Exec(context.Background(), `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), src,
+		fmt.Sprintf(`^spiffe://prod\.internal/ns/ui%d/sa/%s$`, n, x)); err != nil {
+		t.Fatal(err)
+	}
+	c := changerequests.Caller{Principal: authz.Principal{Name: user}, Grants: v.s.Authz.For(authz.Principal{Groups: []string{operators}})}
+	cr, err := v.s.Bindings.Create(context.Background(), c, []byte(`{"name":"`+name+`","source":"`+src+`","target":"tgt-`+x+`","accessLevel":"read"}`))
+	if err != nil || cr.Status != "PENDING" {
+		t.Fatalf("file %s: %v", name, err)
+	}
+	return cr
+}
+
+// TestDecisions: approve, decline and withdraw from the change request's
+// page, each answering the updated fragment (§7.4); the requester cannot
+// decide, a stale payload hash is a 409 in the form, and decline needs a
+// comment.
+func TestDecisions(t *testing.T) {
+	v := sessionSetup(t)
+	x := fixture(t, v)
+	v.dir.groups[v.user] = []string{operators}
+	requester, approver := v.browser(t), v.browser(t)
+	requester.signIn("right")
+	requester.page()
+	approver.signInAs("a"+v.user, "right")
+	approver.page()
+
+	cr := v.file(t, v.user, 1, x)
+	_, own := requester.do("GET", "/ui/change-requests/"+cr.ID.String(), nil, "HX-Request", "")
+	if !strings.Contains(own, "Withdraw my request") || strings.Contains(own, ">Approve<") {
+		t.Error("the requester's page: withdraw, and no approval")
+	}
+	_, page := approver.do("GET", "/ui/change-requests/"+cr.ID.String(), nil, "HX-Request", "")
+	// one human side: the requester acts for the source's scope, so the source side was approved automatically
+	if !strings.Contains(page, ">Approve<") || !strings.Contains(page, `name="side" value="TARGET"`) || strings.Contains(page, "Withdraw my request") {
+		t.Fatal("the approver's page: approve the TARGET side")
+	}
+	if resp, body := requester.do("POST", "/ui/change-requests/"+cr.ID.String()+"/approve", url.Values{"payloadSha256": {cr.PayloadSHA256}}); resp.StatusCode != http.StatusForbidden ||
+		!strings.Contains(body, "requester") {
+		t.Errorf("four eyes: %d %s", resp.StatusCode, body)
+	}
+	base := "/ui/change-requests/" + cr.ID.String()
+	if resp, body := approver.do("POST", base+"/approve", url.Values{"payloadSha256": {strings.Repeat("0", 64)}, "side": {cr.Sides[0].Name}}); resp.StatusCode != http.StatusConflict ||
+		resp.Header.Get("HX-Retarget") != "" || !strings.Contains(body, `class="alert`) {
+		t.Errorf("stale hash: %d %v", resp.StatusCode, resp.Header)
+	}
+	resp, frag := approver.do("POST", base+"/approve", url.Values{"payloadSha256": {cr.PayloadSHA256}, "side": {cr.Sides[0].Name}})
+	if resp.StatusCode != 200 || !strings.HasPrefix(frag, `<div id="cr-decision">`) || !strings.Contains(frag, ">APPROVED<") || strings.Contains(frag, "<html") {
+		t.Errorf("approve: %d %s", resp.StatusCode, frag)
+	}
+
+	cr2 := v.file(t, v.user, 2, x)
+	if resp, _ := approver.do("POST", "/ui/change-requests/"+cr2.ID.String()+"/decline", url.Values{"side": {cr2.Sides[0].Name}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("decline without a comment: %d", resp.StatusCode)
+	}
+	if resp, frag := approver.do("POST", "/ui/change-requests/"+cr2.ID.String()+"/decline", url.Values{"side": {cr2.Sides[0].Name}, "comment": {"not now"}}); resp.StatusCode != 200 ||
+		!strings.Contains(frag, ">DECLINED<") {
+		t.Errorf("decline: %d %s", resp.StatusCode, frag)
+	}
+
+	cr3 := v.file(t, v.user, 3, x)
+	if resp, frag := requester.do("POST", "/ui/change-requests/"+cr3.ID.String()+"/withdraw", url.Values{}); resp.StatusCode != 200 || !strings.Contains(frag, ">WITHDRAWN<") ||
+		strings.Contains(frag, "Withdraw my request") {
+		t.Errorf("withdraw: %d %s", resp.StatusCode, frag)
+	}
+	if resp, _ := approver.do("POST", "/ui/change-requests/"+cr3.ID.String()+"/approve", url.Values{"payloadSha256": {cr3.PayloadSHA256}}); resp.StatusCode < 400 {
+		t.Errorf("approving a withdrawn request: %d", resp.StatusCode)
 	}
 }

@@ -290,11 +290,12 @@ func (s *Server) changeRequests(w http.ResponseWriter, r *http.Request) {
 	s.page(w, r, http.StatusOK, "change-requests", p)
 }
 
-// RequestPage is a change request's data: its sides and, for an update,
-// its diff against the resource.
+// RequestPage is a change request's data: its sides with the user's
+// controls and, for an update, its diff against the resource.
 type RequestPage struct {
-	Request *changerequests.Request
-	Diff    any
+	Request  *changerequests.Request
+	Decision Decision
+	Diff     any
 }
 
 func (s *Server) changeRequest(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +310,7 @@ func (s *Server) changeRequest(w http.ResponseWriter, r *http.Request) {
 	cr, err := s.Requests.Get(r.Context(), session(r).Caller(), id)
 	var d RequestPage
 	if err == nil {
-		d.Request = cr
+		d.Request, d.Decision = cr, s.decision(r, cr)
 		d.Diff, err = s.Requests.DiffOf(r.Context(), cr)
 	}
 	if err != nil {
