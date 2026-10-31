@@ -6,7 +6,6 @@ package adminhttp
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 	"uuid"
 
@@ -27,13 +25,13 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
 
 // Server is the admin API.
@@ -53,7 +51,7 @@ type Server struct {
 	Plugins   Plugins // the platforms' health and forms
 	Logger    *slog.Logger
 
-	limits limiter
+	limits ratelimit.Limiter
 }
 
 // Directory authenticates LDAP users: *adminauth.LDAP.
@@ -93,36 +91,11 @@ func (s *Server) routes() *router {
 // and, with client_svid_auth, client X.509-SVIDs verified against the
 // accepted trust domains' current bundles at every handshake.
 func (s *Server) TLSConfig(cert func(*tls.ClientHelloInfo) (*tls.Certificate, error)) *tls.Config {
-	return &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert,
-		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
-			c := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: cert}
-			if s.Bundles == nil || !s.Listener.ClientSVIDAuth.Enabled {
-				return c, nil
-			}
-			pool := x509.NewCertPool()
-			for _, name := range s.Listener.ClientSVIDAuth.AcceptedTrustDomains {
-				td, err := spiffeid.TrustDomainFromString(name)
-				if err != nil {
-					return nil, err
-				}
-				if b, err := s.Bundles.GetX509BundleForTrustDomain(td); err == nil {
-					for _, a := range b.X509Authorities() {
-						pool.AddCert(a)
-					}
-				}
-			}
-			c.ClientCAs, c.ClientAuth = pool, tls.VerifyClientCertIfGiven
-			// the chain must also lead to the bundle of the SVID's own trust
-			// domain; VerifyConnection runs on resumed sessions too
-			c.VerifyConnection = func(cs tls.ConnectionState) error {
-				if len(cs.PeerCertificates) == 0 {
-					return nil
-				}
-				_, _, err := x509svid.Verify(cs.PeerCertificates, s.Bundles)
-				return err
-			}
-			return c, nil
-		}}
+	var bundles x509bundle.Source
+	if s.Bundles != nil && s.Listener.ClientSVIDAuth.Enabled {
+		bundles = s.Bundles
+	}
+	return identity.ServerTLS(cert, bundles, s.Listener.ClientSVIDAuth.AcceptedTrustDomains)
 }
 
 type callerKey struct{}
@@ -156,7 +129,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		case err != nil:
 			s.Logger.Error("authentication", "request_id", id, "error", err)
 			problem(w, http.StatusServiceUnavailable, "unavailable", "the directory cannot be reached")
-		case !s.limits.allow("api:"+c.ID(), s.apiRate(c)):
+		case !s.limits.Allow("api:"+c.ID(), s.apiRate(c)):
 			w.Header().Set("Retry-After", "1")
 			problem(w, http.StatusTooManyRequests, "rate-limited", "too many requests")
 		default:
@@ -213,12 +186,12 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 		rl := s.Listener.RateLimit
 		ipRate, userRate := perMinute(rl.LoginPerIPPerMin, 10), perMinute(rl.LoginPerUserPerMin, 5)
-		if s.limits.exhausted("ip:"+ip, ipRate) || s.limits.exhausted("user:"+user, userRate) {
+		if s.limits.Exhausted("ip:"+ip, ipRate) || s.limits.Exhausted("user:"+user, userRate) {
 			return changerequests.Caller{}, errLoginLimited
 		}
 		if p, err = s.LDAP.Authenticate(r.Context(), user, password); errors.Is(err, adminauth.ErrInvalidCredentials) {
-			s.limits.spend("ip:"+ip, ipRate)
-			s.limits.spend("user:"+user, userRate)
+			s.limits.Spend("ip:"+ip, ipRate)
+			s.limits.Spend("user:"+user, userRate)
 		}
 	default:
 		err = adminauth.ErrInvalidCredentials
@@ -231,81 +204,24 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 
 // apiRate is the caller's API rate: its bindings' rate_limit, else
 // api_per_principal_rps (default 10).
-func (s *Server) apiRate(c changerequests.Caller) rate {
+func (s *Server) apiRate(c changerequests.Caller) ratelimit.Rate {
 	for _, g := range c.Grants {
 		if g.RateLimit != nil && g.RateLimit.APIRPS > 0 {
-			return rate{g.RateLimit.APIRPS, float64(max(g.RateLimit.Burst, 1))}
+			return ratelimit.Rate{PerSecond: g.RateLimit.APIRPS, Burst: float64(max(g.RateLimit.Burst, 1))}
 		}
 	}
 	rps := s.Listener.RateLimit.APIPerPrincipalRPS
 	if rps <= 0 {
 		rps = 10
 	}
-	return rate{rps, 2 * rps}
+	return ratelimit.Rate{PerSecond: rps, Burst: 2 * rps}
 }
 
-func perMinute(n, fallback int) rate {
+func perMinute(n, fallback int) ratelimit.Rate {
 	if n <= 0 {
 		n = fallback
 	}
-	return rate{float64(n) / 60, float64(n)}
-}
-
-// rate is a token bucket's refill per second and size.
-type rate struct{ perSecond, burst float64 }
-
-type bucket struct {
-	tokens float64
-	at     time.Time
-}
-
-// limiter keeps a token bucket per key.
-type limiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-}
-
-// refill returns key's bucket, refilled up to now; l.mu is held.
-func (l *limiter) refill(key string, r rate) *bucket {
-	now := time.Now()
-	if l.buckets == nil || len(l.buckets) > 100_000 {
-		l.buckets = map[string]*bucket{} // shortcut: forgets every bucket when the map grows past 100k keys; prune by age if that ever matters
-	}
-	b, ok := l.buckets[key]
-	if !ok {
-		b = &bucket{tokens: r.burst, at: now}
-		l.buckets[key] = b
-	}
-	b.tokens = min(r.burst, b.tokens+now.Sub(b.at).Seconds()*r.perSecond)
-	b.at = now
-	return b
-}
-
-// allow takes a token from key's bucket, if one is left.
-func (l *limiter) allow(key string, r rate) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b := l.refill(key, r)
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-
-// exhausted reports whether key's bucket has no token left, taking none.
-func (l *limiter) exhausted(key string, r rate) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.refill(key, r).tokens < 1
-}
-
-// spend takes a token from key's bucket, down to none.
-func (l *limiter) spend(key string, r rate) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b := l.refill(key, r)
-	b.tokens = max(0, b.tokens-1)
+	return ratelimit.Rate{PerSecond: float64(n) / 60, Burst: float64(n)}
 }
 
 // viewer: any role but break_glass alone (§7.2.2).

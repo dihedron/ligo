@@ -226,6 +226,17 @@ func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
 		}
 	}
 	check("workload_listener.accepted_trust_domains", wl.AcceptedTrustDomains)
+	if len(wl.AuthModes) == 0 {
+		c.failf(12, "workload_listener.auth_modes is empty")
+	}
+	for _, m := range wl.AuthModes {
+		switch {
+		case m != AuthX509SVID && m != AuthJWTSVID:
+			c.failf(12, "workload_listener.auth_modes: unknown mode %q", m)
+		case m == AuthJWTSVID && wl.ExpectedJWTAudience == "":
+			c.failf(12, "workload_listener.auth_modes: jwt_svid needs expected_jwt_audience")
+		}
+	}
 	check("admin_listener.client_svid_auth.accepted_trust_domains", cfg.Server.AdminListener.ClientSVIDAuth.AcceptedTrustDomains)
 	for _, p := range allPlatforms(cfg) {
 		for _, td := range p.AllowedSourceTrustDomains {

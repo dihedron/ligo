@@ -10,16 +10,14 @@ import (
 	"fmt"
 	"net"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/identity"
 	"github.com/go-ldap/ldap/v3"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 )
 
 // ErrInvalidCredentials is a refused login, whatever the reason: the caller
@@ -193,17 +191,8 @@ func (l *LDAP) connect(ctx context.Context) (directory, error) {
 // certificate the listener verified against the accepted trust domains'
 // bundles (§7.2.1); a principal of another trust domain is refused.
 func SVID(cs *tls.ConnectionState, accepted []string) (authz.Principal, error) {
-	if cs == nil || len(cs.VerifiedChains) == 0 {
-		return authz.Principal{}, ErrInvalidCredentials
-	}
-	id, err := x509svid.IDFromCert(cs.VerifiedChains[0][0])
+	id, err := identity.PeerID(cs, accepted)
 	if err != nil {
-		return authz.Principal{}, ErrInvalidCredentials
-	}
-	if !slices.ContainsFunc(accepted, func(td string) bool {
-		t, err := spiffeid.TrustDomainFromString(td)
-		return err == nil && id.MemberOf(t)
-	}) {
 		return authz.Principal{}, ErrInvalidCredentials
 	}
 	return authz.Principal{SPIFFEID: id.String()}, nil
