@@ -25,7 +25,8 @@ cmd_echo() {
 		echo_client "$@"
 		;;
 	smoke) echo_smoke ;;
-	*) die "echo: install, status, logs, client or smoke" ;;
+	ui-smoke) echo_ui_smoke ;;
+	*) die "echo: install, status, logs, client, smoke or ui-smoke" ;;
 	esac
 }
 
@@ -176,4 +177,53 @@ echo_smoke() {
 	cli ligo-ops delete source echo-bound-src -r "$revision" >/dev/null || die "retire the source"
 	cli_approve source echo-bound-src
 	info "echo smoke test passed; the source is retired, so the guide starts clean"
+}
+
+# echo_ui PHASE TARGET BINDING REGISTER: the human steps of the guide in
+# headless Chrome on the lab host, as carol and dave (test/lab/echo/ui).
+echo_ui() {
+	(cd "$REPO_DIR" && ECHO_UI_PHASE="$1" ECHO_UI_TARGET="$2" ECHO_UI_SOURCE=echo-bound-src ECHO_UI_BINDING="$3" ECHO_UI_REGISTER_SOURCE="$4" \
+		ECHO_UI_URL="https://$(lxd_ip):9443" ECHO_UI_PASSWORD_carol="$(ldap_password carol)" ECHO_UI_PASSWORD_dave="$(ldap_password dave)" \
+		go test -tags uilab -count=1 -run TestUISmoke -v ./test/lab/echo/ui/ 2>&1 | sed 's/^/        /') || die "the browser steps ($1 $2) failed"
+}
+
+# echo_ui_smoke: the whole guide for both targets, the human steps in a
+# browser (as carol and dave) and the client checks in between; the source
+# is retired at the end if this run registered it.
+echo_ui_smoke() {
+	section "Echo UI smoke test"
+	local mode target binding port direct register=1 ours=1 revision bound=spiffe://prod.lab/ns/echo/sa/bound
+	if cli ligo-ops get source echo-bound-src >/dev/null 2>&1; then
+		register=0 ours=0 # someone's source, e.g. from the guide: kept at the end
+	fi
+	for mode in svid local; do
+		target="echo-$mode-target" binding="echo-bound-src-$target"
+		cli ligo-ops get binding "$binding" >/dev/null 2>&1 && die "the binding $binding exists: revoke it first"
+		port=7101 direct=(--mode svid)
+		if [[ "$mode" == local ]]; then
+			port=7201 direct=(--mode password --user anyone --password anything)
+		fi
+		expect 2 '^no binding$' echo-bound "$target"
+		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
+		echo_ui request "$target" "$binding" "$register"
+		register=0
+		cli_phase "$binding" ACTIVE
+		if [[ "$mode" == svid ]]; then
+			expect 0 "^ui $mode"$'\t'"$bound\$" echo-bound "$target" --message "ui $mode"
+		else
+			expect 0 "^ui $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "ui $mode"
+		fi
+		expect 2 '^no binding$' echo-unbound "$target"
+		expect 3 '^denied$' echo-unbound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
+		echo_ui revoke "$target" "$binding" 0
+		cli_phase "$binding" ""
+		expect 2 '^no binding$' echo-bound "$target"
+		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
+	done
+	if [[ "$ours" == 1 ]]; then
+		revision="$(cli ligo-ops -o json get source echo-bound-src | jq -r '.metadata.revision')"
+		cli ligo-ops delete source echo-bound-src -r "$revision" >/dev/null || die "retire the source"
+		cli_approve source echo-bound-src
+	fi
+	info "echo UI smoke test passed"
 }
