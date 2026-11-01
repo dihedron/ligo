@@ -48,8 +48,13 @@ func (s *Service) BreakGlass(ctx context.Context, c changerequests.Caller, body 
 	if in.TTL != "" {
 		var err error
 		if ttl, err = time.ParseDuration(in.TTL); err != nil {
-			return nil, invalid("ttl: %v", err)
+			e := invalid("ttl: %v", err)
+			e.Fields = map[string]string{"ttl": "Not a duration: e.g. 30m or 4h."}
+			return nil, e
 		}
+	}
+	if err := s.Requests.CheckEmergency(in.Justification, in.IncidentReference, ttl); err != nil {
+		return nil, err // the person's own input first, before the binding is looked at
 	}
 	if in.InlineSource != nil && in.Operation != "CREATE" {
 		return nil, invalid("inlineSource is only for a CREATE")

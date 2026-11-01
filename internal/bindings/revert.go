@@ -172,21 +172,26 @@ func (s *Service) revalidate(ctx context.Context, b *Binding, cur *stored) error
 
 // RetireInlineSources retires the inline source of each reverted
 // break-glass CREATE once its binding is gone, unless the source has other
-// bindings by then (§6.3 "Inline source").
+// bindings by then (§6.3 "Inline source"), in the name of whoever reverted
+// the binding: the expiry, or the person who reverted it at once.
 func (s *Service) RetireInlineSources(ctx context.Context) error {
-	rows, err := s.DB.Query(ctx, `SELECT d.id, d.resource_id FROM change_requests c
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT ON (d.id) d.id, d.resource_id, v.requested_by FROM change_requests c
 		JOIN change_requests d ON d.id = c.depends_on_cr_id JOIN sources src ON src.id = d.resource_id
+		JOIN change_requests v ON v.reverts_cr_id = c.id AND v.status = 'APPLIED'
 		WHERE c.kind = 'BREAK_GLASS' AND d.kind = 'BREAK_GLASS' AND src.state <> 'RETIRED'
-		AND EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = c.id AND v.status = 'APPLIED')
 		AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.id = c.resource_id OR b.source_id = src.id)
-		AND NOT EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = d.id AND v.status = 'APPLIED')`)
+		AND NOT EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = d.id AND v.status = 'APPLIED')
+		ORDER BY d.id, v.requested_at DESC`)
 	if err != nil {
 		return err
 	}
-	type inline struct{ cr, source uuid.UUID }
+	type inline struct {
+		cr, source uuid.UUID
+		by         string
+	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (inline, error) {
 		var i inline
-		return i, r.Scan(&i.cr, &i.source)
+		return i, r.Scan(&i.cr, &i.source, &i.by)
 	})
 	if err != nil {
 		return err
@@ -195,7 +200,7 @@ func (s *Service) RetireInlineSources(ctx context.Context) error {
 	for _, i := range list {
 		r, err := s.Sources.Retirement(ctx, i.source)
 		if err == nil {
-			r.Kind, r.Consent, r.RequestedBy, r.RevertsID = changerequests.KindSystemRevert, changerequests.ConsentAny, actorRevert, &i.cr
+			r.Kind, r.Consent, r.RequestedBy, r.RevertsID = changerequests.KindSystemRevert, changerequests.ConsentAny, i.by, &i.cr
 			r.Sides = []changerequests.Side{{Name: "OWNER", Scope: r.OwnerScope, Basis: changerequests.KindSystemRevert,
 				Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover}}
 			err = s.Requests.System(ctx, r)

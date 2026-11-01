@@ -37,8 +37,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 
 // forbidden refuses a page to a session without a viewer role.
 func (s *Server) readable(w http.ResponseWriter, r *http.Request) bool {
-	if !session(r).Grants.Viewer() {
-		s.fail(w, r, &changerequests.Error{Status: http.StatusForbidden, Slug: "forbidden", Detail: "A viewer role is required to see this page."})
+	if gs := session(r).Grants; !gs.Viewer() {
+		detail := "A viewer role is required to see this page."
+		if breakGlassMember(gs) {
+			detail += " For an emergency change, use Break glass in the menu."
+		}
+		s.fail(w, r, &changerequests.Error{Status: http.StatusForbidden, Slug: "forbidden", Detail: detail})
 		return false
 	}
 	return true
@@ -89,15 +93,16 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	s.page(w, r, http.StatusOK, "bindings", p)
 }
 
-// openBreakGlass lists the applied, unratified break-glass changes still
-// within their TTL (ADR-12), for the dashboard's banner; CanAct marks those
+// openBreakGlass lists the open break-glass changes of bindings
+// (changerequests.OpenBreakGlass), for the dashboard's banner; CanAct marks those
 // c may ratify or revert, as an approver of a side or the requester.
 func (s *Server) openBreakGlass(ctx context.Context, c changerequests.Caller) ([]OpenBreakGlass, error) {
 	rows, err := s.DB.Query(ctx, `SELECT r.id, r.resource_name, r.requested_by, r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) AS expires,
 		array_agg(s.scope)
 		FROM change_requests r JOIN change_request_sides s ON s.change_request_id = r.id
-		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()
-		GROUP BY r.id HAVING bool_or(s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL) ORDER BY expires`)
+		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.id IN (SELECT r.id FROM change_requests r
+			JOIN change_request_sides s ON s.change_request_id = r.id WHERE `+changerequests.OpenBreakGlass+`)
+		GROUP BY r.id ORDER BY expires`)
 	if err != nil {
 		return nil, err
 	}

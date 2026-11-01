@@ -1056,7 +1056,9 @@ func TestBreakGlass(t *testing.T) {
 	}
 
 	g := v.browser(t)
-	g.signInAs("g"+v.user, "right")
+	if resp := g.signInAs("g"+v.user, "right"); resp.Header.Get("HX-Redirect") != "/ui/break-glass/new-form" { // F-4
+		t.Errorf("a break-glass member lands on %q", resp.Header.Get("HX-Redirect"))
+	}
 	_, form := g.do("GET", "/ui/break-glass/new-form", nil, "HX-Request", "")
 	if m := csrfMeta.FindStringSubmatch(form); m != nil {
 		g.csrf = m[1]
@@ -1076,12 +1078,23 @@ func TestBreakGlass(t *testing.T) {
 		}
 		return n
 	}
+	// a wrong password: on the password field, the form kept (F-10)
 	if resp, body := g.do("POST", "/ui/break-glass", emergency("bg1-"+x, "lsrc-"+x, "wrong")); resp.StatusCode != http.StatusUnauthorized || failed() != 1 ||
-		!strings.Contains(body, "password") {
-		t.Errorf("a wrong password: %d, %d audited", resp.StatusCode, failed())
+		!strings.Contains(body, `id="bg-password-error"`) || !strings.Contains(body, `aria-describedby="bg-password-error"`) || !strings.Contains(body, `value="bg1-`+x+`"`) {
+		t.Errorf("a wrong password: %d, %d audited: %s", resp.StatusCode, failed(), body)
+	}
+	// the person's own fields are checked first, all together (F-11)
+	short := emergency("bg1-"+x, "lsrc-"+x, "right")
+	short.Set("justification", "too short")
+	short.Set("ttl", "1m")
+	if resp, body := g.do("POST", "/ui/break-glass", short); resp.StatusCode != http.StatusUnprocessableEntity ||
+		!strings.Contains(body, `id="bg-justification-error"`) || !strings.Contains(body, `id="bg-ttl-error"`) {
+		t.Errorf("short justification and ttl: %d %s", resp.StatusCode, body)
 	}
 	for i, name := range []string{"bg1-" + x, "bg2-" + x} {
-		if resp, body := g.do("POST", "/ui/break-glass", emergency(name, []string{"lsrc-" + x, "lsrc2-" + x}[i], "right")); resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") != "/ui/bindings/"+name {
+		// break_glass alone cannot open the binding: back to the form, which says it is applied (F-4)
+		if resp, body := g.do("POST", "/ui/break-glass", emergency(name, []string{"lsrc-" + x, "lsrc2-" + x}[i], "right")); resp.StatusCode != 200 ||
+			resp.Header.Get("HX-Redirect") != "/ui/break-glass/new-form?applied="+name {
 			t.Fatalf("break-glass %d: %d %v %s", i, resp.StatusCode, resp.Header, body)
 		}
 	}
@@ -1116,7 +1129,8 @@ func TestBreakGlass(t *testing.T) {
 	if _, err := v.owner.Exec(ctx, "UPDATE bindings SET phase = 'ACTIVE' WHERE name = $1", "bg2-"+x); err != nil { // provisioned
 		t.Fatal(err)
 	}
-	if resp, frag := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != 200 || strings.Contains(frag, `id="cr-revert"`) {
+	if resp, frag := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != 200 || strings.Contains(frag, `id="cr-revert"`) ||
+		!strings.Contains(frag, ">REVERTED<") { // F-8
 		t.Errorf("revert: %d %s", resp.StatusCode, frag)
 	}
 	var reverts int

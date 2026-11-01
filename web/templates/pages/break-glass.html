@@ -1,37 +1,5 @@
 {{define "content"}}{{with .Content}}<h1>Break glass</h1>
-<div class="banner banner-danger" role="note">An emergency change is applied at once, without approval. A create or update is reverted
+{{with .Applied}}<div class="banner banner-success" role="status">The emergency change of {{.}} is applied. An approver of each side must ratify it before its TTL ends.</div>
+{{end}}<div class="banner banner-danger" role="note">An emergency change is applied at once, without approval. A create or update is reverted
   when its TTL ends unless an approver of each side ratifies it; an emergency delete is final. Everything is audited and announced.</div>
-<div id="bg-errors" class="errors"></div>
-<form id="break-glass" class="card card-danger" hx-post="/ui/break-glass"
-  hx-confirm="Apply this emergency change now, without approval?"
-  hx-status:401="target:#bg-errors swap:innerHTML" hx-status:403="target:#bg-errors swap:innerHTML" hx-status:409="target:#bg-errors swap:innerHTML"
-  hx-status:422="target:#bg-errors swap:innerHTML" hx-status:429="target:#bg-errors swap:innerHTML" {{hxnonce}}>
-  <fieldset><legend>Operation</legend>
-    <label><input type="radio" name="operation" value="CREATE"{{if eq .Operation "CREATE"}} checked{{end}}> Create a binding</label>
-    <label><input type="radio" name="operation" value="UPDATE"{{if eq .Operation "UPDATE"}} checked{{end}}> Update a binding</label>
-    <label><input type="radio" name="operation" value="DELETE"{{if eq .Operation "DELETE"}} checked{{end}}> Revoke a binding</label></fieldset>
-  <div class="field"><label for="bg-name">Binding name *</label><input id="bg-name" name="name" value="{{.Name}}" required></div>
-  <div class="field"><label for="bg-rev">Current revision (UPDATE and DELETE)</label><input id="bg-rev" name="expectedRevision" inputmode="numeric" value="{{.Revision}}"></div>
-  <h2>The binding (CREATE and UPDATE)</h2>
-  <div class="field"><label for="bg-source">Source</label><input id="bg-source" name="source" value="{{.Source}}"></div>
-  <details><summary>Register a new source with the binding (CREATE only)</summary>
-    <label class="field"><span><input type="checkbox" name="sourceMode" value="inline"> Register this source</span></label>
-    <div class="field"><label for="bg-iname">New source name</label><input id="bg-iname" name="inline.name"></div>
-    <div class="field"><label for="bg-itd">Trust domain</label><select id="bg-itd" name="inline.trustDomain">{{range .TrustDomains}}<option>{{.}}</option>{{end}}</select></div>
-    <div class="field"><label for="bg-iregex">SVID regex</label><input id="bg-iregex" name="inline.svidRegex" class="mono"></div>
-    <div class="field"><label for="bg-isamples">Sample SPIFFE IDs (one per line)</label><textarea id="bg-isamples" name="inline.samples" class="mono"></textarea></div>
-  </details>
-  <div class="field"><label for="bg-target">Target</label><input id="bg-target" name="target" value="{{.Target}}"></div>
-  <div class="field"><label for="bg-level">Access level</label><input id="bg-level" name="accessLevel" value="{{.Level}}"></div>
-  <div class="field"><label for="bg-purpose">Purpose</label><input id="bg-purpose" name="purpose" value="{{.Purpose}}"></div>
-  <div class="field"><label for="bg-params">Parameters (JSON object, optional)</label><textarea id="bg-params" name="parameters" class="mono">{{.Parameters}}</textarea></div>
-  <h2>The emergency</h2>
-  <div class="field"><label for="bg-just">Justification * (at least {{.MinJustification}} characters)</label>
-    <textarea id="bg-just" name="justification" minlength="{{.MinJustification}}" required></textarea></div>
-  <div class="field"><label for="bg-incident">Incident reference *</label><input id="bg-incident" name="incidentReference" required></div>
-  <div class="field"><label for="bg-ttl">TTL (e.g. 4h; 5m to the policy's maximum)</label><input id="bg-ttl" name="ttl" value="4h"></div>
-  <div class="field"><label for="bg-password">Your password *</label><input id="bg-password" name="password" type="password" autocomplete="current-password" required>
-    <span class="hint">Break-glass needs a fresh sign-in; your groups are read again.</span></div>
-  <div class="actions"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Apply the emergency change</button>
-    <a class="button button-secondary" href="/ui/bindings">Cancel</a></div>
-</form>{{end}}{{end}}
+{{template "break-glass-form" .}}{{end}}{{end}}
