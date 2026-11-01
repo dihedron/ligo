@@ -161,7 +161,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, cookie(sessionCookie, t, 0))
 	http.SetCookie(w, cookie(preloginCookie, "", -1))
-	redirect(w, "/ui/bindings")
+	redirect(w, home(grants))
 }
 
 // create stores a new session, only the token's SHA-256, and audits action

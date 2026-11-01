@@ -125,17 +125,27 @@ func TestBreakGlassRefusals(t *testing.T) {
 	// max_open: the policy of dc/corp-prod/* allows one more open change
 	var open int
 	if err := o.QueryRow(ctx, `select count(distinct r.id) from change_requests r join change_request_sides s on s.change_request_id = r.id
-		where r.kind = 'BREAK_GLASS' and r.status = 'APPLIED' and s.basis = 'BREAK_GLASS' and s.ratified_by is null and s.scope like 'dc/corp-prod/%'
-		and r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()`).Scan(&open); err != nil {
+		where s.scope like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
 		t.Fatal(err)
 	}
 	s.Requests.Policy.BreakGlassPolicyFor("dc/corp-prod/ledger").MaxOpen = open + 1
-	if _, err := s.BreakGlass(ctx, livia, emergency("CREATE", create(), "")); err != nil {
+	bg, err := s.BreakGlass(ctx, livia, emergency("CREATE", create(), ""))
+	if err != nil {
 		t.Fatal(err)
 	}
 	other := `"binding":` + string(body("ledger-r2-"+w.suffix, ledgerSource(t, o, w, "r2"), w.ledger, "read")) + `,`
 	if _, err := s.BreakGlass(ctx, livia, emergency("CREATE", other, "")); slug(err) != "break-glass-limit" {
 		t.Errorf("beyond max_open: %v", err)
+	}
+	// a reverted change is no longer open, though within its TTL and unratified: the next one fits
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", "ledger-r-"+w.suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevertNow(ctx, livia, bg.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BreakGlass(ctx, livia, emergency("CREATE", other, "")); err != nil {
+		t.Errorf("after the revert: %v", err)
 	}
 }
 

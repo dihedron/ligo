@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
@@ -22,6 +23,14 @@ type Decision struct {
 	Disabled    bool
 	Ratifiable  []string
 	CanRevert   bool
+	Reverted    *Revert // a break-glass change reverted since
+}
+
+// Revert is the applied SYSTEM_REVERT of a break-glass change.
+type Revert struct {
+	ID uuid.UUID
+	By string
+	At time.Time
 }
 
 // decision builds the fragment's data for the session's user.
@@ -34,6 +43,11 @@ func (s *Server) decision(r *http.Request, cr *changerequests.Request) Decision 
 	}
 	if cr.Kind == changerequests.KindBreakGlass && cr.Status == "APPLIED" {
 		s.breakGlassControls(r, cr, &d)
+		var v Revert
+		if err := s.DB.QueryRow(r.Context(), `SELECT id, requested_by, requested_at FROM change_requests
+			WHERE reverts_cr_id = $1 AND status = 'APPLIED' ORDER BY requested_at DESC LIMIT 1`, cr.ID).Scan(&v.ID, &v.By, &v.At); err == nil {
+			d.Reverted = &v
+		}
 	}
 	var on bool
 	if err := s.DB.QueryRow(r.Context(), `SELECT maintenance_mode FROM system_settings`).Scan(&on); err == nil {

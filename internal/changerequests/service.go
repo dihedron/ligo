@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"uuid"
 
@@ -157,6 +159,42 @@ type Filing struct {
 // an inline source first, then the binding, which depends on it. The last
 // request carries the justification and the TTL, 0 for the policies'
 // default; incident is the incident reference. At least one side must need
+// CheckEmergency checks the fields a person gives with a break-glass change
+// (ADR-12 rule 2), all of them, before anything else is looked at: the
+// justification, the incident reference, and a TTL (0 for the default)
+// within 5m and 24h; the policies' max_ttl is checked once the sides are
+// known. The error carries a message per field.
+func (s *Service) CheckEmergency(justification, incident string, ttl time.Duration) error {
+	fields := map[string]string{}
+	if n := max(s.BreakGlassRules.MinJustificationLength, 20); len([]rune(justification)) < n {
+		fields["justification"] = fmt.Sprintf("At least %d characters.", n)
+	}
+	if incident == "" {
+		fields["incidentReference"] = "Required."
+	} else if p := s.BreakGlassRules.IncidentReferencePattern; p != "" {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return err
+		}
+		if !re.MatchString(incident) {
+			fields["incidentReference"] = "Does not match the pattern " + p + "."
+		}
+	}
+	if ttl != 0 && (ttl < 5*time.Minute || ttl > 24*time.Hour) {
+		fields["ttl"] = "Between 5m and 24h (the break-glass policy may allow less)."
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	var parts []string
+	for _, k := range slices.Sorted(maps.Keys(fields)) {
+		parts = append(parts, k+": "+fields[k])
+	}
+	e := refuse(422, "validation-failed", "%s", strings.Join(parts, "; "))
+	e.Fields = fields
+	return e
+}
+
 // a decision.
 func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, filings ...Filing) error {
 	r := filings[len(filings)-1].Request
@@ -175,20 +213,8 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 	if !slices.ContainsFunc(sides, func(sd Side) bool { return sd.Basis == BasisBreakGlass }) {
 		return refuse(422, "validation-failed", "no side needs a decision: file a normal change")
 	}
-	if n := max(s.BreakGlassRules.MinJustificationLength, 20); len([]rune(r.Justification)) < n {
-		return refuse(422, "validation-failed", "justification: at least %d characters", n)
-	}
-	if incident == "" {
-		return refuse(422, "validation-failed", "incidentReference is required")
-	}
-	if p := s.BreakGlassRules.IncidentReferencePattern; p != "" {
-		re, err := regexp.Compile(p)
-		if err != nil {
-			return err
-		}
-		if !re.MatchString(incident) {
-			return refuse(422, "validation-failed", "incidentReference %q does not match incident_reference_pattern", incident)
-		}
+	if err := s.CheckEmergency(r.Justification, incident, r.TTL); err != nil {
+		return err
 	}
 	maxTTL, defaultTTL := 24*time.Hour, 24*time.Hour
 	var policies []*governance.BreakGlassPolicy
@@ -209,7 +235,9 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 		r.TTL = defaultTTL
 	}
 	if r.TTL < 5*time.Minute || r.TTL > maxTTL {
-		return refuse(422, "validation-failed", "ttl %s: between 5m and %s", r.TTL, maxTTL)
+		e := refuse(422, "validation-failed", "ttl %s: between 5m and %s", r.TTL, maxTTL)
+		e.Fields = map[string]string{"ttl": "Between 5m and " + maxTTL.String() + ", the break-glass policy's maximum for these sides."}
+		return e
 	}
 	if err := s.checkOpen(ctx, policies); err != nil {
 		return err
@@ -239,12 +267,21 @@ type filed struct {
 
 // checkOpen refuses a change that would exceed a policy's max_open
 // unratified break-glass changes, each counted once per policy.
+// OpenBreakGlass is the SQL condition, over a change request r and one of
+// its sides s, of an unratified side of a break-glass change that is still
+// open (ADR-12): a binding CREATE or UPDATE while its binding references it
+// (ratifying every side, a revert or a delete clears that), an emergency
+// DELETE until its TTL ends. An inline source's change is not counted on its
+// own: it is ratified and reverted with its binding's.
+const OpenBreakGlass = `r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.resource_type = 'BINDING'
+	AND s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL
+	AND CASE WHEN r.operation = 'DELETE' THEN r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()
+		ELSE EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = r.id) END`
+
 // shortcut: counted before the transaction, so two concurrent emergencies can exceed max_open by one; lock if that matters.
 func (s *Service) checkOpen(ctx context.Context, policies []*governance.BreakGlassPolicy) error {
 	rows, err := s.DB.Query(ctx, `SELECT DISTINCT r.id, s.scope FROM change_requests r
-		JOIN change_request_sides s ON s.change_request_id = r.id
-		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL
-		AND r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()`)
+		JOIN change_request_sides s ON s.change_request_id = r.id WHERE `+OpenBreakGlass)
 	if err != nil {
 		return err
 	}

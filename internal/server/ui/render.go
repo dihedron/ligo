@@ -34,7 +34,14 @@ func funcs() template.FuncMap {
 		"pretty":     pretty,
 		"badge":      badge,
 		"list":       func(v ...string) []string { return v },
+		"field":      func(f BreakGlassForm, name string) fieldError { return fieldError{Errors: f.Errors, Field: name} },
 	}
+}
+
+// fieldError is a form's errors and one field's name, for the bg-error template.
+type fieldError struct {
+	Errors map[string]string
+	Field  string
 }
 
 // when is a time in UTC, to the minute; "" for none.

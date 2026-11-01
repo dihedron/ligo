@@ -1,6 +1,7 @@
 {{define "cr-decision"}}<div id="cr-decision">
 {{with .Request}}<section class="card"><dl class="fields">
-  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span></dd>
+  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span>{{with $.Reverted}} <span class="badge badge-danger">REVERTED</span>
+    by {{.By}} at {{when .At}}: <a href="/ui/change-requests/{{.ID}}">the revert</a>{{end}}</dd>
   <dt>Requested</dt><dd>{{when .RequestedAt}} by {{.RequestedBy}}</dd>
   <dt>Expires</dt><dd>{{when .ExpiresAt}}</dd>
   {{with .Consent}}<dt>Consent</dt><dd>{{.}}</dd>{{end}}
@@ -14,7 +15,7 @@
 <div class="table-wrap"><table>
   <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
   <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
-    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else}}<span class="badge badge-warning">AWAITING</span>{{end}}</td>
+    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else if eq $.Request.Status "PENDING"}}<span class="badge badge-warning">AWAITING</span>{{else}}<span class="badge">NOT NEEDED</span>{{end}}</td>
     <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if or .Eligible .CanWithdraw .Ratifiable .CanRevert}}<div id="cr-errors" class="errors"></div>{{end}}
@@ -23,6 +24,7 @@
   <h3>Ratify the break-glass change</h3>
   <p class="muted">Ratified, the change stays; unratified, a create or update is reverted when its TTL ends.</p>
   {{if gt (len .Ratifiable) 1}}<div class="field"><label for="cr-rside">Side</label><select id="cr-rside" name="side">
+    {{if not .Request.DistinctApprovers}}<option value="" selected>All my sides ({{range $i, $s := .Ratifiable}}{{if $i}}, {{end}}{{$s}}{{end}})</option>{{end}}
     {{range .Ratifiable}}<option>{{.}}</option>{{end}}</select></div>{{else}}<input type="hidden" name="side" value="{{index .Ratifiable 0}}">
   <p>Side: {{index .Ratifiable 0}}</p>{{end}}
   <div class="field"><label for="cr-rcomment">Comment (required)</label><textarea id="cr-rcomment" name="comment" required></textarea></div>
@@ -39,6 +41,7 @@
   <p class="muted">You approve the payload with SHA-256 <span class="mono">{{.Request.PayloadSHA256}}</span>.</p>
   <input type="hidden" name="payloadSha256" value="{{.Request.PayloadSHA256}}">
   {{if gt (len .Eligible) 1}}<div class="field"><label for="cr-side">Side</label><select id="cr-side" name="side">
+    {{if not .Request.DistinctApprovers}}<option value="" selected>All my sides ({{range $i, $s := .Eligible}}{{if $i}}, {{end}}{{$s}}{{end}})</option>{{end}}
     {{range .Eligible}}<option>{{.}}</option>{{end}}</select></div>{{else}}<input type="hidden" name="side" value="{{index .Eligible 0}}">
   <p>Side: {{index .Eligible 0}}</p>{{end}}
   <div class="field"><label for="cr-comment">Comment (required to decline)</label><textarea id="cr-comment" name="comment"></textarea></div>

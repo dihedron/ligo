@@ -1,0 +1,39 @@
+{{define "bg-error"}}{{with index .Errors .Field}}<span class="field-error" id="bg-{{$.Field}}-error" role="alert">{{.}}</span>{{end}}{{end}}
+{{define "break-glass-form"}}<form id="break-glass" class="card card-danger" hx-post="/ui/break-glass" hx-target="this" hx-swap="outerHTML"
+  hx-confirm="Apply this emergency change now, without approval?" {{hxnonce}}>
+  {{with .General}}<div class="alert" role="alert">{{.}}</div>{{end}}
+  <fieldset><legend>Operation</legend>
+    <label><input type="radio" name="operation" value="CREATE"{{if eq .Operation "CREATE"}} checked{{end}}> Create a binding</label>
+    <label><input type="radio" name="operation" value="UPDATE"{{if eq .Operation "UPDATE"}} checked{{end}}> Update a binding</label>
+    <label><input type="radio" name="operation" value="DELETE"{{if eq .Operation "DELETE"}} checked{{end}}> Revoke a binding</label></fieldset>
+  <div class="field"><label for="bg-name">Binding name *</label><input id="bg-name" name="name" value="{{.Name}}" required></div>
+  <div class="field"><label for="bg-rev">Current revision (UPDATE and DELETE)</label><input id="bg-rev" name="expectedRevision" inputmode="numeric" value="{{.Revision}}"{{if index .Errors "expectedRevision"}} aria-invalid="true" aria-describedby="bg-expectedRevision-error"{{end}}>
+    {{template "bg-error" (field . "expectedRevision")}}</div>
+  <h2>The binding (CREATE and UPDATE)</h2>
+  <div class="field"><label for="bg-source">Source</label><input id="bg-source" name="source" value="{{.Source}}"></div>
+  <details{{if .Inline}} open{{end}}><summary>Register a new source with the binding (CREATE only)</summary>
+    <label class="field"><span><input type="checkbox" name="sourceMode" value="inline"{{if .Inline}} checked{{end}}> Register this source</span></label>
+    <div class="field"><label for="bg-iname">New source name</label><input id="bg-iname" name="inline.name" value="{{.InlineSource.Name}}"></div>
+    <div class="field"><label for="bg-itd">Trust domain</label><select id="bg-itd" name="inline.trustDomain">{{range .TrustDomains}}<option{{if eq . $.InlineSource.TrustDomain}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+    <div class="field"><label for="bg-iregex">SVID regex</label><input id="bg-iregex" name="inline.svidRegex" class="mono" value="{{.InlineSource.SVIDRegex}}"></div>
+    <div class="field"><label for="bg-isamples">Sample SPIFFE IDs (one per line)</label><textarea id="bg-isamples" name="inline.samples" class="mono">{{.InlineSource.Samples}}</textarea></div>
+  </details>
+  <div class="field"><label for="bg-target">Target</label><input id="bg-target" name="target" value="{{.Target}}"></div>
+  <div class="field"><label for="bg-level">Access level</label><input id="bg-level" name="accessLevel" value="{{.Level}}"></div>
+  <div class="field"><label for="bg-purpose">Purpose</label><input id="bg-purpose" name="purpose" value="{{.Purpose}}"></div>
+  <div class="field"><label for="bg-parameters">Parameters (JSON object, optional)</label><textarea id="bg-parameters" name="parameters" class="mono"{{if index .Errors "parameters"}} aria-invalid="true" aria-describedby="bg-parameters-error"{{end}}>{{.Parameters}}</textarea>
+    {{template "bg-error" (field . "parameters")}}</div>
+  <h2>The emergency</h2>
+  <div class="field"><label for="bg-justification">Justification * (at least {{.MinJustification}} characters)</label>
+    <textarea id="bg-justification" name="justification" minlength="{{.MinJustification}}" required{{if index .Errors "justification"}} aria-invalid="true" aria-describedby="bg-justification-error"{{end}}>{{.Justification}}</textarea>
+    {{template "bg-error" (field . "justification")}}</div>
+  <div class="field"><label for="bg-incidentReference">Incident reference *</label><input id="bg-incidentReference" name="incidentReference" value="{{.Incident}}" required{{if index .Errors "incidentReference"}} aria-invalid="true" aria-describedby="bg-incidentReference-error"{{end}}>
+    {{template "bg-error" (field . "incidentReference")}}</div>
+  <div class="field"><label for="bg-ttl">TTL (e.g. 4h; 5m to the policy's maximum)</label><input id="bg-ttl" name="ttl" value="{{.TTL}}"{{if index .Errors "ttl"}} aria-invalid="true" aria-describedby="bg-ttl-error"{{end}}>
+    {{template "bg-error" (field . "ttl")}}</div>
+  <div class="field"><label for="bg-password">Your password *</label><input id="bg-password" name="password" type="password" autocomplete="current-password" required{{if index .Errors "password"}} aria-invalid="true" aria-describedby="bg-password-error"{{end}}>
+    {{template "bg-error" (field . "password")}}
+    <span class="hint">Break-glass needs a fresh sign-in; your groups are read again.</span></div>
+  <div class="actions"><button type="submit" class="button-danger"{{if .Disabled}} disabled{{end}}>Apply the emergency change</button>
+    <a class="button button-secondary" href="/ui/bindings">Cancel</a></div>
+</form>{{end}}
