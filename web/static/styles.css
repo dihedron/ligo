@@ -101,11 +101,28 @@ h3 { font-size: 1rem; margin: 1rem 0 0.5rem; }
   border-bottom: 1px solid var(--color-border);
 }
 .app-header .brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--color-text); text-decoration: none; }
-.app-header .brand img { height: 28px; width: auto; }
+.app-header .brand img { height: 40px; width: auto; }
 .app-nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin-right: auto; }
 .app-nav a { color: var(--color-text); text-decoration: none; padding: 0.25rem 0; border-bottom: 2px solid transparent; }
 .app-nav a[aria-current="page"] { border-bottom-color: var(--color-primary); font-weight: 600; }
-.app-user { display: flex; align-items: center; gap: 0.75rem; color: var(--color-text-muted); }
+/* User menu: a <details> dropdown, closed by app.js on an outside click or Escape */
+.user-menu { position: relative; }
+.user-menu summary { list-style: none; cursor: pointer; display: flex; border-radius: 50%; padding: 0.25rem; color: var(--color-text-muted); }
+.user-menu summary::-webkit-details-marker { display: none; }
+.user-menu summary:hover, .user-menu[open] summary { color: var(--color-text); background: var(--color-bg); }
+.user-menu summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.user-icon { width: 1.75rem; height: 1.75rem; fill: currentColor; }
+.user-menu-panel {
+  position: absolute; right: 0; top: calc(100% + 0.25rem); z-index: 10; min-width: 16rem; padding: 0.75rem 1rem;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+}
+.user-menu-panel p { margin: 0 0 0.25rem; }
+.user-id { font-weight: 600; }
+.user-roles-title { margin-top: 0.75rem !important; font-size: 0.875rem; }
+.user-roles { margin: 0 0 0.75rem; padding-left: 1.25rem; font-size: 0.875rem; }
+.user-menu-item { display: block; width: 100%; padding: 0.5rem 0; border-top: 1px solid var(--color-border); }
+.menu-link { background: none; border: 0; border-top: 1px solid var(--color-border); border-radius: 0; color: var(--color-text); text-align: left; font: inherit; cursor: pointer; }
+.menu-link:hover { color: var(--color-primary); }
 main { max-width: 80rem; margin: 0 auto; padding: 1.5rem; }
 .logo-dark { display: none; }
 @media (prefers-color-scheme: dark) {
@@ -215,6 +232,8 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.55; cursor: not-allo
 .login { max-width: 24rem; margin: 4rem auto; }
 .login .brand { display: flex; justify-content: center; margin-bottom: 1.5rem; }
 .login .brand img { height: 48px; width: auto; }
+.login-title { display: flex; align-items: center; gap: 0.75rem; }
+.login-title img { height: 2.5rem; width: auto; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

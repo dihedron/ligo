@@ -79,7 +79,7 @@ func (d *directory) Lookup(_ context.Context, user string) (authz.Principal, err
 	if _, ok := d.passwords[user]; !ok {
 		return authz.Principal{}, adminauth.ErrInvalidCredentials
 	}
-	return authz.Principal{Name: user, Groups: slices.Clone(d.groups[user])}, nil
+	return authz.Principal{Name: user, DisplayName: "Full " + user, Groups: slices.Clone(d.groups[user])}, nil
 }
 
 // workflows records the retries and rotations started.
@@ -359,7 +359,8 @@ func TestLogin(t *testing.T) {
 		Scan(&stored, &csrf); err != nil || stored != hash(sess.Value) || stored == sess.Value || len(csrf) != 64 {
 		t.Errorf("stored session: %q %q %v", stored, csrf, err)
 	}
-	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, "<span>"+v.user+"</span>") {
+	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, `<p class="user-id mono">`+v.user+`</p>`) ||
+		!strings.Contains(body, `<p class="user-name">Full `+v.user+`</p>`) {
 		t.Errorf("signed-in page: %d %s", resp.StatusCode, body)
 	}
 	if v.audits(t, "SESSION_LOGIN") != 1 {

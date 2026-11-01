@@ -103,8 +103,9 @@ func render(t *testing.T, s *Server, r *http.Request, p Page) (*httptest.Respons
 // follow the data and the cookie (§7.4, §7.6).
 func TestLayout(t *testing.T) {
 	s := newServer(t)
-	rec, n := render(t, s, httptest.NewRequest("GET", "/ui/test", nil), Page{Title: "Test", CSRF: "tok", User: "olga",
-		Nav: []NavItem{{Path: "/ui/bindings", Label: "Bindings", Current: true}}, Maintenance: &Maintenance{Reason: "upgrade"},
+	rec, n := render(t, s, httptest.NewRequest("GET", "/ui/test", nil), Page{Title: "Test", CSRF: "tok", User: "olga", FullName: "Olga Operator",
+		Roles: []string{"operator on dc/corp-prod/*"},
+		Nav:   []NavItem{{Path: "/ui/bindings", Label: "Bindings", Current: true}}, Maintenance: &Maintenance{Reason: "upgrade"},
 		BreakGlass: []OpenBreakGlass{{Name: "bg-1", ExpiresIn: "2h"}}})
 	body := rec.Body.String()
 	// the nonce is base64: html/template may write its + as &#43;, so compare parsed attributes
@@ -135,6 +136,8 @@ func TestLayout(t *testing.T) {
 			`&#34;implicitInheritance&#34;:false,&#34;includeIndicatorCSS&#34;:false,&#34;mode&#34;:&#34;same-origin&#34;,&#34;noSwap&#34;:[204,304,&#34;5xx&#34;]}">`,
 		`<link rel="stylesheet" href="/ui/theme/tokens.css">`, `<title>Test · ligo</title>`, `<html lang="en">`,
 		"Maintenance mode is on: upgrade.", "<li>bg-1, expires in 2h</li>", `aria-current="page"`,
+		`<a class="brand" href="/ui/bindings"><img src="/ui/static/ligo-symbol.svg" alt="ligo"></a>`,
+		`<p class="user-id mono">olga</p>`, `<p class="user-name">Olga Operator</p>`, `<li>operator on dc/corp-prod/*</li>`, `hx-post="/ui/logout"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %s", want)

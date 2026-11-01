@@ -2005,6 +2005,7 @@ CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision
 CREATE TABLE admin_sessions (
     token_sha256       CHAR(64) PRIMARY KEY,
     username           VARCHAR(255) NOT NULL,
+    display_name       VARCHAR(255),            -- the directory's displayName or cn, shown in the UI's user menu
     roles              JSONB NOT NULL,          -- [{"role":"operator","scopes":["dc/corp-prod"]}, ...]
     csrf_token         CHAR(64) NOT NULL,       -- 32 random bytes, hex
     client_ip          INET,
@@ -3421,6 +3422,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 - `history: true`: htmx 4 re-fetches pages on back navigation and keeps nothing in `localStorage` or `sessionStorage`; every `/ui/*` page renders completely on a direct `GET`. The `hx-history-cache` extension MUST NOT be used.
 - `implicitInheritance: false` (the htmx 4 default): templates set every htmx attribute on the element that uses it and do not use `:inherited`.
 - The CSRF header is attached by `web/static/app.js` in a `htmx:config:request` listener (`evt.detail.ctx.request.headers['X-CSRF-Token'] = …`), reading the token from a `<meta>` element; it is never placed in `hx-headers`. When maintenance mode is on (§10.3), every page shows a banner with the reason, and mutating controls are disabled. While any break-glass change is open, the dashboard shows a banner listing them with time to expiry and, for approvers, ratify and revert buttons.
+- The header ends with a user menu: a head-silhouette button that opens a dropdown (a `<details>` element, closed by `app.js` on an outside click or Escape) with the username, the full name (the directory's `displayName`, else `cn`, read at sign-in and stored in `admin_sessions.display_name`), the user's roles with their scopes, the appearance switch and "Sign out". Further per-user preferences go into this menu.
 
 **HTMX Navigation & Response Semantics (Normative):**
 - Full-page navigations triggered by mutating HTMX actions (`POST /ui/login`, `POST /ui/logout`, and `POST`, `PUT` and `DELETE` on `/ui/sources…`, `/ui/targets…` and `/ui/bindings…`) MUST respond with HTTP `200 OK` and an `HX-Redirect: <target-path>` header (never HTTP `301`/`302`/`303`, which cause inconsistent browser method repetition on `PUT`/`DELETE` or partial swap of full pages).
@@ -3518,6 +3520,7 @@ The built-in tokens are defined for light mode on `:root`, and for dark mode bot
 - Each user can switch mode with a control in the page header. The choice is stored in the cookie `__Host-ligo_theme` (`system|light|dark`; `Secure; HttpOnly; SameSite=Strict; Path=/`; only the server reads it) through `POST /ui/preferences/theme` (CSRF-protected like every non-`GET`, §7.3). It is a cosmetic preference, not stored in the database.
 - The server renders `<html data-theme="light|dark">` for an explicit choice and omits the attribute for `system`. Choosing a mode therefore needs **no inline script**, which the CSP forbids, and pages never flash the wrong colors while loading.
 - Logos switch with the mode: `logo-dark` is shown in dark mode when present, otherwise `logo`.
+- Without a theme logo, the header and the sign-in card show ligo's own symbol, embedded in the binary: `web/static/ligo-symbol.svg`, a copy of `docs/common/artwork/ligo-symbol.svg` (the logo without its wordmark, on a transparent background, so one file serves both modes). With one, the sign-in card shows the theme's logo.
 
 **Sources and precedence (Normative).** Each theme element is taken from the first source that provides it:
 1. an explicit path in `server.yaml` (`ui.theme.css_file`, `logo_file`, `logo_dark_file`, `favicon_file`, `fonts_dir`);

@@ -18,6 +18,8 @@ type Principal struct {
 	Name     string
 	SPIFFEID string
 	Groups   []string
+	// DisplayName is a person's full name from the directory, for the UI.
+	DisplayName string
 }
 
 // Grant is an authorization binding that applies to a principal.

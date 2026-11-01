@@ -34,6 +34,23 @@
     showError('The server could not complete the request (' + response.status + '). Request ID: ' + id + '.');
   });
 
+  // The user menu closes on a click outside it and on Escape.
+  function closeMenus(except) {
+    document.querySelectorAll('details.user-menu[open]').forEach(function (menu) {
+      if (menu !== except) {
+        menu.removeAttribute('open');
+      }
+    });
+  }
+  document.addEventListener('click', function (evt) {
+    closeMenus(evt.target.closest('details.user-menu'));
+  });
+  document.addEventListener('keydown', function (evt) {
+    if (evt.key === 'Escape') {
+      closeMenus(null);
+    }
+  });
+
   // "Copy" buttons copy the text of the element their data-copy names.
   document.addEventListener('click', function (evt) {
     var button = evt.target.closest('button[data-copy]');

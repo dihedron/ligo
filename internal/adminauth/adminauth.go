@@ -99,14 +99,17 @@ func (l *LDAP) principal(ctx context.Context, username string, verify func(direc
 		return authz.Principal{}, fmt.Errorf("adminauth: service bind: %w", err)
 	}
 	res, err := conn.Search(ldap.NewSearchRequest(l.Config.UserBaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, l.seconds(), false,
-		fmt.Sprintf(l.Config.UserFilter, ldap.EscapeFilter(username)), []string{"dn"}, nil))
+		fmt.Sprintf(l.Config.UserFilter, ldap.EscapeFilter(username)), []string{"dn", "displayName", "cn"}, nil))
 	if err != nil && !ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) {
 		return authz.Principal{}, fmt.Errorf("adminauth: user search: %w", err)
 	}
 	if err != nil || len(res.Entries) != 1 {
 		return authz.Principal{}, ErrInvalidCredentials // none, or ambiguous
 	}
-	userDN := res.Entries[0].DN
+	userDN, name := res.Entries[0].DN, res.Entries[0].GetAttributeValue("displayName")
+	if name == "" {
+		name = res.Entries[0].GetAttributeValue("cn")
+	}
 	if verify != nil {
 		if err := verify(conn, userDN); err != nil {
 			return authz.Principal{}, err
@@ -115,7 +118,7 @@ func (l *LDAP) principal(ctx context.Context, username string, verify func(direc
 			return authz.Principal{}, fmt.Errorf("adminauth: service bind: %w", err)
 		}
 	}
-	p := authz.Principal{Name: username}
+	p := authz.Principal{Name: username, DisplayName: name}
 	for _, g := range l.Groups {
 		ok, err := l.member(conn, g, userDN)
 		if err != nil {

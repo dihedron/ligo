@@ -8,7 +8,7 @@ Everything runs on one lab, from the repository's root, on a build that holds ev
 
 1. `feature/echo`, with `feature/ui` merged into it. The echo target needs both.
 2. `test/lab/lab.sh reset`, then `deploy`, `serve install`, `echo install`.
-3. Break-glass scenarios only (B-*): `serve install` grants `livia` the role `break_glass` and sets a break-glass policy (lab work of phase 9.7, **not done yet**).
+3. Break-glass scenarios only (B-*): `serve install` grants `livia` the role `break_glass` on `dc/corp-prod/*` and sets a break-glass policy (default TTL 1h, maximum 4h, at most 3 open changes).
 
 Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, `dave` approver, `livia` break-glass, all on `dc/corp-prod/*`. CLI principals: `ligo-ops` (olga, operator) and `ligo-approver` (dora, approver). Web UI: <https://10.252.0.20:9443/ui/login>; use one private window per user so that the sessions stay apart.
 
@@ -21,10 +21,11 @@ Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, 
 | U-1 | The change request page shows one status, which turns `APPLIED` | 7a71d06 | open |
 | U-2 | Catalog "Request access" opens the wizard at step 2, with Next | 7a71d06 | open |
 | U-3 | `cr list --awaiting-me` lists PENDING requests only | 7a71d06 | open |
-| B-1 | Break-glass CREATE from the web UI, then ratified | d473d23 (9.6b) | open, needs 9.7 lab |
-| B-2 | Break-glass CREATE reverted from the dashboard banner | d473d23 (9.6b) | open, needs 9.7 lab |
-| B-3 | Break-glass refusals in the form | d473d23 (9.6b) | open, needs 9.7 lab |
-| B-4 | Emergency revoke (DELETE), then ratified | d473d23 (9.6b) | open, needs 9.7 lab |
+| U-4 | Header and sign-in: ligo symbol, user menu | header commit | open |
+| B-1 | Break-glass CREATE from the web UI, then ratified | d473d23 (9.6b) | open |
+| B-2 | Break-glass CREATE reverted from the dashboard banner | d473d23 (9.6b) | open |
+| B-3 | Break-glass refusals in the form | d473d23 (9.6b) | open |
+| B-4 | Emergency revoke (DELETE), then ratified | d473d23 (9.6b) | open |
 | C-1 | `ligo cr review` on a real terminal | phase 7 (34abf50) | open |
 
 ### E-1, E-2: the echo guide
@@ -33,6 +34,13 @@ Follow the guide in `.specs/ligo-echo-target.md` (on `feature/echo`): steps 1, 2
 - **U-1** (step 2b.6): the page shows its status only once, at the top, and that status turns `APPLIED` after dave's approval, without a reload.
 - **U-2** (step 2b.4): "Request access" opens at "2. Access level", and the form has a Next button.
 - **U-3** (step 2a): `cr list --awaiting-me` lists only `PENDING` requests. Run it again after the approvals: the list is empty.
+
+### U-4: header logo and user menu
+
+1. Every page's header shows the ligo symbol (no wordmark), and so does the sign-in card, left of "Sign in to ligo". The symbol has no background of its own: it blends into the page under **Appearance** light and dark alike.
+2. Click the head icon at the top right. The menu shows the username, the full name from LDAP (`cn` in the lab: e.g. "Dave Approver"), the roles with their scopes, **Appearance** and **Sign out**.
+3. The menu closes when you click outside it or press Escape. **Sign out** returns you to the login page.
+4. Sign in as `livia`: the roles include `break_glass on dc/corp-prod/*`.
 
 ### B-1: break-glass CREATE, ratified
 

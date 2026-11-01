@@ -166,6 +166,8 @@ type Page struct {
 	Assets      Assets
 	CSRF        string
 	User        string
+	FullName    string   // for the user menu
+	Roles       []string // the user's roles with their scopes, for the user menu
 	Nav         []NavItem
 	Maintenance *Maintenance
 	BreakGlass  []OpenBreakGlass
