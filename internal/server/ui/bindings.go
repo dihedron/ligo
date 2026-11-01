@@ -74,7 +74,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	var open []OpenBreakGlass
 	if err == nil {
-		open, err = s.openBreakGlass(r.Context())
+		open, err = s.openBreakGlass(r.Context(), c)
 	}
 	if err != nil {
 		s.fail(w, r, err)
@@ -90,24 +90,30 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 // openBreakGlass lists the applied, unratified break-glass changes still
-// within their TTL (ADR-12), for the dashboard's banner.
-func (s *Server) openBreakGlass(ctx context.Context) ([]OpenBreakGlass, error) {
-	rows, err := s.DB.Query(ctx, `SELECT DISTINCT r.resource_name, r.requested_at + make_interval(secs => r.break_glass_ttl_seconds)
+// within their TTL (ADR-12), for the dashboard's banner; CanAct marks those
+// c may ratify or revert, as an approver of a side or the requester.
+func (s *Server) openBreakGlass(ctx context.Context, c changerequests.Caller) ([]OpenBreakGlass, error) {
+	rows, err := s.DB.Query(ctx, `SELECT r.id, r.resource_name, r.requested_by, r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) AS expires,
+		array_agg(s.scope)
 		FROM change_requests r JOIN change_request_sides s ON s.change_request_id = r.id
-		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL
-		AND r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now() ORDER BY 2`)
+		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()
+		GROUP BY r.id HAVING bool_or(s.basis = 'BREAK_GLASS' AND s.ratified_by IS NULL) ORDER BY expires`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []OpenBreakGlass
 	for rows.Next() {
-		var name string
+		var o OpenBreakGlass
+		var by string
 		var expires time.Time
-		if err := rows.Scan(&name, &expires); err != nil {
+		var scopes []string
+		if err := rows.Scan(&o.ID, &o.Name, &by, &expires, &scopes); err != nil {
 			return nil, err
 		}
-		out = append(out, OpenBreakGlass{Name: name, ExpiresIn: time.Until(expires).Round(time.Minute).String()})
+		o.ExpiresIn = time.Until(expires).Round(time.Minute).String()
+		o.CanAct = by == c.ID() || slices.ContainsFunc(scopes, c.Grants.CanApprove)
+		out = append(out, o)
 	}
 	return out, rows.Err()
 }

@@ -334,6 +334,9 @@ func (s *Server) frame(r *http.Request, title, current string) Page {
 		n.Current = n.Path == current
 		p.Nav = append(p.Nav, n)
 	}
+	if breakGlassMember(sess.Grants) {
+		p.Nav = append(p.Nav, NavItem{Path: "/ui/break-glass/new-form", Label: "Break glass", Current: current == "/ui/break-glass/new-form"})
+	}
 	var on bool
 	var reason string
 	if err := s.DB.QueryRow(r.Context(), `SELECT maintenance_mode, coalesce(maintenance_reason, '') FROM system_settings`).Scan(&on, &reason); err != nil {

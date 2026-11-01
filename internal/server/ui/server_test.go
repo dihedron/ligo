@@ -200,7 +200,7 @@ func TestTemplates(t *testing.T) {
 	}
 	s := newServer(t)
 	full := Page{Title: "t", CSRF: "c", User: "u", Nav: []NavItem{{Path: "/ui/a", Label: "a"}}, Maintenance: &Maintenance{},
-		BreakGlass: []OpenBreakGlass{{Name: "b"}}}
+		BreakGlass: []OpenBreakGlass{{Name: "b", CanAct: true}}}
 	check := func(what string, rec *httptest.ResponseRecorder) {
 		n := cspNonce.FindStringSubmatch(rec.Header().Get("Content-Security-Policy"))[1]
 		doc, err := html.Parse(strings.NewReader(rec.Body.String()))
@@ -296,7 +296,8 @@ func samples() map[string]any {
 			Flows: []flows.Flow{{Name: "f", Ports: []flows.Port{{Low: 1, High: 1}}, TLS: true}}},
 		"change-requests": Requests{Requests: []*changerequests.Request{cr}, Next: id.String()},
 		"change-request":  RequestPage{Request: cr, Decision: Decision{Request: cr, Eligible: []string{"SOURCE", "TARGET"}, CanWithdraw: true}, Diff: map[string]any{"changes": []any{}}},
-		"cr-decision":     Decision{Request: cr, Eligible: []string{"SOURCE"}, CanWithdraw: true, Disabled: true},
+		"cr-decision":     Decision{Request: cr, Eligible: []string{"SOURCE"}, CanWithdraw: true, Disabled: true, Ratifiable: []string{"SOURCE", "TARGET"}, CanRevert: true},
+		"break-glass":     BreakGlassForm{Operation: "UPDATE", Name: "b", Source: "s", Target: "t", Level: "read", Parameters: "{}", Revision: "2", TrustDomains: []string{"prod.internal"}, MinJustification: 20},
 		"error":           Alert{Message: "m"},
 		"alert":           Alert{Message: "m"},
 		"governance":      gov,

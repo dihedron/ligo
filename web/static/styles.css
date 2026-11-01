@@ -129,6 +129,7 @@ main { max-width: 80rem; margin: 0 auto; padding: 1.5rem; }
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
 }
+.card-danger { border: 2px solid var(--color-danger); }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
 dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
 dl.fields dt { color: var(--color-text-muted); }

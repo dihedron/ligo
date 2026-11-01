@@ -229,9 +229,7 @@ func (s *Server) bindingCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		if r.PostFormValue("sourceMode") == "inline" {
-			src := sources.Source{Kind: "Source", Metadata: sources.Metadata{Name: strings.TrimSpace(r.PostFormValue("inline.name"))},
-				Identity: sources.Identity{TrustDomain: r.PostFormValue("inline.trustDomain"), SVIDRegex: strings.TrimSpace(r.PostFormValue("inline.svidRegex")),
-					SampleSPIFFEIDs: lines(r.PostFormValue("inline.samples"))}, Visibility: sources.Visibility{Mode: "PRIVATE"}}
+			src := inlineSource(r)
 			body["source"], body["inlineSource"] = src.Metadata.Name, src
 		} else {
 			body["source"] = r.PostFormValue("source")
@@ -244,6 +242,14 @@ func (s *Server) bindingCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	name, _ := body["name"].(string)
 	s.filed(w, r, cr, err, "/ui/bindings/"+name)
+}
+
+// inlineSource is the source the wizard or the break-glass form registers
+// with a binding's CREATE, from the inline.* fields.
+func inlineSource(r *http.Request) sources.Source {
+	return sources.Source{Kind: "Source", Metadata: sources.Metadata{Name: strings.TrimSpace(r.PostFormValue("inline.name"))},
+		Identity: sources.Identity{TrustDomain: r.PostFormValue("inline.trustDomain"), SVIDRegex: strings.TrimSpace(r.PostFormValue("inline.svidRegex")),
+			SampleSPIFFEIDs: lines(r.PostFormValue("inline.samples"))}, Visibility: sources.Visibility{Mode: "PRIVATE"}}
 }
 
 // BindingForm is the binding update form's data.

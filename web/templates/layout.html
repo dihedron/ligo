@@ -22,7 +22,8 @@
     <button class="button-secondary" hx-post="/ui/logout" {{hxnonce}}>Sign out</button></div>{{end}}
 </header>
 {{with .Maintenance}}<div class="banner banner-warning" role="status">Maintenance mode is on{{with .Reason}}: {{.}}{{end}}. Changes are disabled.</div>
-{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}</li>{{end}}</ul></div>
+{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}{{if .CanAct}}
+  <a class="button" href="/ui/change-requests/{{.ID}}#cr-ratify">Ratify</a> <a class="button button-danger" href="/ui/change-requests/{{.ID}}#cr-revert">Revert</a>{{end}}</li>{{end}}</ul></div>
 {{end}}<div id="error-banner" class="banner banner-danger" role="alert" hidden></div>
 <main id="main">
 <div id="page-errors" class="errors"></div>

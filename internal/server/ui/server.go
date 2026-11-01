@@ -112,6 +112,8 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("PUT /ui/bindings/{name}", s.bindingUpdate)
 	mux.HandleFunc("DELETE /ui/bindings/{name}", s.bindingDelete)
 	mux.HandleFunc("POST /ui/bindings/{name}/{op}", s.bindingOperate)
+	mux.HandleFunc("GET /ui/break-glass/new-form", s.breakGlassForm)
+	mux.HandleFunc("POST /ui/break-glass", s.breakGlassSubmit)
 	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)
 	mux.HandleFunc("GET /ui/change-requests/{id}", s.changeRequest)
 	mux.HandleFunc("POST /ui/change-requests/{id}/{action}", s.decide)
