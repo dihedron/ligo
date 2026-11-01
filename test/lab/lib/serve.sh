@@ -264,6 +264,7 @@ authorization:
     - { spiffe_id: "spiffe://prod.lab/ops/dora", role: approver, scopes: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
+    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, scopes: ["dc/corp-prod/*"] } # livia
   approval:
     required_scopes: ["dc/corp-prod/*"]
     require_distinct_approvers_across_scopes: false
@@ -277,6 +278,8 @@ governance:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
 break_glass:
   min_justification_length: 20
+  policies:
+    - { scopes: ["dc/corp-prod/*"], default_ttl: 1h, max_ttl: 4h, max_open: 3, warn_before: 15m }
 storage:
   postgres: { app_dsn_env: LIGO_APP_DSN, reader_dsn_env: LIGO_READER_DSN, dbos_dsn_env: LIGO_DBOS_DSN }
 secret_sealing:
