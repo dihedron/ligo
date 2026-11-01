@@ -14,15 +14,25 @@
 {{end}}</head>
 <body>
 <header class="app-header">
-  <a class="brand" href="/ui/bindings">{{if .Assets.Logo}}<img class="logo-light{{if .Assets.LogoDark}} has-dark{{end}}" src="/ui/theme/logo" alt="{{.Product}}">{{if .Assets.LogoDark}}<img class="logo-dark" src="/ui/theme/logo-dark" alt="{{.Product}}">{{end}}{{else}}{{.Product}}{{end}}</a>
+  <a class="brand" href="/ui/bindings">{{template "logo" .}}</a>
   {{if .User}}<nav class="app-nav" aria-label="Main">
     {{range .Nav}}<a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>
     {{end}}</nav>
-  <div class="app-user"><span>{{.User}}</span>{{template "theme-switch" .}}
-    <button class="button-secondary" hx-post="/ui/logout" {{hxnonce}}>Sign out</button></div>{{end}}
+  <details class="user-menu">
+    <summary aria-label="Account menu of {{.User}}"><svg class="user-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg></summary>
+    <div class="user-menu-panel">
+      <p class="user-id mono">{{.User}}</p>{{with .FullName}}
+      <p class="user-name">{{.}}</p>{{end}}
+      <p class="muted user-roles-title">Roles</p>
+      <ul class="user-roles">{{range .Roles}}<li>{{.}}</li>{{end}}</ul>
+      <div class="user-menu-item">{{template "theme-switch" .}}</div>
+      <button class="user-menu-item menu-link" hx-post="/ui/logout" {{hxnonce}}>Sign out</button>
+    </div>
+  </details>{{end}}
 </header>
 {{with .Maintenance}}<div class="banner banner-warning" role="status">Maintenance mode is on{{with .Reason}}: {{.}}{{end}}. Changes are disabled.</div>
-{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}</li>{{end}}</ul></div>
+{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}{{if .CanAct}}
+  <a class="button" href="/ui/change-requests/{{.ID}}#cr-ratify">Ratify</a> <a class="button button-danger" href="/ui/change-requests/{{.ID}}#cr-revert">Revert</a>{{end}}</li>{{end}}</ul></div>
 {{end}}<div id="error-banner" class="banner banner-danger" role="alert" hidden></div>
 <main id="main">
 <div id="page-errors" class="errors"></div>
@@ -41,3 +51,5 @@
     {{range modes}}<option value="{{.}}"{{if eq . $.ThemeChoice}} selected{{end}}>{{.}}</option>{{end}}
   </select>
 </form>{{end}}
+
+{{define "logo"}}{{if .Assets.Logo}}<img class="logo-light{{if .Assets.LogoDark}} has-dark{{end}}" src="/ui/theme/logo" alt="{{.Product}}">{{if .Assets.LogoDark}}<img class="logo-dark" src="/ui/theme/logo-dark" alt="{{.Product}}">{{end}}{{else}}<img src="/ui/static/ligo-symbol.svg" alt="{{.Product}}">{{end}}{{end}}

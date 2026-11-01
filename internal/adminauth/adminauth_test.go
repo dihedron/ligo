@@ -102,7 +102,7 @@ const (
 
 func directoryOf() *fakeDirectory {
 	person := func(uid string) map[string][]string {
-		return map[string][]string{"objectClass": {"inetOrgPerson"}, "uid": {uid}}
+		return map[string][]string{"objectClass": {"inetOrgPerson"}, "uid": {uid}, "cn": {uid + " cn"}}
 	}
 	group := func(members ...string) map[string][]string {
 		return map[string][]string{"objectClass": {"groupOfNames"}, "member": members}
@@ -128,9 +128,10 @@ func authenticator(d *fakeDirectory, nested bool, groups ...string) *LDAP {
 func TestAuthenticate(t *testing.T) {
 	ctx := context.Background()
 	d := directoryOf()
+	d.entries[olivia]["displayName"] = []string{"Olivia Viewer"}
 	l := authenticator(d, false, ops, staff, viewers)
 	p, err := l.Authenticate(ctx, "olivia", "olivia-secret")
-	if err != nil || p.Name != "olivia" || p.SPIFFEID != "" || !slices.Equal(p.Groups, []string{ops}) {
+	if err != nil || p.Name != "olivia" || p.DisplayName != "Olivia Viewer" || p.SPIFFEID != "" || !slices.Equal(p.Groups, []string{ops}) {
 		t.Fatalf("olivia: %+v, %v", p, err)
 	}
 	for name, cred := range map[string][2]string{
@@ -166,7 +167,7 @@ func TestLookup(t *testing.T) {
 	ctx := context.Background()
 	d := directoryOf()
 	l := authenticator(d, false, ops, viewers)
-	if p, err := l.Lookup(ctx, "olivia"); err != nil || p.Name != "olivia" || !slices.Equal(p.Groups, []string{ops}) {
+	if p, err := l.Lookup(ctx, "olivia"); err != nil || p.Name != "olivia" || p.DisplayName != "olivia cn" || !slices.Equal(p.Groups, []string{ops}) { // no displayName: cn
 		t.Fatalf("olivia: %+v %v", p, err)
 	}
 	d.entries[ops]["member"] = nil // removed from her group

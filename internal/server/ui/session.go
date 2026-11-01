@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/dihedron/ligo/internal/adminauth"
@@ -36,9 +37,10 @@ const (
 
 // Session is a signed-in user's session (§7.3).
 type Session struct {
-	Username string
-	Grants   authz.Grants
-	CSRF     string
+	Username    string
+	DisplayName string
+	Grants      authz.Grants
+	CSRF        string
 }
 
 // Caller is the session's principal and grants, for the services.
@@ -151,7 +153,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.alert(w, r, http.StatusServiceUnavailable, "The directory cannot be reached. Try again later.")
 		return
 	}
-	t, err := s.create(r.Context(), user, grants, ip, "SESSION_LOGIN")
+	t, err := s.create(r.Context(), user, p.DisplayName, grants, ip, "SESSION_LOGIN")
 	if err != nil {
 		s.Logger.Error("ui: create a session", "error", err)
 		s.alert(w, r, http.StatusServiceUnavailable, "The session cannot be created. Try again later.")
@@ -164,16 +166,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 // create stores a new session, only the token's SHA-256, and audits action
 // with it; it returns the token for the cookie.
-func (s *Server) create(ctx context.Context, user string, grants authz.Grants, ip, action string) (string, error) {
+func (s *Server) create(ctx context.Context, user, displayName string, grants authz.Grants, ip, action string) (string, error) {
 	t := token()
 	roles, err := json.Marshal(grants)
 	if err != nil {
 		return "", err
 	}
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO admin_sessions (token_sha256, username, roles, csrf_token, client_ip, expires_at)
-			VALUES ($1, $2, $3, $4, nullif($5, '')::inet, now() + make_interval(secs => $6))`,
-			hash(t), user, roles, token(), ip, s.Listener.Session.AbsoluteTimeout.Seconds()); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO admin_sessions (token_sha256, username, display_name, roles, csrf_token, client_ip, expires_at)
+			VALUES ($1, $2, nullif($3, ''), $4, $5, nullif($6, '')::inet, now() + make_interval(secs => $7))`,
+			hash(t), user, displayName, roles, token(), ip, s.Listener.Session.AbsoluteTimeout.Seconds()); err != nil {
 			return err
 		}
 		snap, _ := json.Marshal(map[string]any{"username": user, "remote": ip, "roles": grants})
@@ -211,10 +213,10 @@ func (s *Server) authed(next http.Handler) http.Handler {
 		var sess Session
 		var roles []byte
 		var dead, idle, stale bool
-		err = s.DB.QueryRow(ctx, `SELECT username, roles, csrf_token, revoked_at IS NOT NULL OR expires_at <= now(),
+		err = s.DB.QueryRow(ctx, `SELECT username, coalesce(display_name, ''), roles, csrf_token, revoked_at IS NOT NULL OR expires_at <= now(),
 			last_seen_at < now() - make_interval(secs => $2), authz_checked_at < now() - make_interval(secs => $3)
 			FROM admin_sessions WHERE token_sha256 = $1`, h, ss.IdleTimeout.Seconds(), ss.AuthzRecheckInterval.Seconds()).
-			Scan(&sess.Username, &roles, &sess.CSRF, &dead, &idle, &stale)
+			Scan(&sess.Username, &sess.DisplayName, &roles, &sess.CSRF, &dead, &idle, &stale)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && dead {
 			http.SetCookie(w, cookie(sessionCookie, "", -1))
 			unauthenticated(w, r)
@@ -283,7 +285,7 @@ func (s *Server) recheck(w http.ResponseWriter, r *http.Request, h string, sess 
 		_, err := s.DB.Exec(ctx, `UPDATE admin_sessions SET authz_checked_at = now(), last_seen_at = now() WHERE token_sha256 = $1`, h)
 		return true, err
 	}
-	t, err := s.create(ctx, sess.Username, grants, clientIP(r), "SESSION_LOGIN")
+	t, err := s.create(ctx, sess.Username, p.DisplayName, grants, clientIP(r), "SESSION_LOGIN")
 	if err != nil {
 		return false, err
 	}
@@ -293,7 +295,7 @@ func (s *Server) recheck(w http.ResponseWriter, r *http.Request, h string, sess 
 	if err := s.DB.QueryRow(ctx, `SELECT csrf_token FROM admin_sessions WHERE token_sha256 = $1`, hash(t)).Scan(&sess.CSRF); err != nil {
 		return false, err
 	}
-	sess.Grants = grants
+	sess.Grants, sess.DisplayName = grants, p.DisplayName
 	http.SetCookie(w, cookie(sessionCookie, t, 0))
 	return true, nil
 }
@@ -327,12 +329,18 @@ func (s *Server) preference(w http.ResponseWriter, r *http.Request) {
 // user, the navigation and the maintenance banner.
 func (s *Server) frame(r *http.Request, title, current string) Page {
 	sess := session(r)
-	p := Page{Title: title, CSRF: sess.CSRF, User: sess.Username}
+	p := Page{Title: title, CSRF: sess.CSRF, User: sess.Username, FullName: sess.DisplayName}
+	for _, g := range sess.Grants {
+		p.Roles = append(p.Roles, g.Role+" on "+strings.Join(g.Scopes, ", "))
+	}
 	for _, n := range []NavItem{{Path: "/ui/bindings", Label: "Bindings"}, {Path: "/ui/catalog", Label: "Catalog"},
 		{Path: "/ui/sources", Label: "Sources"}, {Path: "/ui/targets", Label: "Targets"}, {Path: "/ui/change-requests", Label: "Change requests"},
 		{Path: "/ui/platforms", Label: "Platforms"}} {
 		n.Current = n.Path == current
 		p.Nav = append(p.Nav, n)
+	}
+	if breakGlassMember(sess.Grants) {
+		p.Nav = append(p.Nav, NavItem{Path: "/ui/break-glass/new-form", Label: "Break glass", Current: current == "/ui/break-glass/new-form"})
 	}
 	var on bool
 	var reason string

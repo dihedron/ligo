@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/web"
@@ -150,7 +151,11 @@ type NavItem struct {
 type Maintenance struct{ Reason string }
 
 // OpenBreakGlass is an entry of the break-glass banner (ADR-12).
-type OpenBreakGlass struct{ Name, ExpiresIn string }
+type OpenBreakGlass struct {
+	ID              uuid.UUID
+	Name, ExpiresIn string
+	CanAct          bool
+}
 
 // Page is the layout's data around a page's content.
 type Page struct {
@@ -161,6 +166,8 @@ type Page struct {
 	Assets      Assets
 	CSRF        string
 	User        string
+	FullName    string   // for the user menu
+	Roles       []string // the user's roles with their scopes, for the user menu
 	Nav         []NavItem
 	Maintenance *Maintenance
 	BreakGlass  []OpenBreakGlass

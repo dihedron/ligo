@@ -79,7 +79,7 @@ func (d *directory) Lookup(_ context.Context, user string) (authz.Principal, err
 	if _, ok := d.passwords[user]; !ok {
 		return authz.Principal{}, adminauth.ErrInvalidCredentials
 	}
-	return authz.Principal{Name: user, Groups: slices.Clone(d.groups[user])}, nil
+	return authz.Principal{Name: user, DisplayName: "Full " + user, Groups: slices.Clone(d.groups[user])}, nil
 }
 
 // workflows records the retries and rotations started.
@@ -359,7 +359,8 @@ func TestLogin(t *testing.T) {
 		Scan(&stored, &csrf); err != nil || stored != hash(sess.Value) || stored == sess.Value || len(csrf) != 64 {
 		t.Errorf("stored session: %q %q %v", stored, csrf, err)
 	}
-	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, "<span>"+v.user+"</span>") {
+	if resp, body := b.page(); resp.StatusCode != 200 || b.csrf != csrf || !strings.Contains(body, `<p class="user-id mono">`+v.user+`</p>`) ||
+		!strings.Contains(body, `<p class="user-name">Full `+v.user+`</p>`) {
 		t.Errorf("signed-in page: %d %s", resp.StatusCode, body)
 	}
 	if v.audits(t, "SESSION_LOGIN") != 1 {
@@ -1012,5 +1013,114 @@ func TestWizard(t *testing.T) {
 	resp, body = b.do("DELETE", "/ui/bindings/"+name+"?expectedRevision="+fmt.Sprint(rev), nil)
 	if resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") == "" {
 		t.Errorf("revoke: %d %s", resp.StatusCode, body)
+	}
+}
+
+// TestBreakGlass: the form only for break_glass members; a wrong password
+// is a 401, counted and audited as a failed sign-in; a CREATE is applied at
+// once and redirects to the binding; the banner offers the approver ratify
+// and revert, and both answer the decision fragment (ADR-12, §7.4).
+func TestBreakGlass(t *testing.T) {
+	v := sessionSetup(t)
+	ctx := context.Background()
+	x := fixture(t, v)
+	target := uuid.NewV7()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{ // a source and a target in dc/corp-prod/ledger, where the role dc/corp-prod/* applies: one TARGET side
+		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc-" + x, `^spiffe://prod\.internal/ns/ledger/sa/` + x + `$`}},
+		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc2-" + x, `^spiffe://prod\.internal/ns/ledger2/sa/` + x + `$`}},
+		{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
+			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "ltgt-" + x}},
+		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
+	} {
+		if _, err := v.owner.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { // runs before the fixture's: the bindings go first, then these levels, so the fixture can delete the targets
+		_, _ = v.owner.Exec(context.Background(), "delete from bindings where name like $1", "%"+x)
+		_, _ = v.owner.Exec(context.Background(), "delete from target_access_levels where target_id = $1", target)
+	})
+
+	viewer := v.browser(t)
+	viewer.signIn("right")
+	if resp, page := viewer.page(); strings.Contains(page, "/ui/break-glass/new-form") || resp.StatusCode != 200 {
+		t.Error("a viewer's navigation offers break-glass")
+	}
+	if resp, _ := viewer.do("GET", "/ui/break-glass/new-form", nil, "HX-Request", ""); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a viewer's form: %d", resp.StatusCode)
+	}
+
+	g := v.browser(t)
+	g.signInAs("g"+v.user, "right")
+	_, form := g.do("GET", "/ui/break-glass/new-form", nil, "HX-Request", "")
+	if m := csrfMeta.FindStringSubmatch(form); m != nil {
+		g.csrf = m[1]
+	}
+	if !strings.Contains(form, `name="password" type="password"`) || !strings.Contains(form, `hx-confirm=`) || !strings.Contains(form, ">Break glass<") {
+		t.Fatalf("the form: %s", form)
+	}
+	emergency := func(name, src, password string) url.Values {
+		return url.Values{"operation": {"CREATE"}, "name": {name}, "source": {src}, "target": {"ltgt-" + x}, "accessLevel": {"read"},
+			"justification": {"payments outage, the ledger read path is needed now"}, "incidentReference": {"INC0012345"}, "ttl": {"1h"}, "password": {password}}
+	}
+	failed := func() int {
+		var n int
+		if err := v.owner.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'SESSION_LOGIN_FAILED' AND snapshot->>'username' = $1`,
+			"g"+v.user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if resp, body := g.do("POST", "/ui/break-glass", emergency("bg1-"+x, "lsrc-"+x, "wrong")); resp.StatusCode != http.StatusUnauthorized || failed() != 1 ||
+		!strings.Contains(body, "password") {
+		t.Errorf("a wrong password: %d, %d audited", resp.StatusCode, failed())
+	}
+	for i, name := range []string{"bg1-" + x, "bg2-" + x} {
+		if resp, body := g.do("POST", "/ui/break-glass", emergency(name, []string{"lsrc-" + x, "lsrc2-" + x}[i], "right")); resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") != "/ui/bindings/"+name {
+			t.Fatalf("break-glass %d: %d %v %s", i, resp.StatusCode, resp.Header, body)
+		}
+	}
+	crOf := func(name string) string {
+		var id uuid.UUID
+		if err := v.owner.QueryRow(ctx, "SELECT break_glass_cr_id FROM bindings WHERE name = $1", name).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return id.String()
+	}
+	bg1, bg2 := crOf("bg1-"+x), crOf("bg2-"+x)
+
+	a := v.browser(t)
+	a.signInAs("a"+v.user, "right")
+	if _, page := a.page(); !strings.Contains(page, "/ui/change-requests/"+bg1+"#cr-ratify") || !strings.Contains(page, "/ui/change-requests/"+bg2+"#cr-revert") {
+		t.Error("the banner offers the approver no ratify and revert")
+	}
+	_, page := a.do("GET", "/ui/change-requests/"+bg1, nil, "HX-Request", "")
+	if !strings.Contains(page, `id="cr-ratify"`) || !strings.Contains(page, `id="cr-revert"`) {
+		t.Fatal("the approver's page: ratify and revert")
+	}
+	if resp, _ := a.do("POST", "/ui/change-requests/"+bg1+"/ratify", url.Values{"side": {"TARGET"}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("ratify without a comment: %d", resp.StatusCode)
+	}
+	if resp, frag := a.do("POST", "/ui/change-requests/"+bg1+"/ratify", url.Values{"side": {"TARGET"}, "comment": {"confirmed with the on-call"}}); resp.StatusCode != 200 ||
+		!strings.Contains(frag, "ratified by a"+v.user) || strings.Contains(frag, `id="cr-ratify"`) || strings.Contains(frag, `id="cr-revert"`) {
+		t.Errorf("ratify: %d %s", resp.StatusCode, frag)
+	}
+	if resp, body := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != http.StatusConflict || !strings.Contains(body, "revert it again") {
+		t.Errorf("revert while provisioning: %d %s", resp.StatusCode, body)
+	}
+	if _, err := v.owner.Exec(ctx, "UPDATE bindings SET phase = 'ACTIVE' WHERE name = $1", "bg2-"+x); err != nil { // provisioned
+		t.Fatal(err)
+	}
+	if resp, frag := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != 200 || strings.Contains(frag, `id="cr-revert"`) {
+		t.Errorf("revert: %d %s", resp.StatusCode, frag)
+	}
+	var reverts int
+	if err := v.owner.QueryRow(ctx, "SELECT count(*) FROM change_requests WHERE kind = 'SYSTEM_REVERT' AND status = 'APPLIED' AND reverts_cr_id = $1", bg2).Scan(&reverts); err != nil || reverts != 1 {
+		t.Errorf("%d reverts of %s: %v", reverts, bg2, err)
 	}
 }

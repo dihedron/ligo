@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="19 14 174 122" width="174" height="122">
+  <!-- The ligo symbol of ligo-light.svg and ligo-dark.svg, without the wordmark and on a transparent background:
+       the gaps where one link passes over the other, and the hole in the diamond, are masks instead of strokes
+       in the background color, so the symbol works on any background (light and dark modes alike). -->
+  <defs>
+    <linearGradient id="l1-cyan" gradientUnits="userSpaceOnUse" x1="31" y1="26.5" x2="143" y2="123.5">
+      <stop offset="0%" stop-color="#06C8E0"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <linearGradient id="l1-indigo" gradientUnits="userSpaceOnUse" x1="68.33" y1="26.5" x2="180.33" y2="123.5">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#3730A3"/>
+    </linearGradient>
+    <linearGradient id="l1-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <path id="left-link" d="M 129 50.75 L 115 26.5 L 59 26.5 L 31 75 L 59 123.5 L 115 123.5 L 129 99.25"/>
+    <path id="right-link" d="M 82.33 50.75 L 96.33 26.5 L 152.33 26.5 L 180.33 75 L 152.33 123.5 L 96.33 123.5 L 82.33 99.25"/>
+    <clipPath id="top-in"><rect x="77.67" y="0" width="56" height="70"/></clipPath>
+    <clipPath id="top-out"><rect x="72.07" y="0" width="67.2" height="70"/></clipPath>
+    <clipPath id="bot-in"><rect x="77.67" y="80" width="56" height="70"/></clipPath>
+    <clipPath id="bot-out"><rect x="72.07" y="80" width="67.2" height="70"/></clipPath>
+    <!-- Top: the left link passes over the right one, which gets a gap there -->
+    <mask id="gap-top" maskUnits="userSpaceOnUse" x="0" y="0" width="220" height="150">
+      <rect x="0" y="0" width="220" height="150" fill="#fff"/>
+      <use href="#left-link" fill="none" stroke="#000" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" clip-path="url(#top-in)"/>
+    </mask>
+    <!-- Bottom: the right link passes over the left one -->
+    <mask id="gap-bot" maskUnits="userSpaceOnUse" x="0" y="0" width="220" height="150">
+      <rect x="0" y="0" width="220" height="150" fill="#fff"/>
+      <use href="#right-link" fill="none" stroke="#000" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" clip-path="url(#bot-in)"/>
+    </mask>
+    <mask id="seal" maskUnits="userSpaceOnUse" x="0" y="0" width="220" height="150">
+      <rect x="0" y="0" width="220" height="150" fill="#fff"/>
+      <circle cx="105.67" cy="75" r="4.5" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="none" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left link (source SVID) -->
+    <use href="#left-link" stroke="url(#l1-cyan)" mask="url(#gap-bot)"/>
+    <!-- Right link (target resource) -->
+    <use href="#right-link" stroke="url(#l1-indigo)" mask="url(#gap-top)"/>
+    <use href="#left-link" stroke="url(#l1-cyan)" clip-path="url(#top-out)"/>
+    <use href="#right-link" stroke="url(#l1-indigo)" clip-path="url(#bot-out)"/>
+  </g>
+  <!-- Central sealed secret diamond -->
+  <polygon points="105.67,55 125.67,75 105.67,95 85.67,75" fill="url(#l1-gold)" mask="url(#seal)"/>
+</svg>

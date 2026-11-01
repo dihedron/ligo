@@ -646,6 +646,7 @@ CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision
 CREATE TABLE admin_sessions (
     token_sha256       CHAR(64) PRIMARY KEY,
     username           VARCHAR(255) NOT NULL,
+    display_name       VARCHAR(255),            -- the directory's displayName or cn, shown in the UI's user menu
     roles              JSONB NOT NULL,          -- [{"role":"operator","scopes":["dc/corp-prod"]}, ...]
     csrf_token         CHAR(64) NOT NULL,       -- 32 random bytes, hex
     client_ip          INET,
