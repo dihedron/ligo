@@ -68,7 +68,7 @@ test/lab/lab.sh cli ligo-ops get binding echo-bound-svid                        
 1. Open `https://10.252.0.20:9443/ui/login` and accept the certificate warning.
 2. Sign in as `carol` (password in `test/lab/.state/passwords/ldap-carol`).
 3. **Sources → Register a source**: name `echo-bound-src`, trust domain `prod.lab`, SVID regex `^spiffe://prod\.lab/ns/echo/sa/bound$`, sample `spiffe://prod.lab/ns/echo/sa/bound`. The tester shows the scope `dc/corp-prod` and the match. Submit: the page shows the pending change request.
-4. **Catalog → `echo-svid-target` → Request access**: level `echo`, source `echo-bound-src`, Review (name `echo-bound-svid`; the governance outcome lists the sides), Submit. The page shows the binding's change request, `PENDING`.
+4. **Catalog → `echo-svid-target` → Request access**: level `echo`, source `echo-bound-src`, Review (set the name to `echo-bound-svid`: the wizard proposes `echo-bound-src-echo-svid-target`; the governance outcome lists the sides), Submit. The page shows the binding's change request, `PENDING`.
 5. Sign out, sign in as `dave` (password in `test/lab/.state/passwords/ldap-dave`).
 6. **Bindings**: "Awaiting my decision" lists both requests. Open the source's, **Approve**; then the binding's, **Approve** (approving the binding first answers that it depends on the source).
 7. Open **Bindings → `echo-bound-svid`**: the status row follows the provisioning until `ACTIVE`.
