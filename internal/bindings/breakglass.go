@@ -10,6 +10,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 )
@@ -203,6 +204,7 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 	if err != nil {
 		return nil, err
 	}
+	left := -1 // the BREAK_GLASS sides still unratified once this commits
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		var name string
 		var open *uuid.UUID
@@ -222,7 +224,6 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 		if int(tag.RowsAffected()) != len(names) {
 			return refuse(409, "break-glass-not-open", "a side was ratified concurrently")
 		}
-		var left int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM change_request_sides
 			WHERE change_request_id = $1 AND basis = 'BREAK_GLASS' AND ratified_by IS NULL`, id).Scan(&left); err != nil {
 			return err
@@ -269,6 +270,9 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 	})
 	if err != nil {
 		return nil, err
+	}
+	if left == 0 {
+		metrics.BreakGlass.WithLabelValues(r.Zone, r.Operation, "ratified").Inc()
 	}
 	return s.Requests.Get(ctx, c, id)
 }

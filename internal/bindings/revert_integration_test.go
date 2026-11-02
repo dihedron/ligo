@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -248,6 +249,7 @@ func TestAC38c(t *testing.T) {
 	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil {
 		t.Fatal(err)
 	}
+	overdue := metrics.Total(metrics.BreakGlass)
 	for range 2 {
 		if err := s.RevertExpired(ctx); err != nil {
 			t.Fatal(err)
@@ -255,6 +257,9 @@ func TestAC38c(t *testing.T) {
 		if err := s.OverdueReviews(ctx); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if metrics.Total(metrics.BreakGlass) < overdue+1 { // once, though checked twice; other tests' changes may be overdue too
+		t.Error("ligo_break_glass_total{outcome=review_overdue} not counted")
 	}
 	if _, n := revertOf(t, o, bg.ID); n != 0 {
 		t.Errorf("%d reverts", n)

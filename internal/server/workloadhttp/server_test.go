@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/spiffetest"
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -140,6 +141,12 @@ func TestAuthentication(t *testing.T) {
 	v.s.Listener.RateLimit.Burst = 100
 	now := time.Now()
 	good := v.token(t, claims(worker, audience, now, now.Add(5*time.Minute)))
+	counted := map[[2]string]float64{}
+	for _, m := range []string{"none", "x509_svid", "jwt_svid"} {
+		for _, r := range []string{"ok", "unauthenticated"} {
+			counted[[2]string{m, r}] = metrics.Count(metrics.WorkloadRequests, m, r)
+		}
+	}
 	for _, c := range []struct {
 		name   string
 		client *http.Client
@@ -166,6 +173,15 @@ func TestAuthentication(t *testing.T) {
 		code, body := v.get(t, c.client, c.token)
 		if code != c.code || (c.caller != "" && body != c.caller) {
 			t.Errorf("%s: %d %q, want %d %q", c.name, code, body, c.code, c.caller)
+		}
+	}
+	// counted by the mode tried and the outcome (§10.1)
+	for _, c := range []struct {
+		mode, result string
+		want         float64
+	}{{"none", "unauthenticated", 2}, {"x509_svid", "ok", 2}, {"x509_svid", "unauthenticated", 2}, {"jwt_svid", "ok", 2}, {"jwt_svid", "unauthenticated", 6}} {
+		if got := metrics.Count(metrics.WorkloadRequests, c.mode, c.result) - counted[[2]string{c.mode, c.result}]; got != c.want {
+			t.Errorf("ligo_workload_requests_total{auth_mode=%s,result=%s} %v, want %v", c.mode, c.result, got, c.want)
 		}
 	}
 }

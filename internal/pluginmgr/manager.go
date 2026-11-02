@@ -14,6 +14,7 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/outputvalidation"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -434,6 +435,7 @@ func (m *Manager) supervise(p *process) {
 		p.client = c
 		p.mu.Unlock()
 		backoff = m.opts.Backoff.Initial
+		metrics.PluginRestarts.WithLabelValues(p.spec.Type, p.spec.Zone.Name).Inc()
 		m.log.Info("plugin process restarted", "plugin", p.spec.Type, "zone", p.spec.Zone.Name)
 	}
 }
@@ -494,7 +496,7 @@ func (m *Manager) Call(ctx context.Context, kind pluginv1.PluginKind, instance s
 	if c == nil {
 		return errUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
+	ctx, cancel := context.WithTimeout(context.WithValue(ctx, calledKey{}, called{p.spec.Type, instance}), m.opts.RPCTimeout)
 	defer cancel()
 	err := fn(ctx, c)
 	if status.Code(err) == codes.Unavailable {

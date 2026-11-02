@@ -10,6 +10,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -68,7 +69,13 @@ func (s *Service) Expire(ctx context.Context) error {
 	}
 	var errs []error
 	for _, id := range ids {
-		if err := s.expire(ctx, id); err != nil {
+		err := s.expire(ctx, id)
+		switch {
+		case err == nil:
+			metrics.BindingExpirations.WithLabelValues("revoked").Inc()
+		case changerequests.IsBusy(err): // revoked at a later run, already unserved
+			metrics.BindingExpirations.WithLabelValues("deferred").Inc()
+		default:
 			errs = append(errs, fmt.Errorf("binding %s: %w", id, err))
 		}
 	}

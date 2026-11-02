@@ -27,6 +27,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -234,6 +235,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context) (bool, error) {
 		}
 		if _, err := d.DB.Exec(ctx, q, args...); err != nil {
 			errs = append(errs, err)
+		} else if derr != nil && x.old {
+			metrics.NotificationsAbandoned.WithLabelValues(x.webhook).Inc()
 		}
 	}
 	if _, err := d.DB.Exec(ctx, `DELETE FROM notification_outbox

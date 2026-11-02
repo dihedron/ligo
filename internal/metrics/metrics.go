@@ -1,13 +1,14 @@
 // Package metrics declares ligo's Prometheus metrics, under the normative
 // names of §10.1, in one registry served on the metrics listener. Events
 // are counted where they happen, through the variables here; state is
-// read from the database at each scrape (DB). No metric carries a scope
+// read from the database at each scrape (package gauges). No metric carries a scope
 // label: the number of scopes is unbounded (§10.1).
 package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // Registry holds every ligo metric, and the Go runtime's.
@@ -57,4 +58,28 @@ func init() {
 		WorkflowDuration, StepDuration, PluginRPCs, WorkloadRequests, PropagationStarted, PropagationFailed, BindingExpirations,
 		RegexNarrowingChecks, InterconnectDenied, PluginRestarts, BreakGlass, NotificationsAbandoned, DelegatedApprovals, BundleConflicts,
 		InterconnectViolations, PrivilegeBoundViolations, AuditChainValid)
+}
+
+// Count is a counter's current value, for tests: they compare it before and
+// after the event they cause.
+func Count(vec *prometheus.CounterVec, labels ...string) float64 {
+	var m dto.Metric
+	if err := vec.WithLabelValues(labels...).Write(&m); err != nil {
+		return -1
+	}
+	return m.GetCounter().GetValue()
+}
+
+// Total is the sum of a counter's series, for tests.
+func Total(vec *prometheus.CounterVec) float64 {
+	ch := make(chan prometheus.Metric, 64)
+	go func() { vec.Collect(ch); close(ch) }()
+	sum := 0.0
+	for m := range ch {
+		var d dto.Metric
+		if m.Write(&d) == nil {
+			sum += d.GetCounter().GetValue()
+		}
+	}
+	return sum
 }

@@ -1,4 +1,7 @@
-package metrics
+// Package gauges collects the metrics of the database's state at each
+// scrape (§10.1), apart from internal/metrics so that the packages it reads
+// can count their events there.
+package gauges
 
 import (
 	"context"

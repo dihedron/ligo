@@ -12,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -177,9 +178,13 @@ func TestNarrowingPropagates(t *testing.T) {
 	if _, err := s.Update(ctx, alice, src.Metadata.Name, body(t, narrow, map[string]any{"expectedRevision": 2})); slug(err) != "revision-conflict" {
 		t.Errorf("stale revision: %v", err)
 	}
+	narrowed := metrics.Count(metrics.RegexNarrowingChecks, "narrowing")
 	r, err := s.Update(ctx, alice, src.Metadata.Name, body(t, narrow, map[string]any{"expectedRevision": 1}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Count(metrics.RegexNarrowingChecks, "narrowing") != narrowed+1 {
+		t.Error("ligo_regex_narrowing_checks_total{result=narrowing} not counted")
 	}
 	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
 		t.Fatal(err)

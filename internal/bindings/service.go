@@ -16,6 +16,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -412,6 +413,7 @@ func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Bindin
 	if err != nil {
 		return err
 	}
+	metrics.InterconnectDenied.WithLabelValues(res.decision.Rule).Inc()
 	return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceScope, res.targetScope, res.decision.Rule)
 }
 

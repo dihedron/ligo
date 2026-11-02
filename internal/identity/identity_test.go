@@ -54,9 +54,26 @@ func TestRoute(t *testing.T) {
 		// the test zone's agent also carries a cloud.internal bundle, which is not authoritative
 		"test": zoneBundles{x509bundle.NewSet(x509bundle.FromX509Authorities(td("cloud.internal"), []*x509.Certificate{rogueCA})), jwtbundle.NewSet()},
 	}
-	z := &Zones{authority: map[spiffeid.TrustDomain]bundles{}}
+	z := &Zones{authority: map[spiffeid.TrustDomain]bundles{}, via: map[spiffeid.TrustDomain]string{}}
 	if err := z.route(cfg, func(name string) bundles { return byZone[name] }); err != nil {
 		t.Fatal(err)
+	}
+	// the conflicts each socket's bundles show (T-24): the test agent's cloud.internal, and any unknown trust domain
+	for zone, tc := range map[string]struct{ published, want []string }{
+		"test": {[]string{"test.internal", "cloud.internal"}, []string{"cloud.internal"}},
+		"prod": {[]string{"prod.internal", "cloud.internal", "evil.example"}, []string{"evil.example"}},
+	} {
+		var published []spiffeid.TrustDomain
+		for _, s := range tc.published {
+			published = append(published, td(s))
+		}
+		var got []string
+		for _, c := range z.conflicts(zone, published) {
+			got = append(got, c.String())
+		}
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("conflicts of %s: %v, want %v", zone, got, tc.want)
+		}
 	}
 	for name, want := range map[string]*x509.Certificate{"prod.internal": prodCA, "cloud.internal": cloudCA} {
 		b, err := z.GetX509BundleForTrustDomain(td(name))

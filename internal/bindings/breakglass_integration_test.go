@@ -11,6 +11,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -191,8 +192,12 @@ func TestAC33(t *testing.T) {
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", ""); slug(err) != "validation-failed" {
 		t.Errorf("no comment: %v", err)
 	}
+	ratified := metrics.Total(metrics.BreakGlass)
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", "confirmed with the payments lead"); err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Total(metrics.BreakGlass) != ratified+1 {
+		t.Error("ligo_break_glass_total{outcome=ratified} not counted")
 	}
 	if cr, _ := breakGlassOf(t, o, name); cr != nil {
 		t.Errorf("still open: %v", cr)

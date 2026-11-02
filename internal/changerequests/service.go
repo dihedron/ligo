@@ -15,6 +15,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -438,6 +439,11 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 	}
 	for _, it := range items {
 		applied(ctx, it.res, it.r)
+		for _, sd := range it.r.Sides {
+			if sd.Basis == BasisDelegated && sd.Decision == Approved {
+				metrics.DelegatedApprovals.WithLabelValues(it.r.RequestedBy, it.r.Zone, it.r.Operation).Inc()
+			}
+		}
 	}
 	return applyErr
 }

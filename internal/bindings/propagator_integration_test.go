@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -86,8 +87,12 @@ func TestAC61(t *testing.T) {
 	if p := propagation(t, o, name); !p.queued {
 		t.Fatal("not queued") // INV-26: queued until re-applied
 	}
+	begun := metrics.Total(metrics.PropagationStarted)
 	if _, err := (&Propagator{Service: s, MaxConcurrent: 100}).Propagate(ctx); err != nil {
 		t.Log(err) // rows of other packages' tests
+	}
+	if metrics.Total(metrics.PropagationStarted) < begun+1 {
+		t.Error("ligo_propagation_started_total not counted")
 	}
 	p := propagation(t, o, name)
 	var id uuid.UUID

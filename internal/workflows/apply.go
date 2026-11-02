@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"uuid"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -96,7 +97,12 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 	}); err != nil {
 		return fail("markStage:IDENTITY:STARTED", err)
 	}
-	idOut, err := dbos.RunAsStep(ctx, func(c context.Context) (identityOutput, error) { return e.ensureIdentity(c, in) },
+	idOut, err := dbos.RunAsStep(ctx, func(c context.Context) (identityOutput, error) {
+		start := time.Now()
+		out, err := e.ensureIdentity(c, in)
+		timed("IDENTITY", w.IdentityType, start, err)
+		return out, err
+	},
 		dbos.WithStepName("ensureIdentity"))
 	if err != nil {
 		return fail("ensureIdentity", err)
@@ -113,7 +119,12 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 	}); err != nil {
 		return fail("markStage:TARGET:STARTED", err)
 	}
-	tgtOut, err := dbos.RunAsStep(ctx, func(c context.Context) (targetOutput, error) { return e.ensureTarget(c, in, idOut) },
+	tgtOut, err := dbos.RunAsStep(ctx, func(c context.Context) (targetOutput, error) {
+		start := time.Now()
+		out, err := e.ensureTarget(c, in, idOut)
+		timed("TARGET", w.PlatformType, start, err)
+		return out, err
+	},
 		dbos.WithStepName("ensureTarget"))
 	if err != nil {
 		return fail("ensureTarget", err)
@@ -131,7 +142,12 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 	}); err != nil {
 		return fail("markStage:SECRET_STORE:STARTED", err)
 	}
-	stOut, err := dbos.RunAsStep(ctx, func(c context.Context) (storeOutput, error) { return e.ensureSecretStore(c, in, idOut, tgtOut) },
+	stOut, err := dbos.RunAsStep(ctx, func(c context.Context) (storeOutput, error) {
+		start := time.Now()
+		out, err := e.ensureSecretStore(c, in, idOut, tgtOut)
+		timed("SECRET_STORE", w.StoreType, start, err)
+		return out, err
+	},
 		dbos.WithStepName("ensureSecretStore"))
 	if err != nil {
 		return fail("ensureSecretStore", err)
@@ -373,7 +389,13 @@ func (e *Engine) finalize(ctx context.Context, f fence, in ApplyInput, id identi
 	}
 	mode := identity.GetMode()
 	rotated := in.Rotate && (mode == pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR || mode == pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
-	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+	var rv *reverted
+	var start time.Time
+	if err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		var err error
+		if start, err = attemptStarted(ctx, tx, f); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `UPDATE bindings SET phase = 'ACTIVE', current_step = 'COMPLETED', status_message = '',
 			active_revision = revision, active_source_svid_regex = source_svid_regex, active_auth_config = $3::jsonb, active_spec = $4::jsonb,
 			active_since = now(), rotate_static_secrets = false, last_rotated_at = CASE WHEN $5 THEN now() ELSE last_rotated_at END,
@@ -390,6 +412,12 @@ func (e *Engine) finalize(ctx context.Context, f fence, in ApplyInput, id identi
 			Action: "PROVISION_SUCCESS", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap}); err != nil {
 			return err
 		}
-		return revertOutcome(ctx, tx, f, in, true)
-	})
+		rv, err = revertOutcome(ctx, tx, f, in, true)
+		return err
+	}); err != nil {
+		return err
+	}
+	rv.count()
+	finished(in.Operation, "success", start)
+	return nil
 }

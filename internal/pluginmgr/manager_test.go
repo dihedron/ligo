@@ -17,6 +17,7 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -175,6 +176,7 @@ func TestManagerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
+	restarts, rpcs := metrics.Total(metrics.PluginRestarts), metrics.Count(metrics.PluginRPCs, "test.v1", "crash", "Describe", "OK")
 	_, err = health(ctx, m, "crash")
 	if code, d := pluginsdk.FromError(err); code != codes.Unavailable || !d.GetRetryable() || d.GetCode() != "PLUGIN_UNAVAILABLE" {
 		t.Fatalf("in-flight RPC: %v (%v %+v)", err, code, d)
@@ -195,6 +197,12 @@ func TestManagerRestart(t *testing.T) {
 	}
 	if m.Resolved(target, "crash") != "spiffe://prod.lab/plugin/crash" {
 		t.Error("not reconfigured after the restart")
+	}
+	if metrics.Total(metrics.PluginRestarts) < restarts+1 {
+		t.Error("ligo_plugin_process_restarts_total not counted")
+	}
+	if metrics.Count(metrics.PluginRPCs, "test.v1", "crash", "Describe", "OK") != rpcs+1 { // through Call, after the restart
+		t.Error("ligo_plugin_rpc_total not counted")
 	}
 }
 

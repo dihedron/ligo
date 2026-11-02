@@ -30,6 +30,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/ratelimit"
@@ -250,6 +251,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 	run(dispatcher.Run)
 	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, time.Hour) })
+	run(func(ctx context.Context) { zones.WatchConflicts(ctx, log, time.Minute) })
 
 	// the metrics: the process-wide ones, and this run's database and cache
 	// gauges in a registry of its own (§10.1)
@@ -259,13 +261,13 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			overdue[p] = t + cfg.Reconciliation.Interval + cfg.Reconciliation.Jitter
 		}
 	}
-	gauges := prometheus.NewRegistry()
-	gauges.MustRegister(&metrics.DB{Pool: pools.App, Logger: log, Rotation: overdue, Timeout: 10 * time.Second},
+	scraped := prometheus.NewRegistry()
+	scraped.MustRegister(&gauges.DB{Pool: pools.App, Logger: log, Rotation: overdue, Timeout: 10 * time.Second},
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "ligo_resolution_cache_age_seconds", Help: "Time since the resolution cache's last full load."},
 			func() float64 { return cache.Age().Seconds() }),
 		prometheus.NewCounterFunc(prometheus.CounterOpts{Name: "ligo_resolution_invalid_regex_total", Help: "Bindings left out of the resolution cache for an invalid regex."},
 			func() float64 { return float64(cache.InvalidRegexes()) }))
-	exposed := promhttp.HandlerFor(prometheus.Gatherers{metrics.Registry, gauges}, promhttp.HandlerOpts{ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)})
+	exposed := promhttp.HandlerFor(prometheus.Gatherers{metrics.Registry, scraped}, promhttp.HandlerOpts{ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)})
 
 	// 9. the workload, admin and metrics listeners
 	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}

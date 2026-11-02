@@ -8,14 +8,17 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"path"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/builtinplugins"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -60,6 +63,7 @@ func Start(cmd *exec.Cmd, kind pluginv1.PluginKind, checksum []byte, logger hclo
 		SyncStderr:       stdio,
 		SecureConfig:     &plugin.SecureConfig{Checksum: checksum, Hash: sha256.New()},
 		Logger:           logger,
+		GRPCDialOptions:  []grpc.DialOption{grpc.WithChainUnaryInterceptor(countRPC)},
 	})
 	c := &Client{process: process}
 	rpc, err := process.Client()
@@ -99,6 +103,23 @@ func (c *Client) Kill() {
 	}
 }
 
+// called is what Manager.Call puts in the context of its RPCs, for
+// ligo_plugin_rpc_total: the provider type and the instance served.
+type called struct{ typ, instance string }
+
+type calledKey struct{}
+
+// countRPC counts the RPCs made through Manager.Call by provider type,
+// instance, method and gRPC code (§10.1); the manager's own (Describe,
+// ConfigureInstances, Health at startup) are not.
+func countRPC(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	err := invoker(ctx, method, req, reply, cc, opts...)
+	if c, ok := ctx.Value(calledKey{}).(called); ok {
+		metrics.PluginRPCs.WithLabelValues(c.typ, c.instance, path.Base(method), status.Code(err).String()).Inc()
+	}
+	return err
+}
+
 // exited tells whether a plugin process has exited; a builtin never does.
 func (c *Client) exited() bool { return c.process != nil && c.process.Exited() }
 
@@ -117,7 +138,8 @@ func startBuiltin(typ string, kind pluginv1.PluginKind) (*Client, error) {
 	go func() { _ = srv.Serve(lis) }()
 	conn, err := grpc.NewClient("passthrough:///"+typ,
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
-		grpc.WithTransportCredentials(insecure.NewCredentials())) // in-memory, never on a network
+		grpc.WithTransportCredentials(insecure.NewCredentials()), // in-memory, never on a network
+		grpc.WithChainUnaryInterceptor(countRPC))
 	if err != nil {
 		srv.Stop()
 		return nil, err

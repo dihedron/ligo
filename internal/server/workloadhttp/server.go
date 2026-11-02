@@ -18,6 +18,7 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -95,13 +96,16 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		rid := uuid.NewV7().String()
 		w.Header().Set("X-Request-Id", rid)
 		start := time.Now()
-		id, err := s.authenticate(r)
+		id, mode, err := s.authenticate(r)
 		switch {
 		case err != nil && isGRPC(r):
+			metrics.WorkloadRequests.WithLabelValues(mode, "unauthenticated").Inc()
 			grpcError(w, codes.Unauthenticated, "a valid X.509-SVID or JWT-SVID is required")
 		case err != nil:
+			metrics.WorkloadRequests.WithLabelValues(mode, "unauthenticated").Inc()
 			problem(w, http.StatusUnauthorized, "unauthenticated", "a valid X.509-SVID or JWT-SVID is required")
 		case !s.limits.Allow(id.String(), ratelimit.Rate{PerSecond: s.Listener.RateLimit.PerSVIDRPS, Burst: float64(max(s.Listener.RateLimit.Burst, 1))}):
+			metrics.WorkloadRequests.WithLabelValues(mode, "rate_limited").Inc()
 			if isGRPC(r) {
 				grpcError(w, codes.ResourceExhausted, "too many requests")
 				break
@@ -111,6 +115,11 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		default:
 			rec := &recorder{ResponseWriter: w, code: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(context.WithValue(context.WithValue(r.Context(), callerKey{}, id), requestIDKey{}, rid)))
+			result := "ok" // gRPC answers 200 and puts its status in the Grpc-Status trailer
+			if g := rec.Header().Get("Grpc-Status"); rec.code >= 400 || g != "" && g != "0" {
+				result = "error"
+			}
+			metrics.WorkloadRequests.WithLabelValues(mode, result).Inc()
 			s.Logger.Info("request", "request_id", rid, "caller", id.String(), "method", r.Method, "path", r.URL.Path,
 				"status", rec.code, "duration", time.Since(start))
 			return
@@ -121,25 +130,26 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 // authenticate evaluates auth_modes in order (§7.1): a verified client
 // X.509-SVID, whose identity a bearer token, if any, must repeat; else a
-// JWT-SVID.
-func (s *Server) authenticate(r *http.Request) (spiffeid.ID, error) {
+// JWT-SVID. The mode is the one tried, "none" for a request with neither.
+func (s *Server) authenticate(r *http.Request) (spiffeid.ID, string, error) {
 	token, bearer := bearerToken(r)
 	if slices.Contains(s.Listener.AuthModes, config.AuthX509SVID) && r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		id, err := identity.PeerID(r.TLS, s.Listener.AcceptedTrustDomains)
 		if err != nil {
-			return spiffeid.ID{}, errUnauthenticated
+			return spiffeid.ID{}, config.AuthX509SVID, errUnauthenticated
 		}
 		if bearer {
 			if sub, err := s.jwt(token); err != nil || sub != id {
-				return spiffeid.ID{}, errUnauthenticated
+				return spiffeid.ID{}, config.AuthX509SVID, errUnauthenticated
 			}
 		}
-		return id, nil
+		return id, config.AuthX509SVID, nil
 	}
 	if slices.Contains(s.Listener.AuthModes, config.AuthJWTSVID) && bearer {
-		return s.jwt(token)
+		id, err := s.jwt(token)
+		return id, config.AuthJWTSVID, err
 	}
-	return spiffeid.ID{}, errUnauthenticated
+	return spiffeid.ID{}, "none", errUnauthenticated
 }
 
 // jwt validates a JWT-SVID: signature and expiry against the zones'

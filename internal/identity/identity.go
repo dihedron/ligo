@@ -7,8 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -27,8 +30,10 @@ type bundles interface {
 // Zones holds the zones' Workload API connections.
 type Zones struct {
 	clients   []*workloadapi.Client
+	names     []string // the zone of each client
 	sources   []*workloadapi.BundleSource
 	authority map[spiffeid.TrustDomain]bundles // the one source of each trust domain
+	via       map[spiffeid.TrustDomain]string  // the zone of that source
 	core      *workloadapi.X509Source
 	coreZone  *workloadapi.Client
 }
@@ -37,7 +42,7 @@ type Zones struct {
 // zone's bundle stream and acquires the core identity; it fails if the
 // core identity's selector does not match exactly one SVID of its zone.
 func Open(ctx context.Context, cfg *config.Config) (_ *Zones, err error) {
-	z := &Zones{authority: map[spiffeid.TrustDomain]bundles{}}
+	z := &Zones{authority: map[spiffeid.TrustDomain]bundles{}, via: map[spiffeid.TrustDomain]string{}}
 	defer func() {
 		if err != nil {
 			_ = z.Close()
@@ -49,7 +54,7 @@ func Open(ctx context.Context, cfg *config.Config) (_ *Zones, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("identity: zone %s: %w", zone.Name, err)
 		}
-		z.clients = append(z.clients, client)
+		z.clients, z.names = append(z.clients, client), append(z.names, zone.Name)
 		src, err := workloadapi.NewBundleSource(ctx, workloadapi.WithClient(client))
 		if err != nil {
 			return nil, fmt.Errorf("identity: zone %s: bundles: %w", zone.Name, err)
@@ -97,25 +102,74 @@ func Open(ctx context.Context, cfg *config.Config) (_ *Zones, err error) {
 // route maps every trust domain to its one authoritative source: a zone's
 // own, or that of the zone a federated trust domain comes through (§7.1).
 func (z *Zones) route(cfg *config.Config, zone func(name string) bundles) error {
-	add := func(name string, src bundles) error {
+	add := func(name, via string) error {
 		td, err := spiffeid.TrustDomainFromString(name)
 		if err != nil {
 			return fmt.Errorf("identity: trust domain %q: %w", name, err)
 		}
-		z.authority[td] = src
+		z.authority[td], z.via[td] = zone(via), via
 		return nil
 	}
 	for _, zn := range cfg.Zones {
-		if err := add(zn.TrustDomain, zone(zn.Name)); err != nil {
+		if err := add(zn.TrustDomain, zn.Name); err != nil {
 			return err
 		}
 	}
 	for _, f := range cfg.Server.WorkloadListener.FederatedTrustDomains {
-		if err := add(f.TrustDomain, zone(f.ViaZone)); err != nil {
+		if err := add(f.TrustDomain, f.ViaZone); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// conflicts are the trust domains a zone's socket publishes bundles for
+// although that zone is not their authoritative source (§7.1): unknown
+// trust domains, and those of other zones or federated through another.
+func (z *Zones) conflicts(zone string, published []spiffeid.TrustDomain) []spiffeid.TrustDomain {
+	var out []spiffeid.TrustDomain
+	for _, td := range published {
+		if z.via[td] != zone {
+			out = append(out, td)
+		}
+	}
+	return out
+}
+
+// WatchConflicts asks every zone's socket for all the bundles it publishes,
+// at once and then every interval; a bundle no routing uses because another
+// source is authoritative for its trust domain is logged at WARN and
+// counted once (ligo_bundle_conflicts_total, T-24), when it first appears.
+func (z *Zones) WatchConflicts(ctx context.Context, log *slog.Logger, interval time.Duration) {
+	seen := map[string]bool{}
+	for {
+		for i, client := range z.clients {
+			set, err := client.FetchX509Bundles(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Warn("identity: bundles of a zone's socket", "zone", z.names[i], "error", err)
+				}
+				continue
+			}
+			var published []spiffeid.TrustDomain
+			for _, b := range set.Bundles() {
+				published = append(published, b.TrustDomain())
+			}
+			for _, td := range z.conflicts(z.names[i], published) {
+				if key := z.names[i] + "/" + td.String(); !seen[key] {
+					seen[key] = true
+					log.Warn("a bundle from a socket that is not its trust domain's authoritative source is discarded",
+						"trust_domain", td.String(), "socket_zone", z.names[i], "authoritative_zone", z.via[td])
+					metrics.BundleConflicts.WithLabelValues(td.String(), z.names[i]).Inc()
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 // GetX509BundleForTrustDomain implements x509bundle.Source over the zones.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 	"uuid"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -69,11 +70,12 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 
 // cleanup cleans one stage: skipped when it has no row; its row deleted,
 // fenced, once the plugin succeeded (§6.5 steps 1 to 4, INV-04).
-func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage string) error {
+func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage string) (err error) {
 	row, err := e.stageRow(ctx, in, stage)
 	if err != nil || row == nil {
 		return err
 	}
+	defer func(start time.Time) { timed(stage, row.providerType, start, err) }(time.Now())
 	if err := store.MarkStep(ctx, e.DB, f.bindingID, f.workflowID, "CLEANUP_"+stage, ""); err != nil {
 		return err
 	}
@@ -132,7 +134,13 @@ func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage stri
 // remove deletes the binding, its stage rows cascading, and audits
 // DELETE_COMPLETED in one fenced transaction (§6.5).
 func (e *Engine) remove(ctx context.Context, f fence, in ApplyInput) error {
-	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+	var rv *reverted
+	var start time.Time
+	if err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		var err error
+		if start, err = attemptStarted(ctx, tx, f); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, "DELETE FROM bindings WHERE id = $1 AND workflow_id = $2 AND phase = 'DELETING'", f.bindingID, f.workflowID)
 		if err != nil {
 			return err
@@ -144,6 +152,12 @@ func (e *Engine) remove(ctx context.Context, f fence, in ApplyInput) error {
 			Action: "DELETE_COMPLETED", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID}); err != nil {
 			return err
 		}
-		return revertOutcome(ctx, tx, f, in, true)
-	})
+		rv, err = revertOutcome(ctx, tx, f, in, true)
+		return err
+	}); err != nil {
+		return err
+	}
+	rv.count()
+	finished(in.Operation, "success", start)
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -123,6 +124,7 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		return false, err
 	}
 	started := false
+	var cause string // SOURCE or TARGET, for ligo_propagation_started_total
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		sn, err := lockSnapshot(ctx, tx, b)
 		if err != nil {
@@ -136,7 +138,6 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		} else if err != nil {
 			return err
 		}
-		var cause string
 		var causeCR uuid.UUID
 		err = tx.QueryRow(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1 RETURNING cause, cause_change_request_id",
 			id).Scan(&cause, &causeCR)
@@ -165,6 +166,9 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 	})
 	if errors.Is(err, errBusy) {
 		return false, nil
+	}
+	if err == nil && started {
+		metrics.PropagationStarted.WithLabelValues(cause).Inc()
 	}
 	return started, err
 }

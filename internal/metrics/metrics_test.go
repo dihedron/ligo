@@ -1,4 +1,4 @@
-package metrics
+package metrics_test
 
 import (
 	"os"
@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -28,8 +30,8 @@ func TestNormativeNames(t *testing.T) {
 	got := map[string]bool{"ligo_resolution_cache_age_seconds": true, "ligo_resolution_invalid_regex_total": true} // ligo serve's, per run
 	ch := make(chan *prometheus.Desc, 256)
 	go func() {
-		Registry.Describe(ch)
-		(&DB{}).Describe(ch)
+		metrics.Registry.Describe(ch)
+		(&gauges.DB{}).Describe(ch)
 		close(ch)
 	}()
 	name := regexp.MustCompile(`fqName: "([^"]+)"`)
