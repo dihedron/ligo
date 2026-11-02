@@ -46,6 +46,9 @@ type Service struct {
 	ApplicationVersion string            `yaml:"application_version"`
 	InstanceIDEnv      string            `yaml:"instance_id_env"`
 	WorkloadAdvertise  WorkloadAdvertise `yaml:"workload_advertise"`
+	// StartupTimeout bounds the wait for SPIRE and the sealer at startup:
+	// past it ligo exits, for its supervisor to restart it (§8.2).
+	StartupTimeout time.Duration `yaml:"startup_timeout"`
 }
 
 // WorkloadAdvertise is served as the "ligo" flow (ADR-16).
@@ -428,6 +431,9 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Service.StartupTimeout == 0 {
+		c.Service.StartupTimeout = time.Minute
+	}
 	if c.Plugins.RPCTimeout == 0 {
 		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6
 	}
