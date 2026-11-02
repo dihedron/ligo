@@ -373,7 +373,7 @@ paths:
     post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/revert:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now; comment (why) is required., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- governance --------------------------------------------------------------
   /v1/admin/governance:

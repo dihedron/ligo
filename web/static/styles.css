@@ -153,6 +153,10 @@ main { max-width: 80rem; margin: 0 auto; padding: 1.5rem; }
   margin-bottom: 1rem;
 }
 .card-danger { border: 2px solid var(--color-danger); }
+/* The break-glass form shows only the chosen operation's fields: the checked radio hides the rest */
+#break-glass:has([name="operation"][value="CREATE"]:checked) [data-ops]:not([data-ops~="CREATE"]),
+#break-glass:has([name="operation"][value="UPDATE"]:checked) [data-ops]:not([data-ops~="UPDATE"]),
+#break-glass:has([name="operation"][value="DELETE"]:checked) [data-ops]:not([data-ops~="DELETE"]) { display: none; }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
 dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
 dl.fields dt { color: var(--color-text-muted); }

@@ -24,9 +24,9 @@ Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, 
 | U-4 | Header and sign-in: ligo symbol, user menu | a96b117 | passed 2026-11-01 |
 | B-1 | Break-glass CREATE from the web UI, then ratified | d473d23 (9.6b) | passed 2026-11-01 (F-4, F-5, F-6) |
 | B-2 | Break-glass CREATE reverted from the dashboard banner | d473d23 (9.6b) | passed 2026-11-01 (F-7, F-8, F-9) |
-| B-3 | Break-glass refusals in the form | d473d23 (9.6b) | failed 2026-11-01 (F-10, F-11, F-12): retest R-3, R-4 |
-| B-4 | Emergency revoke (DELETE), then ratified | d473d23 (9.6b) | open (blocked by F-12) |
-| C-1 | `ligo cr review` on a real terminal | phase 7 (34abf50) | open |
+| B-3 | Break-glass refusals in the form | d473d23 (9.6b) | failed 2026-11-01 (F-10, F-11, F-12); passed 2026-11-01 after the fixes (R-3, R-4) |
+| B-4 | Emergency revoke (DELETE), then ratified | d473d23 (9.6b) | passed 2026-11-02 (overdue review raised once, after a power cut) |
+| C-1 | `ligo cr review` on a real terminal | phase 7 (34abf50) | passed 2026-11-02 (through `lab.sh cli`) |
 
 ## Findings of 2026-11-01 (fixed in 4b7adb2 on feature/ui; F-1 on feature/echo)
 
@@ -44,15 +44,29 @@ Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, 
 | F-11 | The pair check ran before the emergency fields | Emergency fields first, all together |
 | F-12 | Reverted changes and inline sources counted against `max_open` | Only open changes count, inline sources with their binding |
 
+Also seen on 2026-11-01/02: an unratified break-glass CREATE reverted by the sweeper at expiry, its inline source retired (INV-16, `echo-bg-x`).
+
+## Findings of 2026-11-01/02 (fixed on feature/ui after 4b7adb2, except F-16)
+
+| ID | Finding | Decision |
+|----|---------|----------|
+| F-13 | The break-glass form shows every operation's fields; an UPDATE was sent as a CREATE by mistake | Only the chosen operation's fields are shown (CSS `:has()`, no request), and the button names it ("Revoke the binding now") |
+| F-14 | The ratify comment looks like it belongs to Revert, which takes none | Revert requires a comment, stored and audited with the revert (`/revert` body `{"comment"}`, 422 without); the sweeper's reverts say "TTL expired" |
+| F-15 | A sealed OpenBao makes ligo restart every 5s, each start auditing CONFIG_LOADED (15 in 90s) | SPIRE and the sealer are checked before CONFIG_LOADED (§8.2 step 2); the lab unit backs off from 5s to 5min |
+| F-16 | Seen while fixing F-15: at startup, ligo waits without a deadline for an unreachable SPIRE agent socket, neither failing nor serving | open: to decide (a startup deadline, then exit for the supervisor to retry) |
+
 ## Retests (after the fixes)
 
 | ID | Retest | Status |
 |----|--------|--------|
-| R-1 | F-4: livia lands on Break glass after signing in; after a change, back on the form with a green confirmation | open |
-| R-2 | F-5, F-2, F-8, F-7: "All my sides" ratifies both sides at once; banner buttons outlined; a revert shows `REVERTED` | open |
-| R-3 | F-10, F-11: a short justification and a TTL of `1m` together: both fields marked, the pair never mentioned; a wrong password marks the password field | open |
-| R-4 | F-12, B-3 attempt 4: an emergency UPDATE of `echo-bg-svid` goes through, a second gives `break-glass-open` | open |
-| R-5 | F-9: after a manual revert of a binding with an inline source, the source's retirement names the reverter | open |
+| R-1 | F-4: livia lands on Break glass after signing in; after a change, back on the form with a green confirmation | passed 2026-11-01 |
+| R-2 | F-5, F-2, F-8, F-7: "All my sides" ratifies both sides at once; banner buttons outlined; a revert shows `REVERTED` | passed 2026-11-01 |
+| R-3 | F-10, F-11: a short justification and a TTL of `1m` together: both fields marked, the pair never mentioned; a wrong password marks the password field | passed 2026-11-01 |
+| R-4 | F-12, B-3 attempt 4: an emergency UPDATE of `echo-bg-svid` goes through, a second gives `break-glass-open` | passed 2026-11-01 |
+| R-5 | F-9: after a manual revert of a binding with an inline source, the source's retirement names the reverter | passed 2026-11-01 |
+| R-6 | F-13: switching the operation shows only its fields; the button says "Create/Update/Revoke the binding now" | open |
+| R-7 | F-14: Revert sits in its own card and needs a reason; the `REVERTED` line shows it in quotes; `ligo cr revert` needs `-m` | open |
+| R-8 | F-15: with OpenBao sealed, restarting ligo audits no CONFIG_LOADED, and the restarts slow down | open (run on the lab before the PR) |
 
 ### E-1, E-2: the echo guide
 

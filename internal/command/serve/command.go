@@ -110,7 +110,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	audit.Hook = (&notify.Outbox{Webhooks: cfg.Notifications.Webhooks}).Audited
 	defer func() { audit.Hook = nil }()
 
-	// 2. database, and the checks that need it
+	// the database's settings, checked before anything waits on a dependency
 	pg := cfg.Storage.Postgres
 	appDSN, err := env("storage.postgres.app_dsn_env", pg.AppDSNEnv)
 	if err != nil {
@@ -124,6 +124,22 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	// 3. SPIRE: every zone, the composite bundle source, the core identity,
+	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
+	// dependency (a sealed OpenBao) fails startup with nothing audited, so a
+	// restart loop cannot flood the audit log (§8.2)
+	zones, err := identity.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = zones.Close() }()
+	sealer, err := cmd.sealer(ctx, cfg, zones)
+	if err != nil {
+		return err
+	}
+
+	// 2. database, and the checks that need it
 	pools, err := store.Open(ctx, appDSN, readerDSN, cmd.insecureDB)
 	if err != nil {
 		return err
@@ -143,19 +159,6 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			return err
 		}
 		log.Warn("maintenance mode is on")
-	}
-
-	// 3. SPIRE: every zone, the composite bundle source, the core identity
-	zones, err := identity.Open(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = zones.Close() }()
-
-	// 4. the sealer
-	sealer, err := cmd.sealer(ctx, cfg, zones)
-	if err != nil {
-		return err
 	}
 
 	// 5. the plugins, and the checks that need them

@@ -155,6 +155,7 @@ type Side struct {
 	Decision         string // "", APPROVED, DECLINED
 	DecidedBy        string
 	DecidedAt        *time.Time
+	Comment          string // the decision's comment
 	RatifiedBy       string // BREAK_GLASS sides (ADR-12)
 	RatifiedAt       *time.Time
 	RatificationNote string

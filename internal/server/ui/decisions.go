@@ -28,9 +28,9 @@ type Decision struct {
 
 // Revert is the applied SYSTEM_REVERT of a break-glass change.
 type Revert struct {
-	ID uuid.UUID
-	By string
-	At time.Time
+	ID          uuid.UUID
+	By, Comment string
+	At          time.Time
 }
 
 // decision builds the fragment's data for the session's user.
@@ -44,8 +44,10 @@ func (s *Server) decision(r *http.Request, cr *changerequests.Request) Decision 
 	if cr.Kind == changerequests.KindBreakGlass && cr.Status == "APPLIED" {
 		s.breakGlassControls(r, cr, &d)
 		var v Revert
-		if err := s.DB.QueryRow(r.Context(), `SELECT id, requested_by, requested_at FROM change_requests
-			WHERE reverts_cr_id = $1 AND status = 'APPLIED' ORDER BY requested_at DESC LIMIT 1`, cr.ID).Scan(&v.ID, &v.By, &v.At); err == nil {
+		if err := s.DB.QueryRow(r.Context(), `SELECT r.id, r.requested_by, r.requested_at,
+			coalesce((SELECT decision_comment FROM change_request_sides WHERE change_request_id = r.id LIMIT 1), '')
+			FROM change_requests r WHERE r.reverts_cr_id = $1 AND r.status = 'APPLIED' ORDER BY r.requested_at DESC LIMIT 1`, cr.ID).
+			Scan(&v.ID, &v.By, &v.At, &v.Comment); err == nil {
 			d.Reverted = &v
 		}
 	}
@@ -109,7 +111,11 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		cr, err = s.Bindings.Ratify(ctx, c, id, side, comment)
 	case "revert":
-		if _, err = s.Bindings.RevertNow(ctx, c, id); err == nil {
+		if comment == "" {
+			s.alert(w, r, http.StatusUnprocessableEntity, "Say why you revert the change.")
+			return
+		}
+		if _, err = s.Bindings.RevertNow(ctx, c, id, comment); err == nil {
 			cr, err = s.Requests.Get(ctx, c, id) // the break-glass change, now closed
 		}
 	default:

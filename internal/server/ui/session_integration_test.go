@@ -1123,14 +1123,17 @@ func TestBreakGlass(t *testing.T) {
 		!strings.Contains(frag, "ratified by a"+v.user) || strings.Contains(frag, `id="cr-ratify"`) || strings.Contains(frag, `id="cr-revert"`) {
 		t.Errorf("ratify: %d %s", resp.StatusCode, frag)
 	}
-	if resp, body := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != http.StatusConflict || !strings.Contains(body, "revert it again") {
+	if resp, body := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{"comment": {"the incident is over"}}); resp.StatusCode != http.StatusConflict || !strings.Contains(body, "revert it again") {
 		t.Errorf("revert while provisioning: %d %s", resp.StatusCode, body)
 	}
 	if _, err := v.owner.Exec(ctx, "UPDATE bindings SET phase = 'ACTIVE' WHERE name = $1", "bg2-"+x); err != nil { // provisioned
 		t.Fatal(err)
 	}
-	if resp, frag := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != 200 || strings.Contains(frag, `id="cr-revert"`) ||
-		!strings.Contains(frag, ">REVERTED<") { // F-8
+	if resp, _ := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{}); resp.StatusCode != http.StatusUnprocessableEntity { // F-14
+		t.Errorf("a revert without a comment: %d", resp.StatusCode)
+	}
+	if resp, frag := a.do("POST", "/ui/change-requests/"+bg2+"/revert", url.Values{"comment": {"the incident is over"}}); resp.StatusCode != 200 ||
+		strings.Contains(frag, `id="cr-revert"`) || !strings.Contains(frag, ">REVERTED<") || !strings.Contains(frag, "the incident is over") { // F-8
 		t.Errorf("revert: %d %s", resp.StatusCode, frag)
 	}
 	var reverts int
