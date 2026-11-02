@@ -153,6 +153,16 @@ func TestServe(t *testing.T) {
 	if !m.MaintenanceMode {
 		t.Error("--maintenance did not turn maintenance mode on")
 	}
+	// the web UI shares the admin listener, with its own headers and no API authentication
+	if resp, err := (&http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13,
+		InsecureSkipVerify: true}}}).Get("https://" + admin + "/ui/static/app.js"); err != nil { //nolint:gosec // only the UI's headers are under test
+		t.Errorf("UI: %v", err)
+	} else {
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "'nonce-") {
+			t.Errorf("GET /ui/static/app.js: %d %v", resp.StatusCode, resp.Header)
+		}
+	}
 	// the workload listener resolves vera's bindings from the loaded cache: none
 	if resp, err := client.Get("https://" + wl + "/v1/bindings"); err != nil {
 		t.Errorf("workload listener: %v", err)
@@ -192,6 +202,28 @@ func TestServe(t *testing.T) {
 }
 
 // TestServeRefuses: startup stops at the first failing step.
+// TestServeStartupTimeout: an agent socket nobody answers on ends startup
+// once service.startup_timeout has passed, naming the cause, with nothing
+// audited; the supervisor restarts ligo (§8.2, F-16).
+func TestServeStartupTimeout(t *testing.T) {
+	path := testConfig(t, "unix:///nonexistent/agent.sock", "/nonexistent", "127.0.0.1:0")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), "  application_version:", "  startup_timeout: 5s\n  application_version:", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err = (&Serve{ConfigFile: path, InsecureDev: true}).run(context.Background(), slog.New(slog.DiscardHandler))
+	if err == nil || !strings.Contains(err.Error(), "SPIRE not ready within service.startup_timeout (5s)") {
+		t.Errorf("an unreachable agent: %v", err)
+	}
+	if d := time.Since(start); d < 5*time.Second || d > 20*time.Second {
+		t.Errorf("gave up after %s", d)
+	}
+}
+
 func TestServeRefuses(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)

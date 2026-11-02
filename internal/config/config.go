@@ -46,6 +46,9 @@ type Service struct {
 	ApplicationVersion string            `yaml:"application_version"`
 	InstanceIDEnv      string            `yaml:"instance_id_env"`
 	WorkloadAdvertise  WorkloadAdvertise `yaml:"workload_advertise"`
+	// StartupTimeout bounds the wait for SPIRE and the sealer at startup:
+	// past it ligo exits, for its supervisor to restart it (§8.2).
+	StartupTimeout time.Duration `yaml:"startup_timeout"`
 }
 
 // WorkloadAdvertise is served as the "ligo" flow (ADR-16).
@@ -255,7 +258,7 @@ type Backoff struct {
 	Max     time.Duration `yaml:"max"`
 }
 
-// UI is checked in phase 9 (§7.6, §8.2 rule 15).
+// UI is the admin UI's appearance (§7.6, §8.2 rule 15).
 type UI struct {
 	Theme Theme `yaml:"theme"`
 }
@@ -428,6 +431,9 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Service.StartupTimeout == 0 {
+		c.Service.StartupTimeout = time.Minute
+	}
 	if c.Plugins.RPCTimeout == 0 {
 		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6
 	}
@@ -466,6 +472,24 @@ func (c *Config) applyDefaults() {
 	}
 	if wl.ResolutionCache.MaxStaleness == 0 {
 		wl.ResolutionCache.MaxStaleness = 5 * time.Minute
+	}
+	if ss := &c.Server.AdminListener.Session; ss.IdleTimeout == 0 {
+		ss.IdleTimeout = 30 * time.Minute // §7.3 rule 3
+	}
+	if ss := &c.Server.AdminListener.Session; ss.AbsoluteTimeout == 0 {
+		ss.AbsoluteTimeout = 8 * time.Hour
+	}
+	if ss := &c.Server.AdminListener.Session; ss.AuthzRecheckInterval == 0 {
+		ss.AuthzRecheckInterval = 5 * time.Minute
+	}
+	if c.UI.Theme.DefaultMode == "" {
+		c.UI.Theme.DefaultMode = "system" // §7.6
+	}
+	if c.UI.Theme.ProductName == "" {
+		c.UI.Theme.ProductName = "ligo"
+	}
+	if c.UI.Theme.Directory == "" {
+		c.UI.Theme.Directory = "/etc/ligo/theme"
 	}
 	if c.Bindings.MaxExpiry == 0 {
 		c.Bindings.MaxExpiry = 8760 * time.Hour

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 	"uuid"
 
@@ -85,7 +86,7 @@ func (s *Service) RevertExpired(ctx context.Context) error {
 	for _, id := range ids {
 		r, err := s.Requests.Read(ctx, id)
 		if err == nil {
-			_, err = s.revert(ctx, r, actorRevert)
+			_, err = s.revert(ctx, r, actorRevert, "TTL expired")
 		}
 		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
 			continue // a refused revert is recorded FAILED_TO_APPLY: busy ones are retried, failed ones alerted
@@ -98,8 +99,14 @@ func (s *Service) RevertExpired(ctx context.Context) error {
 }
 
 // RevertNow reverts an open break-glass CREATE or UPDATE at once, for its
-// requester or an approver of one of its sides (§7.2.3 "Revert now").
-func (s *Service) RevertNow(ctx context.Context, c changerequests.Caller, id uuid.UUID) (*changerequests.Request, error) {
+// requester or an approver of one of its sides, who says why (§7.2.3
+// "Revert now"): the comment is kept with the revert and audited.
+func (s *Service) RevertNow(ctx context.Context, c changerequests.Caller, id uuid.UUID, comment string) (*changerequests.Request, error) {
+	if strings.TrimSpace(comment) == "" {
+		e := invalid("comment is required: say why the change is reverted")
+		e.Fields = map[string]string{"comment": "Say why you revert the change."}
+		return nil, e
+	}
 	r, err := s.Requests.Read(ctx, id)
 	if err == nil && c.ID() != r.RequestedBy && !slices.ContainsFunc(r.Sides, func(sd changerequests.Side) bool { return c.Grants.CanApprove(sd.Scope) }) {
 		err = pgx.ErrNoRows // the requester holds break_glass only, which sees nothing
@@ -113,13 +120,13 @@ func (s *Service) RevertNow(ctx context.Context, c changerequests.Caller, id uui
 	if r.Kind != changerequests.KindBreakGlass || r.ResourceType != "BINDING" || r.Operation == "DELETE" {
 		return nil, refuse(409, "break-glass-not-open", "change request %s is no break-glass CREATE or UPDATE of a binding", id)
 	}
-	return s.revert(ctx, r, c.ID())
+	return s.revert(ctx, r, c.ID(), comment)
 }
 
 // revert files and applies the SYSTEM_REVERT of bg: a DELETE of a created
 // binding, else an UPDATE to its revert payload, re-validated without RBAC.
 // A payload that no longer validates is a failed revert (§6.3).
-func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor string) (*changerequests.Request, error) {
+func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor, comment string) (*changerequests.Request, error) {
 	cur, err := load(ctx, s.DB, "b.id = $1", *bg.ResourceID, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, refuse(409, "break-glass-not-open", "the binding of %s is gone", bg.ID)
@@ -136,7 +143,7 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor 
 		RequestedBy: actor, RevertsID: &bg.ID}
 	for _, sd := range bg.Sides {
 		r.Sides = append(r.Sides, changerequests.Side{Name: sd.Name, Scope: sd.Scope, Basis: changerequests.KindSystemRevert,
-			Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover})
+			Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: comment})
 	}
 	if bg.Operation == "UPDATE" {
 		r.Operation = "UPDATE"
@@ -172,21 +179,26 @@ func (s *Service) revalidate(ctx context.Context, b *Binding, cur *stored) error
 
 // RetireInlineSources retires the inline source of each reverted
 // break-glass CREATE once its binding is gone, unless the source has other
-// bindings by then (§6.3 "Inline source").
+// bindings by then (§6.3 "Inline source"), in the name of whoever reverted
+// the binding: the expiry, or the person who reverted it at once.
 func (s *Service) RetireInlineSources(ctx context.Context) error {
-	rows, err := s.DB.Query(ctx, `SELECT d.id, d.resource_id FROM change_requests c
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT ON (d.id) d.id, d.resource_id, v.requested_by FROM change_requests c
 		JOIN change_requests d ON d.id = c.depends_on_cr_id JOIN sources src ON src.id = d.resource_id
+		JOIN change_requests v ON v.reverts_cr_id = c.id AND v.status = 'APPLIED'
 		WHERE c.kind = 'BREAK_GLASS' AND d.kind = 'BREAK_GLASS' AND src.state <> 'RETIRED'
-		AND EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = c.id AND v.status = 'APPLIED')
 		AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.id = c.resource_id OR b.source_id = src.id)
-		AND NOT EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = d.id AND v.status = 'APPLIED')`)
+		AND NOT EXISTS (SELECT 1 FROM change_requests v WHERE v.reverts_cr_id = d.id AND v.status = 'APPLIED')
+		ORDER BY d.id, v.requested_at DESC`)
 	if err != nil {
 		return err
 	}
-	type inline struct{ cr, source uuid.UUID }
+	type inline struct {
+		cr, source uuid.UUID
+		by         string
+	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (inline, error) {
 		var i inline
-		return i, r.Scan(&i.cr, &i.source)
+		return i, r.Scan(&i.cr, &i.source, &i.by)
 	})
 	if err != nil {
 		return err
@@ -195,9 +207,9 @@ func (s *Service) RetireInlineSources(ctx context.Context) error {
 	for _, i := range list {
 		r, err := s.Sources.Retirement(ctx, i.source)
 		if err == nil {
-			r.Kind, r.Consent, r.RequestedBy, r.RevertsID = changerequests.KindSystemRevert, changerequests.ConsentAny, actorRevert, &i.cr
+			r.Kind, r.Consent, r.RequestedBy, r.RevertsID = changerequests.KindSystemRevert, changerequests.ConsentAny, i.by, &i.cr
 			r.Sides = []changerequests.Side{{Name: "OWNER", Scope: r.OwnerScope, Basis: changerequests.KindSystemRevert,
-				Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover}}
+				Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: "inline source of a reverted break-glass binding"}}
 			err = s.Requests.System(ctx, r)
 		}
 		if err != nil {

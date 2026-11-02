@@ -1,0 +1,6 @@
+{{define "status-row"}}<div id="status-row" class="card"{{if .Polling}} hx-get="/ui/bindings/{{.Name}}/status-row" hx-trigger="every 2s" hx-swap="outerHTML" {{hxnonce}}{{end}}>
+  <p><span class="{{badge .Phase}}">{{.Phase}}</span>{{with .Message}} <span class="muted">{{.}}</span>{{end}}</p>
+  <ol class="stepper" aria-label="Provisioning stages">
+    {{range .Steps}}<li data-state="{{.State}}">{{.Number}}. {{.Name}}</li>
+    {{end}}</ol>
+</div>{{end}}

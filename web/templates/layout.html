@@ -1,0 +1,55 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"{{with .ThemeMode}} data-theme="{{.}}"{{end}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content="{{htmxConfig}}">
+{{with .CSRF}}<meta name="csrf-token" content="{{.}}">
+{{end}}<title>{{if .Title}}{{.Title}} · {{end}}{{.Product}}</title>
+<link rel="stylesheet" href="/ui/static/styles.css">
+{{if .Assets.Tokens}}<link rel="stylesheet" href="/ui/theme/tokens.css">
+{{end}}{{if .Assets.CSS}}<link rel="stylesheet" href="/ui/theme/theme.css">
+{{end}}{{if .Assets.Favicon}}<link rel="icon" href="/ui/theme/favicon">
+{{else}}<link rel="icon" href="/ui/static/favicon.svg">
+{{end}}</head>
+<body>
+<header class="app-header">
+  <a class="brand" href="/ui/bindings">{{template "logo" .}}</a>
+  {{if .User}}<nav class="app-nav" aria-label="Main">
+    {{range .Nav}}<a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>
+    {{end}}</nav>
+  <details class="user-menu">
+    <summary aria-label="Account menu of {{.User}}"><svg class="user-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg></summary>
+    <div class="user-menu-panel">
+      <p class="user-id mono">{{.User}}</p>{{with .FullName}}
+      <p class="user-name">{{.}}</p>{{end}}
+      <p class="muted user-roles-title">Roles</p>
+      <ul class="user-roles">{{range .Roles}}<li>{{.}}</li>{{end}}</ul>
+      <div class="user-menu-item">{{template "theme-switch" .}}</div>
+      <button class="user-menu-item menu-link" hx-post="/ui/logout" {{hxnonce}}>Sign out</button>
+    </div>
+  </details>{{end}}
+</header>
+{{with .Maintenance}}<div class="banner banner-warning" role="status">Maintenance mode is on{{with .Reason}}: {{.}}{{end}}. Changes are disabled.</div>
+{{end}}{{with .BreakGlass}}<div class="banner banner-danger" role="status">Open break-glass changes:<ul>{{range .}}<li>{{.Name}}, expires in {{.ExpiresIn}}{{if .CanAct}}
+  <a class="button" href="/ui/change-requests/{{.ID}}#cr-ratify">Ratify</a> <a class="button button-danger" href="/ui/change-requests/{{.ID}}#cr-revert">Revert</a>{{end}}</li>{{end}}</ul></div>
+{{end}}<div id="error-banner" class="banner banner-danger" role="alert" hidden></div>
+<main id="main">
+<div id="page-errors" class="errors"></div>
+{{template "content" .}}
+</main>
+<script src="/ui/static/htmx.min.js" nonce="{{nonce}}"></script>
+<script src="/ui/static/ext/hx-csp.min.js" nonce="{{nonce}}"></script>
+<script src="/ui/static/app.js" nonce="{{nonce}}"></script>
+</body>
+</html>
+{{end}}
+
+{{define "theme-switch"}}<form class="theme-switch" hx-post="/ui/preferences/theme" hx-trigger="change" {{hxnonce}}>
+  <label for="theme-mode" class="muted">Appearance</label>
+  <select id="theme-mode" name="mode">
+    {{range modes}}<option value="{{.}}"{{if eq . $.ThemeChoice}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</form>{{end}}
+
+{{define "logo"}}{{if .Assets.Logo}}<img class="logo-light{{if .Assets.LogoDark}} has-dark{{end}}" src="/ui/theme/logo" alt="{{.Product}}">{{if .Assets.LogoDark}}<img class="logo-dark" src="/ui/theme/logo-dark" alt="{{.Product}}">{{end}}{{else}}<img src="/ui/static/ligo-symbol.svg" alt="{{.Product}}">{{end}}{{end}}

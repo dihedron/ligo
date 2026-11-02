@@ -18,6 +18,8 @@ type Principal struct {
 	Name     string
 	SPIFFEID string
 	Groups   []string
+	// DisplayName is a person's full name from the directory, for the UI.
+	DisplayName string
 }
 
 // Grant is an authorization binding that applies to a principal.
@@ -88,6 +90,12 @@ func (a *Authorizer) For(p Principal) Grants {
 
 // Grants are the effective grants of a principal: the union of its bindings.
 type Grants []Grant
+
+// Viewer reports whether the grants may read: any role but break_glass
+// alone (§7.2.2).
+func (gs Grants) Viewer() bool {
+	return gs.has(func(g *Grant) bool { return g.Role != config.RoleBreakGlass })
+}
 
 func (gs Grants) has(match func(*Grant) bool) bool {
 	for i := range gs {

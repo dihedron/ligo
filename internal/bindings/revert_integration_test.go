@@ -106,6 +106,11 @@ func TestAC32(t *testing.T) {
 	if st := state(); st != "RETIRED" {
 		t.Errorf("source %s after the revert", st)
 	}
+	var by string // the retirement is in the name of whoever reverted the binding, here the expiry
+	if err := o.QueryRow(ctx, "select requested_by from change_requests where resource_name = $1 and kind = 'SYSTEM_REVERT'", src).Scan(&by); err != nil ||
+		by != "system:break-glass-expiry" {
+		t.Errorf("source retired by %q (%v)", by, err)
+	}
 	if n, _ := audited(t, o, src, "SOURCE_RETIRED"); n != 1 {
 		t.Errorf("SOURCE_RETIRED %d", n)
 	}
@@ -174,7 +179,7 @@ func TestRevertFailed(t *testing.T) {
 	if cr, _ := breakGlassOf(t, o, name); cr == nil {
 		t.Error("the failed revert closed the change")
 	}
-	if _, err := s.RevertNow(ctx, ledgerApp, bg.ID); slug(err) != "validation-failed" {
+	if _, err := s.RevertNow(ctx, ledgerApp, bg.ID, "the incident is over"); slug(err) != "validation-failed" {
 		t.Errorf("retry: %v", err)
 	}
 	if _, n := revertOf(t, o, bg.ID); n != 2 {
@@ -196,7 +201,7 @@ func TestAC38a(t *testing.T) {
 		expireBreakGlass(t, o, name)
 		var ratifyErr, revertErr error
 		ratify := func() { _, ratifyErr = s.Ratify(ctx, ledgerApp, bg.ID, "", "confirmed") }
-		revert := func() { _, revertErr = s.RevertNow(ctx, livia, bg.ID) }
+		revert := func() { _, revertErr = s.RevertNow(ctx, livia, bg.ID, "the incident is over") }
 		switch first {
 		case "ratify":
 			ratify()

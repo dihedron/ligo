@@ -1,5 +1,6 @@
 service:
   application_version: "4.0.1"          # passed to DBOS (EXT-09)
+  startup_timeout: 60s                   # SPIRE and the sealer must be ready within it (§8.2)
   instance_id_env: "LIGO_INSTANCE_ID"  # unique per replica
   workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16)
     destination: "ligo.prod.internal"

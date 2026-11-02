@@ -1,0 +1,5 @@
+{{define "content"}}{{with .Content}}<h1>Break glass</h1>
+{{with .Applied}}<div class="banner banner-success" role="status">The emergency change of {{.}} is applied. An approver of each side must ratify it before its TTL ends.</div>
+{{end}}<div class="banner banner-danger" role="note">An emergency change is applied at once, without approval. A create or update is reverted
+  when its TTL ends unless an approver of each side ratifies it; an emergency delete is final. Everything is audited and announced.</div>
+{{template "break-glass-form" .}}{{end}}{{end}}

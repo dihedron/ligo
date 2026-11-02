@@ -1,0 +1,43 @@
+{{define "content"}}{{with .Content}}{{with .Binding}}<h1>{{.Metadata.Name}}</h1>
+<div class="grid">
+  <section class="card"><h2>Binding</h2><dl class="fields">
+    <dt>Source</dt><dd>{{.Source}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Access level</dt><dd>{{.AccessLevel}}</dd>
+    <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, zone {{.Metadata.Zone}})</dd>
+    <dt>Scopes</dt><dd>source {{.Metadata.SourceScope}}, target {{.Metadata.TargetScope}}, platform {{.Metadata.PlatformScope}}</dd>
+    <dt>Revision</dt><dd>{{.Metadata.Revision}}{{with .Metadata.ActiveRevision}} (active {{.}}){{end}}</dd>
+    {{with .Purpose}}<dt>Purpose</dt><dd>{{.}}</dd>{{end}}
+    {{with .ExpiresAt}}<dt>Expires</dt><dd>{{when .}}</dd>{{end}}
+    <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
+    {{with .Status.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}
+    {{with .Status.BreakGlass}}<dt>Break-glass</dt><dd><a href="/ui/change-requests/{{.ChangeRequestID}}">open</a>, by {{.RequestedBy}}, {{.IncidentReference}}, expires {{when .ExpiresAt}}</dd>{{end}}
+  </dl></section>
+  <section class="card"><h2>Identity</h2><dl class="fields">
+    <dt>Requested regex</dt><dd class="mono">{{.Requested.SVIDRegex}}</dd>
+    {{with .Active}}<dt>Active regex</dt><dd class="mono">{{.SVIDRegex}}</dd><dt>Active since</dt><dd>{{when .Since}}</dd>{{end}}
+  </dl></section>
+</div>{{end}}
+{{template "status-row" .Row}}
+{{with .Binding}}{{if not (or (eq .Status.Phase "DELETING") (eq .Status.Phase "PENDING"))}}<div id="binding-errors" class="errors"></div>
+<div class="actions">
+  <a class="button" href="/ui/bindings/{{.Metadata.Name}}/edit-form">Edit</a>
+  <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/retry" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Retry</button>
+  <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/rotate" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Rotate</button>
+  <form hx-delete="/ui/bindings/{{.Metadata.Name}}" hx-confirm="Revoke {{.Metadata.Name}}? The workloads lose this access once it is deleted."
+    hx-status:409="target:#binding-errors swap:innerHTML" hx-status:422="target:#binding-errors swap:innerHTML" {{hxnonce}}>
+    <input type="hidden" name="expectedRevision" value="{{.Metadata.Revision}}"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Revoke</button></form>
+</div>{{end}}{{end}}
+<h2>Effective network flows</h2>
+{{template "flows-table" .Flows}}
+<h2>Stages</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Stage</th><th>Provider</th><th>Status</th><th>Revision</th><th>Updated</th></tr></thead>
+  <tbody>{{range .Stages}}<tr><td>{{.Stage}}</td><td>{{.ProviderType}} / {{.ProviderInstance}}</td><td>{{.Status}}</td><td>{{.Revision}}</td><td>{{when .UpdatedAt}}</td></tr>
+  {{else}}<tr><td colspan="5" class="muted">No stage has run.</td></tr>{{end}}</tbody>
+</table></div>
+<h2>Snapshot</h2>
+<div class="grid">
+  <section class="card"><h3>Specification</h3><pre>{{pretty .Binding.Spec}}</pre></section>
+  <section class="card"><h3>Credential retrieval</h3><pre>{{pretty .Binding.Auth}}</pre></section>
+</div>
+{{template "trail" .Audit}}
+{{end}}{{end}}

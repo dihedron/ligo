@@ -208,7 +208,7 @@ func (s *Server) ratify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) revert(w http.ResponseWriter, r *http.Request) {
-	s.decide(w, r, false, func(id uuid.UUID, _ decision) (*changerequests.Request, error) {
-		return s.Bindings.RevertNow(r.Context(), caller(r), id)
+	s.decide(w, r, true, func(id uuid.UUID, d decision) (*changerequests.Request, error) {
+		return s.Bindings.RevertNow(r.Context(), caller(r), id, d.Comment)
 	})
 }

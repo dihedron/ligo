@@ -1,0 +1,6 @@
+{{define "flows-table"}}<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Purpose</th><th>Destination</th><th>Ports</th><th>TLS</th><th>Declared by</th></tr></thead>
+  <tbody>{{range .}}<tr><td>{{.Name}}</td><td>{{.Purpose}}</td><td class="mono">{{.Protocol}} {{.Destination}}</td><td class="mono">{{pretty .Ports}}</td>
+    <td>{{if .TLS}}yes{{with .ServerName}} ({{.}}){{end}}{{else}}no{{end}}</td><td>{{.DeclaredBy}}</td></tr>
+  {{else}}<tr><td colspan="6" class="muted">No flows.</td></tr>{{end}}</tbody>
+</table></div>{{end}}

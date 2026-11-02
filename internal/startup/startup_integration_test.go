@@ -93,7 +93,7 @@ func (v *env) checks(t *testing.T) *Checks {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Checks{DB: v.app, Config: cfg, ConfigSHA256: strings.Repeat("c", 64), Extractors: maps.Clone(rules.Extractors),
+	c := &Checks{DB: v.app, Config: cfg, ConfigSHA256: strings.Repeat("c", 64), ThemeSHA256: map[string]string{"logo": strings.Repeat("d", 64)}, Extractors: maps.Clone(rules.Extractors),
 		Logger: slog.New(slog.DiscardHandler)}
 	c.policy = cfg.Policy()
 	return c
@@ -202,7 +202,8 @@ func TestConfigLoaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded := v.audited(t, before, "CONFIG_LOADED")
-	if len(loaded) != 1 || !strings.Contains(loaded[0], c.policy.SHA256()) || !strings.Contains(loaded[0], `"requiredScopes"`) {
+	if len(loaded) != 1 || !strings.Contains(loaded[0], c.policy.SHA256()) || !strings.Contains(loaded[0], `"requiredScopes"`) ||
+		!strings.Contains(loaded[0], `"themeSha256": {"logo": "`+strings.Repeat("d", 64)+`"}`) {
 		t.Fatalf("CONFIG_LOADED: %v", loaded)
 	}
 	before = v.lastAudit(t) // the first load compared with whatever started last, maybe another test's configuration

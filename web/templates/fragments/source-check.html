@@ -1,0 +1,15 @@
+{{define "source-check"}}<div id="source-check">
+{{with .Test}}{{if .Valid}}<section class="card" aria-live="polite">
+  <h3>Regex</h3>
+  <dl class="fields">
+    <dt>Valid</dt><dd><span class="badge badge-success">yes</span></dd>
+    <dt>Scope</dt><dd>{{.Scope}}</dd>
+    {{range $id, $ok := .Matches}}<dt class="mono">{{$id}}</dt><dd>{{if $ok}}<span class="badge badge-success">matches</span>{{else}}<span class="badge badge-danger">does not match</span>{{end}}</dd>{{end}}
+    {{with .Narrowing}}<dt>Change</dt><dd>{{if .Undecided}}cannot tell whether it narrows{{else if .Narrower}}<span class="badge badge-warning">narrows</span>{{with .Witness}} (no longer matches <span class="mono">{{.}}</span>){{end}}{{else}}does not narrow{{end}}
+      {{with .DroppedSamples}}; samples dropped: {{range .}}<span class="mono">{{.}}</span> {{end}}{{end}}</dd>{{end}}
+    {{range .Overlaps}}<dt>Overlaps</dt><dd>{{.Source}}{{with .Witness}}, both match <span class="mono">{{.}}</span>{{end}}{{if .Undecided}} (maybe){{end}}</dd>{{end}}
+  </dl>
+</section>{{else}}<div class="alert" role="alert">The regex is not valid: {{.Error}}</div>{{end}}{{end}}
+{{with .Governance}}{{template "governance" .}}{{end}}
+{{with .Error}}<div class="alert alert-warning" role="status">{{.}}</div>{{end}}
+</div>{{end}}

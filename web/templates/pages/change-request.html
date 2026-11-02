@@ -1,0 +1,5 @@
+{{define "content"}}{{with .Content}}{{with .Request}}<h1>{{if .Kind}}{{.Kind}}{{else}}STANDARD{{end}} {{.Operation}} of {{.ResourceType}} {{.ResourceName}}</h1>{{end}}
+{{template "cr-decision" .Decision}}
+<h2>{{if .Diff}}Changes{{else}}Payload{{end}}</h2>
+<pre>{{if .Diff}}{{pretty .Diff}}{{else}}{{pretty .Request.Payload}}{{end}}</pre>
+{{end}}{{end}}

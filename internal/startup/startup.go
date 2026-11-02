@@ -39,6 +39,7 @@ type Checks struct {
 	DB           *pgxpool.Pool // the app pool
 	Config       *config.Config
 	ConfigSHA256 string
+	ThemeSHA256  map[string]string                // the theme files in use and tokens.css (theme.Theme.Hashes)
 	Extractors   map[string]*governance.Extractor // the source scope extractors, by trust domain (sources.Rules)
 	// AllowOrphanedBindings and AcceptScopeChanges are the flags of
 	// ligo serve (§8.2 rules 10 and 17).
@@ -80,7 +81,6 @@ func snapshot(v any) json.RawMessage {
 // configLoaded audits CONFIG_LOADED and, against the previous entry's
 // policy, CONFIG_GOVERNANCE_POLICY_CHANGED and
 // CONFIG_APPROVAL_POLICY_WEAKENED.
-// shortcut: no theme file hashes until the UI exists (phase 9).
 func (c *Checks) configLoaded(ctx context.Context) error {
 	canonical, err := c.policy.Canonical()
 	if err != nil {
@@ -110,7 +110,7 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		}
 	}
 	entries := []audit.Entry{{Action: "CONFIG_LOADED", Actor: actor, Snapshot: snapshot(map[string]any{"configSha256": c.ConfigSHA256,
-		"policy": json.RawMessage(canonical), "policySha256": sha, "platforms": platforms})}}
+		"policy": json.RawMessage(canonical), "policySha256": sha, "platforms": platforms, "themeSha256": c.ThemeSHA256})}}
 	changed, err := platformChanges(previous.Platforms, platforms)
 	if err != nil {
 		return err

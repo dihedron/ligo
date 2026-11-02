@@ -1,0 +1,22 @@
+{{define "content"}}{{with .Content}}<h1>Catalog</h1>
+<form class="card" method="get" action="/ui/catalog">
+  <div class="grid">
+    <div class="field"><label for="f-q">Search</label><input id="f-q" name="q" value="{{.Query.Q}}"></div>
+    <div class="field"><label for="f-type">Platform type</label><select id="f-type" name="platformType"><option value="">any</option>
+      {{range .Types}}<option{{if eq . $.Content.Query.PlatformType}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+    <div class="field"><label for="f-platform">Platform</label><input id="f-platform" name="platform" value="{{.Query.Platform}}"></div>
+    <div class="field"><label for="f-scope">Owner scope</label><input id="f-scope" name="scope" value="{{.Query.Scope}}"></div>
+    <div class="field"><label for="f-label">Label (key=value)</label><input id="f-label" name="label" value="{{.Query.Label}}"></div>
+    <div class="field"><label><input type="checkbox" name="deprecated"{{if .Query.Deprecated}} checked{{end}}> Deprecated targets too</label></div>
+  </div>
+  <div class="actions"><button type="submit">Search</button><a class="button button-secondary" href="/ui/catalog">Clear</a></div>
+</form>
+<div class="table-wrap"><table>
+  <thead><tr><th>Target</th><th>Platform</th><th>Scope</th><th>Description</th></tr></thead>
+  <tbody>{{range .Targets}}<tr><td><a href="/ui/catalog/{{.Name}}">{{.Name}}</a>{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}
+    {{if eq .State "DEPRECATED"}} <span class="badge badge-warning">deprecated</span>{{end}}</td>
+    <td>{{.Platform}} ({{.PlatformType}})</td><td>{{.Scope}}</td><td>{{.Description}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">No targets match.</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Next}}<p><a href="/ui/catalog?after={{.}}&amp;q={{$.Content.Query.Q}}&amp;platformType={{$.Content.Query.PlatformType}}&amp;platform={{$.Content.Query.Platform}}&amp;scope={{$.Content.Query.Scope}}&amp;label={{$.Content.Query.Label}}{{if $.Content.Query.Deprecated}}&amp;deprecated=on{{end}}">Next page</a></p>{{end}}
+{{end}}{{end}}

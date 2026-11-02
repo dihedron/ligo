@@ -1,0 +1,6 @@
+{{define "levels-table"}}<div class="table-wrap"><table>
+  <thead><tr><th>Level</th><th>Privileges</th><th>State</th><th>Description</th></tr></thead>
+  <tbody>{{range .}}<tr><td>{{.Name}}</td><td class="mono">{{range .Privileges}}<div>{{.}}</div>{{end}}</td>
+    <td>{{with .State}}<span class="{{badge .}}">{{.}}</span>{{end}}</td><td>{{.Description}}</td></tr>
+  {{else}}<tr><td colspan="4" class="muted">No access levels.</td></tr>{{end}}</tbody>
+</table></div>{{end}}

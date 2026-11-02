@@ -1,0 +1,1 @@
+{{define "alert"}}<div class="alert{{if .Warning}} alert-warning{{end}}" role="alert">{{.Message}}{{with .RequestID}} <span class="mono">(request {{.}})</span>{{end}}</div>{{end}}

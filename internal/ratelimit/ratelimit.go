@@ -63,3 +63,31 @@ func (l *Limiter) Spend(key string, r Rate) {
 	b := l.refill(key, r)
 	b.tokens = max(0, b.tokens-1)
 }
+
+// Logins are the failed-login limits of §7.3 rule 6, shared by the UI's
+// login and the admin API's Basic credentials: only refused credentials
+// spend, and while an address's or a user's bucket is empty, every login
+// from it or for them is refused, the right password included.
+type Logins struct {
+	PerIPPerMin, PerUserPerMin int // login_per_ip_per_min (default 10), login_per_user_per_min (default 5)
+
+	l Limiter
+}
+
+func perMinute(n, fallback int) Rate {
+	if n <= 0 {
+		n = fallback
+	}
+	return Rate{PerSecond: float64(n) / 60, Burst: float64(n)}
+}
+
+// Limited reports whether logins from ip or for user are refused now.
+func (g *Logins) Limited(ip, user string) bool {
+	return g.l.Exhausted("ip:"+ip, perMinute(g.PerIPPerMin, 10)) || g.l.Exhausted("user:"+user, perMinute(g.PerUserPerMin, 5))
+}
+
+// Failed counts a refused login against ip and user.
+func (g *Logins) Failed(ip, user string) {
+	g.l.Spend("ip:"+ip, perMinute(g.PerIPPerMin, 10))
+	g.l.Spend("user:"+user, perMinute(g.PerUserPerMin, 5))
+}

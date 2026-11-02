@@ -154,3 +154,20 @@ func TestNarrowingExpiry(t *testing.T) {
 		}
 	}
 }
+
+// TestSuggestName: <source>-<target>, with the prefix, at most 63 characters.
+func TestSuggestName(t *testing.T) {
+	if got := SuggestName("ledger-workers", "ledger-schema", ""); got != "ledger-workers-ledger-schema" {
+		t.Errorf("plain: %s", got)
+	}
+	if got := SuggestName("fin-01-payments-workers", "ledger", "fin-01-payments-"); got != "fin-01-payments-workers-ledger" {
+		t.Errorf("already prefixed: %s", got)
+	}
+	if got := SuggestName("workers", "ledger", "fin-01-payments-"); got != "fin-01-payments-workers-ledger" {
+		t.Errorf("prefixed: %s", got)
+	}
+	long := SuggestName(strings.Repeat("a", 40), strings.Repeat("b", 40), "")
+	if len(long) != 63 || !ValidName(long) || long == SuggestName(strings.Repeat("a", 40), strings.Repeat("b", 41), "") {
+		t.Errorf("truncated: %s (%d)", long, len(long))
+	}
+}

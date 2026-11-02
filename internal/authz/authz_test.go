@@ -46,6 +46,9 @@ func TestViewer(t *testing.T) {
 	if g.ActsFor("dc/corp-prod", "") || g.CanApprove("dc/corp-prod") {
 		t.Error("viewer acts or approves")
 	}
+	if !g.Viewer() || (Grants{{Role: config.RoleBreakGlass}}).Viewer() || Grants(nil).Viewer() {
+		t.Error("Viewer: any role but break_glass alone")
+	}
 }
 
 func TestOperatorScopes(t *testing.T) {

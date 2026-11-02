@@ -31,14 +31,17 @@ import (
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
+	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/resolution"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
+	"github.com/dihedron/ligo/internal/server/ui"
 	"github.com/dihedron/ligo/internal/server/workloadhttp"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/startup"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
+	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 )
@@ -97,11 +100,17 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := config.Validate(cfg, config.Options{InsecureDev: cmd.InsecureDev}); err != nil {
 		return err
 	}
+	t := cfg.UI.Theme
+	look, err := theme.Load(theme.Files{Directory: t.Directory, CSS: t.CSSFile, Logo: t.LogoFile, LogoDark: t.LogoDarkFile,
+		Favicon: t.FaviconFile, Fonts: t.FontsDir, Colors: t.Colors}, theme.Options{Logger: log})
+	if err != nil {
+		return err
+	}
 	// every audited event is announced from now on, startup's included (§7.5)
 	audit.Hook = (&notify.Outbox{Webhooks: cfg.Notifications.Webhooks}).Audited
 	defer func() { audit.Hook = nil }()
 
-	// 2. database, and the checks that need it
+	// the database's settings, checked before anything waits on a dependency
 	pg := cfg.Storage.Postgres
 	appDSN, err := env("storage.postgres.app_dsn_env", pg.AppDSNEnv)
 	if err != nil {
@@ -115,6 +124,27 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	// 3. SPIRE: every zone, the composite bundle source, the core identity,
+	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
+	// dependency (a sealed OpenBao) fails startup with nothing audited, so a
+	// restart loop cannot flood the audit log (§8.2)
+	// Both must be ready within service.startup_timeout: an unreachable agent
+	// socket or OpenBao fails startup, and the supervisor restarts ligo.
+	ready, cancel := context.WithTimeout(ctx, cfg.Service.StartupTimeout)
+	defer cancel()
+	zones, err := identity.Open(ready, cfg)
+	if err != nil {
+		return notReady("SPIRE", cfg.Service.StartupTimeout, err)
+	}
+	defer func() { _ = zones.Close() }()
+	sealer, err := cmd.sealer(ready, cfg, zones)
+	if err != nil {
+		return notReady("the sealer", cfg.Service.StartupTimeout, err)
+	}
+	cancel()
+
+	// 2. database, and the checks that need it
 	pools, err := store.Open(ctx, appDSN, readerDSN, cmd.insecureDB)
 	if err != nil {
 		return err
@@ -124,7 +154,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, Extractors: srcRules.Extractors,
+	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, ThemeSHA256: look.Hashes(), Extractors: srcRules.Extractors,
 		AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptScopeChanges: cmd.AcceptScopeChanges, Logger: log}
 	if err := checks.Run(ctx); err != nil {
 		return err
@@ -134,19 +164,6 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			return err
 		}
 		log.Warn("maintenance mode is on")
-	}
-
-	// 3. SPIRE: every zone, the composite bundle source, the core identity
-	zones, err := identity.Open(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = zones.Close() }()
-
-	// 4. the sealer
-	sealer, err := cmd.sealer(ctx, cfg, zones)
-	if err != nil {
-		return err
 	}
 
 	// 5. the plugins, and the checks that need them
@@ -232,7 +249,20 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 
 	// 9. the workload and admin listeners
 	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
-	return cmd.listen(ctx, log, cfg, zones, w, s)
+	u, err := ui.New(look, cfg.UI.Theme, log)
+	if err != nil {
+		return err
+	}
+	return cmd.listen(ctx, log, cfg, zones, w, s, u)
+}
+
+// notReady says which dependency was not ready, and that the deadline
+// (rather than a refusal) ended the wait.
+func notReady(what string, timeout time.Duration, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("serve: %s not ready within service.startup_timeout (%s): %w", what, timeout, err)
+	}
+	return err
 }
 
 // sealer is secret_sealing's provider, checked for key availability.
@@ -310,16 +340,27 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 // both; SIGHUP reloads the certificate files, everything else needs a
 // restart.
 func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
-	s *adminhttp.Server) error {
+	s *adminhttp.Server, u *ui.Server) error {
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
-	if al.AllowBasicAuth {
+	if al.AllowBasicAuth || cfg.AdminAuth.LDAP.URL != "" { // Basic credentials, and the UI's login
 		var err error
 		if directory, err = ldap(cfg); err != nil {
 			return err
 		}
+	}
+	if al.AllowBasicAuth {
 		s.LDAP = directory
+	}
+	// the UI's sessions share the directory, the roles and the failed-login limits with the API (§7.3)
+	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin}
+	s.Logins = logins
+	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
+	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg
+	u.Workflows = s.Workflows
+	if directory != nil {
+		u.LDAP = directory
 	}
 	workloadCert, reloadWorkload, err := certificate("workload_listener", wl.TLSSource, wl.TLSCertFile, wl.TLSKeyFile, zones)
 	if err != nil {
@@ -335,7 +376,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	failed := make(chan error, 2)
 	servers := map[string]*http.Server{
 		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
-		"admin":    {Addr: al.ListenAddress, Handler: s.Handler(), TLSConfig: s.TLSConfig(adminCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: adminHandler(s, u), TLSConfig: s.TLSConfig(adminCert)},
 	}
 	for name, srv := range servers {
 		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
@@ -370,6 +411,26 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	}
 	wg.Wait()
 	return stopErr
+}
+
+// noDirectory refuses every UI login when admin_auth.ldap is not set.
+type noDirectory struct{}
+
+func (noDirectory) Authenticate(context.Context, string, string) (authz.Principal, error) {
+	return authz.Principal{}, adminauth.ErrInvalidCredentials
+}
+
+func (noDirectory) Lookup(context.Context, string) (authz.Principal, error) {
+	return authz.Principal{}, adminauth.ErrInvalidCredentials
+}
+
+// adminHandler serves the admin API and, under /ui/, the web UI, which
+// authenticates with its own sessions (§7.3).
+func adminHandler(s *adminhttp.Server, u *ui.Server) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/ui/", u.Handler())
+	mux.Handle("/", s.Handler())
+	return mux
 }
 
 // reload is SIGHUP: it reloads the listeners' certificate files and the

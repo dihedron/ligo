@@ -1,0 +1,59 @@
+{{define "cr-decision"}}<div id="cr-decision">
+{{with .Request}}<section class="card"><dl class="fields">
+  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span>{{with $.Reverted}} <span class="badge badge-danger">REVERTED</span>
+    by {{.By}} at {{when .At}}{{with .Comment}} (“{{.}}”){{end}}: <a href="/ui/change-requests/{{.ID}}">the revert</a>{{end}}</dd>
+  <dt>Requested</dt><dd>{{when .RequestedAt}} by {{.RequestedBy}}</dd>
+  <dt>Expires</dt><dd>{{when .ExpiresAt}}</dd>
+  {{with .Consent}}<dt>Consent</dt><dd>{{.}}</dd>{{end}}
+  {{with .InterconnectRule}}<dt>Interconnection rule</dt><dd>{{.}}</dd>{{end}}
+  <dt>Distinct approvers</dt><dd>{{if .DistinctApprovers}}required{{else}}not required{{end}}</dd>
+  {{with .ApprovalReference}}<dt>Reference</dt><dd>{{.}}</dd>{{end}}
+  {{with .Justification}}<dt>Justification</dt><dd>{{.}}</dd>{{end}}
+  <dt>Payload SHA-256</dt><dd class="mono">{{.PayloadSHA256}}</dd>
+</dl></section>{{end}}
+<h2>Sides</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
+  <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
+    <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else if eq $.Request.Status "PENDING"}}<span class="badge badge-warning">AWAITING</span>{{else}}<span class="badge">NOT NEEDED</span>{{end}}</td>
+    <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if or .Eligible .CanWithdraw .Ratifiable .CanRevert}}<div id="cr-errors" class="errors"></div>{{end}}
+{{if .Ratifiable}}<form class="card" id="cr-ratify" hx-post="/ui/change-requests/{{.Request.ID}}/ratify" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <h3>Ratify the break-glass change</h3>
+  <p class="muted">Ratified, the change stays; unratified, a create or update is reverted when its TTL ends.</p>
+  {{if gt (len .Ratifiable) 1}}<div class="field"><label for="cr-rside">Side</label><select id="cr-rside" name="side">
+    {{if not .Request.DistinctApprovers}}<option value="" selected>All my sides ({{range $i, $s := .Ratifiable}}{{if $i}}, {{end}}{{$s}}{{end}})</option>{{end}}
+    {{range .Ratifiable}}<option>{{.}}</option>{{end}}</select></div>{{else}}<input type="hidden" name="side" value="{{index .Ratifiable 0}}">
+  <p>Side: {{index .Ratifiable 0}}</p>{{end}}
+  <div class="field"><label for="cr-rcomment">Comment (required)</label><textarea id="cr-rcomment" name="comment" required></textarea></div>
+  <div class="actions"><button type="submit">Ratify</button></div>
+</form>{{end}}
+{{if .CanRevert}}<form class="card" id="cr-revert" hx-post="/ui/change-requests/{{.Request.ID}}/revert" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-confirm="Revert the break-glass change now? The binding returns to its state before the change, or is deleted if the change created it."
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <h3>Revert the break-glass change</h3>
+  <p class="muted">The binding returns to its state before the change, or is deleted if the change created it, without waiting for the TTL.</p>
+  <div class="field"><label for="cr-vcomment">Why do you revert it? (required, audited)</label><textarea id="cr-vcomment" name="comment" required></textarea></div>
+  <div class="actions"><button type="submit" class="button-danger">Revert now</button></div>
+</form>{{end}}
+{{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <h3>Decide</h3>
+  <p class="muted">You approve the payload with SHA-256 <span class="mono">{{.Request.PayloadSHA256}}</span>.</p>
+  <input type="hidden" name="payloadSha256" value="{{.Request.PayloadSHA256}}">
+  {{if gt (len .Eligible) 1}}<div class="field"><label for="cr-side">Side</label><select id="cr-side" name="side">
+    {{if not .Request.DistinctApprovers}}<option value="" selected>All my sides ({{range $i, $s := .Eligible}}{{if $i}}, {{end}}{{$s}}{{end}})</option>{{end}}
+    {{range .Eligible}}<option>{{.}}</option>{{end}}</select></div>{{else}}<input type="hidden" name="side" value="{{index .Eligible 0}}">
+  <p>Side: {{index .Eligible 0}}</p>{{end}}
+  <div class="field"><label for="cr-comment">Comment (required to decline)</label><textarea id="cr-comment" name="comment"></textarea></div>
+  <div class="actions"><button type="submit"{{if .Disabled}} disabled{{end}}>Approve</button>
+    <button type="button" class="button-danger" hx-post="/ui/change-requests/{{.Request.ID}}/decline" hx-target="#cr-decision" hx-swap="outerHTML"
+      hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}{{if .Disabled}} disabled{{end}}>Decline</button></div>
+</form>{{end}}
+{{if .CanWithdraw}}<form id="cr-withdraw" hx-post="/ui/change-requests/{{.Request.ID}}/withdraw" hx-target="#cr-decision" hx-swap="outerHTML"
+  hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <div class="actions"><button type="submit" class="button-secondary">Withdraw my request</button></div>
+</form>{{end}}
+</div>{{end}}

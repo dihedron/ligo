@@ -61,6 +61,9 @@ type Error struct {
 	Status int
 	Slug   string
 	Detail string
+	// Fields are the messages per input field, when the error is about the
+	// caller's input, for a form to show each on its field.
+	Fields map[string]string
 }
 
 func (e *Error) Error() string {
@@ -152,6 +155,7 @@ type Side struct {
 	Decision         string // "", APPROVED, DECLINED
 	DecidedBy        string
 	DecidedAt        *time.Time
+	Comment          string // the decision's comment
 	RatifiedBy       string // BREAK_GLASS sides (ADR-12)
 	RatifiedAt       *time.Time
 	RatificationNote string

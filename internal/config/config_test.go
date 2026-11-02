@@ -112,6 +112,10 @@ func TestRules(t *testing.T) {
 		{"reserved rule name", "name: no-test-to-prod", "name: default", 16, nil},
 		{"party on a deny rule", "        action: deny\n", "        action: deny\n        additional_approvals: [ { name: x, scope: \"a\" } ]\n", 16, nil},
 		{"unknown name prefix resource", "resources: [source, target, binding]", "resources: [source, platform]", 16, nil},
+		{"unknown default mode", "default_mode: system", "default_mode: sepia", 15, nil},
+		{"unknown color token", "light: { primary: ", "light: { accent: ", 15, nil},
+		{"not a hex color", `primary: "#1f4e8c"`, `primary: "blue"`, 15, nil},
+		{"unknown color mode", "dark:  { primary:", "dim:  { primary:", 15, nil},
 		{"flow outside allowed_endpoints", `destination: "ora-scan.prod.internal", ports: [1521]`, `destination: "ora-scan.prod.internal", ports: [1600]`, 19, nil},
 		{"invalid flow", `- { name: listener, purpose: DATA`, `- { name: Listener, purpose: DATA`, 19, nil},
 		{"no workload_advertise", `    destination: "ligo.prod.internal"`, `    destination: ""`, 19, nil},
@@ -190,7 +194,7 @@ func TestDefaults(t *testing.T) {
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
 		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
-		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 {
+		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute {
 		t.Errorf("defaults: %+v", cfg)
 	}
 	if err := Validate(cfg, Options{}); err == nil {
@@ -222,6 +226,8 @@ func TestPluginRules(t *testing.T) {
 		{"no scopes", `role: viewer,      scopes: ["*"]`, `role: viewer,      scopes: []`},
 		{"bad incident pattern", `incident_reference_pattern: '^INC[0-9]{7}$'`, `incident_reference_pattern: 'INC['`},
 		{"bad sealing provider", "provider: vault-transit", "provider: kms"},
+		{"startup_timeout too short", `  application_version: "4.0.1"`, "  startup_timeout: 1s\n  application_version: \"4.0.1\""},
+		{"startup_timeout too long", `  application_version: "4.0.1"`, "  startup_timeout: 1h\n  application_version: \"4.0.1\""},
 		{"bad default_cross_scope", "default_cross_scope: deny", "default_cross_scope: maybe"},
 		{"bad action", "        action: deny\n", "        action: drop\n"},
 		{"duplicate party", `- { name: security, scope: "sec/infosec" }`, `- { name: security, scope: "sec/infosec" }
