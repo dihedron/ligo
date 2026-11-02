@@ -66,7 +66,7 @@ Also seen on 2026-11-01/02: an unratified break-glass CREATE reverted by the swe
 | R-5 | F-9: after a manual revert of a binding with an inline source, the source's retirement names the reverter | passed 2026-11-01 |
 | R-6 | F-13: switching the operation shows only its fields; the button says "Create/Update/Revoke the binding now" | open |
 | R-7 | F-14: Revert sits in its own card and needs a reason; the `REVERTED` line shows it in quotes; `ligo cr revert` needs `-m` | open |
-| R-8 | F-15: with OpenBao sealed, restarting ligo audits no CONFIG_LOADED, and the restarts slow down | open (run on the lab before the PR) |
+| R-8 | F-15: with OpenBao sealed, restarting ligo audits no CONFIG_LOADED, and the restarts slow down | passed 2026-11-02 (0 entries in 90s; restarts 5s, 7s, 11s, 18s apart; one entry once unsealed) |
 
 ### E-1, E-2: the echo guide
 
