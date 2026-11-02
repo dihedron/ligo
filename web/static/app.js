@@ -57,12 +57,14 @@
     if (!button) {
       return;
     }
-    var source = document.getElementById(button.getAttribute('data-copy'));
+    var source = document.getElementById(button.dataset.copy);
     if (!source || !navigator.clipboard) {
       return;
     }
     navigator.clipboard.writeText(source.textContent).then(function () {
       button.textContent = 'Copied';
+    }, function () {
+      button.textContent = 'Copy failed: select the text';
     });
   });
 

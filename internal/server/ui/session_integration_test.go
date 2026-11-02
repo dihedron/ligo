@@ -1140,4 +1140,52 @@ func TestBreakGlass(t *testing.T) {
 	if err := v.owner.QueryRow(ctx, "SELECT count(*) FROM change_requests WHERE kind = 'SYSTEM_REVERT' AND status = 'APPLIED' AND reverts_cr_id = $1", bg2).Scan(&reverts); err != nil || reverts != 1 {
 		t.Errorf("%d reverts of %s: %v", reverts, bg2, err)
 	}
+
+	// refusals the form shows on their fields or at its top
+	if resp, body := viewer.do("POST", "/ui/break-glass", emergency("bg9-"+x, "lsrc-"+x, "right")); resp.StatusCode != http.StatusForbidden ||
+		!strings.Contains(body, "break-glass group") {
+		t.Errorf("a viewer's submission: %d %s", resp.StatusCode, body)
+	}
+	update := emergency("bg1-"+x, "lsrc-"+x, "right")
+	update.Set("operation", "UPDATE")
+	if resp, body := g.do("POST", "/ui/break-glass", update); resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, `id="bg-expectedRevision-error"`) {
+		t.Errorf("an update without its revision: %d %s", resp.StatusCode, body)
+	}
+	params := emergency("bg9-"+x, "lsrc-"+x, "right")
+	params.Set("parameters", "{not json")
+	if resp, body := g.do("POST", "/ui/break-glass", params); resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, `id="bg-parameters-error"`) {
+		t.Errorf("parameters that are no JSON object: %d %s", resp.StatusCode, body)
+	}
+	// an emergency revoke of the ratified bg1: applied at once, back to the form
+	var rev int64
+	if err := v.owner.QueryRow(ctx, "SELECT revision FROM bindings WHERE name = $1", "bg1-"+x).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.owner.Exec(ctx, "UPDATE bindings SET phase = 'ACTIVE' WHERE name = $1", "bg1-"+x); err != nil { // provisioned
+		t.Fatal(err)
+	}
+	revoke := url.Values{"operation": {"DELETE"}, "name": {"bg1-" + x}, "expectedRevision": {fmt.Sprint(rev)}, "incidentReference": {"INC0012345"},
+		"justification": {"payments outage, the ledger read path must close"}, "ttl": {"1h"}, "password": {"right"}}
+	if resp, body := g.do("POST", "/ui/break-glass", revoke); resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") != "/ui/break-glass/new-form?applied=bg1-"+x {
+		t.Errorf("an emergency revoke: %d %v %s", resp.StatusCode, resp.Header, body)
+	}
+	if resp, page := g.do("GET", "/ui/break-glass/new-form?applied=bg1-"+x, nil, "HX-Request", ""); resp.StatusCode != 200 || !strings.Contains(page, "banner-success") {
+		t.Errorf("the confirmation: %d", resp.StatusCode)
+	}
+	// the directory down: said at the form's top
+	v.dir.down = true
+	if resp, body := g.do("POST", "/ui/break-glass", emergency("bg9-"+x, "lsrc-"+x, "right")); resp.StatusCode != http.StatusServiceUnavailable ||
+		!strings.Contains(body, "directory") {
+		t.Errorf("the directory down: %d %s", resp.StatusCode, body)
+	}
+	v.dir.down = false
+	// a member who also reads gets the binding's values in the form, and lands on the bindings
+	v.dir.groups[v.user] = []string{viewers, glass}
+	both := v.browser(t)
+	if resp := both.signIn("right"); resp.Header.Get("HX-Redirect") != "/ui/bindings" {
+		t.Errorf("a viewer and member lands on %q", resp.Header.Get("HX-Redirect"))
+	}
+	if _, page := both.do("GET", "/ui/break-glass/new-form?operation=UPDATE&name=bg2-"+x, nil, "HX-Request", ""); !strings.Contains(page, `value="lsrc2-`+x+`"`) {
+		t.Errorf("the form is not prefilled: %s", page)
+	}
 }
