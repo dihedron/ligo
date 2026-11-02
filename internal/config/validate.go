@@ -274,8 +274,12 @@ func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
 	}
 }
 
-// sealing checks rule 9.
+// sealing checks rule 9, and the deadline for SPIRE and the sealer to be
+// ready at startup.
 func (c *checker) sealing(cfg *Config, opts Options) {
+	if t := cfg.Service.StartupTimeout; t < 5*time.Second || t > 10*time.Minute {
+		c.failf(9, "service.startup_timeout %s: between 5s and 10m", t)
+	}
 	switch cfg.SecretSealing.Provider {
 	case "vault-transit":
 	case "local-kek":

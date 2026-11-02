@@ -129,15 +129,20 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
 	// dependency (a sealed OpenBao) fails startup with nothing audited, so a
 	// restart loop cannot flood the audit log (§8.2)
-	zones, err := identity.Open(ctx, cfg)
+	// Both must be ready within service.startup_timeout: an unreachable agent
+	// socket or OpenBao fails startup, and the supervisor restarts ligo.
+	ready, cancel := context.WithTimeout(ctx, cfg.Service.StartupTimeout)
+	defer cancel()
+	zones, err := identity.Open(ready, cfg)
 	if err != nil {
-		return err
+		return notReady("SPIRE", cfg.Service.StartupTimeout, err)
 	}
 	defer func() { _ = zones.Close() }()
-	sealer, err := cmd.sealer(ctx, cfg, zones)
+	sealer, err := cmd.sealer(ready, cfg, zones)
 	if err != nil {
-		return err
+		return notReady("the sealer", cfg.Service.StartupTimeout, err)
 	}
+	cancel()
 
 	// 2. database, and the checks that need it
 	pools, err := store.Open(ctx, appDSN, readerDSN, cmd.insecureDB)
@@ -249,6 +254,15 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	return cmd.listen(ctx, log, cfg, zones, w, s, u)
+}
+
+// notReady says which dependency was not ready, and that the deadline
+// (rather than a refusal) ended the wait.
+func notReady(what string, timeout time.Duration, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("serve: %s not ready within service.startup_timeout (%s): %w", what, timeout, err)
+	}
+	return err
 }
 
 // sealer is secret_sealing's provider, checked for key availability.
