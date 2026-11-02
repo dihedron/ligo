@@ -203,6 +203,8 @@ serve_unit() {
 Description=ligo, the SPIFFE binding lifecycle service
 After=network-online.target spire-agent-prod.service spire-agent-test.service
 Wants=network-online.target
+# never give up restarting: the back-off below keeps it cheap
+StartLimitIntervalSec=0
 
 [Service]
 User=ligo
@@ -213,7 +215,10 @@ ExecReload=/bin/kill -HUP $MAINPID
 KillSignal=SIGTERM
 TimeoutStopSec=30
 Restart=on-failure
+# back off from 5s to 5min while a dependency (a sealed OpenBao) keeps it down
 RestartSec=5
+RestartSteps=10
+RestartMaxDelaySec=300
 
 [Install]
 WantedBy=multi-user.target

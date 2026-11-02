@@ -132,3 +132,54 @@ func TestBrowser(t *testing.T) {
 		t.Errorf("Trusted Types: innerHTML %s", sink)
 	}
 }
+
+// TestBreakGlassFormBrowser: the break-glass form shows only the chosen
+// operation's fields and names it on its button, in CSS alone (F-13).
+func TestBreakGlassFormBrowser(t *testing.T) {
+	s := newServer(t)
+	mux := http.NewServeMux()
+	mux.Handle("/ui/static/", s.Handler())
+	mux.Handle("GET /ui/test", s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.page(w, r, 200, "break-glass", Page{Title: "Break glass", CSRF: "c", Content: BreakGlassForm{Operation: "DELETE", TrustDomains: []string{"prod.lab"}}})
+	})))
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome(t)), chromedp.IgnoreCertErrors)
+	if os.Getenv("CI") != "" {
+		opts = append(opts, chromedp.NoSandbox)
+	}
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancelAlloc()
+	ctx, cancel := chromedp.NewContext(alloc)
+	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+	if _, err := chromedp.Run(ctx, chromedp.Navigate(srv.URL+"/ui/test")); err != nil {
+		t.Fatal(err)
+	}
+	// shown: the elements whose box is rendered, of those the form marks with data-ops
+	shown := func() string {
+		t.Helper()
+		v, err := chromedp.Run(ctx, chromedp.Evaluate[string](`["bg-rev", "bg-source", "bg-inline", "bg-justification"]
+			.filter(id => document.getElementById(id).getClientRects().length > 0).join(" ") + " | " +
+			[...document.querySelectorAll("#break-glass button[type=submit] span")].filter(e => e.getClientRects().length > 0).map(e => e.textContent).join("")`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if got := shown(); got != "bg-rev bg-justification | Revoke the binding now" {
+		t.Errorf("DELETE shows %q", got)
+	}
+	for op, want := range map[string]string{
+		"CREATE": "bg-source bg-inline bg-justification | Create the binding now",
+		"UPDATE": "bg-rev bg-source bg-justification | Update the binding now",
+	} {
+		if _, err := chromedp.Run(ctx, chromedp.Click(chromedp.CSS(`[name=operation][value=`+op+`]`))); err != nil {
+			t.Fatal(err)
+		}
+		if got := shown(); got != want {
+			t.Errorf("%s shows %q, want %q", op, got, want)
+		}
+	}
+}

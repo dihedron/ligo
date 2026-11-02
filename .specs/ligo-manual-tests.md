@@ -46,13 +46,14 @@ Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, 
 
 Also seen on 2026-11-01/02: an unratified break-glass CREATE reverted by the sweeper at expiry, its inline source retired (INV-16, `echo-bg-x`).
 
-## Findings of 2026-11-01/02, open
+## Findings of 2026-11-01/02 (fixed on feature/ui after 4b7adb2, except F-16)
 
 | ID | Finding | Decision |
 |----|---------|----------|
-| F-13 | The break-glass form shows every operation's fields; an UPDATE was sent as a CREATE by mistake | to decide: show only the selected operation's fields, and name the operation on the submit button |
+| F-13 | The break-glass form shows every operation's fields; an UPDATE was sent as a CREATE by mistake | Only the chosen operation's fields are shown (CSS `:has()`, no request), and the button names it ("Revoke the binding now") |
 | F-14 | The ratify comment looks like it belongs to Revert, which takes none | Revert requires a comment, stored and audited with the revert (`/revert` body `{"comment"}`, 422 without); the sweeper's reverts say "TTL expired" |
-| F-15 | A sealed OpenBao makes ligo restart every 5s, each start auditing CONFIG_LOADED (15 in 90s) | Check OpenBao and SPIRE before auditing CONFIG_LOADED (spec startup order); back the lab unit's restarts off (`RestartSteps`, `RestartMaxDelaySec`) |
+| F-15 | A sealed OpenBao makes ligo restart every 5s, each start auditing CONFIG_LOADED (15 in 90s) | SPIRE and the sealer are checked before CONFIG_LOADED (§8.2 step 2); the lab unit backs off from 5s to 5min |
+| F-16 | Seen while fixing F-15: at startup, ligo waits without a deadline for an unreachable SPIRE agent socket, neither failing nor serving | open: to decide (a startup deadline, then exit for the supervisor to retry) |
 
 ## Retests (after the fixes)
 
@@ -63,6 +64,9 @@ Also seen on 2026-11-01/02: an unratified break-glass CREATE reverted by the swe
 | R-3 | F-10, F-11: a short justification and a TTL of `1m` together: both fields marked, the pair never mentioned; a wrong password marks the password field | passed 2026-11-01 |
 | R-4 | F-12, B-3 attempt 4: an emergency UPDATE of `echo-bg-svid` goes through, a second gives `break-glass-open` | passed 2026-11-01 |
 | R-5 | F-9: after a manual revert of a binding with an inline source, the source's retirement names the reverter | passed 2026-11-01 |
+| R-6 | F-13: switching the operation shows only its fields; the button says "Create/Update/Revoke the binding now" | open |
+| R-7 | F-14: Revert sits in its own card and needs a reason; the `REVERTED` line shows it in quotes; `ligo cr revert` needs `-m` | open |
+| R-8 | F-15: with OpenBao sealed, restarting ligo audits no CONFIG_LOADED, and the restarts slow down | open (run on the lab before the PR) |
 
 ### E-1, E-2: the echo guide
 

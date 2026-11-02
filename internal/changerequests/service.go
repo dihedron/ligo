@@ -815,9 +815,10 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	}
 	for _, sd := range r.Sides {
 		if _, err := tx.Exec(ctx, `INSERT INTO change_request_sides (change_request_id, side, scope, approval_required, basis,
-			requested_by, cr_kind, decision, decided_by, decided_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END)`,
-			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind()); err != nil {
+			requested_by, cr_kind, decision, decided_by, decided_at, decision_comment)
+			VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END, $10)`,
+			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind(),
+			null(limit(sd.Comment))); err != nil {
 			return fmt.Errorf("changerequests: insert side %s: %w", sd.Name, err)
 		}
 	}
@@ -853,14 +854,14 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 
 func loadSides(ctx context.Context, q store.Querier, id uuid.UUID) ([]Side, error) {
 	rows, err := q.Query(ctx, `SELECT side, scope, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, ''),
-		decided_at, coalesce(ratified_by, ''), ratified_at, coalesce(ratification_comment, '')
+		decided_at, coalesce(decision_comment, ''), coalesce(ratified_by, ''), ratified_at, coalesce(ratification_comment, '')
 		FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Side, error) {
 		var s Side
-		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.DecidedAt, &s.RatifiedBy,
+		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.DecidedAt, &s.Comment, &s.RatifiedBy,
 			&s.RatifiedAt, &s.RatificationNote)
 		return s, err
 	})

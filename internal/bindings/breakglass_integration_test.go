@@ -141,8 +141,20 @@ func TestBreakGlassRefusals(t *testing.T) {
 	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", "ledger-r-"+w.suffix); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RevertNow(ctx, livia, bg.ID); err != nil {
+	if _, err := s.RevertNow(ctx, livia, bg.ID, " "); slug(err) != "validation-failed" { // a revert says why (F-14)
+		t.Errorf("a revert without a comment: %v", err)
+	}
+	rv, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(rv.Sides) == 0 || rv.Sides[0].Comment != "the incident is over" {
+		t.Errorf("the revert's sides: %+v", rv.Sides)
+	}
+	var stored string
+	if err := o.QueryRow(ctx, "select decision_comment from change_request_sides where change_request_id = $1 limit 1", rv.ID).Scan(&stored); err != nil ||
+		stored != "the incident is over" {
+		t.Errorf("stored comment %q (%v)", stored, err)
 	}
 	if _, err := s.BreakGlass(ctx, livia, emergency("CREATE", other, "")); err != nil {
 		t.Errorf("after the revert: %v", err)
@@ -305,10 +317,10 @@ func TestBreakGlassDelete(t *testing.T) {
 	if phase, _, _, _, _ := bindingRow(t, o, name); phase != "DELETING" {
 		t.Errorf("phase %s", phase)
 	}
-	if _, err := s.RevertNow(ctx, livia, r.ID); slug(err) != "break-glass-not-open" {
+	if _, err := s.RevertNow(ctx, livia, r.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
 		t.Errorf("revert an emergency delete: %v", err)
 	}
-	if _, err := s.RevertNow(ctx, caller("nobody"), r.ID); slug(err) != "not-found" {
+	if _, err := s.RevertNow(ctx, caller("nobody"), r.ID, "the incident is over"); slug(err) != "not-found" {
 		t.Errorf("a stranger reverts: %v", err)
 	}
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", "the workload was compromised"); err != nil {
@@ -360,10 +372,10 @@ func TestBreakGlassValidation(t *testing.T) {
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", ""); slug(err) != "validation-failed" {
 		t.Errorf("ratify without a comment: %v", err)
 	}
-	if _, err := s.RevertNow(ctx, ledgerOp, r.ID); slug(err) != "break-glass-not-open" {
+	if _, err := s.RevertNow(ctx, ledgerOp, r.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
 		t.Errorf("revert a standard request: %v", err)
 	}
-	if _, err := s.RevertNow(ctx, ledgerOp, uuid.NewV7()); slug(err) != "not-found" {
+	if _, err := s.RevertNow(ctx, ledgerOp, uuid.NewV7(), "the incident is over"); slug(err) != "not-found" {
 		t.Errorf("revert an unknown request: %v", err)
 	}
 }
@@ -381,7 +393,7 @@ func TestRevertGone(t *testing.T) {
 	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RevertNow(ctx, livia, bg.ID); slug(err) != "break-glass-not-open" {
+	if _, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
 		t.Errorf("revert: %v", err)
 	}
 }

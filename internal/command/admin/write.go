@@ -360,11 +360,12 @@ func (cmd *ChangeRequestWithdraw) Execute([]string) error {
 
 type ChangeRequestRevert struct {
 	Base
-	Args crID `positional-args:"yes" required:"yes"`
+	Comment string `short:"m" long:"comment" required:"true" description:"Why the change is reverted (required, audited)."`
+	Args    crID   `positional-args:"yes" required:"yes"`
 }
 
 func (cmd *ChangeRequestRevert) Execute([]string) error {
-	return cmd.decide(cmd.Args.ID, "revert", nil)
+	return cmd.decide(cmd.Args.ID, "revert", map[string]any{"comment": cmd.Comment})
 }
 
 type MaintenanceOn struct {

@@ -185,7 +185,7 @@ func TestWriteCommands(t *testing.T) {
 		{"decline", (&ChangeRequestDecline{Base: b, Comment: "no", Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/decline", `"comment":"no"`},
 		{"withdraw", (&ChangeRequestWithdraw{Base: b, Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/withdraw", ""},
 		{"ratify", (&ChangeRequestRatify{Base: b, Comment: "ok", Side: "SOURCE", Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/ratify", `"side":"SOURCE"`},
-		{"revert", (&ChangeRequestRevert{Base: b, Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/revert", ""},
+		{"revert", (&ChangeRequestRevert{Base: b, Comment: "over", Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/revert", `{"comment":"over"}`},
 		{"maintenance on", (&MaintenanceOn{Base: b, Reason: "upgrade"}).Execute, "PUT /v1/admin/maintenance", `{"enabled":true,"reason":"upgrade"}`},
 		{"maintenance off", (&MaintenanceOff{Base: b}).Execute, "PUT /v1/admin/maintenance", `{"enabled":false,"reason":""}`},
 		{"break-glass apply", (&BreakGlassApply{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1"}, File: bgFile}).Execute,

@@ -1,7 +1,7 @@
 {{define "cr-decision"}}<div id="cr-decision">
 {{with .Request}}<section class="card"><dl class="fields">
   <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span>{{with $.Reverted}} <span class="badge badge-danger">REVERTED</span>
-    by {{.By}} at {{when .At}}: <a href="/ui/change-requests/{{.ID}}">the revert</a>{{end}}</dd>
+    by {{.By}} at {{when .At}}{{with .Comment}} (“{{.}}”){{end}}: <a href="/ui/change-requests/{{.ID}}">the revert</a>{{end}}</dd>
   <dt>Requested</dt><dd>{{when .RequestedAt}} by {{.RequestedBy}}</dd>
   <dt>Expires</dt><dd>{{when .ExpiresAt}}</dd>
   {{with .Consent}}<dt>Consent</dt><dd>{{.}}</dd>{{end}}
@@ -30,9 +30,12 @@
   <div class="field"><label for="cr-rcomment">Comment (required)</label><textarea id="cr-rcomment" name="comment" required></textarea></div>
   <div class="actions"><button type="submit">Ratify</button></div>
 </form>{{end}}
-{{if .CanRevert}}<form id="cr-revert" hx-post="/ui/change-requests/{{.Request.ID}}/revert" hx-target="#cr-decision" hx-swap="outerHTML"
+{{if .CanRevert}}<form class="card" id="cr-revert" hx-post="/ui/change-requests/{{.Request.ID}}/revert" hx-target="#cr-decision" hx-swap="outerHTML"
   hx-confirm="Revert the break-glass change now? The binding returns to its state before the change, or is deleted if the change created it."
   hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
+  <h3>Revert the break-glass change</h3>
+  <p class="muted">The binding returns to its state before the change, or is deleted if the change created it, without waiting for the TTL.</p>
+  <div class="field"><label for="cr-vcomment">Why do you revert it? (required, audited)</label><textarea id="cr-vcomment" name="comment" required></textarea></div>
   <div class="actions"><button type="submit" class="button-danger">Revert now</button></div>
 </form>{{end}}
 {{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target="#cr-decision" hx-swap="outerHTML"
