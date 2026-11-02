@@ -46,6 +46,9 @@ server:
     session: { idle_timeout: 30m, absolute_timeout: 8h, authz_recheck_interval: 5m }
     rate_limit: { login_per_ip_per_min: 10, login_per_user_per_min: 5, api_per_principal_rps: 10 }
 
+  metrics_listener:                       # GET /metrics, plain HTTP and no authentication (§10.1): loopback or a management network
+    listen_address: "127.0.0.1:9090"     # default
+
 admin_auth:
   ldap:
     url: "ldaps://ldap.corp.internal:636"

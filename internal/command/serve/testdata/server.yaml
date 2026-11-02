@@ -18,6 +18,8 @@ server:
     listen_address: "127.0.0.1:0"
     tls_source: spiffe
     client_svid_auth: { enabled: true, accepted_trust_domains: [prod.internal] }
+  metrics_listener:
+    listen_address: "127.0.0.1:0"
 authorization:
   bindings:
     - { spiffe_id: "spiffe://prod.internal/ops/vera", role: viewer, scopes: ["*"] }

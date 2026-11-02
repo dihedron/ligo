@@ -51,6 +51,12 @@ type Service struct {
 	StartupTimeout time.Duration `yaml:"startup_timeout"`
 }
 
+// MetricsListener serves GET /metrics (Prometheus, §10.1) in plain HTTP,
+// without authentication: bind it to a loopback or management address.
+type MetricsListener struct {
+	ListenAddress string `yaml:"listen_address"`
+}
+
 // WorkloadAdvertise is served as the "ligo" flow (ADR-16).
 type WorkloadAdvertise struct {
 	Destination string `yaml:"destination"`
@@ -78,6 +84,7 @@ type CoreIdentity struct {
 type Server struct {
 	WorkloadListener WorkloadListener `yaml:"workload_listener"`
 	AdminListener    AdminListener    `yaml:"admin_listener"`
+	MetricsListener  MetricsListener  `yaml:"metrics_listener"`
 }
 
 type WorkloadListener struct {
@@ -431,6 +438,9 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Server.MetricsListener.ListenAddress == "" {
+		c.Server.MetricsListener.ListenAddress = "127.0.0.1:9090"
+	}
 	if c.Service.StartupTimeout == 0 {
 		c.Service.StartupTimeout = time.Minute
 	}

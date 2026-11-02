@@ -25,6 +25,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
@@ -571,7 +572,6 @@ func failPending(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]a
 // interconnects is rule 18: cross-scope bindings that the current policy
 // would deny are logged and audited, never changed (ADR-14 rule 6). It
 // returns nothing to stop startup.
-// shortcut: no ligo_interconnect_violations gauge until metrics (phase 10).
 func (c *Checks) interconnects(ctx context.Context) error {
 	rows, err := c.DB.Query(ctx, "SELECT name, source_scope, target_scope FROM bindings WHERE source_scope <> target_scope ORDER BY name")
 	if err != nil {
@@ -597,6 +597,7 @@ func (c *Checks) interconnects(ctx context.Context) error {
 			found = append(found, violation{p[0], p[1], p[2], d.Rule})
 		}
 	}
+	metrics.InterconnectViolations.Set(float64(len(found)))
 	if len(found) == 0 {
 		return nil
 	}
@@ -612,7 +613,6 @@ func (c *Checks) interconnects(ctx context.Context) error {
 // the flows are left out of effective flows.
 // shortcut: one ValidateTarget call per level, to name the level that
 // fails; batch per target if startup grows slow with many targets.
-// shortcut: no ligo_privilege_bound_violations gauge until metrics (phase 10).
 func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget) error {
 	rows, err := c.DB.Query(ctx, `SELECT t.name, t.platform, t.definition, l.name, l.grants FROM targets t
 		JOIN target_access_levels l ON l.target_id = t.id
@@ -681,6 +681,7 @@ func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget)
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	metrics.PrivilegeBoundViolations.Set(float64(len(found)))
 	if len(found) == 0 {
 		return nil
 	}

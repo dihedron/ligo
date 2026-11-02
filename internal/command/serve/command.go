@@ -29,6 +29,7 @@ import (
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/ratelimit"
@@ -44,6 +45,8 @@ import (
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // drain is how long shutdown waits for active requests (§8.2).
@@ -246,14 +249,55 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	run(dispatcher.Run)
+	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, time.Hour) })
 
-	// 9. the workload and admin listeners
+	// the metrics: the process-wide ones, and this run's database and cache
+	// gauges in a registry of its own (§10.1)
+	overdue := map[string]time.Duration{}
+	for p, t := range rotation {
+		if t > 0 {
+			overdue[p] = t + cfg.Reconciliation.Interval + cfg.Reconciliation.Jitter
+		}
+	}
+	gauges := prometheus.NewRegistry()
+	gauges.MustRegister(&metrics.DB{Pool: pools.App, Logger: log, Rotation: overdue, Timeout: 10 * time.Second},
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "ligo_resolution_cache_age_seconds", Help: "Time since the resolution cache's last full load."},
+			func() float64 { return cache.Age().Seconds() }),
+		prometheus.NewCounterFunc(prometheus.CounterOpts{Name: "ligo_resolution_invalid_regex_total", Help: "Bindings left out of the resolution cache for an invalid regex."},
+			func() float64 { return float64(cache.InvalidRegexes()) }))
+	exposed := promhttp.HandlerFor(prometheus.Gatherers{metrics.Registry, gauges}, promhttp.HandlerOpts{ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)})
+
+	// 9. the workload, admin and metrics listeners
 	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
 	u, err := ui.New(look, cfg.UI.Theme, log)
 	if err != nil {
 		return err
 	}
-	return cmd.listen(ctx, log, cfg, zones, w, s, u)
+	return cmd.listen(ctx, log, cfg, zones, w, s, u, exposed)
+}
+
+// verifyAudit verifies the audit chain at once and then every interval,
+// for ligo_audit_chain_valid; a broken chain is also logged.
+func verifyAudit(ctx context.Context, log *slog.Logger, db store.Querier, interval time.Duration) {
+	for {
+		r, err := audit.Verify(ctx, db)
+		switch {
+		case err != nil:
+			if ctx.Err() == nil {
+				log.Warn("audit chain verification", "error", err)
+			}
+		case r.Valid:
+			metrics.AuditChainValid.Set(1)
+		default:
+			metrics.AuditChainValid.Set(0)
+			log.Error("the audit chain is broken", "first_broken", r.FirstBroken, "entries", r.Entries)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 // notReady says which dependency was not ready, and that the deadline
@@ -340,7 +384,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 // both; SIGHUP reloads the certificate files, everything else needs a
 // restart.
 func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
-	s *adminhttp.Server, u *ui.Server) error {
+	s *adminhttp.Server, u *ui.Server, exposed http.Handler) error {
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
@@ -373,20 +417,28 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
-	failed := make(chan error, 2)
+	failed := make(chan error, 3)
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", exposed)
+	ml := cfg.Server.MetricsListener
 	servers := map[string]*http.Server{
 		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
 		"admin":    {Addr: al.ListenAddress, Handler: adminHandler(s, u), TLSConfig: s.TLSConfig(adminCert)},
+		"metrics":  {Addr: ml.ListenAddress, Handler: mux}, // plain HTTP, no auth (§10.1): a loopback or management address
 	}
 	for name, srv := range servers {
 		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 		go func() {
-			if err := srv.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
+			serve := func() error { return srv.ListenAndServeTLS("", "") }
+			if srv.TLSConfig == nil {
+				serve = srv.ListenAndServe
+			}
+			if err := serve(); !errors.Is(err, http.ErrServerClosed) {
 				failed <- fmt.Errorf("serve: %s listener: %w", name, err)
 			}
 		}()
 	}
-	log.Info("serving", "workload", wl.ListenAddress, "admin", al.ListenAddress)
+	log.Info("serving", "workload", wl.ListenAddress, "admin", al.ListenAddress, "metrics", ml.ListenAddress)
 	var stopErr error
 	for done := false; !done; {
 		select {

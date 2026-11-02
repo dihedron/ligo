@@ -3608,6 +3608,9 @@ server:
     session: { idle_timeout: 30m, absolute_timeout: 8h, authz_recheck_interval: 5m }
     rate_limit: { login_per_ip_per_min: 10, login_per_user_per_min: 5, api_per_principal_rps: 10 }
 
+  metrics_listener:                       # GET /metrics, plain HTTP and no authentication (§10.1): loopback or a management network
+    listen_address: "127.0.0.1:9090"     # default
+
 admin_auth:
   ldap:
     url: "ldaps://ldap.corp.internal:636"
@@ -4528,7 +4531,7 @@ type GovCheckCommand struct {
 ### 10.1 Observability
 - **Logs:** structured JSON. Every request and workflow log line carries `request_id`, `binding_id`, `workflow_id`, `attempt` (and `source_id` or `target_id` for changes of those resources). A redacting logger masks `password`, `private_key_pem`, `token`, `Authorization`, and values matching `IDENTIFIED BY \S+`.
 - **Traces:** OpenTelemetry spans for HTTP and gRPC handlers, each workflow, each step and each plugin RPC. Trace context propagates to plugins via gRPC metadata. No secrets in span attributes.
-- **Metrics (Prometheus, Normative names).** No metric carries a scope label, because the number of scopes is unbounded; per-scope views come from the admin API and the audit log.
+- **Metrics (Prometheus, Normative names).** No metric carries a scope label, because the number of scopes is unbounded; per-scope views come from the admin API and the audit log. They are served at `GET /metrics` on the metrics listener (`server.metrics_listener.listen_address`, default `127.0.0.1:9090`), in plain HTTP without authentication: it MUST be bound to a loopback or management address. Gauges of the database's state (bindings, change requests and their pending sides, sources, targets, the propagation queue, expiring bindings, open break-glass changes, overdue rotations) are computed from the database at each scrape, so every replica reports the same values; `ligo_db_scrape_success` is `0` when one of those queries failed. `ligo_audit_chain_valid` comes from a verification of the whole chain at startup and then hourly, on each replica.
   - `ligo_bindings{phase,zone}`
   - `ligo_workflow_duration_seconds{op,result}`
   - `ligo_step_duration_seconds{stage,provider_type,result}`
@@ -4552,6 +4555,7 @@ type GovCheckCommand struct {
   - `ligo_notifications_abandoned_total{webhook}`
   - `ligo_delegated_approvals_total{principal,zone,operation}` (SHOULD be alerted on for unusual rates)
   - `ligo_bundle_conflicts_total{trust_domain,socket_zone}` (bundles discarded because they came from a non-authoritative socket, §7.1; SHOULD be alerted on)
+  - `ligo_db_scrape_success` (gauge: whether the last scrape's database queries all succeeded)
   - `ligo_rotation_overdue{zone,platform}` (gauge: `ACTIVE` bindings in a static-secret identity mode whose `last_rotated_at` is `NULL` or older than `rotation_interval` + `reconciliation.interval` + `reconciliation.jitter`; SHOULD be alerted on when non-zero)
 
 ### 10.2 High availability
