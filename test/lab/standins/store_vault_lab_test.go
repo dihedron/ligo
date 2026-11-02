@@ -90,12 +90,18 @@ func TestLabStoreVault(t *testing.T) {
 	static := &pluginv1.SecretProvisioningPayload{Mode: pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL,
 		Payload: &pluginv1.SecretProvisioningPayload_StaticSecret{StaticSecret: &pluginv1.StaticSecret{Username: b.GetDerivedPrincipalName(), Password: strings.Repeat("A1", 16)}}}
 	t.Cleanup(func() { _, _ = cleanupStore(c, b, "vault-static") })
+	wide := binding()
+	wide.SourceSvidRegex = `^spiffe://prod\.lab/ns/standins/sa/[a-z0-9]+$`
+	if _, err := ensureStore(t, c, wide, "vault-static", static); err == nil || !strings.Contains(err.Error(), "literal SPIFFE ID") {
+		t.Errorf("a source matching more than one SPIFFE ID: %v", err)
+	}
 	r, err := ensureStore(t, c, b, "vault-static", static)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var auth struct{ Address, SecretPath, Policy string }
-	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth.SecretPath != "kv/data/bindings/"+b.GetBindingId() || auth.Policy != "binding-"+b.GetBindingId() {
+	var auth struct{ Address, SecretPath, Policy, AuthMount, Role string }
+	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth.SecretPath != "kv/data/bindings/"+b.GetBindingId() || auth.Policy != "binding-"+b.GetBindingId() ||
+		auth.Role != "binding-"+b.GetBindingId() || auth.AuthMount != "jwt-spiffe" {
 		t.Fatalf("client auth %s (%v)", r.GetFinalizedClientAuthJson(), err)
 	}
 	read := func() string {

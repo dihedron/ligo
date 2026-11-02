@@ -8,7 +8,7 @@ LIGO1_TESTS=/home/ligo/tests
 # LIGO1_PLUGINS is ligo1's plugins.directory; LAB_PLUGINS are the lab's
 # plugins (test/lab/plugins), in the zone prod.
 LIGO1_PLUGINS=/usr/lib/ligo/plugins
-LAB_PLUGINS=(labprobe target-postgres store-vault)
+LAB_PLUGINS=(labprobe target-postgres store-vault target-echo)
 
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {
@@ -127,6 +127,13 @@ path "database/roles/binding-*" {
 }
 path "sys/leases/revoke-prefix/database/creds/binding-*" {
   capabilities = ["update", "sudo"]
+}
+path "auth/jwt-spiffe/role/binding-*" {
+  capabilities = ["create", "update", "read", "delete"]
+  allowed_parameters = {
+    "token_policies" = ["binding-*"]
+    "*" = []
+  }
 }
 HCL
 	bao prod policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null

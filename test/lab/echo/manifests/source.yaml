@@ -1,0 +1,9 @@
+# The echo guide's source (.specs/ligo-echo-target.md): the workload of the
+# lab user echo-bound, by its literal SPIFFE ID.
+kind: Source
+metadata: {name: echo-bound-src}
+identity:
+  trustDomain: prod.lab
+  svidRegex: '^spiffe://prod\.lab/ns/echo/sa/bound$'
+  sampleSpiffeIds: ['spiffe://prod.lab/ns/echo/sa/bound']
+visibility: {mode: PRIVATE}

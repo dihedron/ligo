@@ -26,6 +26,8 @@ source "$LAB_DIR/lib/bao.sh"
 source "$LAB_DIR/lib/ldap.sh"
 # shellcheck source=lib/deploy.sh
 source "$LAB_DIR/lib/deploy.sh"
+# shellcheck source=lib/echo.sh
+source "$LAB_DIR/lib/echo.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -56,6 +58,12 @@ commands:
   serve install|start|stop|reload|status|logs|test
                             ligo serve on ligo1 (database ligo_serve), and
                             its e2e with reload, stop and start
+  echo install|status|logs|smoke
+                            the echo target on ligo1 (.specs/ligo-echo-target.md)
+  echo client USER TARGET [args]
+                            echo-client on ligo1 as USER (echo-bound, echo-unbound)
+  cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);
+                            stdin passes through, for manifests
   spire <prod|test> [args]  spire-server on that zone's server
   bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
   ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
@@ -218,6 +226,8 @@ main() {
 	deploy) cmd_deploy ;;
 	test) cmd_test "$@" ;;
 	serve) cmd_serve "$@" ;;
+	echo) cmd_echo "$@" ;;
+	cli) require_lab && [[ $# -ge 1 ]] && cli "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
 	bao) require_lab && bao "$@" ;;
