@@ -4876,7 +4876,8 @@ Input: `pattern`, `trustDomain`, and `regex_policy`. The pattern is accepted onl
    - (c) any `OpCharClass` whose inclusive rune ranges `[lo, hi]` contain `'/'` (`0x2F`). Classes such as `[a-z0-9-]` and `[^/]` are accepted; `[^a]`, `\S`, `\W` and `\pP` are rejected because they include `/`;
    - (d) any `OpLiteral` containing `'/'` that lies anywhere inside a **repeating or optional** node: `OpStar` (`*`), `OpPlus` (`+`), `OpQuest` (`?`), or `OpRepeat` other than exactly `{1}`;
    - (e) `OpBeginText`/`OpEndText` anywhere except positions 0 and last at the top level;
-   - (f) `OpAlternate` at the top level. This is already implied by rule 4; alternation nested inside the pattern, such as `(worker-1|worker-2)` or `(?:api|web)/replica-[0-9]+`, is allowed.
+   - (f) `OpAlternate` at the top level. This is already implied by rule 4; alternation nested inside the pattern, such as `(worker-1|worker-2)` or `(?:api|web)/replica-[0-9]+`, is allowed;
+   - (g) `OpWordBoundary` and `OpNoWordBoundary` (`\b`, `\B`): the narrowing and overlap checks (§3.10) support no assertion other than the text anchors, so a regex with them could never be narrowed.
 8. `regexp.Compile(pattern)` succeeds. The compiled program is the one used for matching (§4.5, `/ui/sources/test`).
 
 ### A.3 Rationale for each rule

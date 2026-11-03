@@ -60,6 +60,8 @@ func TestAC03(t *testing.T) {
 		{prefix + `x(?s:.)$`, "7b"},
 		{prefix + `x.$`, "7b"},
 		{prefix + `x[!-0]$`, "7c"},
+		{prefix + `x\b[a-z]*$`, "7g"},
+		{prefix + `x\B[a-z]*$`, "7g"},
 		{prefix + `x(?:[a-z]+|/)+$`, "7d"},
 		{prefix + `x(/[a-z]+)*$`, "7d"},
 		{prefix + `x(/[a-z]+)?$`, "7d"},
