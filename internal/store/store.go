@@ -4,6 +4,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,11 +17,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Statement timeouts of the pools (§4.1).
+// Statement timeouts of the pools by default (§4.1).
 const (
 	statementTimeoutApp    = 5 * time.Second
 	statementTimeoutReader = 500 * time.Millisecond
 )
+
+// Limits are the pools' settings (storage.postgres); a zero field keeps the
+// default: pgx's connection limit, the statement timeouts above.
+type Limits struct {
+	MaxConns               int32 // per pool
+	AppStatementTimeout    time.Duration
+	ReaderStatementTimeout time.Duration
+}
 
 var (
 	// ErrInsecureConnection refuses a DSN without sslmode=verify-full (§4.1).
@@ -46,17 +55,20 @@ type Pools struct {
 
 // Open connects the app and reader pools. allowInsecure accepts connections
 // without verify-full, for the tests' containers only.
-func Open(ctx context.Context, appDSN, readerDSN string, allowInsecure bool) (*Pools, error) {
+func Open(ctx context.Context, appDSN, readerDSN string, l Limits, allowInsecure bool) (*Pools, error) {
 	var p Pools
 	for _, c := range []struct {
 		pool    **pgxpool.Pool
 		dsn     string
 		timeout time.Duration
-	}{{&p.App, appDSN, statementTimeoutApp}, {&p.Reader, readerDSN, statementTimeoutReader}} {
+	}{{&p.App, appDSN, cmp.Or(l.AppStatementTimeout, statementTimeoutApp)}, {&p.Reader, readerDSN, cmp.Or(l.ReaderStatementTimeout, statementTimeoutReader)}} {
 		cfg, err := poolConfig(c.dsn, c.timeout, allowInsecure)
 		if err != nil {
 			p.Close()
 			return nil, err
+		}
+		if l.MaxConns > 0 {
+			cfg.MaxConns = l.MaxConns
 		}
 		if *c.pool, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
 			p.Close()
@@ -93,6 +105,13 @@ func poolConfig(dsn string, timeout time.Duration, allowInsecure bool) (*pgxpool
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(timeout.Milliseconds(), 10)
 	return cfg, nil
+}
+
+// CheckDSN refuses a DSN that does not verify the server, as the pools do:
+// for DBOS's own pool (§4.1).
+func CheckDSN(dsn string, allowInsecure bool) error {
+	_, err := poolConfig(dsn, statementTimeoutApp, allowInsecure)
+	return err
 }
 
 // Migrator connects as ligo_migrator, for ligo migrate: verify-full, as

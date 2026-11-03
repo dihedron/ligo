@@ -283,6 +283,15 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if n := cfg.Server.AdminListener.RateLimit.MaxTrackedKeys; n < 10_000 || n > 10_000_000 {
 		c.failf(9, "admin_listener.rate_limit.max_tracked_keys %d: between 10000 and 10000000", n)
 	}
+	if pg := cfg.Storage.Postgres; pg.MaxConns < 0 || pg.MaxConns > 1000 {
+		c.failf(9, "storage.postgres.max_conns %d: between 1 and 1000", pg.MaxConns)
+	}
+	for k, t := range map[string]time.Duration{"app_statement_timeout": cfg.Storage.Postgres.AppStatementTimeout,
+		"reader_statement_timeout": cfg.Storage.Postgres.ReaderStatementTimeout} {
+		if t != 0 && (t < 100*time.Millisecond || t > 5*time.Minute) {
+			c.failf(9, "storage.postgres.%s %s: between 100ms and 5m", k, t)
+		}
+	}
 	if r := cfg.Observability.Tracing.SampleRatio; r != nil && (*r < 0 || *r > 1) {
 		c.failf(9, "observability.tracing.sample_ratio %v: between 0 and 1", *r)
 	}

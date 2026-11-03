@@ -246,10 +246,9 @@ type Postgres struct {
 	AppDSNEnv              string        `yaml:"app_dsn_env"`
 	ReaderDSNEnv           string        `yaml:"reader_dsn_env"`
 	DBOSDSNEnv             string        `yaml:"dbos_dsn_env"`
-	MaxConns               int           `yaml:"max_conns"`
-	AppStatementTimeout    time.Duration `yaml:"app_statement_timeout"`
-	ReaderStatementTimeout time.Duration `yaml:"reader_statement_timeout"`
-	SSLMode                string        `yaml:"sslmode"`
+	MaxConns               int           `yaml:"max_conns"`                // per pool; default pgx's
+	AppStatementTimeout    time.Duration `yaml:"app_statement_timeout"`    // default 5s
+	ReaderStatementTimeout time.Duration `yaml:"reader_statement_timeout"` // default 500ms
 }
 
 type DBOS struct {

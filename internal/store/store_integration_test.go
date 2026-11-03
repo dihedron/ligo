@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -40,7 +41,7 @@ func setup(t *testing.T) *Pools {
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	p, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +67,18 @@ func TestPools(t *testing.T) {
 		var got string
 		if err := pool.QueryRow(ctx, "show statement_timeout").Scan(&got); err != nil || got != want {
 			t.Errorf("statement_timeout = %q (%v), want %q", got, err, want)
+		}
+	}
+	set, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), Limits{MaxConns: 3, AppStatementTimeout: 2 * time.Second,
+		ReaderStatementTimeout: time.Second}, insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	for pool, want := range map[*pgxpool.Pool]string{set.App: "2s", set.Reader: "1s"} {
+		var got string
+		if err := pool.QueryRow(ctx, "show statement_timeout").Scan(&got); err != nil || got != want || pool.Config().MaxConns != 3 {
+			t.Errorf("statement_timeout = %q (%v), want %q; max_conns %d, want 3", got, err, want, pool.Config().MaxConns)
 		}
 	}
 	var user string

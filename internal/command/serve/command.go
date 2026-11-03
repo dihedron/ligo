@@ -143,6 +143,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := store.CheckDSN(dbosDSN, cmd.insecureDB); err != nil {
+		return fmt.Errorf("serve: storage.postgres.dbos_dsn_env: %w", err)
+	}
 
 	// 3. SPIRE: every zone, the composite bundle source, the core identity,
 	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
@@ -164,7 +167,8 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	cancel()
 
 	// 2. database, and the checks that need it
-	pools, err := store.Open(ctx, appDSN, readerDSN, cmd.insecureDB)
+	pools, err := store.Open(ctx, appDSN, readerDSN, store.Limits{MaxConns: int32(pg.MaxConns), AppStatementTimeout: pg.AppStatementTimeout,
+		ReaderStatementTimeout: pg.ReaderStatementTimeout}, cmd.insecureDB)
 	if err != nil {
 		return err
 	}

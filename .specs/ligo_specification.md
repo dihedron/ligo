@@ -1350,7 +1350,7 @@ erDiagram
 | `ligo_reader` | `SELECT` on the views `v_active_bindings` and `v_active_binding_flows` only. |
 | `ligo_dbos` | Whatever DBOS requires on the `dbos` schema (EXT-08). No access to `public` tables. |
 
-- **Connection pools:** `app` (statement timeout 5s), `reader` (statement timeout 500ms), and DBOS's own pool. All connections MUST use TLS with `sslmode=verify-full`.
+- **Connection pools:** `app` (statement timeout `storage.postgres.app_statement_timeout`, default 5s), `reader` (`reader_statement_timeout`, default 500ms), each with at most `max_conns` connections (default pgx's), and DBOS's own pool. All connections MUST use TLS with `sslmode=verify-full`: a DSN without it, DBOS's included, fails startup.
 
 ### 4.2 Migration `migrations/001_init_schema.sql`
 
@@ -3723,7 +3723,6 @@ storage:
     max_conns: 25
     app_statement_timeout: 5s
     reader_statement_timeout: 500ms
-    sslmode: verify-full
   dbos:
     workflow_retention: 168h
 
@@ -3944,7 +3943,7 @@ platform_providers:                       # plugin types and the platforms that 
 6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`, checked after every plugin has described itself and before any `ConfigureInstances` (§5.2). The schema MUST compile as JSON Schema 2020-12: a plugin with an empty or invalid schema is refused. An omitted `config` is validated as `{}`. A failure names the instance and the schema location that failed.
-9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`. `admin_listener.rate_limit.max_tracked_keys` is between 10000 and 10000000. `service.startup_timeout` is between 5s and 10m; `observability.tracing.sample_ratio` between 0 and 1.
+9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`. `admin_listener.rate_limit.max_tracked_keys` is between 10000 and 10000000. `storage.postgres.max_conns`, if set, is between 1 and 1000, and `app_statement_timeout` and `reader_statement_timeout`, if set, between 100ms and 5m. `service.startup_timeout` is between 5s and 10m; `observability.tracing.sample_ratio` between 0 and 1.
 10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
 12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone. `workload_listener.auth_modes` is not empty and lists only `x509_svid` and `jwt_svid`; `jwt_svid` requires `expected_jwt_audience`.

@@ -154,7 +154,6 @@ storage:
     max_conns: 25
     app_statement_timeout: 5s
     reader_statement_timeout: 500ms
-    sslmode: verify-full
   dbos:
     workflow_retention: 168h
 

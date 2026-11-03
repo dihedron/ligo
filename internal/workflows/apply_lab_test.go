@@ -129,7 +129,7 @@ func labBinding(t *testing.T) *lab {
 		t.Fatal(err)
 	}
 	_ = conn.Close(ctx)
-	pools, err := store.Open(ctx, labEnv(t, "LIGO_TEST_PG_APP_DSN"), labEnv(t, "LIGO_TEST_PG_READER_DSN"), false)
+	pools, err := store.Open(ctx, labEnv(t, "LIGO_TEST_PG_APP_DSN"), labEnv(t, "LIGO_TEST_PG_READER_DSN"), store.Limits{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

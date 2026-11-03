@@ -64,6 +64,9 @@ func TestRequireVerifyFull(t *testing.T) {
 			}
 		}
 	}
+	if err := CheckDSN("postgres://u@db:5432/ligo?sslmode=disable", false); !errors.Is(err, ErrInsecureConnection) {
+		t.Errorf("CheckDSN: %v, want ErrInsecureConnection", err)
+	}
 	if _, err := poolConfig("::not a dsn::", statementTimeoutApp, true); err == nil {
 		t.Error("invalid DSN accepted")
 	}
