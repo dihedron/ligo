@@ -212,7 +212,7 @@ serve_env() {
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
 		printf 'LIGO_%s_DSN=%s\n' "$upper" "$(pg_dsn "$role" pg.ligo.lab /etc/ligo-lab/ca.crt "$SERVE_DB")"
 	done
-	printf '%s\n' "LIGO_LDAP_BIND_PASSWORD=$(ldap_password ligo-admin-auth)" "LIGO_INSTANCE_ID=ligo1" "SSL_CERT_FILE=/etc/ligo-lab/ca.crt"
+	printf '%s\n' "LIGO_LDAP_BIND_PASSWORD=$(ldap_password ligo-admin-auth)" "LIGO_INSTANCE_ID=ligo1"
 }
 
 serve_unit() {
@@ -313,7 +313,8 @@ storage:
   postgres: { app_dsn_env: LIGO_APP_DSN, reader_dsn_env: LIGO_READER_DSN, dbos_dsn_env: LIGO_DBOS_DSN }
 secret_sealing:
   provider: vault-transit
-  vault_transit: { address: "$bao", auth_mount: jwt-spiffe, role: ligo-sealer, jwt_audience: "$aud", mount: transit, key_name: ligo-interstage }
+  vault_transit: { address: "$bao", auth_mount: jwt-spiffe, role: ligo-sealer, jwt_audience: "$aud", mount: transit, key_name: ligo-interstage,
+    ca_cert_file: /etc/ligo-lab/ca.crt }
 plugins:
   directory: "$LIGO1_PLUGINS"
 identity_providers:

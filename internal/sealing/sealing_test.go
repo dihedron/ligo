@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -382,6 +383,38 @@ func TestTransitNoToken(t *testing.T) {
 	}
 	if _, err := NewTransitKEK(cfg, jwtSource{}, nil); err != nil {
 		t.Errorf("default client: %v", err)
+	}
+}
+
+// TestTransitCACert: the default client trusts ca_cert_file, and only it
+// when set (finding 2.7).
+func TestTransitCACert(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"auth":{"client_token":"t"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	ca := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := TransitConfig{Address: srv.URL, AuthMount: "m", Role: "r", JWTAudience: "a", Mount: "transit", KeyName: "k"}
+	kek, _ := NewTransitKEK(cfg, jwtSource{}, nil)
+	if _, err := kek.currentToken(context.Background()); err == nil || !strings.Contains(err.Error(), "certificate") {
+		t.Errorf("without ca_cert_file: %v", err)
+	}
+	cfg.CACertFile = ca
+	if kek, err := NewTransitKEK(cfg, jwtSource{}, nil); err != nil {
+		t.Fatal(err)
+	} else if _, err := kek.currentToken(context.Background()); err != nil {
+		t.Errorf("with ca_cert_file: %v", err)
+	}
+	notPEM := filepath.Join(t.TempDir(), "x.crt")
+	_ = os.WriteFile(notPEM, []byte("x"), 0o600)
+	for _, file := range []string{filepath.Join(t.TempDir(), "none"), notPEM} {
+		cfg.CACertFile = file
+		if _, err := NewTransitKEK(cfg, jwtSource{}, nil); err == nil {
+			t.Errorf("ca_cert_file %s accepted", file)
+		}
 	}
 }
 

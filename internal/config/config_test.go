@@ -230,6 +230,9 @@ func TestPluginRules(t *testing.T) {
 		{"max_tracked_keys too few", "max_tracked_keys: 1000000", "max_tracked_keys: 9999"},
 		{"max_tracked_keys too many", "max_tracked_keys: 1000000", "max_tracked_keys: 10000001"},
 		{"max_conns too many", "max_conns: 25", "max_conns: 1001"},
+		{"transit audience not the core identity's", `    jwt_audience: "https://vault.prod.internal"
+    mount: "transit"`, `    jwt_audience: "https://vault.other.internal"
+    mount: "transit"`},
 		{"app_statement_timeout too long", "app_statement_timeout: 5s", "app_statement_timeout: 10m"},
 		{"reader_statement_timeout too short", "reader_statement_timeout: 500ms", "reader_statement_timeout: 10ms"},
 		{"startup_timeout too long", `  application_version: "4.0.1"`, "  startup_timeout: 1h\n  application_version: \"4.0.1\""},

@@ -346,7 +346,7 @@ func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, zones *identit
 	var err error
 	switch ss := cfg.SecretSealing; ss.Provider {
 	case "vault-transit":
-		kek, err = sealing.NewTransitKEK(ss.VaultTransit, zones, &http.Client{Timeout: 10 * time.Second})
+		kek, err = sealing.NewTransitKEK(ss.VaultTransit, zones, nil)
 	case "local-kek":
 		kek, err = sealing.NewLocalKEK(ss.LocalKEKFile, cmd.InsecureDev)
 	default:

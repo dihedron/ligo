@@ -167,6 +167,7 @@ secret_sealing:
     jwt_audience: "https://vault.prod.internal"
     mount: "transit"
     key_name: "ligo-interstage"
+    # ca_cert_file: "/etc/ligo/tls/corp-ca.crt"   # CAs trusted for address; default the system roots
   # local_kek_file: "/etc/ligo/dev/kek"   # local-kek only: 32-byte key, not group- or world-readable
 
 plugins:

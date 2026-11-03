@@ -297,6 +297,9 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	}
 	switch cfg.SecretSealing.Provider {
 	case "vault-transit":
+		if a := cfg.SecretSealing.VaultTransit.JWTAudience; !slices.Contains(cfg.CoreIdentity.SVIDSelector.JWTAudience, a) {
+			c.failf(9, "secret_sealing.vault_transit.jwt_audience %q is not in core_identity.svid_selector.jwt_audience", a)
+		}
 	case "local-kek":
 		if !opts.InsecureDev {
 			c.failf(9, "secret_sealing.provider local-kek requires --insecure-dev")
