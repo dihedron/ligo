@@ -179,7 +179,7 @@ func (s *Server) getBinding(w http.ResponseWriter, r *http.Request) {
 		stages, err = s.Bindings.Stages(r.Context(), v)
 	}
 	if err == nil {
-		entries, _, err = s.auditPage(r.Context(), "BINDING", v.Metadata.Name, nil, 20)
+		entries, _, err = s.auditPage(r.Context(), v.Metadata.ID, nil, 20)
 	}
 	if err != nil {
 		s.fail(w, r, err)

@@ -103,7 +103,7 @@ func (s *Server) getSource(w http.ResponseWriter, r *http.Request) {
 	v, err := s.Sources.Get(r.Context(), caller(r), r.PathValue("name"))
 	var entries []auditDTO
 	if err == nil {
-		entries, _, err = s.auditPage(r.Context(), "SOURCE", v.Metadata.Name, nil, 20)
+		entries, _, err = s.auditPage(r.Context(), v.Metadata.ID, nil, 20)
 	}
 	if err != nil {
 		s.fail(w, r, err)

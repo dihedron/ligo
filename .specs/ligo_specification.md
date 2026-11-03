@@ -1997,6 +1997,7 @@ ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
 CREATE INDEX idx_cr_status_zone ON change_requests (status, zone, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
+CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
 
 -- ---------------------------------------------------------------------------
@@ -2044,6 +2045,8 @@ CREATE TABLE audit_log (
     )
 );
 CREATE INDEX idx_audit_resource ON audit_log (resource_type, resource_name, id DESC);
+CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE resource_id IS NOT NULL;
+CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;
@@ -3182,7 +3185,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `GET` | `/v1/admin/break-glass` | viewer | Open and recent break-glass changes with expiry countdown and ratification state (keyset-paginated). |
 | `POST` | `/v1/admin/change-requests/{id}/ratify` | approver of a break-glass side | Ratify one side of a break-glass change. Body `{"comment": "…", "side": "…"}` (`comment` required; `side` selected as for approval). The ratifier MUST differ from the requester, and from the ratifiers of the other sides when distinct approvers are required. Audit `BREAK_GLASS_RATIFIED`. When every `BREAK_GLASS` side is ratified, the binding's expiry is cleared. Ratifying the `SOURCE` side also ratifies the inline source's break-glass change. |
 | `POST` | `/v1/admin/change-requests/{id}/revert` | approver of any side, or the requester | Revert an open break-glass `CREATE`/`UPDATE` now, by the same `SYSTEM_REVERT` as expiry (`requested_by` = the caller). Body `{"comment": "…"}`: why, required (`422` without); kept as the revert's sides' `decision_comment` and audited with it. The sweeper's reverts at expiry carry the comment `TTL expired`. |
-| `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource. |
+| `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource: those carrying its id and those of its change requests (a create's included), never those of a retired or deleted namesake or of a refused attempt on its name. A binding is seen with its party scopes, as by its `GET`. The last 20 entries of the `GET`s and the UI follow the same rule. |
 | `GET` | `/v1/admin/audit/verify` | viewer | Verifies the hash chain: `{"valid": true, "entries": N}`, or the first broken `id`. |
 
 **Keyset Pagination Convention (Normative):**

@@ -30,6 +30,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/adminauth"
+	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
@@ -1055,5 +1056,50 @@ func TestGovernanceAPI(t *testing.T) {
 	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0), (select count(*) from change_requests where resource_name like 'eval-%') from audit_log").
 		Scan(&after, &filed); err != nil || after != before || filed != 0 {
 		t.Errorf("the dry run stored something: audit %d to %d, %d requests (%v)", before, after, filed, err)
+	}
+}
+
+// TestAuditNamesake: a resource's audit holds its own entries and those of
+// its change requests, the create's included, never those of a namesake or
+// of a refused attempt on its name (finding 2.4).
+func TestAuditNamesake(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)
+	name := "aud-src-" + v.suffix
+	created := v.do(t, olga, "POST", "/v1/admin/sources", map[string]any{"metadata": map[string]string{"name": name},
+		"identity":   map[string]any{"trustDomain": "prod.internal", "svidRegex": `^spiffe://prod\.internal/ns/aud/sa/w$`},
+		"visibility": map[string]string{"mode": "PRIVATE"}})
+	cr, _ := created.body["changeRequest"].(map[string]any)
+	if ok := v.do(t, dora, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve",
+		map[string]string{"payloadSha256": cr["payloadSha256"].(string)}); ok.code != 200 {
+		t.Fatalf("approve: %+v", ok)
+	}
+	other, refused := uuid.NewV7(), uuid.NewV7()
+	err := pgx.BeginFunc(context.Background(), v.owner, func(tx pgx.Tx) error {
+		if _, err := audit.Append(context.Background(), tx, audit.Entry{ResourceType: "SOURCE", ResourceID: &other, ResourceName: name,
+			Action: "SOURCE_RETIRED", Actor: "t"}); err != nil {
+			return err
+		}
+		_, err := audit.Append(context.Background(), tx, audit.Entry{ResourceType: "SOURCE", ResourceName: name, ChangeRequestID: &refused,
+			Action: "CR_REJECTED", Actor: "t"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := func(items []any) (out []string) {
+		for _, i := range items {
+			out = append(out, i.(map[string]any)["action"].(string))
+		}
+		return out
+	}
+	for _, got := range [][]any{
+		v.do(t, viewer, "GET", "/v1/admin/sources/"+name+"/audit", nil).body["items"].([]any),
+		v.do(t, viewer, "GET", "/v1/admin/sources/"+name, nil).body["audit"].([]any),
+	} {
+		a := actions(got)
+		if slices.Contains(a, "SOURCE_RETIRED") || slices.Contains(a, "CR_REJECTED") || !slices.Contains(a, "CR_CREATED") {
+			t.Errorf("audit: %v", a)
+		}
 	}
 }

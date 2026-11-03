@@ -93,12 +93,15 @@ func (s *Server) verifyAudit(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// scopes of a resource, by its kind in the path; only existing resources
-// have an audit visible through the API.
-var scopeQueries = map[string]struct{ typ, sql string }{
-	"sources":  {"SOURCE", "SELECT ARRAY[scope] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1"},
-	"targets":  {"TARGET", "SELECT ARRAY[scope, platform_scope] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1"},
-	"bindings": {"BINDING", "SELECT ARRAY[source_scope, target_scope, platform_scope] FROM bindings WHERE name = $1"},
+// id and scopes of a resource, by its kind in the path; only existing
+// resources have an audit visible through the API. A binding's scopes include
+// those of its additional parties (§7.2.4).
+var scopeQueries = map[string]string{
+	"sources": "SELECT id, ARRAY[scope] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+	"targets": "SELECT id, ARRAY[scope, platform_scope] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+	"bindings": `SELECT b.id, ARRAY[b.source_scope, b.target_scope, b.platform_scope] || coalesce((SELECT array_agg(DISTINCT sd.scope)
+		FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
+		WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}') FROM bindings b WHERE b.name = $1`,
 }
 
 type auditDTO struct {
@@ -119,10 +122,10 @@ type auditDTO struct {
 // caller who sees its scopes (keyset on id).
 func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
 	kind := strings.Split(r.Pattern, "/")[3] // GET /v1/admin/<kind>/{name}/audit
-	q := scopeQueries[kind]
 	name := r.PathValue("name")
+	var id uuid.UUID
 	var scopes []string
-	err := s.DB.QueryRow(r.Context(), q.sql, name).Scan(&scopes)
+	err := s.DB.QueryRow(r.Context(), scopeQueries[kind], name).Scan(&id, &scopes)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !caller(r).Grants.Sees(scopes...) {
 		problem(w, http.StatusNotFound, "not-found", kind+" "+name)
 		return
@@ -137,7 +140,7 @@ func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
 	var items []auditDTO
 	var more bool
 	if err == nil {
-		items, more, err = s.auditPage(r.Context(), q.typ, name, cursor.BeforeID, size)
+		items, more, err = s.auditPage(r.Context(), id, cursor.BeforeID, size)
 	}
 	if err != nil {
 		s.fail(w, r, err)
@@ -149,12 +152,14 @@ func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"items": items, "nextPageToken": token(more, cursor)})
 }
 
-// auditPage is a resource's audit entries before an id, newest first.
-func (s *Server) auditPage(ctx context.Context, typ, name string, before *int64, size int) ([]auditDTO, bool, error) {
+// auditPage is a resource's audit entries before an id, newest first: those
+// of the resource and of its change requests, never those of a namesake.
+func (s *Server) auditPage(ctx context.Context, id uuid.UUID, before *int64, size int) ([]auditDTO, bool, error) {
 	rows, err := s.DB.Query(ctx, `SELECT id, action, actor, coalesce(approver, ''), change_request_id, revision, attempt,
 		coalesce(workflow_id, ''), coalesce(request_id, ''), snapshot, occurred_at FROM audit_log
-		WHERE resource_type = $1 AND resource_name = $2 AND ($3::bigint IS NULL OR id < $3) ORDER BY id DESC LIMIT $4`,
-		typ, name, before, size+1)
+		WHERE (resource_id = $1 OR change_request_id IN (SELECT id FROM change_requests WHERE resource_id = $1))
+		AND ($2::bigint IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`,
+		id, before, size+1)
 	if err != nil {
 		return nil, false, err
 	}

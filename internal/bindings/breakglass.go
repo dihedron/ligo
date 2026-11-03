@@ -129,7 +129,7 @@ func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller,
 		return nil, err
 	}
 	if res.decision = p.Evaluate(res.sourceScope, res.targetScope); !res.decision.Allowed {
-		return nil, s.denied(ctx, c, &b, res)
+		return nil, s.denied(ctx, c, &b, cur, res)
 	}
 	if err := s.Rules.checkExpiry(b.ExpiresAt, time.Now()); err != nil {
 		return nil, err
