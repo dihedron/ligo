@@ -194,6 +194,10 @@ func TestRevertFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	expireBreakGlass(t, o, name)
+	pending, err := s.Delete(ctx, ledgerOp, name, 2, "", nil) // a revocation can be filed during break-glass; the failed revert withdraws it
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := o.Exec(ctx, "delete from target_access_levels where target_id = $1 and name = 'read'", w.ledgerID); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +211,10 @@ func TestRevertFailed(t *testing.T) {
 	}
 	if n, _ := audited(t, o, name, "BREAK_GLASS_REVERT_FAILED"); n != 1 {
 		t.Errorf("BREAK_GLASS_REVERT_FAILED %d", n)
+	}
+	var status string
+	if err := o.QueryRow(ctx, "select status from change_requests where id = $1", pending.ID).Scan(&status); err != nil || status != "WITHDRAWN" {
+		t.Errorf("the pending revocation is %s (%v)", status, err)
 	}
 	if cr, _ := breakGlassOf(t, o, name); cr == nil {
 		t.Error("the failed revert closed the change")

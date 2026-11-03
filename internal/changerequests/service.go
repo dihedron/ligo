@@ -395,6 +395,10 @@ func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, e
 	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
 	decider := r.Sides[0].DecidedBy
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		entries, err := withdrawPending(ctx, tx, r, nil) // as file does: it would hold the name
+		if err != nil {
+			return err
+		}
 		if err := insert(ctx, tx, r); err != nil {
 			return err
 		}
@@ -405,8 +409,8 @@ func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, e
 		for i := range extra {
 			extra[i].ChangeRequestID = &r.ID
 		}
-		return appendAll(ctx, tx, append([]audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", nil),
-			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})}, extra...))
+		return appendAll(ctx, tx, append(append(entries, entry(r, "CR_CREATED", r.RequestedBy, "", nil),
+			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})), extra...))
 	})
 }
 
