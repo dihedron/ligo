@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
@@ -121,7 +122,10 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
 	// no caller: the change was approved on the source or target (§6.8)
 	if _, err := s.resolve(ctx, nil, b, cur, &governance.Policy{}, "", nil); err != nil {
-		return false, err
+		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
+			return false, s.failPropagation(ctx, id, e)
+		}
+		return false, err // the plugin or the database failed: the row stays, the next run retries
 	}
 	started := false
 	var cause string // SOURCE or TARGET, for ligo_propagation_started_total
@@ -174,6 +178,45 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 var errBusy = errors.New("bindings: busy")
+
+// failPropagation ends a propagation whose revision cannot be composed:
+// the row goes, the binding is FAILED with the refusal, keeping its last
+// active snapshot, and PROPAGATION_FAILED is audited and announced (§6.8).
+func (s *Service) failPropagation(ctx context.Context, id uuid.UUID, refusal *changerequests.Error) error {
+	var cause string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		cur, err := load(ctx, tx, "b.id = $1", id, true)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if cur.phase == "PROVISIONING" || cur.phase == "DELETING" {
+			return nil // busy since: the next run defers it
+		}
+		var causeCR uuid.UUID
+		err = tx.QueryRow(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1 RETURNING cause, cause_change_request_id",
+			id).Scan(&cause, &causeCR)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && cur.phase == "DELETE_FAILED" {
+			cause = ""
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE bindings SET phase = 'FAILED', status_message = $2, last_transition_at = now(),
+			updated_at = now(), updated_by = $3 WHERE id = $1`, id, refusal.Error(), actorPropagator); err != nil {
+			return err
+		}
+		snapshot, _ := json.Marshal(map[string]any{"cause": cause, "error": refusal.Error()})
+		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &id, ResourceName: cur.name, ChangeRequestID: &causeCR,
+			Action: "PROPAGATION_FAILED", Actor: actorPropagator, Revision: &cur.revision, Snapshot: snapshot})
+		return err
+	})
+	if err == nil && cause != "" {
+		metrics.PropagationFailed.WithLabelValues(cause).Inc()
+	}
+	return err
+}
 
 // deferPropagation counts a deferral of a busy binding's row, auditing the
 // first one (§6.8).

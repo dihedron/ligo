@@ -23,8 +23,9 @@ import (
 // TestAudited: audit entries announce their events through the hook, in
 // their transaction: one CR_AWAITING_APPROVAL per pending side, to that
 // side's scope; BINDING_REVOKED to the scopes other than the deciding
-// side's, only for consent ANY; PROPAGATION_FAILED only for a propagated
-// revision; deprecations to the scopes of the affected bindings; system
+// side's, only for consent ANY; PROPAGATION_FAILED for a propagated
+// revision that failed or one the propagator could not compose;
+// deprecations to the scopes of the affected bindings; system
 // events to every subscriber; entries that are no event write nothing.
 func TestAudited(t *testing.T) {
 	ctx := context.Background()
@@ -134,6 +135,8 @@ func TestAudited(t *testing.T) {
 			"PROPAGATION_FAILED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 		{"failure of a propagation", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROVISION_FAILURE", Actor: "system:workflow", Revision: &two},
 			"PROPAGATION_FAILED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"propagation not composed", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROPAGATION_FAILED", Actor: "system:propagator", Revision: &two},
+			"PROPAGATION_FAILED", map[string]int{"all": 2, "dc": 2, "cloud": 2}},
 		{"source deprecated", audit.Entry{ResourceType: "SOURCE", ResourceID: &src, ResourceName: "src-" + x, Action: "SOURCE_DEPRECATED", Actor: "carla"},
 			"SOURCE_DEPRECATED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"interconnection denied", audit.Entry{ResourceType: "BINDING", ResourceName: "denied-" + x, Action: "CR_INTERCONNECT_DENIED", Actor: "tina",
