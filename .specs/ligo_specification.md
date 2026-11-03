@@ -3571,7 +3571,7 @@ service:
   application_version: "4.0.1"          # passed to DBOS (EXT-09)
   instance_id_env: "LIGO_INSTANCE_ID"  # unique per replica
   startup_timeout: 60s                   # SPIRE and the sealer must be ready within it (5s–10m, default 60s), §8.2
-  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16)
+  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16); the same on every replica, so that every replica serves the same flows and ETags
     destination: "ligo.prod.internal"
     port: 8443
     server_name: "ligo.prod.internal"

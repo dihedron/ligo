@@ -63,10 +63,13 @@ lab_start() {
 	done
 	inner_wait pg
 	pg_wait_ready
-	if inner_exists ligo1; then
-		inner_wait ligo1
-		spire_check
-	fi
+	local host
+	for host in ligo1 ligo2; do
+		if inner_exists "$host"; then
+			inner_wait "$host"
+			spire_check "$host"
+		fi
+	done
 	local zone
 	for zone in "${ZONES[@]}"; do
 		if inner_exists "bao-$zone"; then

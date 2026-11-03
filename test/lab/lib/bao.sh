@@ -157,23 +157,25 @@ HCL
 		token_policies=ligo-sealer token_ttl=15m token_max_ttl=1h >/dev/null || die "bao-prod: cannot write the role ligo-sealer"
 }
 
-# bao_check: as the user ligo on ligo1, logs in to bao-prod with a JWT-SVID
-# and wraps a key with Transit (step 3's done criterion).
+# bao_check: as the user ligo on each ligo host, logs in to bao-prod with a
+# JWT-SVID and wraps a key with Transit (step 3's done criterion).
 bao_check() {
-	local uid
-	uid="$(env_get .ligo1.ligo_uid)"
-	inner_exec ligo1 mkdir -p /etc/ligo-lab
-	inner_push "$LAB_STATE_DIR/pki/ca.crt" ligo1 /etc/ligo-lab/ca.crt 0644
-	lxd exec lxd -- lxc exec ligo1 --user "$uid" -- sh -ec '
-		jwt="$(/opt/spire/bin/spire-agent api fetch jwt -audience https://bao-prod.ligo.lab -socketPath /run/spire/prod/agent.sock -output json | jq -r ".[0].svids[0].svid")"
-		token="$(curl -fsS --cacert /etc/ligo-lab/ca.crt -X POST https://bao-prod.ligo.lab:8200/v1/auth/jwt-spiffe/login \
-			-d "{\"role\":\"ligo-sealer\",\"jwt\":\"$jwt\"}" | jq -r .auth.client_token)"
-		curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" -X POST \
-			https://bao-prod.ligo.lab:8200/v1/transit/encrypt/ligo-interstage -d "{\"plaintext\":\"bGFiLWNoZWNr\"}" |
-			jq -e ".data.ciphertext | startswith(\"vault:v\")" >/dev/null
-		! curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" https://bao-prod.ligo.lab:8200/v1/kv/data/x >/dev/null 2>&1
-	' || die "ligo1: the JWT-SVID login to bao-prod, or Transit, does not work"
-	info "ligo1, user ligo: logged in to bao-prod with its JWT-SVID, encrypted with transit/ligo-interstage, denied elsewhere"
+	local host uid
+	for host in $(ligo_hosts); do
+		uid="$(env_get ".$host.ligo_uid")"
+		inner_exec "$host" mkdir -p /etc/ligo-lab
+		inner_push "$LAB_STATE_DIR/pki/ca.crt" "$host" /etc/ligo-lab/ca.crt 0644
+		lxd exec lxd -- lxc exec "$host" --user "$uid" -- sh -ec '
+			jwt="$(/opt/spire/bin/spire-agent api fetch jwt -audience https://bao-prod.ligo.lab -socketPath /run/spire/prod/agent.sock -output json | jq -r ".[0].svids[0].svid")"
+			token="$(curl -fsS --cacert /etc/ligo-lab/ca.crt -X POST https://bao-prod.ligo.lab:8200/v1/auth/jwt-spiffe/login \
+				-d "{\"role\":\"ligo-sealer\",\"jwt\":\"$jwt\"}" | jq -r .auth.client_token)"
+			curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" -X POST \
+				https://bao-prod.ligo.lab:8200/v1/transit/encrypt/ligo-interstage -d "{\"plaintext\":\"bGFiLWNoZWNr\"}" |
+				jq -e ".data.ciphertext | startswith(\"vault:v\")" >/dev/null
+			! curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" https://bao-prod.ligo.lab:8200/v1/kv/data/x >/dev/null 2>&1
+		' || die "$host: the JWT-SVID login to bao-prod, or Transit, does not work"
+		info "$host, user ligo: logged in to bao-prod with its JWT-SVID, encrypted with transit/ligo-interstage, denied elsewhere"
+	done
 }
 
 # identity_bao_up: both zones' OpenBao, then the check.

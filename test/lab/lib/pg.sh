@@ -133,10 +133,12 @@ pg_wait_ready() {
 
 # pg_record writes env.json.
 pg_record() {
-	local version fingerprint
+	local version fingerprint scenarios
 	version="$(pg_superuser -tAc 'show server_version')"
+	# the scenarios built so far, and this command's
+	scenarios="$( (env_get '.scenarios // ""' 2>/dev/null; printf '%s\n' "${LAB_SELECTED[@]}") | tr ' ' '\n' | awk 'NF && !seen[$0]++' | xargs)"
 	fingerprint="$(inner config get pg volatile.base_image)"
-	jq -n --arg scenarios "$LAB_SCENARIOS" --arg image "$LAB_IMAGE" --arg fingerprint "$fingerprint" \
+	jq -n --arg scenarios "$scenarios" --arg image "$LAB_IMAGE" --arg fingerprint "$fingerprint" \
 		--arg pg "$version" --arg ip "$(pg_ip)" --arg published "$(lxd_ip):5432" --arg inner_lxd "$(inner version 2>/dev/null | awk '/Server version/ {print $3}')" --arg driver "$(lxc storage show "$LAB_STORAGE_POOL" | awk '/^driver:/ {print $2}')" \
 		--arg ca "$(sha256sum "$LAB_STATE_DIR/pki/ca.crt" | cut -d' ' -f1)" \
 		--arg cert "$(sha256sum "$LAB_STATE_DIR/pki/pg.crt" | cut -d' ' -f1)" \

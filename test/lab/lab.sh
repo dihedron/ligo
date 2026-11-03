@@ -41,23 +41,26 @@ usage: lab.sh <command> [options]
 
 commands:
   preflight                 check that this machine can run the lab
-  up [--scenario S]         build the lab (or complete a partial one)
+  up [--scenario S]         build the lab (or complete a partial one); S is
+                            storage, identity, ha (adds ligo2) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
   env                       print the integration tests' environment, as
                             export lines: eval "\$(test/lab/lab.sh env)"
-  env --on ligo1            the environment of the tests on ligo1, one
-                            VAR=value per line
-  deploy                    build the lab-tagged tests and copy them to ligo1
-  test --on ligo1 [-run REGEX]
-                            deploy, then run them on ligo1 as the user ligo
+  env --on HOST             the environment of the tests on a ligo host
+                            (ligo1, ligo2), one VAR=value per line
+  deploy                    build the lab-tagged tests and the plugins and copy
+                            them to every ligo host
+  test --on HOST [-run REGEX]
+                            deploy, then run them on HOST as the user ligo
   test [-run REGEX] [pkg...]
                             run "go test -tags integration" (default ./...)
                             with that environment
-  serve install|start|stop|reload|status|logs|test
-                            ligo serve on ligo1 (database ligo_serve), and
-                            its e2e with reload, stop and start
+  serve [--on HOST|all] install|start|stop|reload|status|logs|test
+                            ligo serve on every ligo host (default all; one
+                            database, ligo_serve), and its e2e with reload,
+                            stop and start; test always runs on all
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
@@ -146,8 +149,8 @@ cmd_status() {
 cmd_env() {
 	require_lab
 	if [[ "${1:-}" == --on ]]; then
-		[[ "${2:-}" == ligo1 ]] || die "env --on: only ligo1"
-		env_ligo1
+		ligo_host "${2:-}"
+		env_ligo
 		return
 	fi
 	local role upper
@@ -160,9 +163,10 @@ cmd_env() {
 cmd_test() {
 	require_lab
 	if [[ "${1:-}" == --on ]]; then
-		[[ "${2:-}" == ligo1 ]] || die "test --on: only ligo1"
+		ligo_host "${2:-}"
+		local host="$2"
 		shift 2
-		test_ligo1 "$@"
+		test_on "$host" "$@"
 		return
 	fi
 	local args=() pkgs=()

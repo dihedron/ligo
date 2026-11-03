@@ -1,13 +1,14 @@
 # shellcheck shell=bash
-# Tests that need SVIDs run on ligo1, the ligo host, as the user ligo: deploy
-# builds them on the lab host and copies them there; "test --on ligo1" runs
-# them (.specs/ligo-test-environment.md, "Tests on ligo1").
+# Tests that need SVIDs run on a ligo host (ligo1, and ligo2 with ha) as the
+# user ligo: deploy builds them on the lab host and copies them to every ligo
+# host; "test --on HOST" runs them there (.specs/ligo-test-environment.md,
+# "Tests on ligo1").
 
-LIGO1_TESTS=/home/ligo/tests
+LIGO_TESTS=/home/ligo/tests
 
-# LIGO1_PLUGINS is ligo1's plugins.directory; LAB_PLUGINS are the lab's
+# LIGO_PLUGINS is the ligo hosts' plugins.directory; LAB_PLUGINS are the lab's
 # plugins (test/lab/plugins), in the zone prod.
-LIGO1_PLUGINS=/usr/lib/ligo/plugins
+LIGO_PLUGINS=/usr/lib/ligo/plugins
 LAB_PLUGINS=(labprobe target-postgres store-vault target-echo)
 
 # lab_packages: the packages with tests built with the lab tag.
@@ -15,10 +16,10 @@ lab_packages() {
 	(cd "$REPO_DIR" && grep -rlE '^//go:build .*\blab\b' --include='*_test.go' . | xargs -r -n1 dirname | sort -u)
 }
 
-# env_ligo1: the environment of the tests on ligo1: the database directly
-# (pg.ligo.lab), ligo's Workload API sockets, OpenBao and LDAP, and the lab CA
-# copied to ligo1.
-env_ligo1() {
+# env_ligo: the environment of the tests on a ligo host: the database
+# directly (pg.ligo.lab), ligo's Workload API sockets, OpenBao and LDAP, and
+# the lab CA copied to the host.
+env_ligo() {
 	local role upper
 	for role in migrator app reader dbos; do
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
@@ -34,7 +35,7 @@ env_ligo1() {
 		"LIGO_TEST_LDAP_BASE=$LDAP_BASE" \
 		"LIGO_TEST_LDAP_BIND_PASS=$(ldap_password ligo-admin-auth)" \
 		"LIGO_TEST_LDAP_OLIVIA_PASS=$(ldap_password olivia)" \
-		"LIGO_TEST_PLUGIN_DIR=$LIGO1_PLUGINS"
+		"LIGO_TEST_PLUGIN_DIR=$LIGO_PLUGINS"
 	local name
 	for name in "${LAB_PLUGINS[@]}"; do
 		[[ -f "$LAB_STATE_DIR/plugins/$name" ]] &&
@@ -50,12 +51,12 @@ cmd_deploy() {
 }
 
 # deploy_tests: builds the lab tests (static, linux/amd64) and copies them to
-# ligo1, owned by ligo.
+# every ligo host, owned by ligo.
 deploy_tests() {
 	require_lab
 	inner_exists ligo1 || die "ligo1 does not exist: lab.sh up --scenario identity"
 	section "Deploy"
-	local out="$LAB_STATE_DIR/tests" pkg name
+	local out="$LAB_STATE_DIR/tests" pkg name host
 	rm -rf "${out:?}" && mkdir -p "$out"
 	for pkg in $(lab_packages); do
 		name="$(tr '/' '_' <<<"${pkg#./}").test"
@@ -63,36 +64,43 @@ deploy_tests() {
 			die "cannot build the tests of $pkg"
 		info "built $pkg"
 	done
-	inner_exec ligo1 sh -c "rm -rf $LIGO1_TESTS && install -d -o ligo -g ligo $LIGO1_TESTS /etc/ligo-lab"
-	inner_push "$LAB_STATE_DIR/pki/ca.crt" ligo1 /etc/ligo-lab/ca.crt 0644
-	for name in "$out"/*.test; do
-		inner_push "$name" ligo1 "$LIGO1_TESTS/${name##*/}" 0755
+	for host in $(ligo_hosts); do
+		inner_exec "$host" sh -c "rm -rf $LIGO_TESTS && install -d -o ligo -g ligo $LIGO_TESTS /etc/ligo-lab"
+		inner_push "$LAB_STATE_DIR/pki/ca.crt" "$host" /etc/ligo-lab/ca.crt 0644
+		for name in "$out"/*.test; do
+			inner_push "$name" "$host" "$LIGO_TESTS/${name##*/}" 0755
+		done
+		inner_exec "$host" chown -R ligo:ligo "$LIGO_TESTS"
+		info "copied $(find "$out" -name '*.test' | wc -l) test binaries to $host:$LIGO_TESTS"
 	done
-	inner_exec ligo1 chown -R ligo:ligo "$LIGO1_TESTS"
-	info "copied $(find "$out" -name '*.test' | wc -l) test binaries to ligo1:$LIGO1_TESTS"
 }
 
-# deploy_plugins: builds the lab plugins and installs them on ligo1 as
-# production expects (root:root, 0755, §5.3 rule 3); then registers each
-# plugin's SPIRE entry, which selects on its hash, and its OpenBao objects.
-# Both change with every build, so every deploy applies them.
+# deploy_plugins: builds the lab plugins and installs them on every ligo
+# host as production expects (root:root, 0755, §5.3 rule 3); then registers
+# each plugin's SPIRE entry under each host's node alias, which selects on its
+# hash, and its OpenBao objects. Both change with every build, so every deploy
+# applies them.
 deploy_plugins() {
-	local out="$LAB_STATE_DIR/plugins" uid name sum
+	local out="$LAB_STATE_DIR/plugins" uid name sum host
 	rm -rf "${out:?}" && mkdir -p "$out"
-	uid="$(env_get .ligo1.ligo_uid)"
-	if inner_exec ligo1 systemctl -q is-active ligo 2>/dev/null; then
-		inner_exec ligo1 systemctl stop ligo
-		warn "the ligo service is stopped: its plugins are replaced; lab.sh serve install starts it again"
-	fi
-	inner_exec ligo1 install -d -o root -g root -m 0755 /usr/lib/ligo "$LIGO1_PLUGINS"
 	for name in "${LAB_PLUGINS[@]}"; do
 		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out/$name" "./test/lab/plugins/$name") ||
 			die "cannot build the plugin $name"
-		inner_push "$out/$name" ligo1 "$LIGO1_PLUGINS/$name" 0755
-		sum="$(sha256sum "$out/$name" | cut -d' ' -f1)"
-		plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum"
-		plugin_svid_wait prod "$name" "$uid"
-		info "plugin $name installed in ligo1:$LIGO1_PLUGINS (sha256 ${sum:0:12}…); the agent issues its SVID, selected by that hash"
+	done
+	for host in $(ligo_hosts); do
+		uid="$(env_get ".$host.ligo_uid")"
+		if inner_exec "$host" systemctl -q is-active ligo 2>/dev/null; then
+			inner_exec "$host" systemctl stop ligo
+			warn "the ligo service on $host is stopped: its plugins are replaced; lab.sh serve install starts it again"
+		fi
+		inner_exec "$host" install -d -o root -g root -m 0755 /usr/lib/ligo "$LIGO_PLUGINS"
+		for name in "${LAB_PLUGINS[@]}"; do
+			inner_push "$out/$name" "$host" "$LIGO_PLUGINS/$name" 0755
+			sum="$(sha256sum "$out/$name" | cut -d' ' -f1)"
+			plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum" "$host"
+			plugin_svid_wait prod "$name" "$uid" "$host"
+			info "plugin $name installed in $host:$LIGO_PLUGINS (sha256 ${sum:0:12}…); the agent issues its SVID, selected by that hash"
+		done
 	done
 	pg_target
 	plugin_bao labprobe lab-admin "$LAB_STATE_DIR/passwords/labprobe"
@@ -161,29 +169,31 @@ HCL
 		die "bao-prod: cannot write the role lab-standins-check"
 }
 
-# plugin_svid_wait ZONE NAME UID: waits until the zone's agent issues the
-# plugin's SVID to the plugin's binary run as the user ligo (a new entry
-# reaches the agents at their next sync); the binary asks the agent itself,
-# so the agent attests exactly what it will attest for the plugin.
+# plugin_svid_wait ZONE NAME UID HOST: waits until the zone's agent on HOST
+# issues the plugin's SVID to the plugin's binary run as the user ligo (a new
+# entry reaches the agents at their next sync); the binary asks the agent
+# itself, so the agent attests exactly what it will attest for the plugin.
 plugin_svid_wait() {
-	local zone="$1" name="$2" uid="$3"
+	local zone="$1" name="$2" uid="$3" host="$4"
 	for _ in $(seq 1 30); do
-		lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$LIGO1_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
+		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$LIGO_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
 			grep -qx "spiffe://$zone.lab/ligo/plugin/$name" && return
 		sleep 1
 	done
-	die "the $zone agent does not issue the SVID of the plugin $name after 30s (uid $uid)"
+	die "the $zone agent on $host does not issue the SVID of the plugin $name after 30s (uid $uid)"
 }
 
-# plugin_entry ZONE PATH HINT UID SHA256: the plugin's entry under ligo1's
-# node alias, replaced when the binary's hash changed.
+# plugin_entry ZONE PATH HINT UID SHA256 HOST: the plugin's entry under
+# HOST's node alias, replaced when the binary's hash changed.
 plugin_entry() {
-	local zone="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" entry
-	spire "$zone" entry show -spiffeID "$id" 2>/dev/null | grep -q "unix:sha256:$sum" && return
-	for entry in $(spire "$zone" entry show -spiffeID "$id" 2>/dev/null | awk '/^Entry ID/ {print $4}'); do
+	local zone="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" parent="spiffe://$1.lab/node/$6" entry out
+	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
+	out="$(spire "$zone" entry show -parentID "$parent" -spiffeID "$id" 2>/dev/null)" || true
+	grep -q "unix:sha256:$sum" <<<"$out" && return
+	for entry in $(awk '/^Entry ID/ {print $4}' <<<"$out"); do
 		spire "$zone" entry delete -entryID "$entry" >/dev/null
 	done
-	spire "$zone" entry create -parentID "spiffe://$zone.lab/node/ligo1" -spiffeID "$id" -hint "$hint" \
+	spire "$zone" entry create -parentID "$parent" -spiffeID "$id" -hint "$hint" \
 		-selector "unix:uid:$uid" -selector "unix:sha256:$sum" >/dev/null || die "cannot register $id"
 }
 
@@ -209,29 +219,30 @@ HCL
 		die "bao-prod: cannot write the role ligo-plugin-$name"
 }
 
-# test_ligo1 [-run REGEX]: deploys, then runs the lab tests (TestLab*, or
-# REGEX) of every lab test binary on ligo1 as the user ligo; fails if any
+# test_on HOST [-run REGEX]: deploys, then runs the lab tests (TestLab*, or
+# REGEX) of every lab test binary on HOST as the user ligo; fails if any
 # fails.
-test_ligo1() {
-	local run=(-test.run '^TestLab')
+test_on() {
+	local host="$1" run=(-test.run '^TestLab')
+	shift
 	while (($#)); do
 		case "$1" in
 		-run) run=(-test.run "$2") && shift 2 ;;
-		*) die "test --on ligo1: unknown argument $1" ;;
+		*) die "test --on $host: unknown argument $1" ;;
 		esac
 	done
 	cmd_deploy
-	section "Tests on ligo1"
+	section "Tests on $host"
 	local uid envs=() line name failed=0
-	uid="$(env_get .ligo1.ligo_uid)"
+	uid="$(env_get ".$host.ligo_uid")"
 	while IFS= read -r line; do
 		envs+=(--env "$line")
-	done < <(env_ligo1)
-	for name in $(inner_exec ligo1 sh -c "ls $LIGO1_TESTS"); do
+	done < <(env_ligo)
+	for name in $(inner_exec "$host" sh -c "ls $LIGO_TESTS"); do
 		info "$name"
-		lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO1_TESTS" "${envs[@]}" -- \
-			"$LIGO1_TESTS/$name" -test.count=1 -test.v "${run[@]}" | sed 's/^/        /' || failed=1
+		lxd exec lxd -- lxc exec "$host" --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
+			"$LIGO_TESTS/$name" -test.count=1 -test.v "${run[@]}" | sed 's/^/        /' || failed=1
 	done
-	((failed == 0)) || die "lab tests failed on ligo1"
-	info "lab tests passed on ligo1"
+	((failed == 0)) || die "lab tests failed on $host"
+	info "lab tests passed on $host"
 }

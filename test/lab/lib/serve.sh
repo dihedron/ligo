@@ -1,58 +1,87 @@
 # shellcheck shell=bash
-# The ligo service on ligo1: ligo serve as production runs it, against its
-# own database (.specs/ligo-test-environment.md, "The ligo service on ligo1").
+# The ligo service on every ligo host (ligo1, and ligo2 with ha): ligo serve
+# as production runs it, the replicas sharing one database
+# (.specs/ligo-test-environment.md, "The ligo service on ligo1" and "The
+# second replica ligo2").
 
 LIGO1_E2E=/home/ligo/e2e
 SERVE_DB=ligo_serve
 
+# cmd_serve [--on HOST|all] ACTION: start, stop, reload, status and logs act
+# on HOST or on every ligo host (all, the default); install and test always
+# act on every one, since the plugins they deploy are shared.
 cmd_serve() {
 	require_lab
 	inner_exists ligo1 || die "ligo1 does not exist: lab.sh up --scenario identity"
+	local hosts host
+	hosts="$(ligo_hosts | xargs)"
+	if [[ "${1:-}" == --on ]]; then
+		[[ "${2:-}" == all ]] || { ligo_host "${2:-}" && hosts="$2"; }
+		shift 2
+	fi
 	case "${1:-status}" in
 	install) serve_install ;;
-	start) inner_exec ligo1 systemctl start ligo && serve_wait ;;
-	stop) inner_exec ligo1 systemctl stop ligo ;;
-	reload) inner_exec ligo1 systemctl reload ligo ;;
-	status) inner_exec ligo1 systemctl --no-pager status ligo || true ;;
-	logs) inner_exec ligo1 journalctl --no-pager -u ligo ;;
 	test) serve_test ;;
+	start | stop | reload | status | logs)
+		for host in $hosts; do
+			case "$1" in
+			start) inner_exec "$host" systemctl start ligo && serve_wait "$host" ;;
+			stop) inner_exec "$host" systemctl stop ligo ;;
+			reload) inner_exec "$host" systemctl reload ligo ;;
+			status) inner_exec "$host" systemctl --no-pager status ligo || true ;;
+			logs) inner_exec "$host" journalctl --no-pager -u ligo ;;
+			esac
+		done
+		;;
 	*) die "serve: install, start, stop, reload, status, logs or test" ;;
 	esac
 }
 
 # serve_install: the database, then (after deploy, for the plugins) the
-# binary, the configuration and the unit; starts ligo and waits for it.
+# binary, the configuration and the unit on every ligo host; starts ligo
+# there and waits for it.
 serve_install() {
-	section "ligo serve on ligo1"
+	section "ligo serve on $(ligo_hosts | xargs)"
 	serve_db
+	local host
 	# the plugins it runs are rebuilt, and their hashes go into server.yaml
-	inner_exec ligo1 systemctl stop ligo 2>/dev/null || true
+	for host in $(ligo_hosts); do
+		inner_exec "$host" systemctl stop ligo 2>/dev/null || true
+	done
 	cmd_deploy
 	local out="$LAB_STATE_DIR/ligo"
 	(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out" ./cmd/ligo) || die "cannot build ligo"
-	inner_push "$out" ligo1 /usr/local/bin/ligo 0755
-	inner_exec ligo1 install -d -o root -g ligo -m 0750 /etc/ligo
-	serve_config | inner_exec ligo1 sh -c 'cat >/etc/ligo/server.yaml && chown root:ligo /etc/ligo/server.yaml && chmod 0640 /etc/ligo/server.yaml'
-	serve_env | inner_exec ligo1 sh -c 'umask 027 && cat >/etc/ligo/ligo.env && chown root:ligo /etc/ligo/ligo.env && chmod 0640 /etc/ligo/ligo.env'
-	serve_unit | inner_exec ligo1 sh -c 'cat >/etc/systemd/system/ligo.service'
-	inner_exec ligo1 systemctl daemon-reload
-	inner_exec ligo1 systemctl enable ligo >/dev/null 2>&1
-	inner_exec ligo1 systemctl restart ligo
-	serve_wait
-	info "ligo serves on ligo1:9443 (database $SERVE_DB)"
-	serve_proxy
+	for host in $(ligo_hosts); do
+		inner_push "$out" "$host" /usr/local/bin/ligo 0755
+		inner_exec "$host" install -d -o root -g ligo -m 0750 /etc/ligo
+		serve_config "$host" | inner_exec "$host" sh -c 'cat >/etc/ligo/server.yaml && chown root:ligo /etc/ligo/server.yaml && chmod 0640 /etc/ligo/server.yaml'
+		serve_env "$host" | inner_exec "$host" sh -c 'umask 027 && cat >/etc/ligo/ligo.env && chown root:ligo /etc/ligo/ligo.env && chmod 0640 /etc/ligo/ligo.env'
+		serve_unit | inner_exec "$host" sh -c 'cat >/etc/systemd/system/ligo.service'
+		inner_exec "$host" systemctl daemon-reload
+		inner_exec "$host" systemctl enable ligo >/dev/null 2>&1
+		inner_exec "$host" systemctl restart ligo
+		serve_wait "$host"
+		info "ligo serves on $host:9443 (database $SERVE_DB, executor $host)"
+		serve_proxy "$host"
+	done
 	serve_cli_users
 }
 
-# serve_proxy: the admin listener, and with it the web UI, on the lab VM's
-# address, as pg's proxy publishes PostgreSQL (.specs/ligo-echo-target.md).
+# ui_port HOST: the lab VM's port that publishes HOST's admin listener:
+# 9443 for ligo1, 9444 for ligo2.
+ui_port() { printf '%d' $((9442 + ${1#ligo})); }
+
+# serve_proxy HOST: HOST's admin listener, and with it the web UI, on the lab
+# VM's address, as pg's proxy publishes PostgreSQL (.specs/ligo-echo-target.md).
 serve_proxy() {
-	if ! inner config device get ligo1 admin-ui type >/dev/null 2>&1; then
-		inner config device add ligo1 admin-ui proxy nat=true \
-			listen="tcp:$(lxd_ip):9443" connect="tcp:$(inner_ip ligo1):9443" >/dev/null ||
-			die "cannot publish ligo1:9443 on the lab VM"
+	local host="$1" port
+	port="$(ui_port "$host")"
+	if ! inner config device get "$host" admin-ui type >/dev/null 2>&1; then
+		inner config device add "$host" admin-ui proxy nat=true \
+			listen="tcp:$(lxd_ip):$port" connect="tcp:$(inner_ip "$host"):9443" >/dev/null ||
+			die "cannot publish $host:9443 on the lab VM"
 	fi
-	info "the web UI is at https://$(lxd_ip):9443/ui/login (ligo's SVID: the browser warns once)"
+	info "the web UI of $host is at https://$(lxd_ip):$port/ui/login (ligo's SVID: the browser warns once)"
 }
 
 # CLI_USERS: the users on ligo1 that run the CLI, and their SPIFFE IDs on
@@ -194,25 +223,29 @@ serve_db() {
 	info "database $SERVE_DB migrated"
 }
 
-# serve_wait: waits until the admin listener accepts connections.
+# serve_wait HOST: waits until HOST's admin listener accepts connections.
 serve_wait() {
+	local host="$1" out
 	for _ in $(seq 1 60); do
-		inner_exec ligo1 ss -Hltn 'sport = :9443' 2>/dev/null | grep -q LISTEN && return
+		# captured first: grep -q would cut the pipe, which pipefail reports as a failure
+		out="$(inner_exec "$host" ss -Hltn 'sport = :9443' 2>/dev/null)" || true
+		grep -q LISTEN <<<"$out" && return
 		sleep 1
 	done
-	inner_exec ligo1 journalctl --no-pager -u ligo -n 30 >&2 || true
-	die "ligo does not listen on :9443 after 60s"
+	inner_exec "$host" journalctl --no-pager -u ligo -n 30 >&2 || true
+	die "ligo on $host does not listen on :9443 after 60s"
 }
 
-# serve_env: the unit's environment file: the DSNs of ligo_serve, the LDAP
-# bind password, the replica's ID and the lab CA for the Transit client.
+# serve_env HOST: the unit's environment file: the DSNs of ligo_serve, the
+# LDAP bind password and the replica's ID, HOST (its DBOS executor ID).
 serve_env() {
+	local host="$1"
 	local role upper
 	for role in app reader dbos; do
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
 		printf 'LIGO_%s_DSN=%s\n' "$upper" "$(pg_dsn "$role" pg.ligo.lab /etc/ligo-lab/ca.crt "$SERVE_DB")"
 	done
-	printf '%s\n' "LIGO_LDAP_BIND_PASSWORD=$(ldap_password ligo-admin-auth)" "LIGO_INSTANCE_ID=ligo1"
+	printf '%s\n' "LIGO_LDAP_BIND_PASSWORD=$(ldap_password ligo-admin-auth)" "LIGO_INSTANCE_ID=$host"
 }
 
 serve_unit() {
@@ -244,14 +277,17 @@ WantedBy=multi-user.target
 UNIT
 }
 
-# serve_config: server.yaml for the lab, with the deployed plugins' hashes.
+# serve_config HOST: server.yaml for HOST, with the deployed plugins' hashes.
+# The replicas' files differ only in external_origin, the web UI's address
+# through HOST's proxy; workload_advertise is the same on every replica, so
+# that each serves the same "ligo" flow (and ETag).
 serve_config() {
-	local aud="https://bao-prod.ligo.lab" bao="https://bao-prod.ligo.lab:$BAO_PORT" tp sv te
+	local host="$1" aud="https://bao-prod.ligo.lab" bao="https://bao-prod.ligo.lab:$BAO_PORT" tp sv te
 	tp="$(sha256sum "$LAB_STATE_DIR/plugins/target-postgres" | cut -d' ' -f1)"
 	sv="$(sha256sum "$LAB_STATE_DIR/plugins/store-vault" | cut -d' ' -f1)"
 	te="$(sha256sum "$LAB_STATE_DIR/plugins/target-echo" | cut -d' ' -f1)"
 	cat <<YAML
-# ligo serve on ligo1 (lab), generated by test/lab/lab.sh serve install
+# ligo serve on $host (lab), generated by test/lab/lab.sh serve install
 service:
   application_version: "lab"
   instance_id_env: LIGO_INSTANCE_ID
@@ -271,7 +307,7 @@ server:
     expected_jwt_audience: "spiffe://prod.lab/ns/sys/sa/ligo"
   admin_listener:
     listen_address: "0.0.0.0:9443"
-    external_origin: "https://$(lxd_ip):9443"   # the web UI through the lab VM's proxy (.specs/ligo-echo-target.md)
+    external_origin: "https://$(lxd_ip):$(ui_port "$host")"   # the web UI through the lab VM's proxy (.specs/ligo-echo-target.md)
     tls_source: spiffe
     client_svid_auth: { enabled: true, accepted_trust_domains: [prod.lab] }
     allow_basic_auth: true
@@ -316,7 +352,7 @@ secret_sealing:
   vault_transit: { address: "$bao", auth_mount: jwt-spiffe, role: ligo-sealer, jwt_audience: "$aud", mount: transit, key_name: ligo-interstage,
     ca_cert_file: /etc/ligo-lab/ca.crt }
 plugins:
-  directory: "$LIGO1_PLUGINS"
+  directory: "$LIGO_PLUGINS"
 identity_providers:
   - type: target-local.v1
     builtin: true
@@ -438,28 +474,33 @@ serve_admins() {
 	inner_exec spire-prod rm -rf "$dir"
 }
 
-# serve_e2e RUN: runs the e2e tests matching RUN as the user ligo on ligo1.
+# serve_e2e RUN HOST: runs the e2e tests matching RUN as the user ligo on
+# ligo1, against the replica on HOST.
 serve_e2e() {
-	local uid envs=() line
+	local host="$2" uid envs=() line
 	uid="$(env_get .ligo1.ligo_uid)"
 	while IFS= read -r line; do
 		envs+=(--env "$line")
-	done < <(env_ligo1)
-	envs+=(--env "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" --env "LIGO_E2E_WORKLOAD=https://ligo1.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
+	done < <(env_ligo)
+	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_WORKLOAD=https://$host.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
 		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
-	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO1_TESTS" "${envs[@]}" -- \
-		"$LIGO1_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
+	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
+		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
 }
 
-# serve_test: the e2e of the service, with the lifecycle checks between its
-# two halves (.specs/ligo-test-environment.md).
+# serve_test: the e2e of the service, with the lifecycle checks of ligo1
+# between its two halves (.specs/ligo-test-environment.md). With ligo2, the
+# binding is created through ligo1 and served, then revoked, through ligo2,
+# and each replica ran workflows as its own DBOS executor.
 serve_test() {
 	deploy_tests # not the plugins: the running service holds them, and server.yaml their hashes
 	section "e2e of ligo serve"
+	local other
+	other="$(ligo_hosts | tail -1)" # ligo2, or ligo1 alone
 	E2E_SUFFIX="$(openssl rand -hex 4)"
 	serve_admins
-	serve_e2e '^TestServeE2EApply$' || die "TestServeE2EApply failed"
-	serve_e2e '^TestServeE2EWorkload$' || die "TestServeE2EWorkload failed"
+	serve_e2e '^TestServeE2EApply$' ligo1 || die "TestServeE2EApply failed"
+	serve_e2e '^TestServeE2EWorkload$' "$other" || die "TestServeE2EWorkload failed on $other"
 	local since
 	since="$(inner_exec ligo1 date '+%Y-%m-%d %H:%M:%S')"
 	inner_exec ligo1 systemctl reload ligo
@@ -478,9 +519,13 @@ serve_test() {
 	((end - start <= 30)) || die "stop: took $((end - start))s"
 	info "stop: drained and exited 0 in $((end - start))s"
 	inner_exec ligo1 systemctl start ligo
-	serve_wait
+	serve_wait ligo1
 	info "start: ligo serves again"
-	serve_e2e '^TestServeE2ERestarted$' || die "TestServeE2ERestarted failed"
+	serve_e2e '^TestServeE2ERestarted$' "$other" || die "TestServeE2ERestarted failed on $other"
 	serve_cli
+	local executors
+	executors="$(pg_superuser -d "$SERVE_DB" -tAc "select string_agg(distinct executor_id, ' ' order by executor_id) from dbos.workflow_status")"
+	[[ " $executors " == *" ligo1 "* && " $executors " == *" $other "* ]] || die "workflows ran as executors \"$executors\", not on every replica"
+	info "workflows ran as the executors $executors"
 	info "e2e of ligo serve passed"
 }

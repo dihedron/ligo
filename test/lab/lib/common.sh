@@ -73,7 +73,8 @@ confirm() {
 LAB_SELECTED=()
 
 # select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
-# identity or all) or, when VALUE is empty, from LAB_SCENARIOS.
+# identity, ha or all) or, when VALUE is empty, from LAB_SCENARIOS; ha
+# implies identity, and all is storage and identity.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
 	[[ "$value" == all ]] && value="storage identity"
@@ -81,9 +82,24 @@ select_scenarios() {
 	for scenario in $value; do
 		case "$scenario" in
 		storage | identity) LAB_SELECTED+=("$scenario") ;;
-		*) die "unknown scenario \"$scenario\": storage, identity or all" ;;
+		ha) LAB_SELECTED+=(identity ha) ;;
+		*) die "unknown scenario \"$scenario\": storage, identity, ha or all" ;;
 		esac
 	done
+}
+
+# ligo_host NAME: fails unless NAME is a ligo host of this lab.
+ligo_host() {
+	local hosts
+	hosts="$(ligo_hosts | xargs)"
+	[[ -n "$1" && " $hosts " == *" $1 "* ]] || die "no ligo host \"$1\": $hosts"
+}
+
+# ligo_hosts: the ligo replicas, one per line: ligo1, and ligo2 when up
+# works on the ha scenario or built it before.
+ligo_hosts() {
+	echo ligo1
+	if selected ha || inner_exists ligo2; then echo ligo2; fi
 }
 
 # selected SCENARIO: true when the command works on SCENARIO.
@@ -112,6 +128,7 @@ inner_ip() {
 	bao-test) host=31 ;;
 	ldap) host=40 ;;
 	ligo1) host=50 ;;
+	ligo2) host=51 ;;
 	*) die "no address for $1" ;;
 	esac
 	printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$host"

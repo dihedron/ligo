@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # The identity scenario's SPIRE: one server per trust domain (prod.lab,
-# test.lab), each with its OIDC discovery provider, and ligo1 with one agent
-# per trust domain, attested by lxd-spiffe's lxd_iid plugins through the
-# inner LXD (.specs/ligo-test-environment.md, "SPIRE").
+# test.lab), each with its OIDC discovery provider, and each ligo host (ligo1,
+# and ligo2 with ha) with one agent per trust domain, attested by
+# lxd-spiffe's lxd_iid plugins through the inner LXD
+# (.specs/ligo-test-environment.md, "SPIRE").
 
 ZONES=(prod test)
 SPIRE_PREFIX=/opt/spire
@@ -34,7 +35,7 @@ inner_lxd_fingerprint() { inner query /1.0 | jq -r .environment.certificate_fing
 
 # spire_identity ZONE: the zone's SPIRE server identity on the inner LXD:
 # group spire-ZONE with can_view and can_view_instances on project default,
-# and can_view and can_access_files on ligo1 (file_pull).
+# and can_view and can_access_files on each ligo host (file_pull).
 spire_identity() {
 	local zone="$1" group="spire-$1"
 	pki_client "spire-$zone-lxd"
@@ -50,11 +51,15 @@ spire_identity() {
 	for entitlement in can_view can_view_instances; do
 		inner auth group permission add "$group" project default "$entitlement" >/dev/null 2>&1 || true
 	done
-	for entitlement in can_view can_access_files; do
-		inner auth group permission add "$group" instance ligo1 "$entitlement" project=default >/dev/null 2>&1 || true
+	local host hosts
+	hosts="$(ligo_hosts | wc -l)"
+	for host in $(ligo_hosts); do
+		for entitlement in can_view can_access_files; do
+			inner auth group permission add "$group" instance "$host" "$entitlement" project=default >/dev/null 2>&1 || true
+		done
 	done
-	inner query "/1.0/auth/groups/$group" | jq -e '[.permissions[] | select(.entity_type == "instance")] | length == 2' >/dev/null ||
-		die "$group: the grants on ligo1 are missing"
+	inner query "/1.0/auth/groups/$group" | jq -e --argjson n "$((2 * hosts))" '[.permissions[] | select(.entity_type == "instance")] | length == $n' >/dev/null ||
+		die "$group: the grants on the ligo hosts are missing"
 }
 
 # server_conf ZONE CHECKSUM: SPIRE Server's configuration.
@@ -89,7 +94,7 @@ plugins {
     plugin_checksum = "$2"
     plugin_data {
       proof_mode = "file_pull"
-      # the agent of this zone on ligo1 uses its own directory: they must match
+      # the agent of this zone on each ligo host uses its own directory: they must match
       proof_dir  = "/run/spire/lxd-$zone"
       servers = {
         "inner" = {
@@ -196,7 +201,7 @@ spire_server_up() {
 	info "$name: SPIRE Server of $zone.lab healthy; OIDC discovery on https://$name.ligo.lab:$OIDC_PORT"
 }
 
-# agent_conf ZONE CHECKSUM: the zone's SPIRE Agent on ligo1.
+# agent_conf ZONE CHECKSUM: the zone's SPIRE Agent on a ligo host.
 agent_conf() {
 	local zone="$1"
 	cat <<CONF
@@ -236,99 +241,113 @@ plugins {
 CONF
 }
 
-# ligo1_up: the nested VM ligo1 with the user ligo, SPIRE Agent and the agent
-# plugin installed (the agents are configured by spire_agents_up).
-ligo1_up() {
-	if ! inner_exists ligo1; then
-		inner_init ligo1 --vm -c limits.cpu="$LAB_LIGO1_CPUS" -c limits.memory="$LAB_LIGO1_MEMORY" \
-			-c boot.autostart=true -d root,size="$LAB_LIGO1_DISK" -d eth0,ipv4.address="$(inner_ip ligo1)" >/dev/null
-		info "VM ligo1 created (nested)"
+# ligo_vm_up HOST: the nested VM HOST (ligo1, ligo2) with the user ligo, SPIRE
+# Agent and the agent plugin installed (the agents are configured by
+# spire_agents_up). Its sizes are LAB_LIGO1_* or LAB_LIGO2_*.
+ligo_vm_up() {
+	local host="$1" var
+	var="LAB_$(tr '[:lower:]' '[:upper:]' <<<"$host")"
+	if ! inner_exists "$host"; then
+		if [[ "$host" != ligo1 ]] && (($(size_mib "$(lxd config get lxd limits.memory)") < 8192)); then
+			die "$host needs the VM lxd at 8GiB or more, it has $(lxd config get lxd limits.memory): lab.sh stop; lxc --project $LAB_PROJECT config set lxd limits.memory 8GiB; lab.sh start"
+		fi
+		local cpus="${var}_CPUS" memory="${var}_MEMORY" disk="${var}_DISK"
+		inner_init "$host" --vm -c limits.cpu="${!cpus}" -c limits.memory="${!memory}" \
+			-c boot.autostart=true -d root,size="${!disk}" -d eth0,ipv4.address="$(inner_ip "$host")" >/dev/null
+		info "VM $host created (nested)"
 	fi
-	inner_start ligo1
-	inner_wait ligo1
-	inner_exec ligo1 sh -c 'id ligo >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ligo'
-	inner_exec ligo1 sh -c 'command -v jq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null'
-	if ! inner_exec ligo1 test -x /usr/bin/lxd-agent-plugin; then
-		inner_push "$(spire_release spire)" ligo1 /root/spire.tar.gz 0644
-		inner_push "$(lxd_spiffe_package lxd-agent-plugin)" ligo1 /root/lxd-agent-plugin.deb 0644
-		inner_exec ligo1 sh -ec "
+	inner_start "$host"
+	inner_wait "$host"
+	inner_exec "$host" sh -c 'id ligo >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ligo'
+	inner_exec "$host" sh -c 'command -v jq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null'
+	if ! inner_exec "$host" test -x /usr/bin/lxd-agent-plugin; then
+		inner_push "$(spire_release spire)" "$host" /root/spire.tar.gz 0644
+		inner_push "$(lxd_spiffe_package lxd-agent-plugin)" "$host" /root/lxd-agent-plugin.deb 0644
+		inner_exec "$host" sh -ec "
 			mkdir -p $SPIRE_PREFIX
 			tar -xzf /root/spire.tar.gz -C $SPIRE_PREFIX --strip-components=1
 			dpkg -i /root/lxd-agent-plugin.deb >/dev/null
 			rm -f /root/spire.tar.gz /root/lxd-agent-plugin.deb"
-		info "ligo1: SPIRE Agent $LAB_SPIRE_VERSION and lxd-agent-plugin $LAB_LXD_SPIFFE_VERSION installed"
+		info "$host: SPIRE Agent $LAB_SPIRE_VERSION and lxd-agent-plugin $LAB_LXD_SPIFFE_VERSION installed"
 	fi
 }
 
-# spire_agents_up: one agent per zone on ligo1, as root (file_pull,
+# spire_agents_up HOST: one agent per zone on HOST, as root (file_pull,
 # lxd-spiffe FR-A7), with the zone's trust bundle.
 spire_agents_up() {
-	local zone checksum tmp
-	checksum="$(inner_exec ligo1 sha256sum /usr/bin/lxd-agent-plugin | cut -d' ' -f1)"
+	local host="$1" zone checksum tmp
+	checksum="$(inner_exec "$host" sha256sum /usr/bin/lxd-agent-plugin | cut -d' ' -f1)"
 	tmp="$(mktemp -d)"
 	for zone in "${ZONES[@]}"; do
 		spire "$zone" bundle show -format pem >"$tmp/bundle.pem"
 		agent_conf "$zone" "$checksum" >"$tmp/agent.conf"
 		unit "SPIRE Agent $zone.lab" root "$SPIRE_PREFIX/bin/spire-agent run -config /etc/spire/$zone/agent.conf" lxd-agent.service >"$tmp/unit"
-		inner_exec ligo1 mkdir -p "/etc/spire/$zone" "/var/lib/spire/agent-$zone"
-		inner_push "$tmp/bundle.pem" ligo1 "/etc/spire/$zone/bundle.pem" 0644
-		inner_push "$tmp/agent.conf" ligo1 "/etc/spire/$zone/agent.conf" 0644
-		inner_push "$tmp/unit" ligo1 "/etc/systemd/system/spire-agent-$zone.service" 0644
-		inner_exec ligo1 sh -ec "systemctl daemon-reload; systemctl enable spire-agent-$zone >/dev/null 2>&1; systemctl restart spire-agent-$zone"
+		inner_exec "$host" mkdir -p "/etc/spire/$zone" "/var/lib/spire/agent-$zone"
+		inner_push "$tmp/bundle.pem" "$host" "/etc/spire/$zone/bundle.pem" 0644
+		inner_push "$tmp/agent.conf" "$host" "/etc/spire/$zone/agent.conf" 0644
+		inner_push "$tmp/unit" "$host" "/etc/systemd/system/spire-agent-$zone.service" 0644
+		inner_exec "$host" sh -ec "systemctl daemon-reload; systemctl enable spire-agent-$zone >/dev/null 2>&1; systemctl restart spire-agent-$zone"
 	done
 	rm -rf "${tmp:?}"
 }
 
-# spire_entries: the node alias of ligo1 in each zone, and ligo's entries
-# under it (§10.5): the core identity on prod, the bundle-access identity on
-# test, both for the user ligo (lab deviation: unix:uid only).
+# spire_entries HOST: the node alias of HOST in each zone, and ligo's
+# entries under it (§10.5): the core identity on prod, the bundle-access
+# identity on test, both for the user ligo (lab deviation: unix:uid only).
+# Each host has its own alias, and the same SPIFFE IDs under it.
 spire_entries() {
-	local uuid uid zone id
-	uuid="$(inner config get ligo1 volatile.uuid)"
-	uid="$(inner_exec ligo1 id -u ligo)"
+	local host="$1" uuid uid zone id out
+	uuid="$(inner config get "$host" volatile.uuid)"
+	uid="$(inner_exec "$host" id -u ligo)"
 	for zone in "${ZONES[@]}"; do
-		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/node/ligo1" 2>/dev/null | grep -q "lxd_iid:uuid:$uuid" ||
-			spire "$zone" entry create -node -spiffeID "spiffe://$zone.lab/node/ligo1" \
+		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/node/$host" 2>/dev/null | grep -q "lxd_iid:uuid:$uuid" ||
+			spire "$zone" entry create -node -spiffeID "spiffe://$zone.lab/node/$host" \
 				-selector lxd_iid:server:inner -selector "lxd_iid:uuid:$uuid" >/dev/null
 	done
 	for id in "prod ns/sys/sa/ligo" "test ns/sys/sa/ligo-bundles"; do
 		zone="${id%% *}"
-		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/${id#* }" 2>/dev/null | grep -q "unix:uid:$uid" ||
-			spire "$zone" entry create -parentID "spiffe://$zone.lab/node/ligo1" -spiffeID "spiffe://$zone.lab/${id#* }" \
+		# captured first: grep -q would cut the pipe, which pipefail reports as a failure
+		out="$(spire "$zone" entry show -parentID "spiffe://$zone.lab/node/$host" -spiffeID "spiffe://$zone.lab/${id#* }" 2>/dev/null)" || true
+		grep -q "unix:uid:$uid" <<<"$out" ||
+			spire "$zone" entry create -parentID "spiffe://$zone.lab/node/$host" -spiffeID "spiffe://$zone.lab/${id#* }" \
 				-selector "unix:uid:$uid" >/dev/null
 	done
-	env_set .ligo1 "$(jq -n --arg uuid "$uuid" --argjson uid "$uid" --arg ip "$(inner_ip ligo1)" '{uuid: $uuid, ligo_uid: $uid, address: $ip}')"
+	env_set ".$host" "$(jq -n --arg uuid "$uuid" --argjson uid "$uid" --arg ip "$(inner_ip "$host")" '{uuid: $uuid, ligo_uid: $uid, address: $ip}')"
 }
 
-# spire_check: as the user ligo on ligo1, fetches an X.509-SVID and a
+# spire_check HOST: as the user ligo on HOST, fetches an X.509-SVID and a
 # JWT-SVID from each agent (step 2's done criterion).
 spire_check() {
-	local zone uid out="" i
-	uid="$(env_get .ligo1.ligo_uid)"
+	local host="$1" zone uid out="" i
+	uid="$(env_get ".$host.ligo_uid")"
 	for zone in "${ZONES[@]}"; do
 		for i in $(seq 1 60); do
-			out="$(lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 -socketPath "/run/spire/$zone/agent.sock" 2>/dev/null)" && break
+			out="$(lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 -socketPath "/run/spire/$zone/agent.sock" 2>/dev/null)" && break
 			sleep 2
 		done
-		grep -q "SPIFFE ID:" <<<"$out" || die "ligo1: no X.509-SVID from the $zone agent (lab.sh logs ligo1 spire-agent-$zone)"
-		info "ligo1, user ligo: X.509-SVID $(awk '/SPIFFE ID:/ {print $3; exit}' <<<"$out")"
-		lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch jwt -audience lab-check \
-			-socketPath "/run/spire/$zone/agent.sock" 2>/dev/null | grep -q "token(" || die "ligo1: no JWT-SVID from the $zone agent"
-		info "ligo1, user ligo: JWT-SVID from the $zone agent"
+		grep -q "SPIFFE ID:" <<<"$out" || die "$host: no X.509-SVID from the $zone agent (lab.sh logs $host spire-agent-$zone)"
+		info "$host, user ligo: X.509-SVID $(awk '/SPIFFE ID:/ {print $3; exit}' <<<"$out")"
+		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch jwt -audience lab-check \
+			-socketPath "/run/spire/$zone/agent.sock" 2>/dev/null | grep -q "token(" || die "$host: no JWT-SVID from the $zone agent"
+		info "$host, user ligo: JWT-SVID from the $zone agent"
 	done
 }
 
 # identity_spire_up: everything of SPIRE, in order.
 identity_spire_up() {
 	section "SPIRE (prod.lab, test.lab) with lxd-spiffe"
-	ligo1_up
-	local zone
+	local zone host
+	for host in $(ligo_hosts); do
+		ligo_vm_up "$host"
+	done
 	for zone in "${ZONES[@]}"; do
 		spire_identity "$zone"
 		spire_server_up "$zone"
 	done
-	spire_agents_up
-	spire_entries
-	spire_check
+	for host in $(ligo_hosts); do
+		spire_agents_up "$host"
+		spire_entries "$host"
+		spire_check "$host"
+	done
 	env_set .spire "$(jq -n --arg v "$LAB_SPIRE_VERSION" --arg l "$LAB_LXD_SPIFFE_VERSION" '{version: $v, lxd_spiffe: $l}')"
 }
