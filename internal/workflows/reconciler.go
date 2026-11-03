@@ -110,7 +110,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 
 // reapply moves an ACTIVE binding to a REAPPLY attempt: same revision, a
 // new attempt and workflow, rotating if rotate is set or, for a static
-// secret, once rotation has passed (§6.4 rotation flag); it reports false
+// secret, once rotation has passed, never if it is 0 (§6.4 rotation flag); it reports false
 // if the binding is no longer ACTIVE. Maintenance mode refuses it.
 func (e *Engine) reapply(ctx context.Context, id uuid.UUID, actor string, rotate bool, rotation time.Duration) (bool, error) {
 	ok := false
@@ -124,7 +124,7 @@ func (e *Engine) reapply(ctx context.Context, id uuid.UUID, actor string, rotate
 			workflow_id = format('ligo:reapply:%s:r%s:a%s', id, revision, attempt + 1), current_step = 'INIT', status_message = '',
 			rotate_static_secrets = $3 OR coalesce((SELECT s.artifact->>'mode' IN ('IDENTITY_MODE_EXTERNAL_DIR', 'IDENTITY_MODE_TARGET_LOCAL')
 				FROM binding_stage_state s WHERE s.binding_id = b.id AND s.stage = 'IDENTITY'), false)
-				AND (last_rotated_at IS NULL OR last_rotated_at < now() - $2::interval),
+				AND $2::interval > interval '0' AND (last_rotated_at IS NULL OR last_rotated_at < now() - $2::interval),
 			last_transition_at = now(), updated_at = now(), updated_by = $4
 			WHERE id = $1 AND phase = 'ACTIVE' RETURNING name, revision, attempt`, id, rotation.String(), rotate, actor).Scan(&name, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {

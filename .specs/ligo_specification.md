@@ -2855,7 +2855,7 @@ Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`
 ### 6.4 Apply and reapply workflow (`ApplyBindingWorkflow`)
 
 **Rotation flag** (`rotate_static_secrets`), set when the workflow is started:
-- `true` for: `CREATE`; any new revision whose `source_svid_regex` differs from the previous revision's (a propagated narrowing); any update, propagation or retry from `FAILED`; an explicit rotate; a scheduled rotation (the binding uses a static-secret identity mode, `EXTERNAL_DIR` or `TARGET_LOCAL`, and `last_rotated_at` is `NULL` or older than the platform's `rotation_interval`).
+- `true` for: `CREATE`; any new revision whose `source_svid_regex` differs from the previous revision's (a propagated narrowing); any update, propagation or retry from `FAILED`; an explicit rotate; a scheduled rotation (the binding uses a static-secret identity mode, `EXTERNAL_DIR` or `TARGET_LOCAL`, and `last_rotated_at` is `NULL` or older than the platform's `rotation_interval`; a platform without `rotation_interval`, or with `0`, has no scheduled rotation).
 - `false` for: scheduled reconcile, and updates or propagations from `ACTIVE` that do not change the regex.
 - **Rationale.** A narrowed regex removes workloads that may have read the static secret while they were covered; rotating it makes sure they cannot keep using it.
 

@@ -5,6 +5,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,29 @@ func TestReconcile(t *testing.T) {
 	}
 	if rotations[true] != 1 || rotations[false] != 1 {
 		t.Errorf("rotations %v: one due, one not", v.fake.rotations)
+	}
+}
+
+// TestReconcileNoRotation: a platform without rotation_interval has no
+// scheduled rotation, however old the static secret (§6.4 rotation flag).
+func TestReconcileNoRotation(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	if _, err := v.owner.Exec(ctx, "update bindings set last_rotated_at = now() - interval '48 hours' where id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	v.fake.rotations = nil
+	r := v.reconciler()
+	r.Rotation = nil
+	if _, err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b := v.waitPhase(t, id, "ACTIVE"); b.phase != "ACTIVE" {
+		t.Fatalf("binding %+v", b)
+	}
+	if slices.Contains(v.fake.rotations, true) {
+		t.Errorf("rotations %v: none scheduled", v.fake.rotations)
 	}
 }
 
