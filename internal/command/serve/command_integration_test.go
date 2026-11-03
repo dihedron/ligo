@@ -238,7 +238,7 @@ func TestServeStartupTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	err = (&Serve{ConfigFile: path, InsecureDev: true}).run(context.Background(), slog.New(slog.DiscardHandler))
+	err = (&Serve{ConfigFile: path, InsecureDev: true, insecureDB: os.Getenv("CI") != ""}).run(context.Background(), slog.New(slog.DiscardHandler))
 	if err == nil || !strings.Contains(err.Error(), "SPIRE not ready within service.startup_timeout (5s)") {
 		t.Errorf("an unreachable agent: %v", err)
 	}
