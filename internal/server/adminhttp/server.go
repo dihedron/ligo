@@ -58,6 +58,7 @@ type Server struct {
 
 	limits     ratelimit.Limiter
 	loginsOnce sync.Once
+	basic      basicCache
 }
 
 // Directory authenticates LDAP users: *adminauth.LDAP.
@@ -197,7 +198,14 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 		if !s.logins().Begin(ip, user, "") {
 			return changerequests.Caller{}, errLoginLimited
 		}
-		p, err = s.LDAP.Authenticate(r.Context(), user, password)
+		// a remembered login skips the directory, except for break-glass,
+		// whose groups are read at the moment of use (ADR-12)
+		var ok bool
+		if p, ok = s.basic.get(user, password, time.Now()); !ok || r.Method == http.MethodPost && r.URL.Path == "/v1/admin/break-glass" {
+			if p, err = s.LDAP.Authenticate(r.Context(), user, password); err == nil {
+				s.basic.put(user, password, p, time.Now())
+			}
+		}
 		s.logins().Done(ip, user, "", errors.Is(err, adminauth.ErrInvalidCredentials))
 	default:
 		err = adminauth.ErrInvalidCredentials

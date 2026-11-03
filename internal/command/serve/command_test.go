@@ -89,7 +89,7 @@ func TestLDAP(t *testing.T) {
 	caFile := filepath.Join(dir, "ca.pem")
 	_ = os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Cert.Raw}), 0o600)
 	cfg := &config.Config{AdminAuth: config.AdminAuth{LDAP: config.LDAP{ServiceBindPasswordEnv: "LIGO_TEST_LDAP_PW", CACertFile: caFile}},
-		Authorization: config.Authorization{Bindings: []config.RoleBinding{{LDAPGroupDN: "cn=a"}, {SPIFFEID: "spiffe://x/y"}, {LDAPGroupDN: "cn=b"}}}}
+		Authorization: config.Authorization{Bindings: []config.RoleBinding{{LDAPGroupDN: "cn=a"}, {SPIFFEID: "spiffe://x/y"}, {LDAPGroupDN: "cn=b"}, {LDAPGroupDN: "cn=a"}}}} // cn=a twice: searched once
 	if _, err := ldap(cfg); err == nil {
 		t.Error("an unset bind password variable")
 	}

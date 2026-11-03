@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -601,7 +602,7 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 	}
 	var groups []string
 	for _, b := range cfg.Authorization.Bindings {
-		if b.LDAPGroupDN != "" {
+		if b.LDAPGroupDN != "" && !slices.Contains(groups, b.LDAPGroupDN) {
 			groups = append(groups, b.LDAPGroupDN)
 		}
 	}
