@@ -280,6 +280,9 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if t := cfg.Service.StartupTimeout; t < 5*time.Second || t > 10*time.Minute {
 		c.failf(9, "service.startup_timeout %s: between 5s and 10m", t)
 	}
+	if r := cfg.Observability.Tracing.SampleRatio; r != nil && (*r < 0 || *r > 1) {
+		c.failf(9, "observability.tracing.sample_ratio %v: between 0 and 1", *r)
+	}
 	switch cfg.SecretSealing.Provider {
 	case "vault-transit":
 	case "local-kek":

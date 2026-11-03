@@ -15,6 +15,7 @@ import (
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -73,6 +74,8 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 	}
 	f := fence{bindingID: id, workflowID: in.WorkflowID}
 	w := in.Wiring
+	ctx, span := workflowSpan(ctx, in)
+	defer span.End()
 	step := func(name string, fn func(context.Context) error) error {
 		_, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, fn(c) }, dbos.WithStepName(name))
 		return err
@@ -85,6 +88,7 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 		if se.Code == "PLUGIN_ERROR" && !errors.As(err, new(*StepError)) { // replayed: keep the recorded text
 			se = &StepError{Code: "WORKFLOW_ERROR", Message: err.Error()}
 		}
+		span.SetStatus(otelcodes.Error, "")
 		if ferr := step("markFailed", func(c context.Context) error { return e.markFailed(c, f, name, se, in) }); ferr != nil {
 			return "", ferr
 		}
@@ -98,9 +102,9 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 		return fail("markStage:IDENTITY:STARTED", err)
 	}
 	idOut, err := dbos.RunAsStep(ctx, func(c context.Context) (identityOutput, error) {
-		start := time.Now()
+		c, end := stepSpan(c, "IDENTITY", w.IdentityType)
 		out, err := e.ensureIdentity(c, in)
-		timed("IDENTITY", w.IdentityType, start, err)
+		end(err)
 		return out, err
 	},
 		dbos.WithStepName("ensureIdentity"))
@@ -120,9 +124,9 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 		return fail("markStage:TARGET:STARTED", err)
 	}
 	tgtOut, err := dbos.RunAsStep(ctx, func(c context.Context) (targetOutput, error) {
-		start := time.Now()
+		c, end := stepSpan(c, "TARGET", w.PlatformType)
 		out, err := e.ensureTarget(c, in, idOut)
-		timed("TARGET", w.PlatformType, start, err)
+		end(err)
 		return out, err
 	},
 		dbos.WithStepName("ensureTarget"))
@@ -143,9 +147,9 @@ func (e *Engine) apply(ctx dbos.Context, in ApplyInput) (string, error) {
 		return fail("markStage:SECRET_STORE:STARTED", err)
 	}
 	stOut, err := dbos.RunAsStep(ctx, func(c context.Context) (storeOutput, error) {
-		start := time.Now()
+		c, end := stepSpan(c, "SECRET_STORE", w.StoreType)
 		out, err := e.ensureSecretStore(c, in, idOut, tgtOut)
-		timed("SECRET_STORE", w.StoreType, start, err)
+		end(err)
 		return out, err
 	},
 		dbos.WithStepName("ensureSecretStore"))

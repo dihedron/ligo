@@ -19,6 +19,11 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -535,4 +540,33 @@ func TestSpecs(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestCallSpan: an RPC through Call is a span of its own, child of the
+// caller's, so a step's plugin calls show in its trace; the trace context
+// reaches the plugin in the gRPC metadata (§10.1).
+func TestCallSpan(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before, prop := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTracerProvider(before); otel.SetTextMapPropagator(prop) })
+	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, parent := otel.Tracer("test").Start(context.Background(), "step TARGET")
+	if _, err := health(ctx, m, "pg-prod"); err != nil {
+		t.Fatal(err)
+	}
+	parent.End()
+	for _, s := range rec.Ended() {
+		if strings.HasSuffix(s.Name(), "/Health") && s.SpanKind() == trace.SpanKindClient {
+			if s.Parent().SpanID() != parent.SpanContext().SpanID() {
+				t.Errorf("the RPC's span is not a child of the step's")
+			}
+			return
+		}
+	}
+	t.Error("no client span for the Health RPC")
 }

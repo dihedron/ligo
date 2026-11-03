@@ -21,9 +21,13 @@ import (
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/store"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 )
 
@@ -299,15 +303,32 @@ type fence struct {
 	workflowID string
 }
 
-// timed observes a step's duration once its function returns
-// (ligo_step_duration_seconds); inside the step, so DBOS's replays of
-// completed steps are not counted.
-func timed(stage, providerType string, start time.Time, err error) {
-	result := "success"
-	if err != nil {
-		result = "failure"
+// stepSpan starts a step's span and returns the function that ends it and
+// observes its duration (ligo_step_duration_seconds); it runs inside the
+// step, so DBOS's replays of completed steps count nothing. A failed span
+// gets an error status, never the error's text (§10.1: no secrets in spans).
+func stepSpan(ctx context.Context, stage, providerType string) (context.Context, func(error)) {
+	start := time.Now()
+	ctx, span := tracing.Tracer().Start(ctx, "step "+stage, trace.WithAttributes(attribute.String("ligo.stage", stage),
+		attribute.String("ligo.provider_type", providerType)))
+	return ctx, func(err error) {
+		result := "success"
+		if err != nil {
+			result = "failure"
+			span.SetStatus(otelcodes.Error, "")
+		}
+		span.End()
+		metrics.StepDuration.WithLabelValues(stage, providerType, result).Observe(time.Since(start).Seconds())
 	}
-	metrics.StepDuration.WithLabelValues(stage, providerType, result).Observe(time.Since(start).Seconds())
+}
+
+// workflowSpan starts the span of a workflow run, and puts it in the DBOS
+// context its steps inherit; a replay after a recovery starts a new one.
+func workflowSpan(ctx dbos.Context, in ApplyInput) (dbos.Context, trace.Span) {
+	c, span := tracing.Tracer().Start(ctx, "workflow "+in.Operation, trace.WithAttributes(attribute.String("ligo.binding_id", in.BindingID),
+		attribute.String("ligo.binding", in.BindingName), attribute.String("ligo.workflow_id", in.WorkflowID),
+		attribute.Int64("ligo.revision", in.Revision), attribute.Int64("ligo.attempt", in.Attempt)))
+	return dbos.From(ctx, c), span
 }
 
 // attemptStarted is the time the attempt's phase was entered, read in its

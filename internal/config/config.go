@@ -40,6 +40,7 @@ type Config struct {
 	IdentityProviders []InstanceProvider `yaml:"identity_providers"`
 	SecretStores      []InstanceProvider `yaml:"secret_stores"`
 	PlatformProviders []PlatformProvider `yaml:"platform_providers"`
+	Observability     Observability      `yaml:"observability"`
 }
 
 type Service struct {
@@ -49,6 +50,19 @@ type Service struct {
 	// StartupTimeout bounds the wait for SPIRE and the sealer at startup:
 	// past it ligo exits, for its supervisor to restart it (§8.2).
 	StartupTimeout time.Duration `yaml:"startup_timeout"`
+}
+
+// Observability configures traces (§10.1); metrics have their listener.
+type Observability struct {
+	Tracing Tracing `yaml:"tracing"`
+}
+
+// Tracing exports OpenTelemetry spans to an OTLP/gRPC collector; an empty
+// endpoint turns tracing off.
+type Tracing struct {
+	OTLPEndpoint string   `yaml:"otlp_endpoint"`
+	SampleRatio  *float64 `yaml:"sample_ratio"` // default 0.1
+	Insecure     bool     `yaml:"insecure"`     // a collector without TLS
 }
 
 // MetricsListener serves GET /metrics (Prometheus, §10.1) in plain HTTP,
@@ -438,6 +452,10 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Observability.Tracing.SampleRatio == nil {
+		r := 0.1
+		c.Observability.Tracing.SampleRatio = &r
+	}
 	if c.Server.MetricsListener.ListenAddress == "" {
 		c.Server.MetricsListener.ListenAddress = "127.0.0.1:9090"
 	}

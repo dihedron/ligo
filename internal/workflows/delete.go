@@ -12,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -40,6 +41,8 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		return "", err
 	}
 	f := fence{bindingID: id, workflowID: in.WorkflowID}
+	ctx, span := workflowSpan(ctx, in)
+	defer span.End()
 	fail := func(name string, err error) (string, error) {
 		if errors.Is(err, store.ErrFenced) || err.Error() == store.ErrFenced.Error() {
 			return "", err
@@ -48,6 +51,7 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		if se.Code == "PLUGIN_ERROR" && !errors.As(err, new(*StepError)) {
 			se = &StepError{Code: "WORKFLOW_ERROR", Message: err.Error()}
 		}
+		span.SetStatus(otelcodes.Error, "")
 		if _, ferr := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, e.markFailed(c, f, name, se, in) },
 			dbos.WithStepName("markFailed")); ferr != nil {
 			return "", ferr
@@ -75,7 +79,8 @@ func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage stri
 	if err != nil || row == nil {
 		return err
 	}
-	defer func(start time.Time) { timed(stage, row.providerType, start, err) }(time.Now())
+	ctx, end := stepSpan(ctx, stage, row.providerType)
+	defer func() { end(err) }()
 	if err := store.MarkStep(ctx, e.DB, f.bindingID, f.workflowID, "CLEANUP_"+stage, ""); err != nil {
 		return err
 	}

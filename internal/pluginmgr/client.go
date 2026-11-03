@@ -16,6 +16,7 @@ import (
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
@@ -63,7 +64,7 @@ func Start(cmd *exec.Cmd, kind pluginv1.PluginKind, checksum []byte, logger hclo
 		SyncStderr:       stdio,
 		SecureConfig:     &plugin.SecureConfig{Checksum: checksum, Hash: sha256.New()},
 		Logger:           logger,
-		GRPCDialOptions:  []grpc.DialOption{grpc.WithChainUnaryInterceptor(countRPC)},
+		GRPCDialOptions:  []grpc.DialOption{grpc.WithChainUnaryInterceptor(countRPC), grpc.WithStatsHandler(otelgrpc.NewClientHandler())},
 	})
 	c := &Client{process: process}
 	rpc, err := process.Client()
@@ -138,8 +139,8 @@ func startBuiltin(typ string, kind pluginv1.PluginKind) (*Client, error) {
 	go func() { _ = srv.Serve(lis) }()
 	conn, err := grpc.NewClient("passthrough:///"+typ,
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
-		grpc.WithTransportCredentials(insecure.NewCredentials()), // in-memory, never on a network
-		grpc.WithChainUnaryInterceptor(countRPC))
+		grpc.WithTransportCredentials(insecure.NewCredentials()),                                     // in-memory, never on a network
+		grpc.WithChainUnaryInterceptor(countRPC), grpc.WithStatsHandler(otelgrpc.NewClientHandler())) // spans, and the trace context in the metadata
 	if err != nil {
 		srv.Stop()
 		return nil, err

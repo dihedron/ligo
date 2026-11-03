@@ -11,6 +11,11 @@ import (
 
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/spiffetest"
+	"github.com/dihedron/ligo/internal/tracing"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"net/http"
+	"net/http/httptest"
 )
 
 // TestConfigValid: the integration test's configuration passes the static
@@ -142,5 +147,34 @@ func TestSealer(t *testing.T) {
 func TestExecute(t *testing.T) {
 	if err := (&Serve{ConfigFile: filepath.Join(t.TempDir(), "missing.yaml")}).Execute(nil); err == nil {
 		t.Error("a missing configuration")
+	}
+}
+
+// TestTraced: an HTTP request gets a span named after the listener and
+// the method, continuing the caller's trace (traceparent); a gRPC request
+// gets none here, as the gRPC server makes its own.
+func TestTraced(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracing.Provider(rec, 1, "test", "a"))
+	t.Cleanup(func() { otel.SetTracerProvider(before) })
+	if _, err := tracing.Setup(context.Background(), config.Tracing{}, "", ""); err != nil { // the propagator
+		t.Fatal(err)
+	}
+	h := traced("admin", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	const parent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+	r := httptest.NewRequest("GET", "/v1/admin/maintenance", nil)
+	r.Header.Set("traceparent", parent)
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	g := httptest.NewRequest("POST", "/ligo.workload.v1alpha1.WorkloadBindingService/ListBindings", nil)
+	g.Header.Set("Content-Type", "application/grpc")
+	h.ServeHTTP(httptest.NewRecorder(), g)
+	ended := rec.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("%d spans, want 1", len(ended))
+	}
+	if s := ended[0]; s.Name() != "admin GET" || s.SpanContext().TraceID().String() != "0af7651916cd43dd8448eb211c80319c" ||
+		s.Parent().SpanID().String() != "b7ad6b7169203331" {
+		t.Errorf("span %s trace %s parent %s", s.Name(), s.SpanContext().TraceID(), s.Parent().SpanID())
 	}
 }

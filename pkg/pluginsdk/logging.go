@@ -7,7 +7,7 @@ import (
 )
 
 // secretKeys are the attribute key fragments whose values never reach a log.
-var secretKeys = []string{"password", "passwd", "secret", "token", "credential", "private_key"}
+var secretKeys = []string{"password", "passwd", "secret", "token", "credential", "private_key", "authorization"}
 
 // RedactingHandler drops secrets from log records before next sees them:
 // attributes with a secret-looking key, and any message or string value

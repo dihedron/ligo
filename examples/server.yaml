@@ -49,6 +49,12 @@ server:
   metrics_listener:                       # GET /metrics, plain HTTP and no authentication (§10.1): loopback or a management network
     listen_address: "127.0.0.1:9090"     # default
 
+observability:
+  tracing:                                # OpenTelemetry traces (§10.1)
+    otlp_endpoint: ""                     # host:port of an OTLP/gRPC collector; empty: tracing off (default)
+    sample_ratio: 0.1                     # share of new traces kept (0 to 1, default 0.1); a sampled caller's are always kept
+    insecure: false                       # true only for a collector without TLS
+
 admin_auth:
   ldap:
     url: "ldaps://ldap.corp.internal:636"

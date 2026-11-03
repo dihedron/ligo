@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -44,10 +45,12 @@ import (
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/internal/theme"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // drain is how long shutdown waits for active requests (§8.2).
@@ -104,6 +107,18 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := config.Validate(cfg, config.Options{InsecureDev: cmd.InsecureDev}); err != nil {
 		return err
 	}
+	// traces (§10.1): off unless observability.tracing.otlp_endpoint is set
+	stopTracing, err := tracing.Setup(ctx, cfg.Observability.Tracing, cfg.Service.ApplicationVersion, os.Getenv(cfg.Service.InstanceIDEnv))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := stopTracing(flush); err != nil {
+			log.Warn("tracing shutdown", "error", err)
+		}
+	}()
 	t := cfg.UI.Theme
 	look, err := theme.Load(theme.Files{Directory: t.Directory, CSS: t.CSSFile, Logo: t.LogoFile, LogoDark: t.LogoDarkFile,
 		Favicon: t.FaviconFile, Fonts: t.FontsDir, Colors: t.Colors}, theme.Options{Logger: log})
@@ -278,6 +293,16 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	return cmd.listen(ctx, log, cfg, zones, w, s, u, exposed)
 }
 
+// traced gives each HTTP request a span named after the listener and the
+// method, its trace context from the traceparent header; gRPC calls get
+// theirs from the gRPC server instead.
+func traced(listener string, h http.Handler) http.Handler {
+	return otelhttp.NewHandler(h, listener, otelhttp.WithSpanNameFormatter(func(op string, r *http.Request) string { return op + " " + r.Method }),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return !strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+		}))
+}
+
 // verifyAudit verifies the audit chain at once and then every interval,
 // for ligo_audit_chain_valid; a broken chain is also logged.
 func verifyAudit(ctx context.Context, log *slog.Logger, db store.Querier, interval time.Duration) {
@@ -424,8 +449,8 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	mux.Handle("GET /metrics", exposed)
 	ml := cfg.Server.MetricsListener
 	servers := map[string]*http.Server{
-		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
-		"admin":    {Addr: al.ListenAddress, Handler: adminHandler(s, u), TLSConfig: s.TLSConfig(adminCert)},
+		"workload": {Addr: wl.ListenAddress, Handler: traced("workload", w.Handler()), TLSConfig: w.TLSConfig(workloadCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: traced("admin", adminHandler(s, u)), TLSConfig: s.TLSConfig(adminCert)},
 		"metrics":  {Addr: ml.ListenAddress, Handler: mux}, // plain HTTP, no auth (§10.1): a loopback or management address
 	}
 	for name, srv := range servers {

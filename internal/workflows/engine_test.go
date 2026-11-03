@@ -10,7 +10,11 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/pluginmgr"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"go.opentelemetry.io/otel"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -92,5 +96,39 @@ func TestManager(t *testing.T) {
 	}
 	if p.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, "local-prod") != nil {
 		t.Error("a built-in with an output schema") // built-ins declare none
+	}
+}
+
+// TestStepSpan: a step's span names its stage, carries the provider type,
+// and on failure has an error status without the error's text, which may
+// hold a plugin's details (§10.1: no secrets in spans); its duration is
+// observed.
+func TestStepSpan(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracing.Provider(rec, 1, "test", "a"))
+	t.Cleanup(func() { otel.SetTracerProvider(before) })
+	ctx, root := otel.Tracer("test").Start(context.Background(), "workflow")
+	c, end := stepSpan(ctx, "TARGET", "echo.v1")
+	if c == ctx {
+		t.Error("the step's context carries no span")
+	}
+	end(errors.New("ALTER USER x IDENTIFIED BY s3cr3t"))
+	root.End()
+	ended := rec.Ended()
+	if len(ended) != 2 {
+		t.Fatalf("%d spans", len(ended))
+	}
+	s := ended[0]
+	attrs := map[string]string{}
+	for _, a := range s.Attributes() {
+		attrs[string(a.Key)] = a.Value.String()
+	}
+	if s.Name() != "step TARGET" || attrs["ligo.stage"] != "TARGET" || attrs["ligo.provider_type"] != "echo.v1" ||
+		s.Parent().SpanID() != root.SpanContext().SpanID() {
+		t.Errorf("span %s %v, parent %s", s.Name(), attrs, s.Parent().SpanID())
+	}
+	if s.Status().Code != otelcodes.Error || s.Status().Description != "" || len(s.Events()) != 0 {
+		t.Errorf("status %+v, events %v: the error must not be recorded", s.Status(), s.Events())
 	}
 }

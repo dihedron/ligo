@@ -11,6 +11,7 @@ import (
 	workloadv1alpha1 "github.com/dihedron/ligo/api/gen/workload/v1alpha1"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/resolution"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -37,7 +38,7 @@ func grpcError(w http.ResponseWriter, code codes.Code, msg string) {
 // grpcServer serves WorkloadBindingService behind the middleware, which has
 // authenticated the caller and applied its rate limit.
 func (s *Server) grpcServer() *grpc.Server {
-	g := grpc.NewServer()
+	g := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler())) // a span per call, its trace context from the metadata
 	workloadv1alpha1.RegisterWorkloadBindingServiceServer(g, &service{s: s})
 	return g
 }
