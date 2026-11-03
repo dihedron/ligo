@@ -22,6 +22,7 @@ cmd_serve() {
 	case "${1:-status}" in
 	install) serve_install ;;
 	test) serve_test ;;
+	test-ha) serve_test_ha ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -33,7 +34,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs or test" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test or test-ha" ;;
 	esac
 }
 
@@ -334,6 +335,9 @@ authorization:
   bindings:
     - { spiffe_id: "spiffe://prod.lab/ops/olga", role: operator, scopes: ["dc/corp-prod/*"] }
     - { spiffe_id: "spiffe://prod.lab/ops/dora", role: approver, scopes: ["dc/corp-prod/*"] }
+    # the HA e2e: a second approver (AC-50), and an administrator for maintenance (AC-26)
+    - { spiffe_id: "spiffe://prod.lab/ops/sam", role: approver, scopes: ["dc/corp-prod/*"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/ada", role: admin.full_access, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     # the web UI's echo guide: carol files, dave approves (.specs/ligo-echo-target.md)
@@ -465,7 +469,7 @@ YAML
 # max_token_ttl.
 serve_admins() {
 	local who dir="/root/e2e" f
-	local -A ids=([olga]=ops/olga [dora]=ops/dora [workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX")
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
 	for who in "${!ids[@]}"; do
 		inner_exec spire-prod mkdir -m 0700 "$dir/$who"
@@ -484,15 +488,17 @@ serve_admins() {
 	inner_exec spire-prod rm -rf "$dir"
 }
 
-# serve_e2e RUN HOST: runs the e2e tests matching RUN as the user ligo on
-# ligo1, against the replica on HOST.
+# serve_e2e RUN HOST [OTHER]: runs the e2e tests matching RUN as the user
+# ligo on ligo1, against the admin listener of HOST and, for the HA e2e, the
+# admin and workload listeners of OTHER (default HOST).
 serve_e2e() {
-	local host="$2" uid envs=() line
+	local host="$2" other="${3:-$2}" uid envs=() line
 	uid="$(env_get .ligo1.ligo_uid)"
 	while IFS= read -r line; do
 		envs+=(--env "$line")
 	done < <(env_ligo)
-	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_WORKLOAD=https://$host.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
+	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_ADMIN2=https://$other.ligo.lab:9443"
+		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
 		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
 		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
@@ -547,4 +553,49 @@ serve_test() {
 	[[ " $executors " == *" ligo1 "* && " $executors " == *" $other "* ]] || die "workflows ran as executors \"$executors\", not on every replica"
 	info "workflows ran as the executors $executors"
 	info "e2e of ligo serve passed"
+}
+
+# serve_sql SQL: one value from ligo_serve, as the superuser.
+serve_sql() { pg_superuser -d "$SERVE_DB" -tAc "$1"; }
+
+# serve_test_ha: the HA e2e on ligo1 and ligo2 (.specs/ligo-test-environment.md,
+# "The HA tests"): with both up, AC-26, AC-50 and AC-77; with ligo1 stopped,
+# ligo2 alone runs the sweeper, a workflow and the propagator; then ligo1,
+# frozen mid-workflow and killed, recovers its own workflow (§10.2).
+serve_test_ha() {
+	inner_exists ligo2 || die "serve test-ha needs ligo2: lab.sh up --scenario ha"
+	deploy_tests
+	section "HA e2e of ligo serve"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_e2e '^TestServeHA(Maintenance|ConcurrentApproval|RetireRace)$' ligo1 ligo2 || die "the HA tests with both replicas failed"
+	[[ "$(serve_sql "select count(*) from audit_log where action = 'SYSTEM_MAINTENANCE_ENABLED' and snapshot->>'reason' = 'ha e2e AC-26'")" -ge 1 ]] ||
+		die "AC-26: SYSTEM_MAINTENANCE_ENABLED is not audited"
+	info "AC-26: SYSTEM_MAINTENANCE_ENABLED audited"
+
+	section "ligo2 alone"
+	inner_exec ligo1 systemctl stop ligo
+	serve_e2e '^TestServeHAAloneFile$' ligo2 ligo2 || die "TestServeHAAloneFile failed"
+	serve_sql "update change_requests set expires_at = now() - interval '1 second' where resource_name = 'ha-exp-$E2E_SUFFIX' and status = 'PENDING'" >/dev/null
+	local status=""
+	for _ in $(seq 1 90); do
+		status="$(serve_sql "select status from change_requests where resource_name = 'ha-exp-$E2E_SUFFIX'")"
+		[[ "$status" == EXPIRED ]] && break
+		sleep 1
+	done
+	[[ "$status" == EXPIRED ]] || die "ligo2's sweeper did not expire the request (status $status)"
+	info "ligo2's sweeper expired a request while ligo1 was down"
+	serve_e2e '^TestServeHAAloneApply$' ligo2 ligo2 || die "TestServeHAAloneApply failed"
+	info "ligo2 alone applied a binding and propagated a narrowing"
+	inner_exec ligo1 systemctl start ligo
+	serve_wait ligo1
+
+	section "ligo1 killed mid-workflow"
+	serve_e2e '^TestServeHAKill$' ligo1 ligo2 || die "TestServeHAKill failed"
+	local executors
+	executors="$(serve_sql "select string_agg(w.executor_id || ':' || w.status, ' ') from bindings b join dbos.workflow_status w on w.workflow_uuid = b.workflow_id where b.name = 'ha-k-$E2E_SUFFIX'")"
+	[[ "$executors" == "ligo1:SUCCESS" ]] || die "the killed replica's workflow: $executors, not ligo1:SUCCESS"
+	serve_wait ligo1
+	info "ligo1 recovered its own workflow after the kill ($executors)"
+	info "HA e2e of ligo serve passed"
 }

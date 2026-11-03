@@ -63,7 +63,9 @@ commands:
   serve [--on HOST|all] install|start|stop|reload|status|logs|test
                             ligo serve on every ligo host (default all; one
                             database, ligo_serve), and its e2e with reload,
-                            stop and start; test always runs on all
+                            stop and start; test always runs on all;
+                            test-ha (with ligo2) the HA e2e, which stops and
+                            kills replicas
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
