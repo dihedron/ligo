@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"uuid"
 
@@ -400,5 +401,43 @@ func TestRevertGone(t *testing.T) {
 	}
 	if _, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
 		t.Errorf("revert: %v", err)
+	}
+}
+
+// TestBreakGlassConcurrent: concurrent break-glass changes are counted one
+// after the other, so together they cannot exceed max_open (ADR-12 rule 6,
+// finding 2.5).
+func TestBreakGlassConcurrent(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	var open int
+	if err := o.QueryRow(ctx, `select count(distinct r.id) from change_requests r join change_request_sides s on s.change_request_id = r.id
+		where s.scope like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	s.Requests.Policy.BreakGlassPolicyFor("dc/corp-prod/ledger").MaxOpen = open + 1
+	const n = 5
+	bodies := make([][]byte, n)
+	for i := range bodies {
+		k := fmt.Sprintf("c%d", i)
+		bodies[i] = emergency("CREATE", `"binding":`+string(body("ledger-"+k+"-"+w.suffix, ledgerSource(t, o, w, k), w.ledger, "read"))+`,`, "")
+	}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range bodies {
+		wg.Go(func() { _, errs[i] = s.BreakGlass(ctx, livia, bodies[i]) })
+	}
+	wg.Wait()
+	applied := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			applied++
+		case slug(err) != "break-glass-limit":
+			t.Errorf("unexpected: %v", err)
+		}
+	}
+	if applied != 1 {
+		t.Errorf("%d applied, max_open allows 1 more", applied)
 	}
 }
