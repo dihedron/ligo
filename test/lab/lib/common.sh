@@ -73,8 +73,8 @@ confirm() {
 LAB_SELECTED=()
 
 # select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
-# identity, ha or all) or, when VALUE is empty, from LAB_SCENARIOS; ha
-# implies identity, and all is storage and identity.
+# identity, ha, lb or all) or, when VALUE is empty, from LAB_SCENARIOS; ha
+# implies identity, lb implies ha, and all is storage and identity.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
 	[[ "$value" == all ]] && value="storage identity"
@@ -83,7 +83,8 @@ select_scenarios() {
 		case "$scenario" in
 		storage | identity) LAB_SELECTED+=("$scenario") ;;
 		ha) LAB_SELECTED+=(identity ha) ;;
-		*) die "unknown scenario \"$scenario\": storage, identity, ha or all" ;;
+		lb) LAB_SELECTED+=(identity ha lb) ;;
+		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb or all" ;;
 		esac
 	done
 }
@@ -129,6 +130,7 @@ inner_ip() {
 	ldap) host=40 ;;
 	ligo1) host=50 ;;
 	ligo2) host=51 ;;
+	lb) host=60 ;;
 	*) die "no address for $1" ;;
 	esac
 	printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$host"

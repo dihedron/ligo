@@ -34,6 +34,8 @@ source "$LAB_DIR/lib/pg.sh"
 source "$LAB_DIR/lib/snapshot.sh"
 # shellcheck source=lib/serve.sh
 source "$LAB_DIR/lib/serve.sh"
+# shellcheck source=lib/lb.sh
+source "$LAB_DIR/lib/lb.sh"
 
 usage() {
 	cat <<USAGE
@@ -42,7 +44,8 @@ usage: lab.sh <command> [options]
 commands:
   preflight                 check that this machine can run the lab
   up [--scenario S]         build the lab (or complete a partial one); S is
-                            storage, identity, ha (adds ligo2) or all
+                            storage, identity, ha (adds ligo2), lb (adds
+                            HAProxy in front of both) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
@@ -113,6 +116,9 @@ cmd_up() {
 		identity_spire_up
 		identity_bao_up
 		ldap_up
+	fi
+	if selected lb; then
+		lb_up
 	fi
 	# a new snapshot when there is none, or when up added inner instances
 	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then
