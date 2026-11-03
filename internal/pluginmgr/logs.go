@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/go-hclog"
 )
@@ -48,4 +50,50 @@ func (w *hclogWriter) Write(p []byte) (int, error) {
 func str(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// maxLine is the longest line a plugin may write to stdout or stderr.
+const maxLine = 64 << 10
+
+// lineWriter passes whole lines to next, so a line split across writes is
+// redacted as one; a longer line than maxLine is dropped, never logged in
+// pieces.
+// shortcut: a last line without a newline is lost when the plugin exits; flush on exit if plugins need it.
+type lineWriter struct {
+	mu      sync.Mutex
+	next    io.Writer
+	buf     []byte
+	dropped bool // the current line is over maxLine
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		part := p
+		if i >= 0 {
+			part = p[:i+1]
+		}
+		p = p[len(part):]
+		if !w.dropped && len(w.buf)+len(part) > maxLine {
+			w.buf, w.dropped = w.buf[:0], true
+		}
+		if !w.dropped {
+			w.buf = append(w.buf, part...)
+		}
+		if i < 0 {
+			break
+		}
+		line := w.buf
+		if w.dropped {
+			line = []byte("[a line over 64 KiB was dropped]\n")
+		}
+		if _, err := w.next.Write(line); err != nil {
+			return 0, err
+		}
+		w.buf, w.dropped = w.buf[:0], false
+	}
+	return n, nil
 }

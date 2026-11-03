@@ -3,6 +3,7 @@ package pluginsdk
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"strings"
 )
 
@@ -10,8 +11,8 @@ import (
 var secretKeys = []string{"password", "passwd", "secret", "token", "credential", "private_key", "authorization"}
 
 // RedactingHandler drops secrets from log records before next sees them:
-// attributes with a secret-looking key, and any message or string value
-// containing IDENTIFIED BY (§5.8 rule 6).
+// attributes and map keys with a secret-looking key, and any message,
+// string or error containing SQL that sets a password (§5.8 rule 6).
 type RedactingHandler struct{ next slog.Handler }
 
 // NewRedactingHandler wraps next.
@@ -48,11 +49,8 @@ func (h *RedactingHandler) WithGroup(name string) slog.Handler {
 
 func redact(a slog.Attr) slog.Attr {
 	a.Value = a.Value.Resolve()
-	key := strings.ToLower(a.Key)
-	for _, k := range secretKeys {
-		if strings.Contains(key, k) {
-			return slog.String(a.Key, redacted)
-		}
+	if secretKey(a.Key) {
+		return slog.String(a.Key, redacted)
 	}
 	switch a.Value.Kind() {
 	case slog.KindGroup:
@@ -66,10 +64,56 @@ func redact(a slog.Attr) slog.Attr {
 		if hasSQLSecret(a.Value.String()) {
 			return slog.String(a.Key, redacted)
 		}
+	case slog.KindAny:
+		return slog.Any(a.Key, clean(a.Value.Any()))
 	}
 	return a
 }
 
-func hasSQLSecret(s string) bool {
-	return strings.Contains(strings.ToUpper(s), "IDENTIFIED BY")
+// clean redacts the values an attribute of any kind may hold: decoded JSON
+// (maps and slices, as plugin log lines arrive) and errors.
+func clean(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, e := range v {
+			if secretKey(k) {
+				out[k] = redacted
+			} else {
+				out[k] = clean(e)
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = clean(e)
+		}
+		return out
+	case string:
+		if hasSQLSecret(v) {
+			return redacted
+		}
+	case error:
+		if hasSQLSecret(v.Error()) {
+			return redacted
+		}
+	}
+	return v
 }
+
+func secretKey(key string) bool {
+	key = strings.ToLower(key)
+	for _, k := range secretKeys {
+		if strings.Contains(key, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// sqlSecretRE is SQL that sets a password: Oracle's IDENTIFIED BY, and
+// PostgreSQL's PASSWORD followed by a literal ('...', E'...' or $$...$$).
+var sqlSecretRE = regexp.MustCompile(`(?i)IDENTIFIED\s+BY|\bPASSWORD\s+(E?'|\$)`)
+
+func hasSQLSecret(s string) bool { return sqlSecretRE.MatchString(s) }

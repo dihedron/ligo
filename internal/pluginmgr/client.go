@@ -60,8 +60,8 @@ func Start(cmd *exec.Cmd, kind pluginv1.PluginKind, checksum []byte, logger hclo
 		AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC},
 		AutoMTLS:         true,
 		SkipHostEnv:      true, // a plugin gets cmd.Env only, never ligo's environment
-		SyncStdout:       stdio,
-		SyncStderr:       stdio,
+		SyncStdout:       &lineWriter{next: stdio},
+		SyncStderr:       &lineWriter{next: stdio},
 		SecureConfig:     &plugin.SecureConfig{Checksum: checksum, Hash: sha256.New()},
 		Logger:           logger,
 		GRPCDialOptions:  []grpc.DialOption{grpc.WithChainUnaryInterceptor(countRPC), grpc.WithStatsHandler(otelgrpc.NewClientHandler())},

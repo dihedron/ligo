@@ -2242,7 +2242,7 @@ FROM v_active_bindings WHERE id = $1;
 4. **Integrity.**
    - The SHA-256 of each binary is verified against `server.yaml` before every spawn (go-plugin `SecureConfig`, EXT-11).
    - To close the check-then-exec race, implementations SHOULD open the binary, hash it from the open file descriptor, and execute that descriptor (Linux `/proc/self/fd/N`, or `execveat` with `AT_EMPTY_PATH`).
-5. **Logging.** Plugin stderr and hclog output pass through the redacting logger (§10.1).
+5. **Logging.** Plugin stdout, stderr and hclog output pass through the redacting logger (§10.1), one whole line at a time: a line split across writes is joined first, and a line over 64 KiB is dropped, never logged in pieces. The logger also looks inside nested objects of a plugin's JSON log lines, and into error values.
 6. **Timeouts.** Every RPC carries a deadline of `plugins.rpc_timeout` (default 60s).
 7. **Concurrency.** At most `plugins.max_concurrent_rpcs_per_instance` (default 4) concurrent `Ensure*`/`Cleanup*` RPCs per logical instance. This is enforced by a host-side semaphore.
 
@@ -2376,7 +2376,7 @@ bootstrap_credential:
    - Errors are returned as gRPC status codes with a `PluginErrorDetail` (§5.9).
    - Neither `status.message` nor `public_message` may contain secrets or full SQL statements.
    - The host persists **only** `code` and `public_message`.
-6. **Logging.** No secret values, no bootstrap credentials, no SQL text containing `IDENTIFIED BY`.
+6. **Logging.** No secret values, no bootstrap credentials, no SQL text that sets a password (`IDENTIFIED BY`, or PostgreSQL's `PASSWORD` followed by a literal).
 7. **Targets are register-only (ADR-15).** `ValidateTarget` and `ValidateBinding` MUST NOT change anything on the platform. They MAY read from it (for example, to confirm that a schema and the roles named by an access level exist) when `check_existence` is set, using the platform's bootstrap credential with read-only use.
 8. **Parameters never add privilege.** `ValidateBinding` MUST reject parameters that would grant anything beyond the access level (for example extra roles, or a schema other than the target's). The privileges it returns MUST equal those of the access level.
 9. **Canonical privileges.** `ValidateTarget` returns, for each access level, `privileges`: a sorted, duplicate-free list of identifiers such that, for two levels of the same target, `privileges(A) ⊆ privileges(B)` implies that everything `A` grants is also granted by `B` (§3.10). Identifiers are stable across plugin versions; a plugin that changes them MUST bump its major type version (`oracle.v2`). Where containment cannot be guaranteed (for example a grant with conditions the plugin cannot compare), the plugin MUST emit an identifier unique to that grant.
