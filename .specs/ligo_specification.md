@@ -2837,7 +2837,7 @@ Applying a binding change request whose consent rule is satisfied, a propagation
 3. If step 2 fails, or the process crashes between commit and start, the **sweeper** (§6.3) starts the workflow.
 
 ### 6.3 Sweeper
-Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`, performs the following:
+Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`, performs the following. The sweeper, the reconciler and the propagator log the errors of a pass at `ERROR`, and retry at the next one.
 - For each binding in `PROVISIONING`/`DELETING` with `last_transition_at < now() - 60s`, query DBOS for `workflow_id` (EXT-03):
   - **not found:** start the workflow with that ID. This is idempotent.
   - **terminal error or cancelled, while the binding is not terminal:** run the fenced failure transition (`FAILED`/`DELETE_FAILED`, `status_message = "workflow terminated unexpectedly"`).

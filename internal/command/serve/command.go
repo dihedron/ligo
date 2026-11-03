@@ -259,12 +259,12 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			rotation[pl.Name] = pl.RotationInterval
 		}
 	}
-	run((&workflows.Sweeper{Engine: engine, Retention: cfg.Storage.DBOS.WorkflowRetention, Bindings: s.Bindings,
+	run((&workflows.Sweeper{Engine: engine, Logger: log, Retention: cfg.Storage.DBOS.WorkflowRetention, Bindings: s.Bindings,
 		ExpiryWarning: cfg.Bindings.ExpiryWarning}).Run)
 	if rc := cfg.Reconciliation; rc.Enabled {
-		run((&workflows.Reconciler{Engine: engine, Interval: rc.Interval, Jitter: rc.Jitter, MaxConcurrent: rc.MaxConcurrent, Rotation: rotation}).Run)
+		run((&workflows.Reconciler{Engine: engine, Logger: log, Interval: rc.Interval, Jitter: rc.Jitter, MaxConcurrent: rc.MaxConcurrent, Rotation: rotation}).Run)
 	}
-	run((&bindings.Propagator{Service: s.Bindings, Interval: cfg.Propagation.Interval, MaxConcurrent: cfg.Propagation.MaxConcurrent}).Run)
+	run((&bindings.Propagator{Service: s.Bindings, Logger: log, Interval: cfg.Propagation.Interval, MaxConcurrent: cfg.Propagation.MaxConcurrent}).Run)
 	dispatcher, err := notify.NewDispatcher(pools.App, cfg.Notifications.Webhooks, log)
 	if err != nil {
 		return err

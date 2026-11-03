@@ -1,9 +1,11 @@
 package workflows
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 	"uuid"
@@ -18,6 +20,7 @@ import (
 // time: it repairs drift on the targets and rotates static secrets (§6.6).
 type Reconciler struct {
 	Engine        *Engine
+	Logger        *slog.Logger             // errors of a pass; default slog.Default()
 	Interval      time.Duration            // reconciliation.interval; default 6h
 	Jitter        time.Duration            // reconciliation.jitter
 	MaxConcurrent int                      // re-applies running at once; default 4
@@ -39,7 +42,9 @@ func (r *Reconciler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
-			_, _ = r.Reconcile(ctx)
+			if _, err := r.Reconcile(ctx); err != nil && ctx.Err() == nil {
+				cmp.Or(r.Logger, slog.Default()).Error("reconciler", "error", err)
+			}
 		}
 	}
 }

@@ -1,9 +1,11 @@
 package bindings
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 	"uuid"
 
@@ -22,6 +24,7 @@ const actorPropagator = "system:propagator"
 // changes at new revisions, one replica at a time (§6.8).
 type Propagator struct {
 	Service       *Service
+	Logger        *slog.Logger  // errors of a pass; default slog.Default()
 	Interval      time.Duration // propagation.interval; default 5s
 	MaxConcurrent int           // propagation.max_concurrent; default 8
 }
@@ -39,7 +42,9 @@ func (p *Propagator) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			_, _ = p.Propagate(ctx)
+			if _, err := p.Propagate(ctx); err != nil && ctx.Err() == nil {
+				cmp.Or(p.Logger, slog.Default()).Error("propagator", "error", err)
+			}
 		}
 	}
 }
