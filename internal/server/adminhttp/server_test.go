@@ -10,6 +10,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/authz"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 )
 
@@ -80,5 +81,21 @@ func TestBasicDirectory(t *testing.T) {
 	d.groups = nil // removed from the group
 	if p, err := call(http.MethodPost, "/v1/admin/break-glass", "pw"); err != nil || len(p.Groups) != 0 || d.calls != 3 {
 		t.Errorf("break-glass: %v %v, %d calls", p.Groups, err, d.calls)
+	}
+}
+
+// TestAPIRate: the highest rate_limit of the caller's bindings, in any
+// order, else api_per_principal_rps (finding 4.2).
+func TestAPIRate(t *testing.T) {
+	s := &Server{}
+	slow := authz.Grant{RateLimit: &config.APIRateLimit{APIRPS: 5, Burst: 20}}
+	fast := authz.Grant{RateLimit: &config.APIRateLimit{APIRPS: 50, Burst: 10}}
+	for _, gs := range []authz.Grants{{slow, fast}, {fast, slow}, {{}, fast, slow}} {
+		if r := s.apiRate(changerequests.Caller{Grants: gs}); r.PerSecond != 50 || r.Burst != 20 {
+			t.Errorf("%d grants: %+v, want 50/s, burst 20", len(gs), r)
+		}
+	}
+	if r := s.apiRate(changerequests.Caller{Grants: authz.Grants{{}}}); r.PerSecond != 10 || r.Burst != 20 {
+		t.Errorf("no rate_limit: %+v", r)
 	}
 }

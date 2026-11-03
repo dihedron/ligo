@@ -216,13 +216,17 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 	return changerequests.Caller{Principal: p, Grants: s.Authz.For(p)}, nil
 }
 
-// apiRate is the caller's API rate: its bindings' rate_limit, else
-// api_per_principal_rps (default 10).
+// apiRate is the caller's API rate: the highest api_rps and burst of its
+// bindings' rate_limit, else api_per_principal_rps (default 10).
 func (s *Server) apiRate(c changerequests.Caller) ratelimit.Rate {
+	var r ratelimit.Rate
 	for _, g := range c.Grants {
 		if g.RateLimit != nil && g.RateLimit.APIRPS > 0 {
-			return ratelimit.Rate{PerSecond: g.RateLimit.APIRPS, Burst: float64(max(g.RateLimit.Burst, 1))}
+			r = ratelimit.Rate{PerSecond: max(r.PerSecond, g.RateLimit.APIRPS), Burst: max(r.Burst, float64(g.RateLimit.Burst), 1)}
 		}
+	}
+	if r.PerSecond > 0 {
+		return r
 	}
 	rps := s.Listener.RateLimit.APIPerPrincipalRPS
 	if rps <= 0 {
