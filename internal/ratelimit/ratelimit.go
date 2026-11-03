@@ -87,11 +87,18 @@ func (l *Limiter) Allow(key string, r Rate) bool {
 
 // Logins are the failed-login limits of §7.3 rule 6, shared by the UI's
 // login and the admin API's Basic credentials: only refused credentials
-// spend, and while an address's or a user's bucket is empty, every login
-// from it or for them is refused, the right password included.
+// spend, and while a bucket of the login is empty, it is refused, the right
+// password included. A login has three buckets: its address, its address
+// and user, and its user from any address, whose higher limit stops
+// guessing spread over addresses without letting one address lock a user
+// out. A re-authentication within a session (break-glass) uses its address
+// and that session instead, so no one outside the session can block it;
+// its failures still spend the user's bucket.
 type Logins struct {
-	PerIPPerMin, PerUserPerMin int // login_per_ip_per_min (default 10), login_per_user_per_min (default 5)
-	MaxKeys                    int // max_tracked_keys (default DefaultMaxKeys)
+	PerIPPerMin         int // login_per_ip_per_min (default 10)
+	PerUserPerMin       int // login_per_user_per_min (default 5), per address and user, or per session
+	PerUserGlobalPerMin int // login_per_user_global_per_min (default 50), per user from any address
+	MaxKeys             int // max_tracked_keys (default DefaultMaxKeys)
 
 	once sync.Once
 	l    Limiter
@@ -104,37 +111,59 @@ func perMinute(n, fallback int) Rate {
 	return Rate{PerSecond: float64(n) / 60, Burst: float64(n)}
 }
 
-// Begin reports whether a login from ip for user may be checked now. It
-// takes a token from both buckets before the check, so logins checked at
-// the same time all count; Done returns them unless the credentials were
-// refused.
-func (g *Logins) Begin(ip, user string) bool {
+type limit struct {
+	key string
+	r   Rate
+}
+
+// limits are the buckets of a login; session is "" outside a session.
+func (g *Logins) limits(ip, user, session string) []limit {
+	ls := []limit{{"ip:" + ip, perMinute(g.PerIPPerMin, 10)}}
+	if session != "" {
+		return append(ls, limit{"session:" + session, perMinute(g.PerUserPerMin, 5)})
+	}
+	return append(ls, limit{"ipuser:" + ip + "\x00" + user, perMinute(g.PerUserPerMin, 5)},
+		limit{"user:" + user, perMinute(g.PerUserGlobalPerMin, 50)})
+}
+
+// Begin reports whether a login from ip for user may be checked now; session
+// identifies the session of a re-authentication, else it is "". It takes a
+// token from each bucket before the check, so logins checked at the same
+// time all count; Done returns them unless the credentials were refused.
+func (g *Logins) Begin(ip, user, session string) bool {
 	g.once.Do(func() { g.l.Max = g.MaxKeys })
 	g.l.mu.Lock()
 	defer g.l.mu.Unlock()
-	a, b := g.l.refill("ip:"+ip, perMinute(g.PerIPPerMin, 10)), g.l.refill("user:"+user, perMinute(g.PerUserPerMin, 5))
-	if a == nil || b == nil || a.tokens < 1 || b.tokens < 1 {
-		return false
+	ls := g.limits(ip, user, session)
+	bs := make([]*bucket, len(ls))
+	for i, l := range ls {
+		if bs[i] = g.l.refill(l.key, l.r); bs[i] == nil || bs[i].tokens < 1 {
+			return false
+		}
 	}
-	a.tokens--
-	b.tokens--
+	for _, b := range bs {
+		b.tokens--
+	}
 	return true
 }
 
 // Done ends a login that Begin allowed: refused credentials keep their
-// tokens spent, anything else gives them back.
-func (g *Logins) Done(ip, user string, refused bool) {
-	if refused {
-		return
-	}
+// tokens spent (and a session's also spend the user's bucket, down to
+// none), anything else gives them back.
+func (g *Logins) Done(ip, user, session string, refused bool) {
 	g.l.mu.Lock()
 	defer g.l.mu.Unlock()
-	for _, k := range []struct {
-		key string
-		r   Rate
-	}{{"ip:" + ip, perMinute(g.PerIPPerMin, 10)}, {"user:" + user, perMinute(g.PerUserPerMin, 5)}} {
-		if b := g.l.refill(k.key, k.r); b != nil {
-			b.tokens = min(k.r.Burst, b.tokens+1)
+	if refused {
+		if session != "" {
+			if b := g.l.refill("user:"+user, perMinute(g.PerUserGlobalPerMin, 50)); b != nil {
+				b.tokens = max(0, b.tokens-1)
+			}
+		}
+		return
+	}
+	for _, l := range g.limits(ip, user, session) {
+		if b := g.l.refill(l.key, l.r); b != nil {
+			b.tokens = min(l.r.Burst, b.tokens+1)
 		}
 	}
 }

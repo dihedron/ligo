@@ -161,10 +161,11 @@ type Session struct {
 }
 
 type AdminRateLimit struct {
-	LoginPerIPPerMin   int     `yaml:"login_per_ip_per_min"`
-	LoginPerUserPerMin int     `yaml:"login_per_user_per_min"`
-	APIPerPrincipalRPS float64 `yaml:"api_per_principal_rps"`
-	MaxTrackedKeys     int     `yaml:"max_tracked_keys"` // addresses, users and principals whose buckets are kept; default 1000000
+	LoginPerIPPerMin         int     `yaml:"login_per_ip_per_min"`
+	LoginPerUserPerMin       int     `yaml:"login_per_user_per_min"`
+	LoginPerUserGlobalPerMin int     `yaml:"login_per_user_global_per_min"`
+	APIPerPrincipalRPS       float64 `yaml:"api_per_principal_rps"`
+	MaxTrackedKeys           int     `yaml:"max_tracked_keys"` // addresses, users and principals whose buckets are kept; default 1000000
 }
 
 type AdminAuth struct {

@@ -194,11 +194,11 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 		// before the check so concurrent ones count: once either is
 		// exhausted, Basic requests of that address or user wait
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if !s.logins().Begin(ip, user) {
+		if !s.logins().Begin(ip, user, "") {
 			return changerequests.Caller{}, errLoginLimited
 		}
 		p, err = s.LDAP.Authenticate(r.Context(), user, password)
-		s.logins().Done(ip, user, errors.Is(err, adminauth.ErrInvalidCredentials))
+		s.logins().Done(ip, user, "", errors.Is(err, adminauth.ErrInvalidCredentials))
 	default:
 		err = adminauth.ErrInvalidCredentials
 	}
@@ -229,7 +229,8 @@ func (s *Server) logins() *ratelimit.Logins {
 	s.loginsOnce.Do(func() {
 		if s.Logins == nil {
 			rl := s.Listener.RateLimit
-			s.Logins = &ratelimit.Logins{PerIPPerMin: rl.LoginPerIPPerMin, PerUserPerMin: rl.LoginPerUserPerMin, MaxKeys: rl.MaxTrackedKeys}
+			s.Logins = &ratelimit.Logins{PerIPPerMin: rl.LoginPerIPPerMin, PerUserPerMin: rl.LoginPerUserPerMin,
+				PerUserGlobalPerMin: rl.LoginPerUserGlobalPerMin, MaxKeys: rl.MaxTrackedKeys}
 		}
 	})
 	return s.Logins

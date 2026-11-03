@@ -127,7 +127,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, password, ip := r.PostFormValue("username"), r.PostFormValue("password"), clientIP(r)
-	if !s.Logins.Begin(ip, user) {
+	if !s.Logins.Begin(ip, user, "") {
 		w.Header().Set("Retry-After", "60")
 		s.alert(w, r, http.StatusTooManyRequests, "Too many failed sign-ins. Wait a minute and try again.")
 		return
@@ -139,7 +139,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			err = adminauth.ErrInvalidCredentials // no role is no access, and looks the same
 		}
 	}
-	s.Logins.Done(ip, user, errors.Is(err, adminauth.ErrInvalidCredentials))
+	s.Logins.Done(ip, user, "", errors.Is(err, adminauth.ErrInvalidCredentials))
 	switch {
 	case errors.Is(err, adminauth.ErrInvalidCredentials):
 		if len(user) > 255 {

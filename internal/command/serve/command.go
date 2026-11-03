@@ -426,7 +426,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	}
 	// the UI's sessions share the directory, the roles and the failed-login limits with the API (§7.3)
 	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin,
-		MaxKeys: al.RateLimit.MaxTrackedKeys}
+		PerUserGlobalPerMin: al.RateLimit.LoginPerUserGlobalPerMin, MaxKeys: al.RateLimit.MaxTrackedKeys}
 	s.Logins = logins
 	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
 	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg

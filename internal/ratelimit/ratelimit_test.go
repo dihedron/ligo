@@ -16,7 +16,7 @@ func TestLoginsConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Go(func() {
-			if g.Begin("10.0.0.1", "alice") {
+			if g.Begin("10.0.0.1", "alice", "") {
 				passed.Add(1)
 			}
 		})
@@ -26,17 +26,59 @@ func TestLoginsConcurrent(t *testing.T) {
 		t.Fatalf("%d passed, want 5", n)
 	}
 	for range 5 {
-		g.Done("10.0.0.1", "alice", false)
+		g.Done("10.0.0.1", "alice", "", false)
 	}
-	if !g.Begin("10.0.0.1", "alice") {
+	if !g.Begin("10.0.0.1", "alice", "") {
 		t.Error("tokens of logins that were not refused not given back")
 	}
-	g.Done("10.0.0.1", "alice", true)
+	g.Done("10.0.0.1", "alice", "", true)
 	for range 4 {
-		g.Begin("10.0.0.1", "alice")
+		g.Begin("10.0.0.1", "alice", "")
 	}
-	if g.Begin("10.0.0.1", "alice") {
+	if g.Begin("10.0.0.1", "alice", "") {
 		t.Error("five refused logins and still allowed")
+	}
+}
+
+// TestLoginsLockout: refused logins from one address do not lock the user
+// out of others; the user's limit from any address stops guessing spread
+// over addresses; a session's re-authentication is not blocked by either,
+// and its failures spend the user's bucket (§7.3 rule 6).
+func TestLoginsLockout(t *testing.T) {
+	g := &Logins{}
+	fail := func(ip, session string) bool {
+		if !g.Begin(ip, "alice", session) {
+			return false
+		}
+		g.Done(ip, "alice", session, true)
+		return true
+	}
+	for range 5 {
+		fail("10.0.0.1", "")
+	}
+	if g.Begin("10.0.0.1", "alice", "") {
+		t.Error("the address and user not limited")
+	}
+	if !g.Begin("10.0.0.2", "alice", "") {
+		t.Fatal("another address locked out")
+	}
+	g.Done("10.0.0.2", "alice", "", false)
+	for i := 2; i <= 10; i++ { // nine more addresses, five failures each: 50 in all
+		for range 5 {
+			fail(fmt.Sprintf("10.0.0.%d", i+1), "")
+		}
+	}
+	if g.Begin("10.0.1.1", "alice", "") {
+		t.Error("a new address allowed past the user's limit from any address")
+	}
+	if !fail("10.0.2.1", "s1") {
+		t.Error("a session's re-authentication blocked by the user's lockout")
+	}
+	for range 4 {
+		fail("10.0.2.1", "s1")
+	}
+	if g.Begin("10.0.2.1", "alice", "s1") {
+		t.Error("the session not limited")
 	}
 }
 
