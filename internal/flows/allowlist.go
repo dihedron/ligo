@@ -88,18 +88,29 @@ func (al Allowlist) CheckFlow(f Flow) error {
 		return fmt.Errorf("%w: %w", ErrDestinationNotAllowed, err)
 	}
 	for _, p := range f.Ports {
-		allowed := false
-		for _, e := range al.entries {
-			if e.covers(prefix, isIP, f.Destination, p) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !al.allows(prefix, isIP, f.Destination, p) {
 			return fmt.Errorf("%w: flow %q to %s port %s", ErrDestinationNotAllowed, f.Name, f.Destination, portString(p))
 		}
 	}
 	return nil
+}
+
+// allows reports whether one entry covers p, or, for a range, whether each
+// of its ports is allowed: the database merges neighbouring ports allowed
+// one by one into a range.
+func (al Allowlist) allows(prefix netip.Prefix, isIP bool, dest string, p Port) bool {
+	if slices.ContainsFunc(al.entries, func(e endpoint) bool { return e.covers(prefix, isIP, dest, p) }) {
+		return true
+	}
+	if !p.isRange || p.High-p.Low >= len(al.entries) { // an entry with a port allows one
+		return false
+	}
+	for port := p.Low; port <= p.High; port++ {
+		if !al.allows(prefix, isIP, dest, Port{Low: port, High: port}) {
+			return false
+		}
+	}
+	return true
 }
 
 // Within returns the flows of fs that lie within the allowlist: flows that a
@@ -164,7 +175,7 @@ func CanonicalPorts(ports []Port) []Port {
 	for _, p := range sorted {
 		if n := len(out); n > 0 && p.Low <= out[n-1].High+1 {
 			out[n-1].High = max(out[n-1].High, p.High)
-			out[n-1].isRange = true
+			out[n-1].isRange = out[n-1].High > out[n-1].Low
 			continue
 		}
 		out = append(out, Port{Low: p.Low, High: p.High, isRange: p.High != p.Low})

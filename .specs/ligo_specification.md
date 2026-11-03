@@ -2351,7 +2351,7 @@ bootstrap_credential:
   3. check every entry in `declared_endpoints` against the same `allowed_endpoints`.
 - **Endpoint matching.** An endpoint is allowed when an `allowed_endpoints` entry has the same host (case-insensitive; an address must lie within an address or CIDR entry) and either no port, which allows any port, or the endpoint's port. An endpoint without a port, including a URL without one, is allowed only by an entry without a port: a URL scheme does not imply a default port.
 - A validation failure is a terminal error (`OUTPUT_VALIDATION_FAILED`) and is audited.
-- **Target network flows** (ADR-16, INV-24) are checked against the platform's `allowed_endpoints` when a target change request is created and again when it is applied: a DNS-name destination MUST equal an allowed host; an IP address or CIDR destination MUST lie within an allowed CIDR entry (`allowed_endpoints` accepts CIDR entries for this purpose); when the allowed entry has a port, every port of the flow MUST equal it. A failure is `422 flow-destination-not-allowed`. The same check applies at startup to the configured flows of platforms and secret stores (§8.2 rule 19).
+- **Target network flows** (ADR-16, INV-24) are checked against the platform's `allowed_endpoints` when a target change request is created and again when it is applied: a DNS-name destination MUST equal an allowed host; an IP address or CIDR destination MUST lie within an allowed CIDR entry (`allowed_endpoints` accepts CIDR entries for this purpose); an entry with a port allows that port only, so each port of the flow, and each port of a port range, MUST be allowed by some entry (the database stores neighbouring ports as one range, so ports allowed one by one stay allowed when read back). A failure is `422 flow-destination-not-allowed`. The same check applies at startup to the configured flows of platforms and secret stores (§8.2 rule 19).
 
 ### 5.8 Plugin implementation rules (normative for every plugin)
 1. **Idempotency (INV-07).**
@@ -2719,11 +2719,13 @@ message EnsureTargetResponse {
   repeated Endpoint declared_endpoints = 3;
 }
 
+// CleanupTarget removes everything the binding owns on the platform, found by
+// binding ID or derived principal name, whatever the revision (§6.5).
 message CleanupTargetRequest {
   string instance = 1;
   BindingContext binding = 2;
   IdentityArtifact identity = 3;           // non-secret; MAY be empty
-  bytes requested_spec_json = 4;
+  bytes requested_spec_json = 4;           // the latest revision's: informative, MAY never have been provisioned
   bytes finalized_client_spec_json = 5;    // MAY be empty after partial failure
 }
 message CleanupTargetResponse { bool skipped_not_owner = 1; }
@@ -2914,6 +2916,7 @@ For each stage in `[SECRET_STORE, TARGET, IDENTITY]`:
 1. If no `binding_stage_state` row exists for the stage, skip it.
 2. `markStep(CLEANUP_<STAGE>)`.
 3. Call `Cleanup*` with the row's `provider_type`/`provider_instance` (not the current config) and its non-secret artifact. `CleanupSecretStore` and `CleanupTarget` additionally receive the IDENTITY row's non-secret artifact, if any, and `CleanupTarget` also receives `requested_spec`.
+   Cleanup MUST remove everything the binding owns on the provider, found by the binding ID or the derived principal name, which stay the same across revisions. The inputs describe the latest revision, which a failed apply may never have provisioned, or only partly: `requested_spec` and the `BindingContext` (`revision`, `source_svid_regex`, `access_level`) are informative, and a plugin MUST NOT limit its cleanup to them.
 4. On success, delete the stage row (fenced). If `skipped_not_owner` is set, insert audit `CLEANUP_SKIPPED_NOT_OWNER`.
 
 Finally, in one fenced transaction: delete the `bindings` row (stage rows cascade) and insert audit `DELETE_COMPLETED` as the final operation before `COMMIT`.

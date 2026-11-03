@@ -278,3 +278,31 @@ func TestWithin(t *testing.T) {
 		t.Errorf("within: %+v", got)
 	}
 }
+
+// TestCheckFlowStored: flows allowed when filed stay allowed once read back
+// from the database, which merges neighbouring ports.
+func TestCheckFlowStored(t *testing.T) {
+	al, err := ParseAllowlist([]string{"db.internal:5432", "db.internal:5433"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := decode(t, `{"name":"pg","destination":"db.internal","protocol":"tcp","ports":[5432,5433]}`)
+	if err := al.CheckFlow(f); err != nil {
+		t.Fatalf("filed: %v", err)
+	}
+	if f.Ports, err = ParseMultirange("{[5432,5434)}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := al.CheckFlow(f); err != nil {
+		t.Errorf("stored: %v", err)
+	}
+	if f.Ports, err = ParseMultirange("{[5432,5435)}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := al.CheckFlow(f); !errors.Is(err, ErrDestinationNotAllowed) {
+		t.Errorf("5432-5434: %v", err)
+	}
+	if p := CanonicalPorts([]Port{{Low: 5432, High: 5432}, {Low: 5432, High: 5432}}); len(p) != 1 || p[0].isRange {
+		t.Errorf("duplicate port: %+v", p)
+	}
+}

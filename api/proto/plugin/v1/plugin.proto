@@ -330,11 +330,13 @@ message EnsureTargetResponse {
   repeated Endpoint declared_endpoints = 3;
 }
 
+// CleanupTarget removes everything the binding owns on the platform, found by
+// binding ID or derived principal name, whatever the revision (§6.5).
 message CleanupTargetRequest {
   string instance = 1;
   BindingContext binding = 2;
   IdentityArtifact identity = 3;           // non-secret; MAY be empty
-  bytes requested_spec_json = 4;
+  bytes requested_spec_json = 4;           // the latest revision's: informative, MAY never have been provisioned
   bytes finalized_client_spec_json = 5;    // MAY be empty after partial failure
 }
 message CleanupTargetResponse { bool skipped_not_owner = 1; }
