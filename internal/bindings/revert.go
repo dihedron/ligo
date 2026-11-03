@@ -138,9 +138,6 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 	if cur.breakGlassCR == nil || *cur.breakGlassCR != bg.ID {
 		return nil, refuse(409, "break-glass-not-open", "the break-glass change %s was ratified, reverted or closed", bg.ID)
 	}
-	if err := s.withdrawPending(ctx, cur, actor); err != nil {
-		return nil, err
-	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE",
 		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Zone: cur.zone, SourceScope: cur.sourceScope,
 		TargetScope: cur.targetScope, PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),

@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -108,11 +109,34 @@ func TestAC32(t *testing.T) {
 	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil { // the delete workflow completed
 		t.Fatal(err)
 	}
+	// a pending change of the source is withdrawn by the retirement, in its transaction (finding 3.3)
+	pending := uuid.NewV7()
+	err = pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
+			owner_scope, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256, requested_by, expires_at)
+			select $1, 'SOURCE', name, id, 'UPDATE', 'STANDARD', 'ALL', scope, repeat('a', 64), false, revision, '{}', repeat('b', 64),
+			't', now() + interval '1 day' from sources where name = $2`, pending, src); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
+			select $1, 'OWNER', scope, true, 'HUMAN', 't', 'STANDARD' from sources where name = $2`, pending, src)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.RetireInlineSources(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if st := state(); st != "RETIRED" {
 		t.Errorf("source %s after the revert", st)
+	}
+	var withdrawn string
+	if err := o.QueryRow(ctx, "select status from change_requests where id = $1", pending).Scan(&withdrawn); err != nil || withdrawn != "WITHDRAWN" {
+		t.Errorf("the pending change is %s (%v)", withdrawn, err)
+	}
+	if n, _ := audited(t, o, src, "CR_WITHDRAWN"); n != 1 {
+		t.Errorf("CR_WITHDRAWN %d", n)
 	}
 	var by string // the retirement is in the name of whoever reverted the binding, here the expiry
 	if err := o.QueryRow(ctx, "select requested_by from change_requests where resource_name = $1 and kind = 'SYSTEM_REVERT'", src).Scan(&by); err != nil ||

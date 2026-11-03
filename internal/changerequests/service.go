@@ -248,6 +248,25 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 	return s.file(ctx, items...)
 }
 
+// withdrawPending withdraws the pending request on r's resource, if any, in
+// the name of r's requester, and adds its audit entry to entries.
+func withdrawPending(ctx context.Context, tx pgx.Tx, r *Request, entries []audit.Entry) ([]audit.Entry, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT id FROM change_requests WHERE resource_type = $1 AND resource_name = $2 AND status = 'PENDING' FOR UPDATE`,
+		r.ResourceType, r.ResourceName).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entries, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := store.CloseRequest(ctx, tx, id, "WITHDRAWN", r.RequestedBy, "superseded by a system change", ""); err != nil {
+		return nil, err
+	}
+	return append(entries, audit.Entry{ResourceType: r.ResourceType, ResourceID: r.ResourceID, ResourceName: r.ResourceName,
+		ChangeRequestID: &id, Action: "CR_WITHDRAWN", Actor: r.RequestedBy}), nil
+}
+
 // appliedIn reports whether the request id of items was applied.
 func appliedIn(items []filed, id uuid.UUID) bool {
 	return slices.ContainsFunc(items, func(it filed) bool { return it.r.ID == id && it.r.Status == "APPLIED" })
@@ -408,6 +427,14 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 			}
 		}
 		var entries []audit.Entry
+		if k := items[0].r.kind(); k == KindSystemRevert || k == "SYSTEM_EXPIRY" {
+			// a system change supersedes the resource's pending request, which
+			// would hold its name (uq_cr_one_pending_per_resource)
+			var err error
+			if entries, err = withdrawPending(ctx, tx, items[0].r, entries); err != nil {
+				return err
+			}
+		}
 		for _, it := range items {
 			r := it.r
 			if err := insert(ctx, tx, r); err != nil {
