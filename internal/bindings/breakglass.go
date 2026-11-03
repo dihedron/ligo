@@ -206,14 +206,21 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 	}
 	left := -1 // the BREAK_GLASS sides still unratified once this commits
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		var name string
+		var name, operation string
 		var open *uuid.UUID
-		err := tx.QueryRow(ctx, "SELECT name, break_glass_cr_id FROM bindings WHERE id = $1 FOR UPDATE", *r.ResourceID).Scan(&name, &open)
+		err := tx.QueryRow(ctx, "SELECT name, operation, break_glass_cr_id FROM bindings WHERE id = $1 FOR UPDATE",
+			*r.ResourceID).Scan(&name, &operation, &open)
 		exists := err == nil
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if exists && r.Operation != "DELETE" && (open == nil || *open != id) {
+		var reverted bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM change_requests WHERE reverts_cr_id = $1 AND status = 'APPLIED')",
+			id).Scan(&reverted); err != nil {
+			return err
+		}
+		// A binding deleted normally (gone, DELETING or a failed delete) closed the change, which still needs its review.
+		if reverted || exists && r.Operation != "DELETE" && operation != "DELETE" && (open == nil || *open != id) {
 			return refuse(409, "break-glass-not-open", "the break-glass change %s was reverted or closed", id)
 		}
 		tag, err := tx.Exec(ctx, `UPDATE change_request_sides SET ratified_by = $3, ratified_at = now(), ratification_comment = $4

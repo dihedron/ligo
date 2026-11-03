@@ -6,11 +6,18 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 )
 
 // expireBreakGlass makes the open break-glass change of binding name past
@@ -294,5 +301,135 @@ func TestWarnBreakGlass(t *testing.T) {
 	}
 	if n, _ := audited(t, o, name, "BREAK_GLASS_EXPIRING"); n != 1 {
 		t.Errorf("BREAK_GLASS_EXPIRING %d", n)
+	}
+}
+
+// TestRevertParty: a break-glass change with an additional party is
+// reverted, its SYSTEM_REVERT without the PARTY side (consent ANY).
+func TestRevertParty(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	s.Requests.Policy.BreakGlassPolicies = append(s.Requests.Policy.BreakGlassPolicies,
+		governance.BreakGlassPolicy{Scopes: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
+	rescuer := caller("rita", role(config.RoleBreakGlass, "cloud/fin-01/*", "dc/corp-prod/*", "sec/infosec"))
+	name := "fin-01-payments-bp-" + w.suffix
+	bg, err := s.BreakGlass(ctx, rescuer, emergency("CREATE", `"binding":`+string(body(name, w.cloudSrc, w.ledger, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sides(bg); got != "TARGET=BREAK_GLASS,SOURCE=BREAK_GLASS,PARTY:security=BREAK_GLASS" {
+		t.Fatalf("sides %s", got)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevertNow(ctx, rescuer, bg.ID, "the incident is over"); err != nil {
+		t.Fatal(err)
+	}
+	if r, n := revertOf(t, o, bg.ID); r.status != "APPLIED" {
+		t.Fatalf("revert %+v (%d)", r, n)
+	}
+}
+
+// TestRevertClosed: reverting a ratified break-glass change is refused and
+// touches nothing: the binding's pending change stays, no revert is filed.
+func TestRevertClosed(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name, src := "ledger-k-"+w.suffix, ledgerSource(t, o, w, "k")
+	bg, err := s.BreakGlass(ctx, livia, emergency("CREATE", `"binding":`+string(body(name, src, w.ledger, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Ratify(ctx, ledgerApp, bg.ID, "", "confirmed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.Update(ctx, ledgerOp, name, body(name, src, w.ledger, "write", `"expectedRevision":1`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
+		t.Errorf("revert: %v", err)
+	}
+	if st := status(t, o, pending.ID); st != "PENDING" {
+		t.Errorf("pending change %s", st)
+	}
+	if r, n := revertOf(t, o, bg.ID); n != 0 {
+		t.Errorf("revert filed: %+v (%d)", r, n)
+	}
+}
+
+// TestRevertTransient: a plugin that is briefly unavailable when an expired
+// break-glass UPDATE is reverted delays the revert to the next sweep.
+func TestRevertTransient(t *testing.T) {
+	s, o, w, p := setup(t)
+	ctx := context.Background()
+	name, src := "ledger-t-"+w.suffix, ledgerSource(t, o, w, "t")
+	active(t, s, o, ledgerOp, name, src, w.ledger, "read", "", ledgerApp)
+	bg, err := s.BreakGlass(ctx, livia, emergency("UPDATE", `"binding":`+string(body(name, src, w.ledger, "write", `"expectedRevision":1`))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expireBreakGlass(t, o, name)
+	s.Validate = func(context.Context, *pluginv1.ValidateBindingRequest) (*pluginv1.ValidateBindingResponse, error) {
+		return nil, grpcstatus.Error(codes.Unavailable, "plugin restarting")
+	}
+	_ = s.RevertExpired(ctx)
+	s.Validate = p.validate
+	if err := s.RevertExpired(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r, n := revertOf(t, o, bg.ID); r.status != "APPLIED" {
+		t.Errorf("revert %+v (%d)", r, n)
+	}
+}
+
+// TestRatifyAfterRevert: a reverted break-glass CREATE cannot be ratified,
+// even once its binding is gone.
+func TestRatifyAfterRevert(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name, src := "ledger-r-"+w.suffix, ledgerSource(t, o, w, "r")
+	bg, err := s.BreakGlass(ctx, livia, emergency("CREATE", `"binding":`+string(body(name, src, w.ledger, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil { // the delete workflow's end
+		t.Fatal(err)
+	}
+	if _, err := s.Ratify(ctx, ledgerApp, bg.ID, "", "confirmed"); slug(err) != "break-glass-not-open" {
+		t.Errorf("ratify: %v", err)
+	}
+}
+
+// TestRatifyWhileDeleting: a break-glass CREATE whose binding is being
+// deleted normally can still be ratified (AC-38c).
+func TestRatifyWhileDeleting(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name, src := "ledger-d-"+w.suffix, ledgerSource(t, o, w, "d")
+	bg, err := s.BreakGlass(ctx, livia, emergency("CREATE", `"binding":`+string(body(name, src, w.ledger, "read"))+`,`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.Delete(ctx, ledgerOp, name, 1, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, d, ledgerApp)
+	if _, err := s.Ratify(ctx, ledgerApp, bg.ID, "", "confirmed"); err != nil {
+		t.Errorf("ratify: %v", err)
 	}
 }

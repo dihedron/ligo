@@ -135,6 +135,9 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 	if err != nil {
 		return nil, err
 	}
+	if cur.breakGlassCR == nil || *cur.breakGlassCR != bg.ID {
+		return nil, refuse(409, "break-glass-not-open", "the break-glass change %s was ratified, reverted or closed", bg.ID)
+	}
 	if err := s.withdrawPending(ctx, cur, actor); err != nil {
 		return nil, err
 	}
@@ -143,6 +146,9 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 		TargetScope: cur.targetScope, PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),
 		RequestedBy: actor, RevertsID: &bg.ID}
 	for _, sd := range bg.Sides {
+		if strings.HasPrefix(sd.Name, "PARTY:") {
+			continue // a revocation has no additional parties (change_request_check)
+		}
 		r.Sides = append(r.Sides, changerequests.Side{Name: sd.Name, Scope: sd.Scope, Basis: changerequests.KindSystemRevert,
 			Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: comment})
 	}
@@ -152,6 +158,9 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 		err := json.Unmarshal(bg.RevertPayload, &b)
 		if err == nil {
 			err = s.revalidate(ctx, &b, cur)
+			if e := (*changerequests.Error)(nil); err != nil && !errors.As(err, &e) {
+				return nil, err // the plugin or the database failed, not the payload: the next run retries
+			}
 		}
 		if r.Payload, _ = json.Marshal(b); err != nil {
 			if err := s.Requests.SystemFailed(ctx, r, err.Error(), audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id,
