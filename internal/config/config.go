@@ -164,6 +164,7 @@ type AdminRateLimit struct {
 	LoginPerIPPerMin   int     `yaml:"login_per_ip_per_min"`
 	LoginPerUserPerMin int     `yaml:"login_per_user_per_min"`
 	APIPerPrincipalRPS float64 `yaml:"api_per_principal_rps"`
+	MaxTrackedKeys     int     `yaml:"max_tracked_keys"` // addresses, users and principals whose buckets are kept; default 1000000
 }
 
 type AdminAuth struct {
@@ -461,6 +462,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Service.StartupTimeout == 0 {
 		c.Service.StartupTimeout = time.Minute
+	}
+	if c.Server.AdminListener.RateLimit.MaxTrackedKeys == 0 {
+		c.Server.AdminListener.RateLimit.MaxTrackedKeys = 1_000_000
 	}
 	if c.Plugins.RPCTimeout == 0 {
 		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6

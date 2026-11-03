@@ -227,6 +227,8 @@ func TestPluginRules(t *testing.T) {
 		{"bad incident pattern", `incident_reference_pattern: '^INC[0-9]{7}$'`, `incident_reference_pattern: 'INC['`},
 		{"bad sealing provider", "provider: vault-transit", "provider: kms"},
 		{"startup_timeout too short", `  application_version: "4.0.1"`, "  startup_timeout: 1s\n  application_version: \"4.0.1\""},
+		{"max_tracked_keys too few", "max_tracked_keys: 1000000", "max_tracked_keys: 9999"},
+		{"max_tracked_keys too many", "max_tracked_keys: 1000000", "max_tracked_keys: 10000001"},
 		{"startup_timeout too long", `  application_version: "4.0.1"`, "  startup_timeout: 1h\n  application_version: \"4.0.1\""},
 		{"bad default_cross_scope", "default_cross_scope: deny", "default_cross_scope: maybe"},
 		{"bad action", "        action: deny\n", "        action: drop\n"},

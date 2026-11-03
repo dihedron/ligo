@@ -280,6 +280,9 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if t := cfg.Service.StartupTimeout; t < 5*time.Second || t > 10*time.Minute {
 		c.failf(9, "service.startup_timeout %s: between 5s and 10m", t)
 	}
+	if n := cfg.Server.AdminListener.RateLimit.MaxTrackedKeys; n < 10_000 || n > 10_000_000 {
+		c.failf(9, "admin_listener.rate_limit.max_tracked_keys %d: between 10000 and 10000000", n)
+	}
 	if r := cfg.Observability.Tracing.SampleRatio; r != nil && (*r < 0 || *r > 1) {
 		c.failf(9, "observability.tracing.sample_ratio %v: between 0 and 1", *r)
 	}
