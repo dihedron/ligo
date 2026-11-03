@@ -389,6 +389,11 @@ func TestSessionCSRF(t *testing.T) {
 	b.signIn("right")
 	b.page()
 	form := url.Values{"mode": {"dark"}}
+	// a refused request writes nothing to the session (finding 4.3)
+	past := time.Now().Add(-time.Minute).Truncate(time.Microsecond)
+	if _, err := v.owner.Exec(context.Background(), "UPDATE admin_sessions SET last_seen_at = $1 WHERE username = $2", past, v.user); err != nil {
+		t.Fatal(err)
+	}
 	for name, h := range map[string][]string{
 		"no CSRF token":      {"X-CSRF-Token", ""},
 		"another CSRF token": {"X-CSRF-Token", strings.Repeat("a", 64)},
@@ -397,6 +402,11 @@ func TestSessionCSRF(t *testing.T) {
 		if resp, _ := b.do("POST", "/ui/preferences/theme", form, h...); resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s: %d", name, resp.StatusCode)
 		}
+	}
+	var seen time.Time
+	if err := v.owner.QueryRow(context.Background(), "SELECT last_seen_at FROM admin_sessions WHERE username = $1", v.user).Scan(&seen); err != nil ||
+		!seen.Equal(past) {
+		t.Errorf("last_seen_at %v after refused requests, want %v (%v)", seen, past, err)
 	}
 	if resp, _ := b.do("POST", "/ui/preferences/theme", form, "Sec-Fetch-Site", "", "Origin", "https://ligo.example"); resp.StatusCode != 200 {
 		t.Errorf("the configured origin: %d", resp.StatusCode)

@@ -240,6 +240,11 @@ func (s *Server) authed(next http.Handler) http.Handler {
 			s.alert(w, r, http.StatusServiceUnavailable, "The session cannot be read. Try again later.")
 			return
 		}
+		// before anything is written: a refused request leaves the session as it was
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && (!equal(r.Header.Get("X-CSRF-Token"), sess.CSRF) || !s.sameOrigin(r)) {
+			s.alert(w, r, http.StatusForbidden, "The request was refused: reload the page and try again.")
+			return
+		}
 		if stale {
 			ok, err := s.recheck(w, r, h, &sess)
 			if err != nil {
@@ -254,10 +259,6 @@ func (s *Server) authed(next http.Handler) http.Handler {
 			}
 		} else if _, err := s.DB.Exec(ctx, `UPDATE admin_sessions SET last_seen_at = now() WHERE token_sha256 = $1`, h); err != nil {
 			s.Logger.Error("ui: session last seen", "error", err)
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && (!equal(r.Header.Get("X-CSRF-Token"), sess.CSRF) || !s.sameOrigin(r)) {
-			s.alert(w, r, http.StatusForbidden, "The request was refused: reload the page and try again.")
-			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, sessionKey{}, &sess)))
 	})
