@@ -289,8 +289,8 @@ func checkMetadata(t *Target) error {
 		return invalid("documentationUrl: at most 512 characters")
 	}
 	if t.DocumentationURL != "" {
-		if u, err := url.Parse(t.DocumentationURL); err != nil || !u.IsAbs() {
-			return invalid("documentationUrl: an absolute URL")
+		if u, err := url.Parse(t.DocumentationURL); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {
+			return invalid("documentationUrl: an absolute http or https URL")
 		}
 	}
 	return t.Visibility.Normalize()

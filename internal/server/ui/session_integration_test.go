@@ -996,6 +996,9 @@ func TestWizard(t *testing.T) {
 	if resp, _ := b.do("POST", "/ui/bindings/"+name+"/retry", url.Values{}); resp.StatusCode != 200 {
 		t.Errorf("retry: %d", resp.StatusCode)
 	}
+	if resp, _ := b.do("POST", "/ui/bindings/"+name+"/explode", url.Values{}); resp.StatusCode == 200 {
+		t.Errorf("an unknown operation: %d", resp.StatusCode)
+	}
 	if got := fmt.Sprint(v.s.Workflows.(*workflows).calls); got != "[rotate "+v.user+" retry "+v.user+"]" {
 		t.Errorf("workflows: %s", got)
 	}

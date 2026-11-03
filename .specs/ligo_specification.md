@@ -886,7 +886,7 @@ Flows within an item are ordered target, platform, secret store, `ligo`, each gr
 | `accessLevels[].description` | Yes | Yes | Owner | |
 | `accessLevels[].state` | `ACTIVE` | Yes | Owner | `RETIRED` only when no binding uses the level. |
 | `networkFlows` | Yes | Yes | Owner and platform | Served at once to workloads and the catalog; no re-apply. |
-| `displayName`, `description`, `labels`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | |
+| `displayName`, `description`, `labels`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | `documentationUrl`: an absolute `https` or `http` URL with a host, at most 512 characters. |
 | `metadata.state` | `ACTIVE` | Yes | Owner | `RETIRED` only without bindings, and final. |
 
 When the target scope equals the platform scope, "owner and platform" is a single `OWNER` side.
