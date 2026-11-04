@@ -1,4 +1,4 @@
-{{define "wizard-form"}}<form id="wizard" class="card" hx-get="/ui/bindings/wizard" hx-target="#wizard" hx-swap="outerHTML" {{hxnonce}}>
+{{define "wizard-form"}}<form id="wizard" class="card" hx-get="/ui/bindings/wizard" hx-target:inherited="#wizard" hx-swap:inherited="outerHTML" {{hxnonce}}>
   {{if .Offer}}<input type="hidden" name="offer" value="1">{{end}}
   <div id="wizard-errors" class="errors"></div>
   <fieldset><legend>1. Target</legend>

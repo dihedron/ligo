@@ -38,7 +38,7 @@
   <div class="field"><label for="cr-vcomment">Why do you revert it? (required, audited)</label><textarea id="cr-vcomment" name="comment" required></textarea></div>
   <div class="actions"><button type="submit" class="button-danger">Revert now</button></div>
 </form>{{end}}
-{{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target="#cr-decision" hx-swap="outerHTML"
+{{if .Eligible}}<form class="card" id="cr-approve" hx-post="/ui/change-requests/{{.Request.ID}}/approve" hx-target:inherited="#cr-decision" hx-swap:inherited="outerHTML"
   hx-status:409="target:#cr-errors swap:innerHTML" hx-status:422="target:#cr-errors swap:innerHTML" {{hxnonce}}>
   <h3>Decide</h3>
   <p class="muted">You approve the payload with SHA-256 <span class="mono">{{.Request.PayloadSHA256}}</span>.</p>

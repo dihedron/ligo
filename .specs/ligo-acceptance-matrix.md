@@ -13,7 +13,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 
 | | Rows | Covered | Partial | Gap | Covered at L or P | Covered only at U or B |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Scenarios (§11.2) | 92 | 90 | 2 | 0 | 17 | 14 |
+| Scenarios (§11.2) | 92 | 91 | 1 | 0 | 17 | 15 |
 | Invariants (§4) | 26 | 21 | 5 | 0 | 3 | 3 |
 
 ## Scenarios (§11.2)
@@ -110,7 +110,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-82 | Covered | B | TestAlteredFragmentBrowser, TestBrowser | The altered fragment comes from a test route, not a proxy: the browser cannot tell them apart. |
 | AC-83 | Covered | U+B | TestErrorsBrowser, TestAlertAndRedirect |  |
 | AC-84 | Covered | I+B | TestPollingBrowser, TestPages | No real 70 s wait: the browser's timeout is read as 90 s, and htmx is shown to enforce that setting with a shorter one. |
-| AC-85 | Partial | U+B | TestStorageBrowser, TestVendored | **`upgrade-check` runs nowhere** (it is also part of the §11.1 rule 4 gate). |
+| AC-85 | Covered | U+B+tool | TestStorageBrowser, TestInheritedTargetsBrowser, TestVendored, `make htmx-check` | `make htmx-check` downloads the pinned htmx from npm, so it runs on the release path (§11.1 rule 4), not in CI. |
 | AC-86 | Covered | I | TestAC86 (bindings, workflows), TestINV08 | The restart is a changed platform in the rules; startup does not read the prefix. |
 
 ## Invariants (§4)

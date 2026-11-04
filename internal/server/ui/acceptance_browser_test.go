@@ -11,10 +11,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/dihedron/ligo/internal/catalog"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/theme"
 )
@@ -413,4 +416,55 @@ func TestStorageBrowser(t *testing.T) {
 	if got := b.text(`JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage)])`); got != "[[],[]]" {
 		t.Errorf("browser storage: %s", got)
 	}
+}
+
+// TestInheritedTargetsBrowser: the forms upgrade-check names keep their
+// swaps with hx-target:inherited: the form's own request and the button
+// inside it, which sets its own, both replace the whole fragment (AC-85).
+func TestInheritedTargetsBrowser(t *testing.T) {
+	s := newServer(t)
+	if err := s.pages.add("decision", `{{define "content"}}<div id="cr-errors"></div>{{template "cr-decision" .Content}}{{end}}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pages.add("search", `{{define "content"}}{{template "wizard-form" .Content}}{{end}}`); err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewV7()
+	decision := Decision{Request: &changerequests.Request{ID: id, Status: "PENDING", PayloadSHA256: "abc"}, Eligible: []string{"TARGET"}}
+	replaced := func(root, mark string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprintf(w, `<div id="%s"><p id="%s">%s</p></div>`, root, mark, mark)
+		}
+	}
+	srv := tlsServer(t, s, map[string]http.HandlerFunc{
+		"GET /ui/test/decision": func(w http.ResponseWriter, r *http.Request) {
+			s.page(w, r, 200, "decision", Page{Title: "t", CSRF: "c", Content: decision})
+		},
+		"GET /ui/test/search": func(w http.ResponseWriter, r *http.Request) {
+			s.page(w, r, 200, "search", Page{Title: "t", CSRF: "c", Content: Wizard{Step: 1, Targets: []catalog.Target{{Name: "t"}}}})
+		},
+		"POST /ui/change-requests/{id}/approve": replaced("cr-decision", "approved"),
+		"POST /ui/change-requests/{id}/decline": replaced("cr-decision", "declined"),
+		"GET /ui/bindings/wizard":               replaced("wizard", "searched"),
+	})
+	b := newTab(t, false)
+	whole := func(root string) {
+		t.Helper()
+		if got := b.text(`String(document.querySelectorAll("#` + root + `").length) + document.querySelector("#` + root + `").parentElement.id`); !strings.HasPrefix(got, "1") {
+			t.Errorf("#%s: %s", root, got)
+		}
+		if got := b.text(`String(document.querySelectorAll("#` + root + ` #` + root + `").length)`); got != "0" {
+			t.Errorf("#%s swapped inside itself", root)
+		}
+	}
+	for button, mark := range map[string]string{`#cr-approve button[type=submit]`: "approved", `#cr-approve button.button-danger`: "declined"} {
+		b.do(chromedp.Navigate(srv.URL + "/ui/test/decision"))
+		b.do(chromedp.Click(chromedp.CSS(button)))
+		b.do(chromedp.WaitVisible(chromedp.ID(mark)))
+		whole("cr-decision")
+	}
+	b.do(chromedp.Navigate(srv.URL + "/ui/test/search"))
+	b.do(chromedp.Click(chromedp.CSS(`#wizard button.button-secondary`)))
+	b.do(chromedp.WaitVisible(chromedp.ID("searched")))
+	whole("wizard")
 }

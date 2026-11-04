@@ -2229,6 +2229,7 @@ FROM v_active_bindings WHERE id = $1;
 - Plugins are either **internal** (compiled in: `svid.v1`, `target-local.v1`, `delegated-dynamic.v1`, `none.v1`) or **external** (separate binaries hosted via HashiCorp `go-plugin` over gRPC).
 - Both kinds implement the same Go interfaces, generated from §5.9.
 - Internal plugins are subject to the same output validation (INV-13) as external ones.
+- The external identity provider `openldap.v1` is specified in `.specs/ligo-openldap-plugin.md`.
 
 ### 5.2 Process topology (ADR-03)
 - The plugin manager spawns one process per `(type, zone)`. Each process receives `ConfigureInstances` containing only its zone's instances (for target plugins, its zone's platforms) and that zone's `spiffe_workload_socket`.
