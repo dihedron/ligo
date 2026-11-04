@@ -36,6 +36,8 @@ source "$LAB_DIR/lib/snapshot.sh"
 source "$LAB_DIR/lib/serve.sh"
 # shellcheck source=lib/lb.sh
 source "$LAB_DIR/lib/lb.sh"
+# shellcheck source=lib/otel.sh
+source "$LAB_DIR/lib/otel.sh"
 
 usage() {
 	cat <<USAGE
@@ -45,7 +47,8 @@ commands:
   preflight                 check that this machine can run the lab
   up [--scenario S]         build the lab (or complete a partial one); S is
                             storage, identity, ha (adds ligo2), lb (adds
-                            HAProxy in front of both) or all
+                            HAProxy in front of both), otel (adds an OTLP
+                            collector) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
@@ -65,7 +68,7 @@ commands:
                             database, ligo_serve), and its e2e with reload,
                             stop and start; test always runs on all;
                             test-ha (with ligo2) the HA e2e, which stops and
-                            kills replicas
+                            kills replicas; test-otel (with otel) the traces
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
@@ -121,6 +124,9 @@ cmd_up() {
 	fi
 	if selected lb; then
 		lb_up
+	fi
+	if selected otel; then
+		otel_up
 	fi
 	# a new snapshot when there is none, or when up added inner instances
 	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then

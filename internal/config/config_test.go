@@ -91,6 +91,7 @@ func TestRules(t *testing.T) {
     sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "store-vault"
     sha256: "ABC"`, 7, nil},
 		{"local-kek without --insecure-dev", "provider: vault-transit", "provider: local-kek", 9, nil},
+		{"tracing CA without TLS", "    insecure: false                       # true only for a collector without TLS", "    insecure: true\n    ca_cert_file: /etc/ligo/ca.crt", 9, nil},
 		{"zone domain also federated", "{ trust_domain: cloud.internal, via_zone: prod }", "{ trust_domain: prod.internal, via_zone: prod }", 12, nil},
 		{"unknown via_zone", "via_zone: prod }", "via_zone: nowhere }", 12, nil},
 		{"no auth mode", "auth_modes: [x509_svid, jwt_svid]", "auth_modes: []", 12, nil},

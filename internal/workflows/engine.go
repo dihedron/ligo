@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 )
@@ -226,6 +227,7 @@ type ApplyInput struct {
 	AccessLevel          string          `json:"accessLevel"`
 	RequestedSpec        json.RawMessage `json:"requestedSpec"`
 	Wiring               Wiring          `json:"wiring"`
+	TraceParent          string          `json:"traceParent,omitempty"` // the starting request's trace (§10.1), journaled for a recovery
 }
 
 // Start starts the workflow of a PROVISIONING or DELETING binding under its
@@ -235,6 +237,7 @@ func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowH
 	if err != nil {
 		return nil, err
 	}
+	in.TraceParent = traceParent(ctx)
 	switch {
 	case phase == "PROVISIONING" && in.Operation != "DELETE":
 		return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
@@ -325,10 +328,24 @@ func stepSpan(ctx context.Context, stage, providerType string) (context.Context,
 // workflowSpan starts the span of a workflow run, and puts it in the DBOS
 // context its steps inherit; a replay after a recovery starts a new one.
 func workflowSpan(ctx dbos.Context, in ApplyInput) (dbos.Context, trace.Span) {
-	c, span := tracing.Tracer().Start(ctx, "workflow "+in.Operation, trace.WithAttributes(attribute.String("ligo.binding_id", in.BindingID),
+	c, span := startWorkflowSpan(ctx, in)
+	return dbos.From(ctx, c), span
+}
+
+// startWorkflowSpan starts the span in the trace of the request that started
+// the workflow, if any: DBOS runs it on its own context, which has none.
+func startWorkflowSpan(ctx context.Context, in ApplyInput) (context.Context, trace.Span) {
+	ctx = propagation.TraceContext{}.Extract(ctx, propagation.MapCarrier{"traceparent": in.TraceParent})
+	return tracing.Tracer().Start(ctx, "workflow "+in.Operation, trace.WithAttributes(attribute.String("ligo.binding_id", in.BindingID),
 		attribute.String("ligo.binding", in.BindingName), attribute.String("ligo.workflow_id", in.WorkflowID),
 		attribute.Int64("ligo.revision", in.Revision), attribute.Int64("ligo.attempt", in.Attempt)))
-	return dbos.From(ctx, c), span
+}
+
+// traceParent is ctx's trace context as a W3C traceparent, empty without one.
+func traceParent(ctx context.Context) string {
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
+	return carrier.Get("traceparent")
 }
 
 // attemptStarted is the time the attempt's phase was entered, read in its

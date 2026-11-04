@@ -63,6 +63,7 @@ type Tracing struct {
 	OTLPEndpoint string   `yaml:"otlp_endpoint"`
 	SampleRatio  *float64 `yaml:"sample_ratio"` // default 0.1
 	Insecure     bool     `yaml:"insecure"`     // a collector without TLS
+	CACertFile   string   `yaml:"ca_cert_file"` // CAs trusted for the collector; default the system roots
 }
 
 // MetricsListener serves GET /metrics (Prometheus, §10.1) in plain HTTP,

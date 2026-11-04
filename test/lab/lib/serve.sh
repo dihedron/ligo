@@ -23,6 +23,7 @@ cmd_serve() {
 	install) serve_install ;;
 	test) serve_test ;;
 	test-ha) serve_test_ha ;;
+	test-otel) serve_test_otel ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -34,7 +35,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test or test-ha" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha or test-otel" ;;
 	esac
 }
 
@@ -283,6 +284,12 @@ UNIT
 }
 
 # serve_config HOST: server.yaml for HOST, with the deployed plugins' hashes.
+# serve_observability: traces to the collector, with the otel scenario.
+serve_observability() {
+	inner_exists otel || return 0
+	printf 'observability:\n  tracing: { otlp_endpoint: "otel.ligo.lab:%s", ca_cert_file: /etc/ligo-lab/ca.crt }\n' "$OTEL_PORT"
+}
+
 # workload_advertise is the same on every replica, so that each serves the
 # same "ligo" flow (and ETag): lb with the lb scenario, else ligo1. With lb,
 # external_origin is lb's published address and the replicas' files are the
@@ -303,6 +310,7 @@ service:
   application_version: "lab"
   instance_id_env: LIGO_INSTANCE_ID
   workload_advertise: { destination: "$advertise", port: 8443, server_name: "$advertise" }
+$(serve_observability)
 zones:
   - { name: prod, trust_domain: prod.lab, spiffe_workload_socket: "unix:///run/spire/prod/agent.sock" }
   - { name: test, trust_domain: test.lab, spiffe_workload_socket: "unix:///run/spire/test/agent.sock" }
@@ -499,7 +507,7 @@ serve_e2e() {
 	done < <(env_ligo)
 	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_ADMIN2=https://$other.ligo.lab:9443"
 		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
-		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
+		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" --env "LIGO_E2E_TRACE=${E2E_TRACE:-}")
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
 		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
 }

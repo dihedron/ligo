@@ -112,6 +112,9 @@ func (a *admin) do(method, path string, body any) (int, map[string]any) {
 	if a.user != "" {
 		req.SetBasicAuth(a.user, a.pass)
 	}
+	if id := os.Getenv("LIGO_E2E_TRACE"); id != "" { // lab.sh serve test-otel: a sampled caller
+		req.Header.Set("traceparent", "00-"+id+"-b7ad6b7169203331-01")
+	}
 	resp, err := a.client.Do(req)
 	if err != nil {
 		a.t.Fatalf("%s %s: %v", method, path, err)
@@ -180,6 +183,7 @@ func names(t *testing.T) (source, target, binding string) {
 // binding becomes ACTIVE; olivia, a viewer by LDAP, reads it.
 func TestServeE2EApply(t *testing.T) {
 	olga, dora, olivia := newAdmin(t, "olga"), newAdmin(t, "dora"), newAdmin(t, "olivia")
+	dora.base = e2eEnv(t, "LIGO_E2E_ADMIN2") // the replica that runs the workflow
 	source, target, binding := names(t)
 	x := e2eEnv(t, "LIGO_E2E_SUFFIX")
 

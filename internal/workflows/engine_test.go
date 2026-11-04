@@ -14,7 +14,9 @@ import (
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"go.opentelemetry.io/otel"
 	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -96,6 +98,41 @@ func TestManager(t *testing.T) {
 	}
 	if p.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, "local-prod") != nil {
 		t.Error("a built-in with an output schema") // built-ins declare none
+	}
+}
+
+// TestTraceParent: the workflow of a request joins the request's trace and
+// follows its sampling through the journaled input, whatever the ratio, on
+// a recovery too; without a caller's trace (a background start, or
+// tracing off) the workflow starts its own.
+func TestTraceParent(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracing.Provider(rec, 0, "test", "a"))
+	t.Cleanup(func() { otel.SetTracerProvider(before) })
+	if got := traceParent(context.Background()); got != "" {
+		t.Errorf("without a span: %q", got)
+	}
+	id := "0af7651916cd43dd8448eb211c80319c"
+	in := ApplyInput{TraceParent: "00-" + id + "-b7ad6b7169203331-01"}
+	ctx := propagation.TraceContext{}.Extract(context.Background(), propagation.MapCarrier{"traceparent": in.TraceParent})
+	if got := traceParent(ctx); got != in.TraceParent {
+		t.Errorf("traceParent: %q, want %q", got, in.TraceParent)
+	}
+	joined := func(in ApplyInput) trace.SpanContext {
+		t.Helper()
+		_, span := startWorkflowSpan(context.Background(), in)
+		span.End()
+		return span.SpanContext()
+	}
+	if sc := joined(in); sc.TraceID().String() != id || !sc.IsSampled() {
+		t.Errorf("a sampled caller: %v", sc)
+	}
+	if sc := joined(ApplyInput{}); sc.IsSampled() {
+		t.Errorf("no caller, ratio 0: %v", sc)
+	}
+	if sc := joined(ApplyInput{TraceParent: "not a traceparent"}); sc.IsSampled() {
+		t.Errorf("a bad value, ratio 0: %v", sc)
 	}
 }
 

@@ -295,6 +295,9 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if r := cfg.Observability.Tracing.SampleRatio; r != nil && (*r < 0 || *r > 1) {
 		c.failf(9, "observability.tracing.sample_ratio %v: between 0 and 1", *r)
 	}
+	if t := cfg.Observability.Tracing; t.Insecure && t.CACertFile != "" {
+		c.failf(9, "observability.tracing: ca_cert_file with insecure: a collector without TLS has no certificate to verify")
+	}
 	switch cfg.SecretSealing.Provider {
 	case "vault-transit":
 		if a := cfg.SecretSealing.VaultTransit.JWTAudience; !slices.Contains(cfg.CoreIdentity.SVIDSelector.JWTAudience, a) {

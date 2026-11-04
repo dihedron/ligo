@@ -54,6 +54,7 @@ observability:
     otlp_endpoint: ""                     # host:port of an OTLP/gRPC collector; empty: tracing off (default)
     sample_ratio: 0.1                     # share of new traces kept (0 to 1, default 0.1); a sampled caller's are always kept
     insecure: false                       # true only for a collector without TLS
+    # ca_cert_file: "/etc/ligo/tls/corp-ca.crt"   # CAs trusted for the collector; default the system roots
 
 admin_auth:
   ldap:
