@@ -1,6 +1,6 @@
 # The `openldap.v1` identity provider
 
-This file specifies `ligo-plugin-openldap`, the external identity provider that manages one directory account per binding (§0.4, §5). It is the only shipped external plugin so far: the lab's `target-postgres` and `store-vault` stay test tooling. The rules of §5.8 apply; this file states only what they leave open.
+This file specifies `ligo-plugin-openldap`, the external identity provider that manages one directory account per binding (§0.4, §5). It is the only shipped external plugin so far: the lab's `ligo-plugin-postgres` and `ligo-plugin-vault` stay test tooling. The rules of §5.8 apply; this file states only what they leave open.
 
 Status: approved 2026-11-04, chunk plan at the end.
 
@@ -117,7 +117,7 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 
 - `ou=ligo-accounts` and the service account `cn=ligo-idp` already exist, with their access rules (`test/lab/lib/ldap.sh`).
 - New: SPIRE entry `spiffe://prod.lab/ligo/plugin/openldap`, an OpenBao and Vault role, and the KV secret with `cn=ligo-idp`'s DN and password.
-- The lab's `target-postgres` also accepts `EXTERNAL_DIR`: it creates the role with no password and tagged, and grants as usual. `pg_hba` verifies members of a new group role `ligo_ldap` with `ldap ldapscheme=ldaps`, `ldapprefix="uid="` and `ldapsuffix=",ou=ligo-accounts,dc=ligo,dc=lab"`.
+- The lab's `ligo-plugin-postgres` also accepts `EXTERNAL_DIR`: it creates the role with no password and tagged, and grants as usual. `pg_hba` verifies members of a new group role `ligo_ldap` with `ldap ldapscheme=ldaps`, `ldapprefix="uid="` and `ldapsuffix=",ou=ligo-accounts,dc=ligo,dc=lab"`.
 - A new platform `pg-ledger-ldap` uses them, beside `pg-ledger`, whose tests do not change.
 
 ## 10. Chunks
@@ -127,5 +127,5 @@ Each is tests first, then code, with the usual checks; each ends in its own comm
 1. **Spec**: this file, its pointer in §5.1.
 2. **Plugin**: `cmd/plugins/ligo-plugin-openldap`, with the directory behind a small interface; unit tests for OL-1, OL-7, OL-10 and the table of §5.
 3. **Real directory**: `deploy.sh` builds and registers it; `TestLabIdentityOpenLDAP` for OL-2 to OL-6, OL-8, OL-9.
-4. **End to end**: `target-postgres` and `pg_hba`, the platform, and `lab.sh serve test` for OL-11 to OL-14 and AC-10; on OpenBao, then on Vault.
+4. **End to end**: `ligo-plugin-postgres` and `pg_hba`, the platform, and `lab.sh serve test` for OL-11 to OL-14 and AC-10; on OpenBao, then on Vault.
 5. **Documentation and packaging**: the second build, archive and package in `.goreleaser.yaml`, with `ligo` also packaged to the layout of §2, `examples/server.yaml` and §8.1 (`ca_file`), a plugin section in the operator documentation, `.specs/ligo-test-environment.md`, and the matrix's AC-10.

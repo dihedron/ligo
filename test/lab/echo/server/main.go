@@ -28,7 +28,7 @@ func run() error {
 	statePath := flag.String("state", "/var/lib/echo-svid/state.json", "the state file")
 	socket := flag.String("socket", "unix:///run/spire/prod/agent.sock", "the SPIRE agent's Workload API")
 	td := flag.String("trust-domain", "prod.lab", "the clients' trust domain")
-	controlID := flag.String("control-id", "spiffe://prod.lab/ligo/plugin/target-echo", "the only SPIFFE ID the control API admits")
+	controlID := flag.String("control-id", "spiffe://prod.lab/ligo/plugin/echo", "the only SPIFFE ID the control API admits")
 	flag.Parse()
 	if *mode != ModeSVID && *mode != ModePassword {
 		return fmt.Errorf("--mode %q: svid or password", *mode)

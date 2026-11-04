@@ -23,7 +23,7 @@ import (
 
 const (
 	serverID  = "spiffe://prod.lab/ns/lab/sa/echo-server"
-	pluginID  = "spiffe://prod.lab/ligo/plugin/target-echo"
+	pluginID  = "spiffe://prod.lab/ligo/plugin/echo"
 	bindingID = "01a19270-0000-7000-8000-000000000001"
 	regex     = `^spiffe://prod\.lab/ns/echo/sa/bound$`
 )

@@ -1,4 +1,4 @@
-// Command target-postgres is a lab plugin (test tooling, never shipped,
+// Command ligo-plugin-postgres is a lab plugin (test tooling, never shipped,
 // not hardened): a stand-in for the postgres.v1 platform provider, so that
 // phase 6 runs its workflows against a real database. It manages roles in
 // one database of the lab's PostgreSQL, connecting as the admin its
@@ -268,7 +268,7 @@ func owner(ctx context.Context, conn *pgx.Conn, role string) (exists bool, comme
 // stderr, which the host's redacting logger receives (§5.8 rule 6), the
 // caller gets a public message only.
 func failed(err error) error {
-	fmt.Fprintln(os.Stderr, "target-postgres:", err)
+	fmt.Fprintln(os.Stderr, "ligo-plugin-postgres:", err)
 	return pluginsdk.Error(codes.Unavailable, "TARGET_ERROR", "the target database refused a statement", true)
 }
 

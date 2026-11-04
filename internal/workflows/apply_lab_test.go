@@ -63,8 +63,8 @@ func labClient(t *testing.T) *http.Client {
 }
 
 // labPlugins starts the plugin manager with the lab's three plugins in the
-// zone prod: target-local.v1, target-postgres (platform pg-ledger, wired to
-// them) and store-vault.
+// zone prod: target-local.v1, ligo-plugin-postgres (platform pg-ledger, wired to
+// them) and ligo-plugin-vault.
 func labPlugins(t *testing.T) *pluginmgr.Manager {
 	t.Helper()
 	zone := config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}
@@ -76,24 +76,24 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 		}
 		return b
 	}
-	selector := func(binary string) *pluginv1.SVIDSelectorConfig {
-		return &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + binary + `"`, JwtAudience: []string{aud}}
+	selector := func(backend string) *pluginv1.SVIDSelectorConfig {
+		return &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + backend + `"`, JwtAudience: []string{aud}}
 	}
 	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
-		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-target-postgres","jwt_audience":"` + aud +
-		`","kv_path":"kv/data/ligo/bootstrap/target-postgres"}}`
-	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-store-vault","db_connection":"lab-pg","ca_file":"` +
+		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-postgres","jwt_audience":"` + aud +
+		`","kv_path":"kv/data/ligo/bootstrap/postgres"}}`
+	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
 		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Zone: zone,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},
-		{Type: "postgres.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Binary: "target-postgres", SHA256: sum("LIGO_TEST_TARGET_POSTGRES_SHA256"), Zone: zone,
-			Instances: []*pluginv1.InstanceDescriptor{{Name: "pg-ledger", ConfigJson: target, SvidSelector: selector("target-postgres"),
+		{Type: "postgres.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Binary: "ligo-plugin-postgres", SHA256: sum("LIGO_TEST_POSTGRES_SHA256"), Zone: zone,
+			Instances: []*pluginv1.InstanceDescriptor{{Name: "pg-ledger", ConfigJson: target, SvidSelector: selector("postgres"),
 				IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod",
 				SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod", SecretStorageStrategy: "vault-static"}}},
-		{Type: "vault.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Binary: "store-vault", SHA256: sum("LIGO_TEST_STORE_VAULT_SHA256"), Zone: zone,
-			Instances: []*pluginv1.InstanceDescriptor{{Name: "vault-prod", ConfigJson: vault, SvidSelector: selector("store-vault")}}},
+		{Type: "vault.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Binary: "ligo-plugin-vault", SHA256: sum("LIGO_TEST_VAULT_SHA256"), Zone: zone,
+			Instances: []*pluginv1.InstanceDescriptor{{Name: "vault-prod", ConfigJson: vault, SvidSelector: selector("vault")}}},
 	}, pluginmgr.Options{Directory: labEnv(t, "LIGO_TEST_PLUGIN_DIR"), Owner: pluginmgr.Root, RPCTimeout: 30 * time.Second,
 		MaxConcurrentRPCsPerInstance: 4, Backoff: config.Backoff{Initial: time.Second, Max: 10 * time.Second}, Logger: slog.Default()})
 	t.Cleanup(m.Stop)
@@ -385,7 +385,7 @@ func TestLabReconcile(t *testing.T) {
 	if err := l.owner.QueryRow(ctx, "select derived_principal_name from bindings where id = $1", l.id).Scan(&principal); err != nil {
 		t.Fatal(err)
 	}
-	admin := checkRead(t, "kv/data/ligo/bootstrap/target-postgres")
+	admin := checkRead(t, "kv/data/ligo/bootstrap/postgres")
 	db, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s:%s@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=%s",
 		admin["username"], admin["password"], labEnv(t, "LIGO_TEST_CA")))
 	if err != nil {

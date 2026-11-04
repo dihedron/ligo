@@ -26,9 +26,9 @@ import (
 // storeVault starts the stand-in with the instance vault-prod.
 func storeVault(t *testing.T) *pluginmgr.Client {
 	t.Helper()
-	cfg := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-store-vault","db_connection":"lab-pg","ca_file":"` +
+	cfg := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `"}`
-	return start(t, "store-vault", pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, &pluginv1.InstanceDescriptor{Name: "vault-prod", ConfigJson: cfg})
+	return start(t, "ligo-plugin-vault", pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, &pluginv1.InstanceDescriptor{Name: "vault-prod", ConfigJson: cfg})
 }
 
 // check reads path on bao-prod as the lab-only role lab-standins-check,
@@ -135,7 +135,7 @@ func TestLabStoreVault(t *testing.T) {
 }
 
 // TestLabStoreVaultDynamic: with vault-dynamic, OpenBao issues credentials
-// in the parent role target-postgres created; cleanup revokes them.
+// in the parent role ligo-plugin-postgres created; cleanup revokes them.
 func TestLabStoreVaultDynamic(t *testing.T) {
 	ctx := context.Background()
 	target, store := targetPostgres(t, "vault-dynamic"), storeVault(t)

@@ -1,4 +1,4 @@
-// Command target-echo is a lab plugin (test tooling, never shipped, not
+// Command ligo-plugin-echo is a lab plugin (test tooling, never shipped, not
 // hardened): the platform provider of the echo target, which keeps the
 // echo server's access list (SVID mode) or its users (TARGET_LOCAL) through
 // the server's control API (.specs/ligo-echo-target.md).
@@ -161,7 +161,7 @@ func (in *instance) call(ctx context.Context, method, path string, body any) (fo
 	}
 	resp, err := in.control.Do(req)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "target-echo:", err)
+		fmt.Fprintln(os.Stderr, "ligo-plugin-echo:", err)
 		return false, pluginsdk.Error(codes.Unavailable, "TARGET_UNAVAILABLE", "the echo server cannot be reached", true)
 	}
 	_ = resp.Body.Close()
@@ -169,7 +169,7 @@ func (in *instance) call(ctx context.Context, method, path string, body any) (fo
 	case resp.StatusCode == http.StatusNotFound:
 		return false, nil
 	case resp.StatusCode >= 300:
-		fmt.Fprintln(os.Stderr, "target-echo:", method, path, resp.Status)
+		fmt.Fprintln(os.Stderr, "ligo-plugin-echo:", method, path, resp.Status)
 		return false, pluginsdk.Error(codes.Unavailable, "TARGET_ERROR", "the echo server refused a change", true)
 	}
 	return true, nil

@@ -7,9 +7,10 @@
 LIGO_TESTS=/home/ligo/tests
 
 # LIGO_PLUGINS is the ligo hosts' plugins.directory; LAB_PLUGINS are the lab's
-# plugins (test/lab/plugins), in the zone prod.
+# plugins (test/lab/plugins), in the zone prod. A plugin's binary is
+# ligo-plugin-<backend>; its SPIFFE path, hint and bootstrap use <backend>.
 LIGO_PLUGINS=/usr/lib/ligo/plugins
-LAB_PLUGINS=(labprobe target-postgres store-vault target-echo)
+LAB_PLUGINS=(labprobe ligo-plugin-postgres ligo-plugin-vault ligo-plugin-echo)
 
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {
@@ -40,7 +41,7 @@ env_ligo() {
 	local name
 	for name in "${LAB_PLUGINS[@]}"; do
 		[[ -f "$LAB_STATE_DIR/plugins/$name" ]] &&
-			echo "LIGO_TEST_$(tr '[:lower:]-' '[:upper:]_' <<<"$name")_SHA256=$(sha256sum "$LAB_STATE_DIR/plugins/$name" | cut -d' ' -f1)"
+			echo "LIGO_TEST_$(tr '[:lower:]-' '[:upper:]_' <<<"${name#ligo-plugin-}")_SHA256=$(sha256sum "$LAB_STATE_DIR/plugins/$name" | cut -d' ' -f1)"
 	done
 	return 0
 }
@@ -98,21 +99,21 @@ deploy_plugins() {
 		for name in "${LAB_PLUGINS[@]}"; do
 			inner_push "$out/$name" "$host" "$LIGO_PLUGINS/$name" 0755
 			sum="$(sha256sum "$out/$name" | cut -d' ' -f1)"
-			plugin_entry prod "ligo/plugin/$name" "$name-prod" "$uid" "$sum" "$host"
+			plugin_entry prod "ligo/plugin/${name#ligo-plugin-}" "${name#ligo-plugin-}-prod" "$uid" "$sum" "$host"
 			plugin_svid_wait prod "$name" "$uid" "$host"
 			info "plugin $name installed in $host:$LIGO_PLUGINS (sha256 ${sum:0:12}…); the agent issues its SVID, selected by that hash"
 		done
 	done
 	pg_target
 	plugin_bao labprobe lab-admin "$LAB_STATE_DIR/passwords/labprobe"
-	plugin_bao target-postgres lab_target_admin "$LAB_STATE_DIR/passwords/target-admin"
+	plugin_bao postgres lab_target_admin "$LAB_STATE_DIR/passwords/target-admin"
 	store_vault_bao
 }
 
 # store_vault_bao: on the secrets backend, the database secrets engine and its
-# connection lab-pg to the database ledger, the store-vault plugin's role and
+# connection lab-pg to the database ledger, the ligo-plugin-vault plugin's role and
 # policy, and the lab-only role the tests check its work with
-# (.specs/ligo-test-environment.md, store-vault).
+# (.specs/ligo-test-environment.md, ligo-plugin-vault).
 store_vault_bao() {
 	local server aud
 	server="$(secrets_host)" aud="$(secrets_audience)"
@@ -122,8 +123,8 @@ store_vault_bao() {
 		plugin_name=postgresql-database-plugin allowed_roles="binding-*" username=lab_target_admin password=- \
 		connection_url="postgresql://{{username}}:{{password}}@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=$(server_ca "$server")" \
 		>/dev/null || die "$server: cannot configure the database connection lab-pg"
-	inner_exec "$server" sh -c 'cat >/root/ligo-plugin-store-vault.hcl' <<'HCL'
-# store-vault: the objects it keeps per binding, and nothing else
+	inner_exec "$server" sh -c 'cat >/root/ligo-plugin-vault.hcl' <<'HCL'
+# ligo-plugin-vault: the objects it keeps per binding, and nothing else
 path "kv/data/bindings/*" {
   capabilities = ["create", "update", "read"]
 }
@@ -147,18 +148,18 @@ path "auth/jwt-spiffe/role/binding-*" {
   }
 }
 HCL
-	secrets_cli policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null
-	secrets_cli write auth/jwt-spiffe/role/ligo-plugin-store-vault role_type=jwt user_claim=sub \
-		bound_subject="spiffe://prod.lab/ligo/plugin/store-vault" bound_audiences="$aud" \
-		token_policies=ligo-plugin-store-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
-		die "$server: cannot write the role ligo-plugin-store-vault"
+	secrets_cli policy write ligo-plugin-vault /root/ligo-plugin-vault.hcl >/dev/null
+	secrets_cli write auth/jwt-spiffe/role/ligo-plugin-vault role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/vault" bound_audiences="$aud" \
+		token_policies=ligo-plugin-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
+		die "$server: cannot write the role ligo-plugin-vault"
 	inner_exec "$server" sh -c 'cat >/root/lab-standins-check.hcl' <<'HCL'
-# lab only: the tests read what store-vault wrote, and the target admin's
+# lab only: the tests read what ligo-plugin-vault wrote, and the target admin's
 # credential, to cause drift that reconciliation repairs
 path "kv/data/bindings/*" {
   capabilities = ["read"]
 }
-path "kv/data/ligo/bootstrap/target-postgres" {
+path "kv/data/ligo/bootstrap/postgres" {
   capabilities = ["read"]
 }
 path "database/creds/binding-*" {
@@ -180,7 +181,7 @@ plugin_svid_wait() {
 	local zone="$1" name="$2" uid="$3" host="$4"
 	for _ in $(seq 1 30); do
 		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$LIGO_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
-			grep -qx "spiffe://$zone.lab/ligo/plugin/$name" && return
+			grep -qx "spiffe://$zone.lab/ligo/plugin/${name#ligo-plugin-}" && return
 		sleep 1
 	done
 	die "the $zone agent on $host does not issue the SVID of the plugin $name after 30s (uid $uid)"

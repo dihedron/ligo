@@ -241,13 +241,13 @@ identity_providers:
       - { name: "vault-dynamic-db-test", zone: test, config: {} }
   - type: "openldap.v1"
     builtin: false
-    binary: "id-openldap"                 # relative to plugins.directory
-    sha256: "<64-hex-sha256-of-id-openldap>"
+    binary: "ligo-plugin-openldap"                 # relative to plugins.directory
+    sha256: "<64-hex-sha256-of-ligo-plugin-openldap>"
     instances:
       - name: "ldap-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/id-openldap"'
+          match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           url: "ldaps://openldap.prod.internal:636"
@@ -258,7 +258,7 @@ identity_providers:
             address: "https://vault.prod.internal:8200"
             namespace: "prod"
             auth_mount: "jwt-spiffe"
-            role: "ligo-plugin-ldap-prod"
+            role: "ligo-plugin-openldap-prod"
             jwt_audience: "https://vault.prod.internal"
             kv_path: "kv/data/ligo/bootstrap/ldap-prod"
 
@@ -269,13 +269,13 @@ secret_stores:
       - { name: "no-store-prod", zone: prod, config: {} }
   - type: "vault.v1"
     builtin: false
-    binary: "store-vault"
-    sha256: "<64-hex-sha256-of-store-vault>"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
     instances:
       - name: "vault-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'
+          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           address: "https://vault.prod.internal:8200"
@@ -289,7 +289,7 @@ secret_stores:
       - name: "vault-test"
         zone: test
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault"'
+          match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           address: "https://vault.test.internal:8200"
@@ -304,8 +304,8 @@ secret_stores:
 platform_providers:                       # plugin types and the platforms that use them (§3.4)
   - type: "oracle.v1"
     builtin: false
-    binary: "target-oracle"
-    sha256: "<64-hex-sha256-of-target-oracle>"
+    binary: "ligo-plugin-oracle"
+    sha256: "<64-hex-sha256-of-ligo-plugin-oracle>"
     platforms:
       - name: "oracle-prod"
         zone: prod
@@ -323,7 +323,7 @@ platform_providers:                       # plugin types and the platforms that 
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           host: "ora-scan.prod.internal"
@@ -348,7 +348,7 @@ platform_providers:                       # plugin types and the platforms that 
         secret_store: { type: "vault.v1", instance: "vault-test" }
         allowed_source_trust_domains: [test.internal]
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           host: "ora-test.test.internal"

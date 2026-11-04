@@ -104,7 +104,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-75 | Covered | I | TestAC32 |  |
 | AC-76 | Covered | I | TestAC76Backlog, TestAC76, TestDB |  |
 | AC-77 | Covered | L | TestServeHARetireRace |  |
-| AC-78 | Covered | I+P | TestAC78, TestPlatforms, TestAC05 | Stated with the fake plugin's refusal; the real one's `PRIVILEGE_OUT_OF_BOUNDS` is in `target-postgres`. |
+| AC-78 | Covered | I+P | TestAC78, TestPlatforms, TestAC05 | Stated with the fake plugin's refusal; the real one's `PRIVILEGE_OUT_OF_BOUNDS` is in `ligo-plugin-postgres`. |
 | AC-79 | Covered | I | TestTargetsAPI |  |
 | AC-81 | Covered | U | TestAppendixD3, TestAC81BruteForce |  |
 | AC-82 | Covered | B | TestAlteredFragmentBrowser, TestBrowser | The altered fragment comes from a test route, not a proxy: the browser cannot tell them apart. |

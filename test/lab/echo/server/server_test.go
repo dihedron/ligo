@@ -23,7 +23,7 @@ import (
 
 const (
 	serverID  = "spiffe://prod.lab/ns/lab/sa/echo-server"
-	pluginID  = "spiffe://prod.lab/ligo/plugin/target-echo"
+	pluginID  = "spiffe://prod.lab/ligo/plugin/echo"
 	boundID   = "spiffe://prod.lab/ns/echo/sa/bound"
 	unboundID = "spiffe://prod.lab/ns/echo/sa/unbound"
 	bindingID = "01a19270-0000-7000-8000-000000000001"
@@ -115,7 +115,7 @@ func (v *env) controlCall(t *testing.T, id, method, path, body string) (int, err
 }
 
 // TestSVIDMode: only client SVIDs matching the access list are echoed with
-// their SPIFFE ID; target-echo alone changes the list, which survives a
+// their SPIFFE ID; ligo-plugin-echo alone changes the list, which survives a
 // restart.
 func TestSVIDMode(t *testing.T) {
 	ca, dir := spiffetest.NewCA(t, "prod.lab"), t.TempDir()

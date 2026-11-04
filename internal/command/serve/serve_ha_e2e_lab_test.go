@@ -72,7 +72,7 @@ func approveBut(t *testing.T, a *admin, cr map[string]any) map[string]any {
 }
 
 // haFixture registers, through a, a source of the one SPIFFE ID
-// w<tag><suffix> (the lab's store-vault binds literal IDs only) and a target
+// w<tag><suffix> (the lab's ligo-plugin-vault binds literal IDs only) and a target
 // on pg-ledger whose level read grants both ledger roles, both approved by
 // dora.
 func haFixture(t *testing.T, olga, dora *admin, tag string) (source, target string) {

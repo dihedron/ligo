@@ -89,7 +89,7 @@ pg_roles() {
 	info "database ligo and roles ligo_migrator, ligo_app, ligo_reader, ligo_dbos created"
 }
 
-# pg_target creates the target database of the target-postgres stand-in
+# pg_target creates the target database of the ligo-plugin-postgres stand-in
 # (sql/target.sql, idempotent) and lets any role reach that database, and
 # only it, over TLS from the inner network, as a workload would.
 pg_target() {
@@ -103,7 +103,7 @@ pg_target() {
 		inner_exec pg sh -c "echo 'hostssl ledger all $LAB_INNER_SUBNET scram-sha-256' >>$hba"
 		inner_exec pg systemctl reload "postgresql@$v-main"
 	fi
-	info "target database ledger ready (target-postgres)"
+	info "target database ledger ready (ligo-plugin-postgres)"
 }
 
 # pg_dsn ROLE [HOST ROOTCERT DATABASE]: the DSN of ligo_ROLE, verifying the

@@ -62,7 +62,7 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Cookies | `__Host-ligo_*` | `__Host-ligo_session` |
 | HTTP headers | `X-Ligo-*` | `X-Ligo-Signature` |
 | File system paths | `/etc/ligo`, `/usr/lib/ligo` | `/usr/lib/ligo/plugins` |
-| SPIFFE paths | `/ligo/plugin/<binary>`, `/ns/sys/sa/ligo` | `spiffe://prod.internal/ns/sys/sa/ligo` |
+| SPIFFE paths | `/ligo/plugin/<backend>`, `/ns/sys/sa/ligo` | `spiffe://prod.internal/ns/sys/sa/ligo` |
 | Vault/OpenBao objects | `ligo-*`, `kv/data/ligo/…` | `ligo-sealer`, `ligo-interstage`, `kv/data/ligo/bootstrap/oracle-prod` |
 | URNs, annotations, ownership tags | `ligo` | `urn:ligo:problem:<slug>`, `x-ligo-endpoint`, `ligo:binding_id=<uuid>` |
 | go-plugin handshake | `LIGO_PLUGIN` | `MagicCookieKey: "LIGO_PLUGIN"` |
@@ -2229,6 +2229,7 @@ FROM v_active_bindings WHERE id = $1;
 - Plugins are either **internal** (compiled in: `svid.v1`, `target-local.v1`, `delegated-dynamic.v1`, `none.v1`) or **external** (separate binaries hosted via HashiCorp `go-plugin` over gRPC).
 - Both kinds implement the same Go interfaces, generated from §5.9.
 - Internal plugins are subject to the same output validation (INV-13) as external ones.
+- An external plugin's binary and package are `ligo-plugin-<backend>`, where `<backend>` is its type without the version (`openldap.v1`: `ligo-plugin-openldap`); its SPIFFE path is `/ligo/plugin/<backend>` and its Vault role starts with `ligo-plugin-<backend>`. Its kind comes from `Describe`, not from its name.
 - The external identity provider `openldap.v1` is specified in `.specs/ligo-openldap-plugin.md`.
 
 ### 5.2 Process topology (ADR-03)
@@ -3816,13 +3817,13 @@ identity_providers:
       - { name: "vault-dynamic-db-test", zone: test, config: {} }
   - type: "openldap.v1"
     builtin: false
-    binary: "id-openldap"                 # relative to plugins.directory
-    sha256: "<64-hex-sha256-of-id-openldap>"
+    binary: "ligo-plugin-openldap"                 # relative to plugins.directory
+    sha256: "<64-hex-sha256-of-ligo-plugin-openldap>"
     instances:
       - name: "ldap-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/id-openldap"'
+          match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           url: "ldaps://openldap.prod.internal:636"
@@ -3833,7 +3834,7 @@ identity_providers:
             address: "https://vault.prod.internal:8200"
             namespace: "prod"
             auth_mount: "jwt-spiffe"
-            role: "ligo-plugin-ldap-prod"
+            role: "ligo-plugin-openldap-prod"
             jwt_audience: "https://vault.prod.internal"
             kv_path: "kv/data/ligo/bootstrap/ldap-prod"
 
@@ -3844,13 +3845,13 @@ secret_stores:
       - { name: "no-store-prod", zone: prod, config: {} }
   - type: "vault.v1"
     builtin: false
-    binary: "store-vault"
-    sha256: "<64-hex-sha256-of-store-vault>"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
     instances:
       - name: "vault-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'
+          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           address: "https://vault.prod.internal:8200"
@@ -3864,7 +3865,7 @@ secret_stores:
       - name: "vault-test"
         zone: test
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault"'
+          match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           address: "https://vault.test.internal:8200"
@@ -3879,8 +3880,8 @@ secret_stores:
 platform_providers:                       # plugin types and the platforms that use them (§3.4)
   - type: "oracle.v1"
     builtin: false
-    binary: "target-oracle"
-    sha256: "<64-hex-sha256-of-target-oracle>"
+    binary: "ligo-plugin-oracle"
+    sha256: "<64-hex-sha256-of-ligo-plugin-oracle>"
     platforms:
       - name: "oracle-prod"
         zone: prod
@@ -3898,7 +3899,7 @@ platform_providers:                       # plugin types and the platforms that 
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           host: "ora-scan.prod.internal"
@@ -3923,7 +3924,7 @@ platform_providers:                       # plugin types and the platforms that 
         secret_store: { type: "vault.v1", instance: "vault-test" }
         allowed_source_trust_domains: [test.internal]
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           host: "ora-test.test.internal"
@@ -4005,7 +4006,7 @@ ligo/
 │       └── workload/v1alpha1/workload.proto
 ├── cmd/
 │   ├── ligo/                            # jessevdk/go-flags CLI + daemon (Section 8.4)
-│   └── plugins/{id-openldap,target-oracle,target-postgres,store-vault}/   # external plugins: specified separately
+│   └── plugins/{ligo-plugin-openldap,ligo-plugin-oracle,ligo-plugin-postgres,ligo-plugin-vault}/   # external plugins: specified separately
 ├── internal/
 │   ├── adminauth/                       # LDAP, SVID mTLS principal mapping, sessions, CSRF
 │   ├── audit/                           # hash-chained writer + verifier
@@ -4867,10 +4868,10 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 
 | ID | Issue | Proposed direction |
 | :--- | :--- | :--- |
-| OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `store-vault`. |
+| OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `ligo-plugin-vault`. |
 | OI-2 | **The example configuration wires the `oracle-prod` platform to `openldap.v1`.** Oracle cannot authenticate database users against a generic OpenLDAP directory; `EXTERNAL_DIR` on Oracle needs Centrally Managed Users with Active Directory, or Enterprise User Security. | Change the example to `target-local.v1` (or to an Active Directory identity provider once one is bundled), and make the config validator reject `oracle.v1` + `EXTERNAL_DIR` unless the platform declares `directory_integration`. |
 | OI-3 | **Privilege identifiers of existing plugins.** Narrowing of access levels (§3.10) relies on each plugin's canonical `privileges` (§5.8 rule 9). For roles this is the role name, but plugins that grant object privileges, Kafka ACLs or OpenStack roles with project scoping need a documented identifier scheme in which set inclusion really means containment. | Each plugin specification defines its scheme and its test vectors before 4.0 plugins are released; until then, a plugin emits one identifier per grant, so every grant change is treated as a widening. |
-| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `target-postgres` and `target-oracle`. |
+| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `ligo-plugin-postgres` and `ligo-plugin-oracle`. |
 
 **Future work** (not part of this version):
 

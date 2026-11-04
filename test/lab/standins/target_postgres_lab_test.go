@@ -40,7 +40,7 @@ func bootstrap(t *testing.T, name string) string {
 // production checks, and configures its one instance in the zone prod.
 func start(t *testing.T, binary string, kind pluginv1.PluginKind, in *pluginv1.InstanceDescriptor) *pluginmgr.Client {
 	t.Helper()
-	sum, err := hex.DecodeString(labEnv(t, "LIGO_TEST_"+strings.ToUpper(strings.ReplaceAll(binary, "-", "_"))+"_SHA256"))
+	sum, err := hex.DecodeString(labEnv(t, "LIGO_TEST_"+strings.ToUpper(strings.TrimPrefix(binary, "ligo-plugin-"))+"_SHA256"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func start(t *testing.T, binary string, kind pluginv1.PluginKind, in *pluginv1.I
 	}
 	t.Cleanup(c.Kill)
 	in.Zone, in.TrustDomain = "prod", "prod.lab"
-	in.SvidSelector = &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + binary + `"`,
+	in.SvidSelector = &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + strings.TrimPrefix(binary, "ligo-plugin-") + `"`,
 		JwtAudience: []string{labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}}
 	if _, err := c.Control.ConfigureInstances(context.Background(), &pluginv1.ConfigureInstancesRequest{Zone: "prod",
 		SpiffeWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET"), Instances: []*pluginv1.InstanceDescriptor{in}}); err != nil {
@@ -73,8 +73,8 @@ func code(err error) string {
 func targetPostgres(t *testing.T, strategy string) *pluginmgr.Client {
 	t.Helper()
 	cfg := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","bootstrap_credential":` + bootstrap(t, "target-postgres") + `}`
-	return start(t, "target-postgres", pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
+		labEnv(t, "LIGO_TEST_CA") + `","bootstrap_credential":` + bootstrap(t, "postgres") + `}`
+	return start(t, "ligo-plugin-postgres", pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
 		&pluginv1.InstanceDescriptor{Name: "pg-ledger", ConfigJson: cfg, SecretStorageStrategy: strategy})
 }
 
@@ -87,7 +87,7 @@ func binding() *pluginv1.BindingContext {
 	id := uuid.NewV7()
 	return &pluginv1.BindingContext{BindingId: id.String(), BindingName: "b-" + id.String()[24:], Revision: 1, Attempt: 1,
 		DerivedPrincipalName: "bnd_" + strings.ReplaceAll(id.String(), "-", "")[16:32], SourceTrustDomain: "prod.lab",
-		SourceSvidRegex: `^spiffe://prod\.lab/ns/standins/sa/b` + id.String()[24:] + `$`} // literal: store-vault's per-binding role
+		SourceSvidRegex: `^spiffe://prod\.lab/ns/standins/sa/b` + id.String()[24:] + `$`} // literal: ligo-plugin-vault's per-binding role
 }
 
 // TestLabTargetPostgres: the stand-in validates targets and bindings without
