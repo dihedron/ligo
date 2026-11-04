@@ -17,12 +17,14 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
@@ -353,11 +355,25 @@ func TestNamesAndInterconnects(t *testing.T) {
 		t.Errorf("unresolvable prefix: %v", err)
 	}
 
+	if err := c.interconnects(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gauge := func() float64 { // AC-58: ligo_interconnect_violations
+		var d dto.Metric
+		if err := metrics.InterconnectViolations.Write(&d); err != nil {
+			t.Fatal(err)
+		}
+		return d.GetGauge().GetValue()
+	}
+	violations := gauge()
 	src := v.source(t, "src-"+x, "dc/corp-test", "test.internal")
 	v.binding(t, "b-"+x, src, tgt, "vault-prod", [3]string{"dc/corp-test", "dc/corp-prod/n" + x, "dc/corp-prod"})
 	before := v.lastAudit(t)
 	if err := c.interconnects(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if gauge() != violations+1 {
+		t.Errorf("ligo_interconnect_violations %v, was %v", gauge(), violations)
 	}
 	got := v.audited(t, before, "SYSTEM_INTERCONNECT_VIOLATIONS")
 	if len(got) != 1 || !strings.Contains(got[0], `"binding": "b-`+x+`"`) || !strings.Contains(got[0], "no-test-to-prod") {

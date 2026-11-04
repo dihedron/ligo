@@ -70,6 +70,22 @@ func TestLoadConventional(t *testing.T) {
 	}
 }
 
+// TestLogoFile: ui.theme.logo_file wins over the directory's logo.svg
+// (AC-40).
+func TestLogoFile(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "logo.svg"), svg)
+	elsewhere := filepath.Join(t.TempDir(), "brand.png")
+	write(t, elsewhere, png)
+	th, err := Load(Files{Directory: dir, Logo: elsewhere}, me())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.Logo == nil || th.Logo.Path != elsewhere || th.Logo.ContentType != "image/png" || th.Hashes()["logo"] != sum(png) {
+		t.Errorf("logo %+v", th.Logo)
+	}
+}
+
 // TestLoadRefuses: rule 15's failures, each naming the file.
 func TestLoadRefuses(t *testing.T) {
 	dir := t.TempDir()

@@ -52,6 +52,7 @@ func breakGlassOf(t *testing.T, o *pgxpool.Pool, name string) (cr *uuid.UUID, op
 func TestAC31(t *testing.T) {
 	s, o, w, _ := setup(t)
 	name := "ledger-bg-" + w.suffix
+	before := gauge(t, s, "ligo_break_glass_open", "zone", "prod")
 	r, err := s.BreakGlass(context.Background(), livia, emergency("CREATE",
 		`"binding":`+string(body(name, ledgerSource(t, o, w, "a"), w.ledger, "read"))+`,`, `,"ttl":"1h"`))
 	if err != nil {
@@ -68,6 +69,9 @@ func TestAC31(t *testing.T) {
 	}
 	if n, _ := audited(t, o, name, "BREAK_GLASS_USED"); n != 1 {
 		t.Errorf("BREAK_GLASS_USED %d", n)
+	}
+	if v := gauge(t, s, "ligo_break_glass_open", "zone", "prod"); v != before+1 {
+		t.Errorf("ligo_break_glass_open{zone=prod} %v, was %v", v, before)
 	}
 }
 

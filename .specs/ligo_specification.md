@@ -4723,7 +4723,7 @@ Further machines are added as needs emerge during development; each addition is 
 **Rules.**
 1. **Production-like security.** The lab uses the production security settings: TLS everywhere with certificate verification, Vault/OpenBao Transit sealing (never `local-kek` or `--insecure-dev`), SVID mTLS between components, root-owned plugin binaries with checksums, and approval required for the data-centre scope of `prod.lab` and for at least one tenancy.
 2. **Real separation where it is tested.** Tests that depend on node identity or process attestation (dedicated automation nodes, §10.6; plugin binary attestation, ADR-03) MUST run on separate machines or VMs, not only on containers sharing one kernel.
-3. **Coverage.** Every acceptance scenario (§11.2) and every invariant test (`test/invariants`, one suite per INV) runs against the lab. Scenarios that need faults (AC-08, AC-09, AC-19, AC-37 and similar) use scripted fault injection: stopping Vault/OpenBao or a webhook receiver, killing a `ligo` replica mid-workflow, and interrupting database connections.
+3. **Coverage.** Every acceptance scenario (§11.2) and every invariant runs against the lab, and `.specs/ligo-acceptance-matrix.md` names its tests. Scenarios that need faults (AC-08, AC-09, AC-19, AC-37 and similar) use scripted fault injection: stopping Vault/OpenBao or a webhook receiver, killing a `ligo` replica mid-workflow, and interrupting database connections.
 4. **Gate.** A change MUST NOT be merged unless the full lab suite passes for that commit, and the htmx `upgrade-check` of the pinned version reports nothing on the templates (AC-85).
 5. **Vault and OpenBao.** `ligo` supports both only if the lab suite passes against both. The lab runs the suite against each, not CI, which has neither SPIRE nor the lab's VMs; a release notes which versions were tested.
 6. **Clean state.** Each full run starts from a freshly provisioned lab (or a documented reset to a known state), so results do not depend on leftovers from earlier runs.
@@ -4732,7 +4732,7 @@ Further machines are added as needs emerge during development; each addition is 
 
 ### 11.2 Acceptance scenarios
 
-Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11.1).
+Each scenario MUST be an automated test run on the lab (§11.1). Tests live next to the code they test; `.specs/ligo-acceptance-matrix.md` is the index, with each scenario's test and level.
 
 | ID | Given | When | Then |
 | :--- | :--- | :--- | :--- |
@@ -4823,7 +4823,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-78 | `LEDGER_RW_ROLE` is removed from `oracle-prod`'s `grantable_roles` | Restart; then reconciliation of a `write` binding; then a new binding at `write` | `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` lists level `write`; the re-apply fails in `EnsureTarget` and the binding keeps its last active snapshot; the new binding gets `422 validation-failed`. |
 | AC-79 | Source S of `cloud/fin-01/payments` has bindings to three targets of `dc/corp-prod/ledger` | A ledger operator calls bulk revocation for S | Three `DELETE` change requests with consent `ANY`, each with a `TARGET` side, are filed and applied after approval; S's other bindings are untouched. |
 | AC-81 | Appendix D.3 | The reference vectors run | Every inclusion result and witness matches; results agree with brute-force enumeration over short strings. |
-| AC-82 | A fragment is altered in transit by a test proxy to include `<button hx-post="/ui/bindings/x/rotate">` without `hx-nonce`, and one with a copy of the page's nonce | The fragment is swapped and the buttons are clicked | `hx-csp` strips the htmx attributes (`htmx:security:strip`) and no request is sent; the copied page nonce is scrubbed. Removing `trusted-types htmx` from the CSP blocks all htmx processing (fail closed). No CSP violation is reported during normal use of every page. |
+| AC-82 | A fragment is altered in transit by a test proxy to include `<button hx-post="/ui/bindings/x/rotate">` without `hx-nonce`, and one with a copy of the page's nonce | The fragment is swapped and the buttons are clicked | `hx-csp` strips the htmx attributes (`htmx:security:strip`) and no request is sent; the copied page nonce is scrubbed. A CSP that does not allow the Trusted Types policy `htmx` blocks all htmx processing (fail closed). No CSP violation is reported during normal use of every page. |
 | AC-83 | A form submission returns `409`, `422`, `403` and `500` in turn | The browser receives each response | `409` and `422` appear in the form's error container; `403` in the global error container; `500` replaces nothing and shows the generic banner with the `request_id`. |
 | AC-84 | A binding is `PROVISIONING`, its status row is polling | The workflow completes | The final row is shown and no further `status-row` request is made. An approval that waits 70 s on a slow plugin (fault-injected) is not cut off by the browser. |
 | AC-85 | The UI has been used for creates, approvals and navigation, including back navigation | Browser storage is inspected | `localStorage` and `sessionStorage` contain no page content; `htmx.min.js` and `hx-csp.min.js` match the SHA-256 values in `web/static/VERSIONS`; `npx htmx.org@4.0.0 upgrade-check` reports nothing on `web/templates/`. |

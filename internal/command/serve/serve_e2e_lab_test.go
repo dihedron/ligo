@@ -197,6 +197,17 @@ func TestServeE2EApply(t *testing.T) {
 	}
 	approveAll(t, dora, filed)
 
+	// AC-14: the real plugin refuses a role outside its grantable_roles
+	if code, b := olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
+		"metadata":     map[string]string{"name": "dba-" + target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
+		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
+		"accessLevels": []any{map[string]any{"name": "admin", "grants": map[string][]string{"roles": {"DBA"}}}},
+		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
+			"ports": []int{5432}, "tls": true, "serverName": "pg.ligo.lab"}},
+		"visibility": map[string]string{"mode": "PRIVATE"}}); code != http.StatusUnprocessableEntity || !strings.Contains(fmt.Sprint(b), "grantable_roles") {
+		t.Errorf("a level granting DBA: %d %v", code, b)
+	}
+
 	code, filed = olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
 		"metadata":     map[string]string{"name": target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
@@ -209,6 +220,12 @@ func TestServeE2EApply(t *testing.T) {
 	}
 	if cr := approveAll(t, dora, filed); len(cr["sides"].([]any)) != 2 {
 		t.Errorf("target sides: %v", cr["sides"])
+	}
+
+	// AC-14: binding parameters cannot add a role
+	if code, b := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read",
+		"parameters": map[string][]string{"roles": {"DBA"}}}); code != http.StatusUnprocessableEntity {
+		t.Errorf("parameters adding a role: %d %v", code, b)
 	}
 
 	code, filed = olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read"})
