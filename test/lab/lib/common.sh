@@ -73,8 +73,8 @@ confirm() {
 LAB_SELECTED=()
 
 # select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
-# identity, ha, lb, otel, vault or all) or, when VALUE is empty, from LAB_SCENARIOS;
-# ha, otel and vault imply identity, lb implies ha, and all is storage and identity.
+# identity, ha, lb, otel, vault, webhook or all) or, when VALUE is empty, from LAB_SCENARIOS;
+# ha, otel, vault and webhook imply identity, lb implies ha, and all is storage and identity.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
 	[[ "$value" == all ]] && value="storage identity"
@@ -86,7 +86,8 @@ select_scenarios() {
 		lb) LAB_SELECTED+=(identity ha lb) ;;
 		otel) LAB_SELECTED+=(identity otel) ;;
 		vault) LAB_SELECTED+=(identity vault) ;;
-		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb, otel, vault or all" ;;
+		webhook) LAB_SELECTED+=(identity webhook) ;;
+		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb, otel, vault, webhook or all" ;;
 		esac
 	done
 }
@@ -135,6 +136,7 @@ inner_ip() {
 	ligo2) host=51 ;;
 	lb) host=60 ;;
 	otel) host=70 ;;
+	hooks) host=71 ;;
 	*) die "no address for $1" ;;
 	esac
 	printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$host"

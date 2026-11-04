@@ -38,6 +38,8 @@ source "$LAB_DIR/lib/serve.sh"
 source "$LAB_DIR/lib/lb.sh"
 # shellcheck source=lib/otel.sh
 source "$LAB_DIR/lib/otel.sh"
+# shellcheck source=lib/hooks.sh
+source "$LAB_DIR/lib/hooks.sh"
 
 usage() {
 	cat <<USAGE
@@ -48,7 +50,8 @@ commands:
   up [--scenario S]         build the lab (or complete a partial one); S is
                             storage, identity, ha (adds ligo2), lb (adds
                             HAProxy in front of both), otel (adds an OTLP
-                            collector), vault (adds HashiCorp Vault) or all
+                            collector), vault (adds HashiCorp Vault), webhook
+                            (adds a webhook receiver) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
@@ -68,7 +71,9 @@ commands:
                             database, ligo_serve), and its e2e with reload,
                             stop and start; test always runs on all;
                             test-ha (with ligo2) the HA e2e, which stops and
-                            kills replicas; test-otel (with otel) the traces
+                            kills replicas; test-otel (with otel) the traces;
+                            test-webhook (with webhook and ligo2) the webhooks,
+                            which stops the receiver and the replicas
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
@@ -130,6 +135,9 @@ cmd_up() {
 	fi
 	if selected otel; then
 		otel_up
+	fi
+	if selected webhook; then
+		hooks_up
 	fi
 	# a new snapshot when there is none, or when up added inner instances
 	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then

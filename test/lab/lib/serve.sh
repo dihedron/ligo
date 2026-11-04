@@ -24,6 +24,7 @@ cmd_serve() {
 	test) serve_test ;;
 	test-ha) serve_test_ha ;;
 	test-otel) serve_test_otel ;;
+	test-webhook) serve_test_webhook ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -35,7 +36,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha or test-otel" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel or test-webhook" ;;
 	esac
 }
 
@@ -256,6 +257,7 @@ serve_env() {
 		printf 'LIGO_%s_DSN=%s\n' "$upper" "$(pg_dsn "$role" pg.ligo.lab /etc/ligo-lab/ca.crt "$SERVE_DB")"
 	done
 	printf '%s\n' "LIGO_LDAP_BIND_PASSWORD=$(ldap_password ligo-admin-auth)" "LIGO_INSTANCE_ID=$host"
+	hooks_env
 }
 
 serve_unit() {
@@ -316,6 +318,7 @@ service:
   instance_id_env: LIGO_INSTANCE_ID
   workload_advertise: { destination: "$advertise", port: 8443, server_name: "$advertise" }
 $(serve_observability)
+$(hooks_notifications)
 zones:
   - { name: prod, trust_domain: prod.lab, spiffe_workload_socket: "unix:///run/spire/prod/agent.sock" }
   - { name: test, trust_domain: test.lab, spiffe_workload_socket: "unix:///run/spire/test/agent.sock" }
@@ -323,6 +326,7 @@ core_identity:
   zone: prod
   svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["$aud"] }
 server:
+  metrics_listener: { listen_address: "127.0.0.1:9090" }
   workload_listener:
     listen_address: "0.0.0.0:8443"
     tls_source: spiffe
@@ -644,6 +648,8 @@ serve_test_ha() {
 	((SECONDS - cut >= 60)) || die "ligo1's sessions ended after $((SECONDS - cut))s: not the keepalives' doing"
 	info "ligo1's sessions ended $((SECONDS - cut))s after the power cut"
 	audited="$(serve_sql "$recoveries")"
+	local announced=0
+	inner_exists hooks && announced="$(hooks_count SYSTEM_EXECUTOR_RECOVERED)"
 	if out="$(cli ligo-admin executors recover ligo1 <<<wrong 2>&1)"; then
 		die "a wrong confirmation recovered ligo1: $out"
 	fi
@@ -652,6 +658,11 @@ serve_test_ha() {
 		die "a wrong confirmation changed something"
 	cli ligo-admin executors recover ligo1 <<<ligo1 || die "executors recover ligo1"
 	[[ "$(serve_sql "$recoveries")" == "$((audited + 1))" ]] || die "SYSTEM_EXECUTOR_RECOVERED is not audited once"
+	if inner_exists hooks; then
+		hooks_drained
+		[[ "$(hooks_count SYSTEM_EXECUTOR_RECOVERED)" == "$((announced + 3))" ]] || die "SYSTEM_EXECUTOR_RECOVERED did not reach the three webhooks"
+		info "SYSTEM_EXECUTOR_RECOVERED reached the three webhooks"
+	fi
 	local recovered="ha-g-$E2E_SUFFIX" row after
 	cli_phase "$recovered" ACTIVE
 	row="select w.executor_id || ':' || w.status || ':' || w.updated_at from bindings b join dbos.workflow_status w on w.workflow_uuid = b.workflow_id where b.name = '$recovered'"

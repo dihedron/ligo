@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,10 +91,11 @@ func newAdmin(t *testing.T, who string) *admin {
 	t.Helper()
 	a := &admin{t: t, base: e2eEnv(t, "LIGO_E2E_ADMIN")}
 	var cfg *tls.Config
-	if who == "olivia" {
-		a.user, a.pass = "olivia", e2eEnv(t, "LIGO_TEST_LDAP_OLIVIA_PASS")
+	switch who {
+	case "olivia", "livia":
+		a.user, a.pass = who, e2eEnv(t, "LIGO_TEST_LDAP_"+strings.ToUpper(who)+"_PASS")
 		cfg = ligoTLS(t, "")
-	} else {
+	default:
 		cfg = ligoTLS(t, who)
 	}
 	a.client = &http.Client{Timeout: 90 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
