@@ -35,7 +35,7 @@ Out of scope: `activedirectory.v1`; groups (`IdentityArtifact.groups` stays empt
 | `service_ou_dn` | yes | A valid DN (RFC 4514); the accounts' parent. |
 | `allowed_endpoints` | yes | Must contain the `host:port` of `url` (§5.7's form). |
 | `bootstrap_credential` | yes | §5.5, `kv_path` only. Its `username` is the bind DN and must be a valid DN. |
-| `ca_file` | no | A PEM file of the roots that verify the directory; the system roots when absent. TLS 1.2 or later, hostname verified. |
+| `ca_file` | no | A PEM file of the roots that verify the directory and the Vault of `bootstrap_credential`; the system roots when absent. TLS 1.2 or later, hostname verified. |
 
 An instance selects its SVID as §5.4 says, and reads its credential with it. The file is read once, at configuration.
 
@@ -73,11 +73,13 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 
 **`Health`**: for the named instance, a TLS connection and a bind with the bootstrap credential. `Serving = false` with a generic message otherwise.
 
+**`-svids SOCKET`**: not an RPC. Run by hand as the plugin's user, the binary prints the SPIFFE IDs the agent at `SOCKET` issues to it, to check its SPIRE registration, and exits. Nothing secret is printed.
+
 **Connections.** One connection per call, with a 10 s timeout, closed at the end of the call. No pool: calls are rare, and each one reads the current credential.
 
 ## 6. Errors
 
-`public_message` is fixed for each code: directory diagnostics are never copied to it or logged, as they can echo request data (§5.8 rules 5 and 6).
+`public_message` is fixed for each code: directory diagnostics are never copied to it or logged, as they can echo request data (§5.8 rules 5 and 6). Only the LDAP result code goes to the log.
 
 | Condition | gRPC code | `code` | Retryable |
 | :--- | :--- | :--- | :--- |
@@ -85,7 +87,7 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 | Credential cannot be read | `UNAVAILABLE` | `BOOTSTRAP_CREDENTIAL_UNAVAILABLE` | yes |
 | LDAP `invalidCredentials` (49) | `UNAVAILABLE` | `BOOTSTRAP_CREDENTIAL_REJECTED` | yes: the credential may be mid-rotation |
 | LDAP `insufficientAccessRights` (50) | `PERMISSION_DENIED` | `DIRECTORY_ACCESS_DENIED` | no |
-| `noSuchObject` (32) on the OU, or any other LDAP refusal | `FAILED_PRECONDITION` | `DIRECTORY_REJECTED` | no |
+| `noSuchObject` (32) on the OU, an `Add` conflicting twice, or any other LDAP refusal | `FAILED_PRECONDITION` | `DIRECTORY_REJECTED` | no |
 
 ## 7. Known limits
 
@@ -116,7 +118,8 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 ## 9. Lab
 
 - `ou=ligo-accounts` and the service account `cn=ligo-idp` already exist, with their access rules (`test/lab/lib/ldap.sh`).
-- New: SPIRE entry `spiffe://prod.lab/ligo/plugin/openldap`, an OpenBao and Vault role, and the KV secret with `cn=ligo-idp`'s DN and password.
+- New: SPIRE entry `spiffe://prod.lab/ligo/plugin/openldap`, an OpenBao and Vault role, and the KV secret `ligo/bootstrap/openldap` with `cn=ligo-idp`'s DN and password.
+- OL-9's stopped directory is a port nothing listens on: tests run on `ligo1`, which cannot stop `slapd`.
 - The lab's `ligo-plugin-postgres` also accepts `EXTERNAL_DIR`: it creates the role with no password and tagged, and grants as usual. `pg_hba` verifies members of a new group role `ligo_ldap` with `ldap ldapscheme=ldaps`, `ldapprefix="uid="` and `ldapsuffix=",ou=ligo-accounts,dc=ligo,dc=lab"`.
 - A new platform `pg-ledger-ldap` uses them, beside `pg-ledger`, whose tests do not change.
 
