@@ -9,8 +9,9 @@ LIGO_TESTS=/home/ligo/tests
 # LIGO_PLUGINS is the ligo hosts' plugins.directory; LAB_PLUGINS are the lab's
 # plugins (test/lab/plugins), in the zone prod. A plugin's binary is
 # ligo-plugin-<backend>; its SPIFFE path, hint and bootstrap use <backend>.
+# ligo-plugin-openldap is the shipped one, from cmd/plugins.
 LIGO_PLUGINS=/usr/lib/ligo/plugins
-LAB_PLUGINS=(labprobe ligo-plugin-postgres ligo-plugin-vault ligo-plugin-echo)
+LAB_PLUGINS=(labprobe ligo-plugin-postgres ligo-plugin-vault ligo-plugin-echo ligo-plugin-openldap)
 
 # lab_packages: the packages with tests built with the lab tag.
 lab_packages() {
@@ -37,6 +38,7 @@ env_ligo() {
 		"LIGO_TEST_LDAP_BIND_PASS=$(ldap_password ligo-admin-auth)" \
 		"LIGO_TEST_LDAP_OLIVIA_PASS=$(ldap_password olivia)" \
 		"LIGO_TEST_LDAP_LIVIA_PASS=$(ldap_password livia)" \
+		"LIGO_TEST_LDAP_IDP_PASS=$(ldap_password ligo-idp)" \
 		"LIGO_TEST_PLUGIN_DIR=$LIGO_PLUGINS"
 	local name
 	for name in "${LAB_PLUGINS[@]}"; do
@@ -86,7 +88,9 @@ deploy_plugins() {
 	local out="$LAB_STATE_DIR/plugins" uid name sum host
 	rm -rf "${out:?}" && mkdir -p "$out"
 	for name in "${LAB_PLUGINS[@]}"; do
-		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out/$name" "./test/lab/plugins/$name") ||
+		local src="./test/lab/plugins/$name"
+		[[ -d "$REPO_DIR/cmd/plugins/$name" ]] && src="./cmd/plugins/$name"
+		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out/$name" "$src") ||
 			die "cannot build the plugin $name"
 	done
 	for host in $(ligo_hosts); do
@@ -107,6 +111,8 @@ deploy_plugins() {
 	pg_target
 	plugin_bao labprobe lab-admin "$LAB_STATE_DIR/passwords/labprobe"
 	plugin_bao postgres lab_target_admin "$LAB_STATE_DIR/passwords/target-admin"
+	ldap_password ligo-idp >/dev/null
+	plugin_bao openldap "cn=ligo-idp,ou=services,$LDAP_BASE" "$LAB_STATE_DIR/passwords/ldap-ligo-idp"
 	store_vault_bao
 }
 

@@ -102,15 +102,5 @@ func HTTPClient(roots *x509.CertPool) *http.Client {
 // PrintSVIDs prints the SPIFFE IDs the agent at socket issues to this
 // binary, run as this user: what lab.sh deploy waits on ("NAME -svids").
 func PrintSVIDs(socket string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	svids, err := workloadapi.FetchX509SVIDs(ctx, workloadapi.WithAddr(socket))
-	if err != nil {
-		_, _ = os.Stderr.WriteString(err.Error() + "\n")
-		return 1
-	}
-	for _, s := range svids {
-		_, _ = os.Stdout.WriteString(s.ID.String() + "\n")
-	}
-	return 0
+	return pluginsdk.PrintSVIDs(socket)
 }
