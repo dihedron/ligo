@@ -126,6 +126,9 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 			return nil, err
 		}
 		scopes = slices.DeleteFunc(scopes, func(s string) bool { return slices.Contains(deciding, s) })
+		if len(scopes) == 0 { // every side decided, as in a break-glass revert: nobody else to tell
+			return nil, nil
+		}
 	case "PROPAGATION_FAILED": // a revision the propagator could not compose, or one it started that failed
 		if e.Action == "PROPAGATION_FAILED" {
 			break

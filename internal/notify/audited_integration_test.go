@@ -63,11 +63,11 @@ func TestAudited(t *testing.T) {
 	t.Cleanup(func() { audit.Hook = nil })
 
 	src, tgt, bnd := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
-	create, revoke := uuid.NewV7(), uuid.NewV7()
+	create, revoke, revert := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = owner.Exec(ctx, "delete from notification_outbox where webhook like $1", "%-"+x)
-		_, _ = owner.Exec(ctx, "delete from change_requests where id in ($1, $2)", create, revoke)
+		_, _ = owner.Exec(ctx, "delete from change_requests where id in ($1, $2, $3)", create, revoke, revert)
 		_, _ = owner.Exec(ctx, "delete from bindings where id = $1", bnd)
 		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id = $1", tgt)
 		_, _ = owner.Exec(ctx, "delete from targets where id = $1", tgt)
@@ -104,6 +104,15 @@ func TestAudited(t *testing.T) {
 				repeat('a', 64), false, '{}', repeat('c', 64), 'dino', now() + interval '1 day', 1)`, []any{revoke, "b-" + x, bnd}},
 			{`insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind, decision, decided_by, decided_at)
 				values ($1, 'PLATFORM', 'dc/corp-prod', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now())`, []any{revoke}},
+			// a removal that every side decided, as a break-glass revert: no other scope to tell
+			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone, source_scope, target_scope,
+				platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at, expected_revision)
+				values ($1, 'BINDING', $2, NULL, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod',
+				repeat('a', 64), false, '{}', repeat('d', 64), 'dino', now() + interval '1 day', 1)`, []any{revert, "reverted-" + x}},
+			{`insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind, decision, decided_by, decided_at)
+				values ($1, 'SOURCE', 'cloud/fin-01/payments', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now()),
+				($1, 'TARGET', 'dc/corp-prod/ledger', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now()),
+				($1, 'PLATFORM', 'dc/corp-prod', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now())`, []any{revert}},
 		} {
 			if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
 				return fmt.Errorf("%s: %w", strings.Fields(q.sql)[2], err)
@@ -128,6 +137,8 @@ func TestAudited(t *testing.T) {
 		{"granting change applied", audit.Entry{ResourceType: "BINDING", ResourceName: "new-" + x, ChangeRequestID: &create, Action: "CR_APPROVED", Actor: "dora"},
 			"BINDING_REVOKED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 		{"revocation applied", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, ChangeRequestID: &revoke, Action: "CR_APPROVED", Actor: "dora"},
+			"BINDING_REVOKED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"removal every side decided", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, ChangeRequestID: &revert, Action: "CR_APPROVED", Actor: "system:break-glass-revert"},
 			"BINDING_REVOKED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"failure of an apply", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROVISION_FAILURE", Actor: "system:workflow", Revision: &two},
 			"PROPAGATION_FAILED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
