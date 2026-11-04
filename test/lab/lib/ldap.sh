@@ -115,7 +115,7 @@ ldap_check() {
 		ldapsearch_as ligo-admin-auth -b "$LDAP_BASE" -s base dn >/dev/null 2>&1 && break
 		sleep 1
 	done
-	ldapsearch_as ligo-admin-auth -b "ou=users,$LDAP_BASE" "(uid=marco)" dn | grep -q "^dn: uid=marco," ||
+	ldapsearch_as ligo-admin-auth -b "ou=users,$LDAP_BASE" "(uid=marco)" dn | grep "^dn: uid=marco," >/dev/null ||
 		die "ldap: ligo-admin-auth cannot find uid=marco over ldaps"
 	local groups
 	groups="$(ldapsearch_as ligo-admin-auth -b "ou=groups,$LDAP_BASE" "(member=uid=marco,ou=users,$LDAP_BASE)" cn | awk '/^cn:/ {print $2}' | sort | tr '\n' ' ')"
