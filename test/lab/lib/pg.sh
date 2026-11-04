@@ -59,6 +59,10 @@ ssl_cert_file = '/etc/postgresql/ligo-lab/server.crt'
 ssl_key_file = '/etc/postgresql/ligo-lab/server.key'
 ssl_min_protocol_version = 'TLSv1.3'
 password_encryption = 'scram-sha-256'
+# a lost host's sessions end in about two minutes, for ligo executors recover
+tcp_keepalives_idle = 60
+tcp_keepalives_interval = 10
+tcp_keepalives_count = 6
 CONF
 	inner_exec pg sh -c "cat >$conf/pg_hba.conf" <<HBA
 # ligo lab (test/lab): the superuser over the Unix socket, the ligo roles

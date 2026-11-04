@@ -120,7 +120,10 @@ func (fakeDirectory) Authenticate(_ context.Context, user, password string) (aut
 }
 
 // fakeWorkflows records the operational actions it is asked for.
-type fakeWorkflows struct{ calls []string }
+type fakeWorkflows struct {
+	calls   []string
+	pending []dbos.WorkflowStatus
+}
 
 func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	f.calls = append(f.calls, "retry "+actor)
@@ -130,6 +133,18 @@ func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (db
 func (f *fakeWorkflows) Rotate(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	f.calls = append(f.calls, "rotate "+actor)
 	return nil, nil
+}
+
+func (f *fakeWorkflows) ExecutorID() string         { return "ligo-self" }
+func (f *fakeWorkflows) ApplicationVersion() string { return "v2" }
+
+func (f *fakeWorkflows) Pending(context.Context) ([]dbos.WorkflowStatus, error) {
+	return f.pending, nil
+}
+
+func (f *fakeWorkflows) Resume(_ context.Context, ids []string) error {
+	f.calls = append(f.calls, "resume "+strings.Join(ids, ","))
+	return nil
 }
 
 // fakePlugins: oracle-prod serves, every other platform is unreachable.
@@ -526,6 +541,93 @@ func TestMaintenanceAPI(t *testing.T) {
 // TestSourcesAPI: register a source through approval, show and list it,
 // narrow it with a diff of the samples it drops, test regexes; refusals
 // are problems (§7.2.3 sources).
+// TestExecutorsAPI: a replica gone for good is recovered, only by
+// admin.full_access, only for this application version, never while it has
+// sessions, and never for the replica itself (§10.2).
+func TestExecutorsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	admin, viewer := v.client(t, adminID), v.client(t, viewerID)
+	fake := v.s.Workflows.(*fakeWorkflows)
+	gone, alive := "gone-"+v.suffix, "alive-"+v.suffix
+	old := time.Now().Add(-time.Hour)
+	fake.pending = []dbos.WorkflowStatus{
+		{ID: "w1", ExecutorID: gone, ApplicationVersion: "v2", CreatedAt: time.Now()},
+		{ID: "w2", ExecutorID: gone, ApplicationVersion: "v2", CreatedAt: old},
+		{ID: "w3", ExecutorID: gone, ApplicationVersion: "v1", CreatedAt: old},
+		{ID: "w4", ExecutorID: alive, ApplicationVersion: "v2", CreatedAt: old},
+		{ID: "w5", ExecutorID: "ligo-self", ApplicationVersion: "v2", CreatedAt: old},
+	}
+	ctx := context.Background()
+	live, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{Instance: alive}, insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(live.Close)
+
+	r := v.do(t, viewer, "GET", "/v1/admin/executors", nil)
+	if r.code != 200 {
+		t.Fatalf("list: %d %v", r.code, r.body)
+	}
+	rows := map[string]map[string]any{}
+	for _, it := range r.body["items"].([]any) {
+		row := it.(map[string]any)
+		rows[row["executor"].(string)+"/"+fmt.Sprint(row["applicationVersion"])] = row
+	}
+	if row := rows[gone+"/v2"]; row == nil || row["pending"] != 2.0 || row["liveSessions"] != 0.0 || row["self"] != false ||
+		row["oldestPending"] != old.UTC().Format(time.RFC3339Nano) && !strings.HasPrefix(fmt.Sprint(row["oldestPending"]), old.Format("2006-01-02T15:04")) {
+		t.Errorf("the executor gone: %v", row)
+	}
+	if row := rows[alive+"/v2"]; row == nil || row["pending"] != 1.0 || row["liveSessions"].(float64) < 2 {
+		t.Errorf("the live executor: %v", row)
+	}
+	if row := rows["ligo-self/v2"]; row == nil || row["self"] != true {
+		t.Errorf("this replica: %v", row)
+	}
+
+	if r := v.do(t, viewer, "POST", "/v1/admin/executors/"+gone+"/recover", nil); r.code != 403 {
+		t.Errorf("a viewer recovers: %d", r.code)
+	}
+	if r := v.do(t, admin, "POST", "/v1/admin/executors/ligo-self/recover", nil); r.code != 409 || r.slug() != "urn:ligo:problem:executor-self" {
+		t.Errorf("this replica: %d %s", r.code, r.slug())
+	}
+	if r := v.do(t, admin, "POST", "/v1/admin/executors/"+alive+"/recover", nil); r.code != 409 || r.slug() != "urn:ligo:problem:executor-alive" {
+		t.Errorf("a live executor: %d %s", r.code, r.slug())
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("resumed after a refusal: %v", fake.calls)
+	}
+	var start int64
+	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0) from audit_log").Scan(&start); err != nil {
+		t.Fatal(err)
+	}
+	// allowed in maintenance: it finishes work, it starts none
+	if _, err := v.owner.Exec(ctx, "update system_settings set maintenance_mode = true, maintenance_reason = 'x'"); err != nil {
+		t.Fatal(err)
+	}
+	r = v.do(t, admin, "POST", "/v1/admin/executors/"+gone+"/recover", nil)
+	if r.code != 200 || r.body["recovered"] != 2.0 || r.body["otherVersions"] != 1.0 {
+		t.Errorf("recover: %d %v", r.code, r.body)
+	}
+	if fmt.Sprint(fake.calls) != "[resume w1,w2]" {
+		t.Errorf("resumed: %v", fake.calls)
+	}
+	var snapshot, actor string
+	if err := v.owner.QueryRow(ctx, "select snapshot::text, actor from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and id > $1", start).Scan(&snapshot, &actor); err != nil ||
+		actor != adminID || !strings.Contains(snapshot, gone) || !strings.Contains(snapshot, "w1") {
+		t.Errorf("audit: %q by %q (%v)", snapshot, actor, err)
+	}
+	// nothing of this version left: nothing to resume or audit
+	fake.calls, fake.pending = nil, fake.pending[2:3]
+	r = v.do(t, admin, "POST", "/v1/admin/executors/"+gone+"/recover", nil)
+	if r.code != 200 || r.body["recovered"] != 0.0 || r.body["otherVersions"] != 1.0 || len(fake.calls) != 0 {
+		t.Errorf("recover with nothing to do: %d %v %v", r.code, r.body, fake.calls)
+	}
+	var n int
+	if err := v.owner.QueryRow(ctx, "select count(*) from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and id > $1", start).Scan(&n); err != nil || n != 1 {
+		t.Errorf("audit entries: %d (%v)", n, err)
+	}
+}
+
 func TestSourcesAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)

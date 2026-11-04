@@ -89,7 +89,7 @@ LDIF
 # ldap_seed adds the entries of seed.ldif that are missing, with fresh
 # password hashes.
 ldap_seed() {
-	if inner_exec ldap ldapsearch -LLL -Q -Y EXTERNAL -H ldapi:/// -b "ou=users,$LDAP_BASE" -s base dn 2>/dev/null | grep -q '^dn:'; then
+	if inner_exec ldap ldapsearch -LLL -Q -Y EXTERNAL -H ldapi:/// -b "ou=users,$LDAP_BASE" -s base dn 2>/dev/null | grep '^dn:' >/dev/null; then
 		info "ldap: directory already seeded"
 		return
 	fi

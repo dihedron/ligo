@@ -117,3 +117,86 @@ func TestEXT(t *testing.T) {
 		t.Errorf("EXT-06: deleted workflow still there (%v)", err)
 	}
 }
+
+// ext20Runs counts the step of ext20Workflow; while ext20Hang is set the
+// workflow stops after it, as if its replica had died.
+var (
+	ext20Runs atomic.Int64
+	ext20Hang atomic.Bool
+)
+
+func ext20Workflow(ctx dbos.Context, input string) (counted, error) {
+	c, err := dbos.RunAsStep(ctx, func(context.Context) (counted, error) {
+		return counted{Input: input, Runs: ext20Runs.Add(1)}, nil
+	}, dbos.WithStepName("count"))
+	if err == nil && ext20Hang.Load() {
+		select {} // never returns: the row stays PENDING, the replica is gone
+	}
+	return c, err
+}
+
+// TestEXT20: ResumeWorkflows runs the PENDING workflow of a dead executor on
+// the caller's, without repeating its finished steps, and that executor does
+// not run it again when it comes back (§10.2).
+func TestEXT20(t *testing.T) {
+	x := uuid.NewV7().String()
+	launch := func(executor string) dbos.Context {
+		t.Helper()
+		d, err := dbos.NewContext(context.Background(), dbos.Config{AppName: "ligo-ext-test", DatabaseURL: dsn(t, "DBOS"),
+			DatabaseSchema: "dbos", ApplicationVersion: "ext-v1", ExecutorID: executor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dbos.RegisterWorkflow(d, ext20Workflow)
+		if err := dbos.Launch(d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	gone, there := "ext20-gone-"+x, "ext20-there-"+x
+	id := "ligo:apply:" + x + ":r1:a1"
+
+	ext20Hang.Store(true)
+	a := launch(gone)
+	if _, err := dbos.RunWorkflow(a, ext20Workflow, "x", dbos.WithWorkflowID(id)); err != nil {
+		t.Fatal(err)
+	}
+	for end := time.Now().Add(10 * time.Second); ext20Runs.Load() == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the step did not run")
+		}
+	}
+	time.Sleep(200 * time.Millisecond) // its output is checkpointed
+	_ = dbos.Shutdown(a, time.Second)
+	ext20Hang.Store(false)
+
+	b := launch(there)
+	t.Cleanup(func() { _ = dbos.Shutdown(b, 5*time.Second) })
+	pending, err := dbos.ListWorkflows(b, dbos.WithFilterStatus(dbos.WorkflowStatusPending), dbos.WithFilterExecutorIDs(gone),
+		dbos.WithFilterLoadInput(false), dbos.WithFilterLoadOutput(false))
+	if err != nil || len(pending) != 1 || pending[0].ID != id || pending[0].ApplicationVersion != "ext-v1" {
+		t.Fatalf("EXT-20: pending of the dead executor: %+v (%v)", pending, err)
+	}
+	handles, err := dbos.ResumeWorkflows[counted](b, []string{id})
+	if err != nil || len(handles) != 1 {
+		t.Fatalf("EXT-20: resume: %d (%v)", len(handles), err)
+	}
+	got, err := handles[0].GetResult()
+	if err != nil || got.Runs != 1 || ext20Runs.Load() != 1 {
+		t.Fatalf("EXT-20: result %+v (%v), the step ran %d times", got, err, ext20Runs.Load())
+	}
+	st, err := handles[0].GetStatus()
+	if err != nil || st.ExecutorID != there || st.Status != dbos.WorkflowStatusSuccess {
+		t.Fatalf("EXT-20: status %+v (%v)", st, err)
+	}
+
+	back := launch(gone)
+	t.Cleanup(func() { _ = dbos.Shutdown(back, 5*time.Second) })
+	time.Sleep(3 * time.Second) // recovery and a few polls of the queue
+	if ext20Runs.Load() != 1 {
+		t.Errorf("EXT-20: the returning executor ran the step: %d runs", ext20Runs.Load())
+	}
+	if st, err := handles[0].GetStatus(); err != nil || st.ExecutorID != there {
+		t.Errorf("EXT-20: after the executor came back: %+v (%v)", st, err)
+	}
+}

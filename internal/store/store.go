@@ -23,10 +23,14 @@ const (
 	statementTimeoutReader = 500 * time.Millisecond
 )
 
+// sessionPrefix precedes the instance ID in application_name.
+const sessionPrefix = "ligo/"
+
 // Limits are the pools' settings (storage.postgres); a zero field keeps the
 // default: pgx's connection limit, the statement timeouts above.
 type Limits struct {
-	MaxConns               int32 // per pool
+	MaxConns               int32  // per pool
+	Instance               string // names the sessions and keeps one open, the sign of life of §10.2; "" for neither
 	AppStatementTimeout    time.Duration
 	ReaderStatementTimeout time.Duration
 }
@@ -70,6 +74,10 @@ func Open(ctx context.Context, appDSN, readerDSN string, l Limits, allowInsecure
 		if l.MaxConns > 0 {
 			cfg.MaxConns = l.MaxConns
 		}
+		if l.Instance != "" {
+			cfg.ConnConfig.RuntimeParams["application_name"] = sessionPrefix + l.Instance
+			cfg.MinConns = 1
+		}
 		if *c.pool, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
 			p.Close()
 			return nil, fmt.Errorf("store: %w", err)
@@ -80,6 +88,24 @@ func Open(ctx context.Context, appDSN, readerDSN string, l Limits, allowInsecure
 		}
 	}
 	return &p, nil
+}
+
+// Sessions counts this database's live sessions per instance (§10.2): any
+// role reads application_name in pg_stat_activity. DBOS names its own
+// sessions after the application, so they do not count.
+func Sessions(ctx context.Context, db *pgxpool.Pool) (map[string]int, error) {
+	rows, err := db.Query(ctx, `SELECT substr(application_name, $1), count(*)::int FROM pg_stat_activity
+		WHERE datname = current_database() AND starts_with(application_name, $2) GROUP BY 1`, len(sessionPrefix)+1, sessionPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	found := map[string]int{}
+	var id string
+	var n int
+	if _, err := pgx.ForEachRow(rows, []any{&id, &n}, func() error { found[id] = n; return nil }); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return found, nil
 }
 
 // Close closes the pools that are open.

@@ -35,6 +35,8 @@ var (
 	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess}
 	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	maxPlatformFlow = 32
+	// instanceIDRE leaves room for "ligo/" in the 63 bytes of application_name
+	instanceIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,58}$`)
 )
 
 // checker collects the failures of every rule, so that one run reports them
@@ -56,6 +58,9 @@ func Validate(cfg *Config, opts Options) error {
 		opts.LookupEnv = os.LookupEnv
 	}
 	c := &checker{}
+	if id, _ := opts.LookupEnv(cfg.Service.InstanceIDEnv); !instanceIDRE.MatchString(id) {
+		c.failf(1, "service.instance_id_env %q: the instance ID %q must match %s", cfg.Service.InstanceIDEnv, id, instanceIDRE)
+	}
 	zones := c.zones(cfg)
 	c.instances(cfg, zones)
 	c.trustDomains(cfg, zones)
@@ -173,6 +178,9 @@ func (c *checker) instanceProviders(kind string, list []InstanceProvider, zones 
 		for _, in := range p.Instances {
 			if names[in.Name] {
 				c.failf(1, "%s instance %q is defined twice", kind, in.Name)
+			}
+			if !ruleNameRE.MatchString(in.Name) {
+				c.failf(1, "%s instance %q: the name must match %s", kind, in.Name, ruleNameRE)
 			}
 			names[in.Name] = true
 			zoneOf[p.Type][in.Name] = in.Zone

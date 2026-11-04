@@ -18,6 +18,8 @@ func (s *Server) opsRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/maintenance", s.getMaintenance)
 	mux.HandleFunc("PUT /v1/admin/maintenance", s.putMaintenance)
 	mux.HandleFunc("GET /v1/admin/audit/verify", s.verifyAudit)
+	mux.HandleFunc("GET /v1/admin/executors", s.listExecutors)
+	mux.HandleFunc("POST /v1/admin/executors/{id}/recover", s.recoverExecutor)
 	for kind := range scopeQueries { // one route each: a {kind} wildcard would overlap /v1/admin/catalog/targets/{name}
 		mux.HandleFunc("GET /v1/admin/"+kind+"/{name}/audit", s.resourceAudit)
 	}

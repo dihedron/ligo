@@ -318,3 +318,70 @@ func TestServeHAKill(t *testing.T) {
 	stopped = false
 	phase(t, olga2, binding, "ACTIVE")
 }
+
+// TestServeHARecoverFrozen: with ligo1 frozen (SIGSTOP) in a binding's apply,
+// its sessions are alive, and ligo2 refuses to recover it (§10.2). It leaves
+// ligo1 frozen, for lab.sh to kill and TestServeHARecoverGone to recover.
+func TestServeHARecoverFrozen(t *testing.T) {
+	olga, dora, ada2 := newAdmin(t, "olga"), newAdmin(t, "dora"), on2(t, "ada")
+	source, target := haFixture(t, olga, dora, "g")
+	binding := "ha-g-" + e2eEnv(t, "LIGO_E2E_SUFFIX")
+	out, err := exec.Command("pgrep", "-x", "ligo").Output()
+	if err != nil {
+		t.Fatalf("pgrep ligo: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("ligo's pid %q: %v", out, err)
+	}
+	code, filed := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read"})
+	cr := approveBut(t, dora, filedCR(t, "binding", code, filed))
+	if code, body := approve(dora, cr, awaiting(cr)[0]); code != http.StatusOK {
+		t.Fatalf("approve: %d %v", code, body)
+	}
+	if err := exec.Command("kill", "-STOP", strconv.Itoa(pid)).Run(); err != nil {
+		t.Fatalf("SIGSTOP ligo1: %v", err)
+	}
+	code, body := ada2.do("GET", "/v1/admin/executors", nil)
+	if code != http.StatusOK || executor(body, "ligo1")["pending"] == 0.0 || executor(body, "ligo1")["liveSessions"] == 0.0 {
+		t.Fatalf("executors with ligo1 frozen: %d %v", code, body)
+	}
+	if code, body := ada2.do("POST", "/v1/admin/executors/ligo1/recover", nil); code != http.StatusConflict || body["type"] != "urn:ligo:problem:executor-alive" {
+		t.Fatalf("recovering a frozen replica: %d %v", code, body)
+	}
+	if code, body := ada2.do("POST", "/v1/admin/executors/ligo2/recover", nil); code != http.StatusConflict || body["type"] != "urn:ligo:problem:executor-self" {
+		t.Fatalf("recovering itself: %d %v", code, body)
+	}
+}
+
+// TestServeHARecoverGone: ligo1 is stopped for good: its sessions end, ligo2
+// recovers its workflow and the binding becomes ACTIVE.
+func TestServeHARecoverGone(t *testing.T) {
+	olga, ada := newAdmin(t, "olga"), newAdmin(t, "ada")
+	binding := "ha-g-" + e2eEnv(t, "LIGO_E2E_SUFFIX")
+	for end := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+		code, body := ada.do("POST", "/v1/admin/executors/ligo1/recover", nil)
+		if code == http.StatusOK {
+			if body["recovered"] == 0.0 {
+				t.Fatalf("recover found nothing: %v", body)
+			}
+			break
+		}
+		if code != http.StatusConflict || body["type"] != "urn:ligo:problem:executor-alive" || time.Now().After(end) {
+			t.Fatalf("recover: %d %v", code, body)
+		}
+	}
+	phase(t, olga, binding, "ACTIVE")
+}
+
+// executor is an executor's row with pending workflows in GET
+// /v1/admin/executors.
+func executor(body map[string]any, id string) map[string]any {
+	items, _ := body["items"].([]any)
+	for _, it := range items {
+		if row, _ := it.(map[string]any); row["executor"] == id {
+			return row
+		}
+	}
+	return map[string]any{"pending": 0.0, "liveSessions": 0.0}
+}

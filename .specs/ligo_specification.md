@@ -2146,7 +2146,7 @@ The audit action vocabulary (**Normative**) is (`resource_type` and `resource_na
 - Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, the governance policy with its SHA-256, and each platform's privilege bounds, allowed endpoints and flows, which the next start compares for rule 19, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
 - Governance: `SOURCE_RESCOPED`, `TARGET_RESCOPED`, `BINDING_RESCOPED` (snapshot: old and new scopes, §8.2 rule 17)
 - Break-glass: `BREAK_GLASS_USED`, `BREAK_GLASS_RATIFIED` (one per ratified side; the snapshot says whether the change is now fully ratified), `BREAK_GLASS_REVERT_STARTED`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE` (snapshots include justification, incident reference and expiry)
-- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` (snapshot: the additional parties that no break-glass policy covers, with their rules, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
+- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_EXECUTOR_RECOVERED` (§10.2), `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` (snapshot: the additional parties that no break-glass policy covers, with their rules, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
 
 ### 4.3 Audit hash chain & lock ordering
 Every audit insert MUST run inside a database transaction that:
@@ -3188,6 +3188,8 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `POST` | `/v1/admin/change-requests/{id}/revert` | approver of any side, or the requester | Revert an open break-glass `CREATE`/`UPDATE` now, by the same `SYSTEM_REVERT` as expiry (`requested_by` = the caller). Body `{"comment": "…"}`: why, required (`422` without); kept as the revert's sides' `decision_comment` and audited with it. The sweeper's reverts at expiry carry the comment `TTL expired`. |
 | `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource: those carrying its id and those of its change requests (a create's included), never those of a retired or deleted namesake or of a refused attempt on its name. A binding is seen with its party scopes, as by its `GET`. The last 20 entries of the `GET`s and the UI follow the same rule. |
 | `GET` | `/v1/admin/audit/verify` | viewer | Verifies the hash chain: `{"valid": true, "entries": N}`, or the first broken `id`. |
+| `GET` | `/v1/admin/executors` | viewer | `{"items": [{"executor": "...", "applicationVersion": "...", "pending": N, "oldestPending": "...", "liveSessions": M, "self": bool}]}`: one row per executor and version with pending workflows, and one per other executor with live sessions (§10.2). |
+| `POST` | `/v1/admin/executors/{id}/recover` | `admin.full_access` | Re-enqueues the pending workflows of a replica gone for good (§10.2): `{"executor": "...", "recovered": N, "otherVersions": M}`. `409 executor-alive`, `409 executor-self`. Allowed in maintenance mode. Audited. |
 
 **Keyset Pagination Convention (Normative):**
 All paginated endpoints accept `pageSize` (default `50`, max `200`) and an optional `pageToken` query parameter, and return `{"items": [...], "nextPageToken": "<token>|null"}`. SQL `OFFSET` MUST NOT be used. `pageToken` is the base64url-encoded (unpadded) JSON of the keyset cursor:
@@ -3377,6 +3379,8 @@ Source change requests carry `ownerScope`; target change requests carry `ownerSc
 | `rate-limited` | 429 |
 | `break-glass-limit` | 429 |
 | `maintenance` | 503 (with `Retry-After: 60`) |
+| `executor-alive` | 409 |
+| `executor-self` | 409 |
 
 #### 7.2.4 Catalog, visibility and the binding wizard
 - **Visibility (Normative).** A source or target is visible to a principal who holds any role on its scope (for a target, also on its platform's scope), or, beyond them, according to `visibility`: `LISTED` to holders of any role on a scope matching `visibleTo`; `PUBLIC` to every authenticated principal with any role. A binding is visible to holders of a role on any of its three scopes or on a party's scope; seeing a binding shows the names and scopes of its source and target even when those are not otherwise visible, because the link concerns both. Everything else is `404`.
@@ -3940,7 +3944,7 @@ platform_providers:                       # plugin types and the platforms that 
 ### 8.2 Configuration validation & Daemon Startup/Shutdown Sequence
 
 **Validation rules (at startup; failures are fatal):**
-1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique.
+1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique. The replica's instance ID, the value of `service.instance_id_env`, is set and matches `^[A-Za-z0-9._-]{1,58}$` (§10.2).
 2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
 3. The wiring satisfies the §5.6 matrix and the plugins' Describe capabilities (§5.9: an identity provider produces exactly one mode, a platform provider lists the modes it accepts); the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
@@ -4080,6 +4084,7 @@ type Options struct {
 	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
 	Audit    AuditCommand         `command:"audit" description:"Query and verify the cryptographic audit log."`
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
+	Exec   ExecutorsCommand     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
 	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
 	Migrate MigrateCommand      `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
@@ -4408,6 +4413,26 @@ type MaintenanceStatusCommand struct {
 }
 
 // ---------------------------------------------------------------------------
+// Executors subcommands: `ligo executors list|recover` (§10.2)
+// ---------------------------------------------------------------------------
+type ExecutorsCommand struct {
+	List    ExecutorsListCommand    `command:"list" description:"Show the pending workflows and live database sessions of each executor."`
+	Recover ExecutorsRecoverCommand `command:"recover" description:"Re-enqueue the pending workflows of a replica gone for good (requires admin.full_access)."`
+}
+
+type ExecutorsListCommand struct {
+	ClientOptions
+}
+
+type ExecutorsRecoverCommand struct {
+	ClientOptions
+	Yes  bool `long:"yes" description:"Do not ask for confirmation."`
+	Args struct {
+		ID string `positional-arg-name:"executor-id" description:"The instance ID of the replica gone for good."`
+	} `positional-args:"yes" required:"yes"`
+}
+
+// ---------------------------------------------------------------------------
 // Break-glass subcommands: `ligo break-glass apply|delete|list` (people only;
 // requires server allow_basic_auth, because credentials must be presented on the request)
 // ---------------------------------------------------------------------------
@@ -4579,6 +4604,11 @@ type GovCheckCommand struct {
 ### 10.2 High availability
 - Multiple replicas are supported. Each replica has a unique DBOS executor ID (`instance_id_env`).
 - **A replica keeps its executor ID (Normative).** DBOS recovers, when a replica starts, only the workflows pending under that replica's own executor ID; no other replica takes them over. A replica that dies MUST therefore be started again under the same `instance_id_env` value (a systemd unit on its host, a Kubernetes StatefulSet ordinal); its workflows then resume from their last checkpoint, and until then its bindings stay `PROVISIONING` or `DELETING` while resolution keeps serving their last active snapshot. Two live replicas MUST NOT share an ID: the one that restarts would recover, and run a second time, the workflows the other is still running, whose plugin calls are not checkpointed (a rotation could store a secret the target does not have); the `workflow_id` fencing (ADR-08) cannot tell the two runs apart, as they share the ID.
+- **Recovering a replica gone for good (Normative).** When a replica cannot come back under its ID, `ligo executors recover <id>` (`POST /v1/admin/executors/{id}/recover`) re-enqueues its `PENDING` workflows of the current `application_version` with `dbos.ResumeWorkflows` (EXT-20). Any replica of that version dequeues them and becomes their executor; they resume from their last checkpoint, and the old ID does not run them again if it returns. Workflows of other versions stay put and are counted in the answer. Starting the replica again remains the rule; this is the exception.
+  - **Sign of life.** Each replica names its app and reader sessions `ligo/<id>` in `application_name` and keeps at least one open in each pool. Recovery is refused with `409 executor-alive` while such a session exists, and with `409 executor-self` for the replica's own ID. There is no force option. DBOS names its own sessions after the application, so they do not count. The PostgreSQL connections MUST NOT go through a pooler that hides or reuses `application_name`: the sessions would not be attributable and recovery would pass the check.
+  - **The check is evidence, not proof.** A replica that lost only its database connections still runs, and an in-flight plugin call can overlap the second run. The operator MUST confirm that the host is down; the CLI asks for the executor ID unless given `--yes`.
+  - **Lost hosts.** A host that loses power leaves its sessions open until the server's TCP keepalives end them, by default about two hours on Linux. Set `tcp_keepalives_idle` to 60, `tcp_keepalives_interval` to 10 and `tcp_keepalives_count` to 6 on PostgreSQL, or end the sessions with `pg_terminate_backend`. A live replica reconnects, so it is still refused.
+  - Recovery requires `admin.full_access`, is allowed in maintenance mode, and audits `SYSTEM_EXECUTOR_RECOVERED` (snapshot: executor, workflow IDs, count of other versions) before it resumes; asking again after a failure is safe.
 - Singletons (sweeper, reconciler, propagator, notification dispatcher) use PostgreSQL advisory locks.
 - The resolution cache is per replica, and so are the rate limits (§7.3 rule 6): with N replicas behind a load balancer, a client can fail N times as many logins; the directory's own lockout policy is the cluster-wide bound (T-36).
 
@@ -4824,8 +4854,9 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | EXT-17 | OpenBao | OpenBao is API-compatible with Vault for every feature `ligo` and its plugins use: Transit `encrypt`/`decrypt` with key versioning, KV v2, the Database Secrets Engine, and JWT auth roles. Verified by running the lab suite against both (§11.1 rule 5). | Support only the product whose lab run passes; document the difference. |
 | EXT-18 | Go `regexp/syntax` | `syntax.Parse(p, syntax.Perl)` merges consecutive literal characters (including escaped ones such as `\.`) into one `OpLiteral` node at the top level of a concatenation, and keeps a capture group or alternation as a separate node, so the leading literal is exactly the pattern's fixed beginning (§3.9, Appendix A). Verified with Go 1.24.7 by the Appendix D vectors. Re-run them on every Go upgrade. | Compute the fixed beginning by walking the top-level concatenation and joining leading literal nodes. |
 | EXT-19 | Go `regexp/syntax` | `syntax.Compile` of a simplified `syntax.Perl` parse produces only the instruction kinds handled by Appendix D.3 (`Alt`, `AltMatch`, `Capture`, `Nop`, `EmptyWidth`, `Rune`, `Rune1`, `RuneAny`, `RuneAnyNotNL`, `Match`, `Fail`); `Inst.MatchRune` handles `InstRune` only (not `RuneAny*`, which D.3 matches itself); `^` and `$` compile to `EmptyBeginText` and `EmptyEndText`. Verified with Go 1.24.7 by the D.3 tests. | Extend the D.3 instruction switch; any unknown instruction makes the check return `ErrUnsupported` (fail closed). |
+| EXT-20 | `dbos-transact-golang` | `ResumeWorkflows` re-enqueues the `PENDING` workflow of another executor; the dequeuing replica becomes its executor, finished steps do not run again, and the old executor does not run it when it returns. | Recovery only by starting the replica again under the same ID. |
 
-**Verified on `dbos-transact-golang` v1.8.0** (`internal/workflows/ext_integration_test.go`, run on the lab): EXT-01 holds (`RunAsStep`; steps are not retried unless `WithStepMaxRetries` is set, so §6.1 rule 3 needs no option). EXT-02 holds (`WithWorkflowID`; the default reuse policy returns the existing workflow without running its steps again). EXT-03 holds (`RetrieveWorkflow` and `GetStatus`; an unknown ID is an error; `dbos.workflow_status` is readable with SQL). EXT-05: cron schedules exist (`CreateSchedule`), but `ligo` keeps its internal ticker and advisory locks. EXT-06 holds: finished workflows are listed by age (`ListWorkflows` with `WithFilterCreatedBefore`) and deleted (`DeleteWorkflows`), which the retention job uses. EXT-07 holds (JSON serialization of DTOs by default). EXT-08 holds (its own DSN and the schema `dbos` owned by `ligo_dbos`, without access to `public`). EXT-09 holds (recovery re-enqueues only the workflows of the executor's application version).
+**Verified on `dbos-transact-golang` v1.8.0** (`internal/workflows/ext_integration_test.go`, run on the lab): EXT-01 holds (`RunAsStep`; steps are not retried unless `WithStepMaxRetries` is set, so §6.1 rule 3 needs no option). EXT-02 holds (`WithWorkflowID`; the default reuse policy returns the existing workflow without running its steps again). EXT-03 holds (`RetrieveWorkflow` and `GetStatus`; an unknown ID is an error; `dbos.workflow_status` is readable with SQL). EXT-05: cron schedules exist (`CreateSchedule`), but `ligo` keeps its internal ticker and advisory locks. EXT-06 holds: finished workflows are listed by age (`ListWorkflows` with `WithFilterCreatedBefore`) and deleted (`DeleteWorkflows`), which the retention job uses. EXT-07 holds (JSON serialization of DTOs by default). EXT-08 holds (its own DSN and the schema `dbos` owned by `ligo_dbos`, without access to `public`). EXT-09 holds (recovery re-enqueues only the workflows of the executor's application version). EXT-20 holds (`TestEXT20`).
 
 **Verified on `go-ldap/ldap/v3` v3.4.15:** EXT-13 holds, and the DN helper exists too: `ldap.EscapeFilter` escapes the username in `user_filter` and the user DN in `group_membership_filter`; `ldap.EscapeDN` (RFC 4514) is available, so `adminauth` implements no escaping of its own. go-ldap requires `golang.org/x/crypto` (for `md4`, used by NTLM), which govulncheck flags at module level with GO-2026-5932: the deprecated `openpgp` package of that module is unsafe by design. Nothing in `ligo` or go-ldap imports `openpgp`, govulncheck reports the code unaffected, and no fixed version exists; the advisory is accepted and goes away when `x/crypto` drops the package.
 

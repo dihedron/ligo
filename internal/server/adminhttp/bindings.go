@@ -16,6 +16,10 @@ import (
 type Workflows interface {
 	Retry(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error)
 	Rotate(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error)
+	ExecutorID() string
+	ApplicationVersion() string
+	Pending(ctx context.Context) ([]dbos.WorkflowStatus, error)
+	Resume(ctx context.Context, ids []string) error
 }
 
 func (s *Server) bindingRoutes(mux *router) {

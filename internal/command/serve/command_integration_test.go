@@ -35,6 +35,7 @@ import (
 // its own version's workflows).
 func testConfig(t *testing.T, socket, kek, admin string, workload ...string) string {
 	t.Helper()
+	t.Setenv("LIGO_INSTANCE_ID", "ligo-test")
 	data, err := os.ReadFile("testdata/server.yaml")
 	if err != nil {
 		t.Fatal(err)

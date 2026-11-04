@@ -513,6 +513,20 @@ paths:
       operationId: verifyAudit
       summary: Verify the hash chain of the audit log.
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/executors:
+    get:
+      tags: [operations]
+      operationId: listExecutors
+      summary: The pending workflows and live database sessions of each executor (§10.2).
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/executors/{id}/recover:
+    post:
+      tags: [operations]
+      operationId: recoverExecutor
+      summary: Re-enqueue the pending workflows of a replica gone for good (admin.full_access, §10.2).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
 components:
   securitySchemes:

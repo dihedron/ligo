@@ -605,5 +605,25 @@ serve_test_ha() {
 	[[ "$executors" == "ligo1:SUCCESS" ]] || die "the killed replica's workflow: $executors, not ligo1:SUCCESS"
 	serve_wait ligo1
 	info "ligo1 recovered its own workflow after the kill ($executors)"
+
+	section "ligo1 gone for good, ligo2 recovers its workflow"
+	serve_e2e '^TestServeHARecoverFrozen$' ligo1 ligo2 || die "TestServeHARecoverFrozen failed"
+	# killed first: a stop would thaw it (SIGCONT) and let it drain the workflow;
+	# the stop then cancels the restart, which waits RestartSec
+	inner_exec ligo1 sh -c 'kill -KILL "$(systemctl show -p MainPID --value ligo)"'
+	inner_exec ligo1 systemctl stop ligo
+	serve_e2e '^TestServeHARecoverGone$' ligo2 ligo2 || die "TestServeHARecoverGone failed"
+	local recovered="ha-g-$E2E_SUFFIX" row after
+	row="select w.executor_id || ':' || w.status || ':' || w.updated_at from bindings b join dbos.workflow_status w on w.workflow_uuid = b.workflow_id where b.name = '$recovered'"
+	executors="$(serve_sql "$row")"
+	[[ "$executors" == ligo2:SUCCESS:* ]] || die "the recovered workflow: $executors, not on ligo2"
+	[[ "$(serve_sql "select count(*) from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and snapshot->>'executor' = 'ligo1'")" -ge 1 ]] ||
+		die "SYSTEM_EXECUTOR_RECOVERED is not audited"
+	inner_exec ligo1 systemctl start ligo
+	serve_wait ligo1
+	sleep 5
+	after="$(serve_sql "$row")"
+	[[ "$after" == "$executors" ]] || die "ligo1 came back and touched the recovered workflow: $after, was $executors"
+	info "ligo2 ran ligo1's workflow, audited; ligo1 came back and left it alone"
 	info "HA e2e of ligo serve passed"
 }

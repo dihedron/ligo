@@ -21,9 +21,36 @@ func example(t *testing.T) string {
 	return regexp.MustCompile(`<64-hex-sha256-of-[a-z-]+>`).ReplaceAllString(string(data), strings.Repeat("ab", 32))
 }
 
-var env = map[string]string{"LIGO_WEBHOOK_ONCALL_SECRET": "x", "LIGO_WEBHOOK_DBA_SECRET": "y"}
+var env = map[string]string{"LIGO_INSTANCE_ID": "ligo-1", "LIGO_WEBHOOK_ONCALL_SECRET": "x", "LIGO_WEBHOOK_DBA_SECRET": "y"}
 
 func lookupEnv(k string) (string, bool) { v, ok := env[k]; return v, ok }
+
+// TestInstanceID: PostgreSQL truncates application_name at 63 bytes, so a
+// longer ID, or one it would rewrite, would look dead (§10.2).
+func TestInstanceID(t *testing.T) {
+	cfg := parse(t, example(t))
+	for id, ok := range map[string]bool{"ligo-0": true, "ligo1.dc1_a": true, strings.Repeat("a", 58): true,
+		"": false, strings.Repeat("a", 59): false, "ligo 1": false, "ligo/1": false, "lìgo": false} {
+		err := Validate(cfg, Options{LookupEnv: func(k string) (string, bool) {
+			if k == "LIGO_INSTANCE_ID" {
+				return id, true
+			}
+			return lookupEnv(k)
+		}})
+		if got := err == nil || !strings.Contains(err.Error(), "instance ID"); got != ok {
+			t.Errorf("instance ID %q: %v", id, err)
+		}
+	}
+	unset := func(k string) (string, bool) {
+		if k == "LIGO_INSTANCE_ID" {
+			return "", false
+		}
+		return lookupEnv(k)
+	}
+	if err := Validate(cfg, Options{LookupEnv: unset}); err == nil || !strings.Contains(err.Error(), "instance ID") {
+		t.Errorf("no instance ID: %v", err)
+	}
+}
 
 func parse(t *testing.T, doc string) *Config {
 	t.Helper()
@@ -119,6 +146,7 @@ func TestRules(t *testing.T) {
 		{"unknown color mode", "dark:  { primary:", "dim:  { primary:", 15, nil},
 		{"flow outside allowed_endpoints", `destination: "ora-scan.prod.internal", ports: [1521]`, `destination: "ora-scan.prod.internal", ports: [1600]`, 19, nil},
 		{"invalid flow", `- { name: listener, purpose: DATA`, `- { name: Listener, purpose: DATA`, 19, nil},
+		{"invalid instance name", `name: "svid-passthrough-prod"`, `name: "Svid Passthrough"`, 1, nil},
 		{"no workload_advertise", `    destination: "ligo.prod.internal"`, `    destination: ""`, 19, nil},
 	} {
 		doc := example(t)

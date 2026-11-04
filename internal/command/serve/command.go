@@ -169,7 +169,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 
 	// 2. database, and the checks that need it
 	maxConns := int32(pg.MaxConns) //nolint:gosec // validated between 1 and 1000 (§8.2 rule 9)
-	pools, err := store.Open(ctx, appDSN, readerDSN, store.Limits{MaxConns: maxConns, AppStatementTimeout: pg.AppStatementTimeout,
+	pools, err := store.Open(ctx, appDSN, readerDSN, store.Limits{Instance: os.Getenv(cfg.Service.InstanceIDEnv), MaxConns: maxConns, AppStatementTimeout: pg.AppStatementTimeout,
 		ReaderStatementTimeout: pg.ReaderStatementTimeout}, cmd.insecureDB)
 	if err != nil {
 		return err
