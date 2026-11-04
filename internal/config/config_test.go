@@ -163,8 +163,11 @@ func TestPolicy(t *testing.T) {
 	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
 		t.Errorf("AC-51: %+v", d)
 	}
-	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 2 || len(p.SHA256()) != 64 {
+	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 3 || len(p.SHA256()) != 64 {
 		t.Errorf("policy: %+v", p)
+	}
+	if got := p.PartiesWithoutBreakGlass(); len(got) != 0 {
+		t.Errorf("the example leaves parties without break-glass: %v", got)
 	}
 }
 

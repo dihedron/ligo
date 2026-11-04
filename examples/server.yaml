@@ -83,6 +83,7 @@ authorization:                            # roles are granted on governance scop
     - { ldap_group_dn: "cn=cloud-fin01-payments-devs,ou=groups,dc=corp,dc=internal",  role: operator,    scopes: ["cloud/fin-01/payments"] }
     - { ldap_group_dn: "cn=cloud-fin01-payments-leads,ou=groups,dc=corp,dc=internal", role: approver,    scopes: ["cloud/fin-01/payments"] }
     - { ldap_group_dn: "cn=cloud-fin01-breakglass,ou=groups,dc=corp,dc=internal",     role: break_glass, scopes: ["cloud/fin-01/*"] }
+    - { ldap_group_dn: "cn=infosec-breakglass,ou=groups,dc=corp,dc=internal",         role: break_glass, scopes: ["sec/infosec"] }
     # Information Security, an additional party for cloud-to-data-centre connections (ADR-14)
     - { ldap_group_dn: "cn=infosec-approvers,ou=groups,dc=corp,dc=internal",     role: approver,    scopes: ["sec/infosec"] }
     # Delegated approval (ADR-11): SPIFFE principals only; see §10.6 for identity requirements.
@@ -199,6 +200,7 @@ break_glass:                              # ADR-12; role holders are set in auth
   policies:                               # first entry whose pattern matches a side's scope applies to that side
     - { scopes: ["dc/corp-prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
     - { scopes: ["cloud/fin-01/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+    - { scopes: ["sec/infosec"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
 
 notifications:                            # §7.5
   webhooks:

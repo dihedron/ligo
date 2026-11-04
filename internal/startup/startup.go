@@ -55,7 +55,7 @@ type Checks struct {
 // stops startup.
 func (c *Checks) Run(ctx context.Context) error {
 	c.policy = c.Config.Policy()
-	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.scopes, c.interconnects} {
+	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.scopes, c.interconnects, c.breakGlassParties} {
 		if err := check(ctx); err != nil {
 			return err
 		}
@@ -602,6 +602,19 @@ func (c *Checks) interconnects(ctx context.Context) error {
 		return nil
 	}
 	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_INTERCONNECT_VIOLATIONS", Actor: actor, Snapshot: snapshot(map[string]any{"bindings": found})})
+}
+
+// breakGlassParties warns of the parties that no break-glass policy covers,
+// so that the refusal shows before an incident (rule 18, ADR-12).
+func (c *Checks) breakGlassParties(ctx context.Context) error {
+	found := c.policy.PartiesWithoutBreakGlass()
+	if len(found) == 0 {
+		return nil
+	}
+	for _, f := range found {
+		c.Logger.Warn("no break-glass policy covers an additional party: break-glass under this rule is always refused", "rule", f.Rule, "party", f.Party, "scope", f.Scope)
+	}
+	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_BREAK_GLASS_PARTY_UNCOVERED", Actor: actor, Snapshot: snapshot(map[string]any{"parties": found})})
 }
 
 // Platforms is the part of rule 19 that needs the plugins: every ACTIVE or

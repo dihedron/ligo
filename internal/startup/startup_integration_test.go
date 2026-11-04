@@ -365,6 +365,37 @@ func TestNamesAndInterconnects(t *testing.T) {
 	}
 }
 
+// TestBreakGlassParties: a party no break-glass policy covers is logged and
+// audited at startup, and nothing is when every party is covered (rule 18).
+func TestBreakGlassParties(t *testing.T) {
+	v := setup(t)
+	c := v.checks(t)
+	var logs bytes.Buffer
+	c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	c.policy.BreakGlassPolicies = []governance.BreakGlassPolicy{{Scopes: []string{"dc/*"}}}
+	c.policy.Interconnects.Rules = []governance.InterconnectRule{{Name: "gap-" + v.x,
+		AdditionalApprovals: []governance.AdditionalApproval{{Name: "security", Scope: "sec/infosec"}}}}
+	before := v.lastAudit(t)
+	if err := c.breakGlassParties(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := v.audited(t, before, "SYSTEM_BREAK_GLASS_PARTY_UNCOVERED")
+	if len(got) != 1 || !strings.Contains(got[0], "gap-"+v.x) || !strings.Contains(got[0], "sec/infosec") {
+		t.Errorf("audited: %v", got)
+	}
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "sec/infosec") {
+		t.Errorf("logs: %s", logs.String())
+	}
+	c.policy.BreakGlassPolicies[0].Scopes = append(c.policy.BreakGlassPolicies[0].Scopes, "sec/*")
+	before = v.lastAudit(t)
+	if err := c.breakGlassParties(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.audited(t, before, "SYSTEM_BREAK_GLASS_PARTY_UNCOVERED"); len(got) != 0 {
+		t.Errorf("covered: %v", got)
+	}
+}
+
 // TestWiring: a binding whose wiring differs from its platform's keeps it,
 // with a warning (rule 11).
 func TestWiring(t *testing.T) {
