@@ -99,19 +99,22 @@ serve_cli_users() {
 	done
 }
 
-# ligo1_user USER ID: the user on ligo1, its entry under the node alias
+# ligo1_user USER ID: host_user on ligo1.
+ligo1_user() { host_user ligo1 "$@"; }
+
+# host_user HOST USER ID: the user on HOST, its entry under the node alias
 # (unix:uid only), and a wait until the prod agent issues it ID.
-ligo1_user() {
-	local user="$1" id="$2" uid out
-	inner_exec ligo1 id -u "$user" >/dev/null 2>&1 || inner_exec ligo1 useradd -m -s /bin/bash "$user"
-	uid="$(inner_exec ligo1 id -u "$user")"
+host_user() {
+	local host="$1" user="$2" id="$3" uid out parent="spiffe://prod.lab/node/$1"
+	inner_exec "$host" id -u "$user" >/dev/null 2>&1 || inner_exec "$host" useradd -m -s /bin/bash "$user"
+	uid="$(inner_exec "$host" id -u "$user")"
 	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
-	out="$(spire prod entry show -spiffeID "$id" 2>/dev/null)" || true
+	out="$(spire prod entry show -parentID "$parent" -spiffeID "$id" 2>/dev/null)" || true
 	grep -q "unix:uid:$uid" <<<"$out" ||
-		spire prod entry create -parentID "spiffe://prod.lab/node/ligo1" -spiffeID "$id" -selector "unix:uid:$uid" >/dev/null ||
+		spire prod entry create -parentID "$parent" -spiffeID "$id" -selector "unix:uid:$uid" >/dev/null ||
 		die "cannot register $id"
 	for _ in $(seq 1 30); do
-		out="$(lxd exec lxd -- lxc exec ligo1 --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 \
+		out="$(lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 \
 			-socketPath /run/spire/prod/agent.sock 2>/dev/null)" || true
 		grep -q "SPIFFE ID:.*$id" <<<"$out" && return
 		sleep 1
@@ -119,17 +122,18 @@ ligo1_user() {
 	die "the prod agent does not issue $id to $user"
 }
 
-# CLI_SERVER: the admin listener the CLI calls, ligo1's or lb's.
+# CLI_SERVER: the admin listener the CLI calls; CLI_HOST: where the CLI runs.
 CLI_SERVER=ligo1.ligo.lab
+CLI_HOST=ligo1
 
-# cli USER ARGS: runs the ligo CLI on ligo1 as USER (ligo-ops,
+# cli USER ARGS: runs the ligo CLI on CLI_HOST as USER (ligo-ops,
 # ligo-approver, or ligo for olivia's Basic credentials), against the
 # service at CLI_SERVER, with the prod agent's socket.
 cli() {
 	local user="$1" uid
 	shift
-	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" # not the caller's stdin: it may be a manifest for ligo
-	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env "LIGO_SERVER_URL=https://$CLI_SERVER:9443" \
+	uid="$(inner_exec "$CLI_HOST" id -u "$user" </dev/null)" # not the caller's stdin: it may be a manifest for ligo
+	lxd exec lxd -- lxc exec "$CLI_HOST" --user "$uid" --cwd /tmp --env "LIGO_SERVER_URL=https://$CLI_SERVER:9443" \
 		--env LIGO_SPIFFE_SOCKET=unix:///run/spire/prod/agent.sock -- /usr/local/bin/ligo "$@"
 }
 
@@ -529,7 +533,7 @@ serve_test() {
 	since="$(inner_exec ligo1 date '+%Y-%m-%d %H:%M:%S')"
 	inner_exec ligo1 systemctl reload ligo
 	sleep 2
-	inner_exec ligo1 journalctl --no-pager -u ligo --since "$since" | grep -q "SIGHUP: directory CA reloaded" ||
+	inner_exec ligo1 journalctl --no-pager -u ligo --since "$since" | grep "SIGHUP: directory CA reloaded" >/dev/null ||
 		die "reload: the journal does not show the directory CA reload"
 	info "reload: the directory CA was reloaded"
 	since="$(inner_exec ligo1 date '+%Y-%m-%d %H:%M:%S')"
@@ -537,7 +541,7 @@ serve_test() {
 	start="$(date +%s)"
 	inner_exec ligo1 systemctl stop ligo
 	end="$(date +%s)"
-	inner_exec ligo1 journalctl --no-pager -u ligo --since "$since" | grep -q '"msg":"shutting down"' ||
+	inner_exec ligo1 journalctl --no-pager -u ligo --since "$since" | grep '"msg":"shutting down"' >/dev/null ||
 		die "stop: the journal does not show the drain"
 	[[ "$(inner_exec ligo1 systemctl show -p ExecMainStatus --value ligo)" == 0 ]] || die "stop: ligo exited with a failure"
 	((end - start <= 30)) || die "stop: took $((end - start))s"
@@ -566,10 +570,17 @@ serve_test() {
 # serve_sql SQL: one value from ligo_serve, as the superuser.
 serve_sql() { pg_superuser -d "$SERVE_DB" -tAc "$1"; }
 
+# executor_field ID FIELD: a field of ID's row in ligo executors list, 0
+# without a row.
+executor_field() {
+	cli ligo-admin -o json executors list | jq -r --arg id "$1" --arg f "$2" '[.items[]? | select(.executor == $id)][0][$f] // 0'
+}
+
 # serve_test_ha: the HA e2e on ligo1 and ligo2 (.specs/ligo-test-environment.md,
 # "The HA tests"): with both up, AC-26, AC-50 and AC-77; with ligo1 stopped,
 # ligo2 alone runs the sweeper, a workflow and the propagator; then ligo1,
-# frozen mid-workflow and killed, recovers its own workflow (§10.2).
+# killed mid-workflow, recovers its own workflow; then ligo1, frozen
+# mid-workflow, loses power and ligo2 recovers its workflow (§10.2).
 serve_test_ha() {
 	inner_exists ligo2 || die "serve test-ha needs ligo2: lab.sh up --scenario ha"
 	deploy_tests
@@ -606,20 +617,52 @@ serve_test_ha() {
 	serve_wait ligo1
 	info "ligo1 recovered its own workflow after the kill ($executors)"
 
-	section "ligo1 gone for good, ligo2 recovers its workflow"
+	section "ligo1 loses power, ligo2 recovers its workflow"
+	local CLI_HOST=ligo2 CLI_SERVER=ligo2.ligo.lab # ligo1 is about to go
+	host_user ligo2 ligo-ops spiffe://prod.lab/ops/olga
+	host_user ligo2 ligo-admin spiffe://prod.lab/ops/ada
 	serve_e2e '^TestServeHARecoverFrozen$' ligo1 ligo2 || die "TestServeHARecoverFrozen failed"
-	# killed first: a stop would thaw it (SIGCONT) and let it drain the workflow;
-	# the stop then cancels the restart, which waits RestartSec
-	inner_exec ligo1 sh -c 'kill -KILL "$(systemctl show -p MainPID --value ligo)"'
-	inner_exec ligo1 systemctl stop ligo
-	serve_e2e '^TestServeHARecoverGone$' ligo2 ligo2 || die "TestServeHARecoverGone failed"
+	# QEMU dies and the guest's kernel sends no FIN or RST: only PostgreSQL's
+	# keepalives can end the sessions
+	inner stop ligo1 --force
+	local cut=$SECONDS pending out live="" audited
+	local recoveries="select count(*) from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and snapshot->>'executor' = 'ligo1'"
+	pending="$(executor_field ligo1 pending)" || die "executors list"
+	((pending >= 1)) || die "executors list shows no pending workflow of ligo1"
+	if out="$(cli ligo-admin executors recover ligo1 --yes 2>&1 </dev/null)"; then
+		die "ligo1 was recovered with its sessions alive: $out"
+	fi
+	grep -q executor-alive <<<"$out" || die "recovering with sessions alive: $out"
+	info "CLI: ligo1 has $pending pending, refused while its sessions live"
+	while ((SECONDS - cut < 180)); do
+		live="$(executor_field ligo1 liveSessions)" || live=""
+		[[ "$live" == 0 ]] && break
+		sleep 5
+	done
+	[[ "$live" == 0 ]] || die "ligo1's sessions outlived the power cut by 180s: check PostgreSQL's TCP keepalives (lib/pg.sh)"
+	((SECONDS - cut >= 60)) || die "ligo1's sessions ended after $((SECONDS - cut))s: not the keepalives' doing"
+	info "ligo1's sessions ended $((SECONDS - cut))s after the power cut"
+	audited="$(serve_sql "$recoveries")"
+	if out="$(cli ligo-admin executors recover ligo1 <<<wrong 2>&1)"; then
+		die "a wrong confirmation recovered ligo1: $out"
+	fi
+	grep -q "not confirmed" <<<"$out" || die "a wrong confirmation: $out"
+	[[ "$(executor_field ligo1 pending)" == "$pending" && "$(serve_sql "$recoveries")" == "$audited" ]] ||
+		die "a wrong confirmation changed something"
+	cli ligo-admin executors recover ligo1 <<<ligo1 || die "executors recover ligo1"
+	[[ "$(serve_sql "$recoveries")" == "$((audited + 1))" ]] || die "SYSTEM_EXECUTOR_RECOVERED is not audited once"
 	local recovered="ha-g-$E2E_SUFFIX" row after
+	cli_phase "$recovered" ACTIVE
 	row="select w.executor_id || ':' || w.status || ':' || w.updated_at from bindings b join dbos.workflow_status w on w.workflow_uuid = b.workflow_id where b.name = '$recovered'"
-	executors="$(serve_sql "$row")"
+	for _ in $(seq 1 10); do # ACTIVE comes just before the workflow's end
+		executors="$(serve_sql "$row")"
+		[[ "$executors" == ligo2:SUCCESS:* ]] && break
+		sleep 1
+	done
 	[[ "$executors" == ligo2:SUCCESS:* ]] || die "the recovered workflow: $executors, not on ligo2"
-	[[ "$(serve_sql "select count(*) from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and snapshot->>'executor' = 'ligo1'")" -ge 1 ]] ||
-		die "SYSTEM_EXECUTOR_RECOVERED is not audited"
-	inner_exec ligo1 systemctl start ligo
+	inner_start ligo1
+	inner_wait ligo1
+	spire_check ligo1
 	serve_wait ligo1
 	sleep 5
 	after="$(serve_sql "$row")"

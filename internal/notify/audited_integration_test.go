@@ -49,7 +49,7 @@ func TestAudited(t *testing.T) {
 	t.Cleanup(owner.Close)
 	x := uuid.NewV7().String()[24:]
 	events := []string{"CR_AWAITING_APPROVAL", "BINDING_REVOKED", "PROPAGATION_FAILED", "SOURCE_DEPRECATED", "CR_INTERCONNECT_DENIED",
-		"SYSTEM_MAINTENANCE_ENABLED", "BINDING_EXPIRING"}
+		"SYSTEM_MAINTENANCE_ENABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_EXPIRING"}
 	hooks := map[string]string{"all-" + x: "", "dc-" + x: "dc/corp-prod/*", "cloud-" + x: "cloud/*"}
 	var webhooks []config.Webhook
 	for name, scope := range hooks {
@@ -144,6 +144,8 @@ func TestAudited(t *testing.T) {
 			"CR_INTERCONNECT_DENIED", map[string]int{"all": 1, "dc": 1, "cloud": 0}},
 		{"maintenance", audit.Entry{Action: "SYSTEM_MAINTENANCE_ENABLED", Actor: "root", Snapshot: snap(map[string]string{"reason": "upgrade-" + x})},
 			"SYSTEM_MAINTENANCE_ENABLED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"executor recovered", audit.Entry{Action: "SYSTEM_EXECUTOR_RECOVERED", Actor: "ada", Snapshot: snap(map[string]string{"executor": "gone-" + x})},
+			"SYSTEM_EXECUTOR_RECOVERED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"expiry warning", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "BINDING_EXPIRY_WARNED", Actor: "system:expiry"},
 			"BINDING_EXPIRING", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"no event", audit.Entry{Action: "CONFIG_LOADED", Actor: "system:startup"}, "CONFIG_LOADED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},

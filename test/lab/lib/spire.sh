@@ -42,7 +42,7 @@ spire_identity() {
 	if ! inner query /1.0/auth/groups | jq -e --arg g "/1.0/auth/groups/$group" 'index($g)' >/dev/null; then
 		inner auth group create "$group" >/dev/null
 	fi
-	if ! inner auth identity list -f csv | grep -q "^tls,[^,]*,$group,"; then
+	if ! inner auth identity list -f csv | grep "^tls,[^,]*,$group," >/dev/null; then
 		inner query -X POST /1.0/auth/identities/tls --data "$(jq -n --arg name "$group" --arg group "$group" \
 			--rawfile cert "$LAB_STATE_DIR/pki/spire-$zone-lxd.crt" '{name: $name, certificate: $cert, groups: [$group]}')" >/dev/null ||
 			die "cannot trust identity $group on the inner LXD"
@@ -300,7 +300,7 @@ spire_entries() {
 	uuid="$(inner config get "$host" volatile.uuid)"
 	uid="$(inner_exec "$host" id -u ligo)"
 	for zone in "${ZONES[@]}"; do
-		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/node/$host" 2>/dev/null | grep -q "lxd_iid:uuid:$uuid" ||
+		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/node/$host" 2>/dev/null | grep "lxd_iid:uuid:$uuid" >/dev/null ||
 			spire "$zone" entry create -node -spiffeID "spiffe://$zone.lab/node/$host" \
 				-selector lxd_iid:server:inner -selector "lxd_iid:uuid:$uuid" >/dev/null
 	done
@@ -328,7 +328,7 @@ spire_check() {
 		grep -q "SPIFFE ID:" <<<"$out" || die "$host: no X.509-SVID from the $zone agent (lab.sh logs $host spire-agent-$zone)"
 		info "$host, user ligo: X.509-SVID $(awk '/SPIFFE ID:/ {print $3; exit}' <<<"$out")"
 		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch jwt -audience lab-check \
-			-socketPath "/run/spire/$zone/agent.sock" 2>/dev/null | grep -q "token(" || die "$host: no JWT-SVID from the $zone agent"
+			-socketPath "/run/spire/$zone/agent.sock" 2>/dev/null | grep "token(" >/dev/null || die "$host: no JWT-SVID from the $zone agent"
 		info "$host, user ligo: JWT-SVID from the $zone agent"
 	done
 }

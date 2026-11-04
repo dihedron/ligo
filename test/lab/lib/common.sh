@@ -164,7 +164,7 @@ lxd_reachable() { lxc query /1.0 >/dev/null 2>&1; }
 # again through "sg lxd".
 ensure_lxd_access() {
 	lxd_reachable || [[ -n "${LAB_SG_DONE:-}" ]] || ! command -v lxc >/dev/null && return 0
-	if getent group lxd | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)"; then
+	if getent group lxd | cut -d: -f4 | tr ',' '\n' | grep -x "$(id -un)" >/dev/null; then
 		export LAB_SG_DONE=1
 		exec sg lxd -c "$(printf '%q ' "$LAB_DIR/lab.sh" "$@")"
 	fi

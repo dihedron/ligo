@@ -127,7 +127,7 @@ ldap_check() {
 		-D "uid=marco,ou=users,$LDAP_BASE" -w wrong >/dev/null 2>&1; then
 		die "ldap: a wrong password binds"
 	fi
-	if inner_exec ldap env LDAPTLS_CACERT=/etc/ldap/lab-ca.crt ldapsearch -LLL -x -H "$LDAP_URL" -b "ou=users,$LDAP_BASE" "(uid=marco)" dn 2>/dev/null | grep -q '^dn:'; then
+	if inner_exec ldap env LDAPTLS_CACERT=/etc/ldap/lab-ca.crt ldapsearch -LLL -x -H "$LDAP_URL" -b "ou=users,$LDAP_BASE" "(uid=marco)" dn 2>/dev/null | grep '^dn:' >/dev/null; then
 		die "ldap: anonymous search finds people"
 	fi
 	if inner_exec ldap ldapsearch -LLL -x -H ldap://127.0.0.1 -b "$LDAP_BASE" -s base 2>/dev/null; then

@@ -155,7 +155,7 @@ preflight_network() {
 		fail "network $LAB_NETWORK exists on the host: set LAB_NETWORK"
 		return
 	fi
-	if ip -4 route | awk '{print $1}' | grep -qx "$LAB_SUBNET"; then
+	if ip -4 route | awk '{print $1}' | grep -x "$LAB_SUBNET" >/dev/null; then
 		fail "$LAB_SUBNET is already routed on this host: set LAB_SUBNET"
 	else
 		ok "subnet $LAB_SUBNET is free"
