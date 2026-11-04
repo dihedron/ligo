@@ -32,8 +32,8 @@ func labEnv(t *testing.T, name string) string {
 
 // bootstrap is the bootstrap_credential of a lab plugin on bao-prod.
 func bootstrap(t *testing.T, name string) string {
-	return `{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_BAO_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-` + name +
-		`","jwt_audience":"` + labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE") + `","kv_path":"kv/data/ligo/bootstrap/` + name + `"}`
+	return `{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-` + name +
+		`","jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") + `","kv_path":"kv/data/ligo/bootstrap/` + name + `"}`
 }
 
 // start launches a lab plugin from the plugins directory with the
@@ -56,7 +56,7 @@ func start(t *testing.T, binary string, kind pluginv1.PluginKind, in *pluginv1.I
 	t.Cleanup(c.Kill)
 	in.Zone, in.TrustDomain = "prod", "prod.lab"
 	in.SvidSelector = &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + binary + `"`,
-		JwtAudience: []string{labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}}
+		JwtAudience: []string{labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}}
 	if _, err := c.Control.ConfigureInstances(context.Background(), &pluginv1.ConfigureInstancesRequest{Zone: "prod",
 		SpiffeWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET"), Instances: []*pluginv1.InstanceDescriptor{in}}); err != nil {
 		t.Fatal(err)

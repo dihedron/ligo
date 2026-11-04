@@ -27,13 +27,10 @@ Working:
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`).
 
 Still to come, before the first release (v0.1.0):
-- OpenTelemetry traces;
-- high availability tested with two replicas;
-- the test suite run against HashiCorp Vault as well as OpenBao;
 - a pass over every acceptance scenario of the specification;
 - packaging (systemd unit, packages) and an operations guide.
 
-Everything is tested on a lab that reproduces the production architecture (two SPIRE trust domains, OpenBao, LDAP, PostgreSQL and target systems; see [.specs/ligo-test-environment.md](.specs/ligo-test-environment.md)). The lab also runs a toy echo service for trying bindings by hand from the CLI or the web UI ([.specs/ligo-echo-target.md](.specs/ligo-echo-target.md)).
+Everything is tested on a lab that reproduces the production architecture (two SPIRE trust domains, OpenBao, LDAP, PostgreSQL and target systems; see [.specs/ligo-test-environment.md](.specs/ligo-test-environment.md)). The lab suite passes against OpenBao 2.7.1 and HashiCorp Vault 2.2.1. The lab also runs a toy echo service for trying bindings by hand from the CLI or the web UI ([.specs/ligo-echo-target.md](.specs/ligo-echo-target.md)).
 
 The specification is in [.specs/ligo_specification.md](.specs/ligo_specification.md).
 

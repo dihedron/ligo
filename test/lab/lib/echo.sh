@@ -124,7 +124,7 @@ echo_client() {
 	shift 2
 	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" || die "no user $user on ligo1"
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/prod/agent.sock -- \
-		/usr/local/bin/echo-client --target "$target" "$@"
+		/usr/local/bin/echo-client --target "$target" --audience "$(secrets_audience)" "$@"
 }
 
 # expect CODE PATTERN USER TARGET ARGS: runs the client and checks its exit

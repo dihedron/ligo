@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -67,7 +68,7 @@ func labClient(t *testing.T) *http.Client {
 func labPlugins(t *testing.T) *pluginmgr.Manager {
 	t.Helper()
 	zone := config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}
-	aud := labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")
+	aud := labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")
 	sum := func(name string) []byte {
 		b, err := hex.DecodeString(labEnv(t, name))
 		if err != nil {
@@ -80,10 +81,10 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 	}
 	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
-		labEnv(t, "LIGO_TEST_BAO_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-target-postgres","jwt_audience":"` + aud +
+		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-target-postgres","jwt_audience":"` + aud +
 		`","kv_path":"kv/data/ligo/bootstrap/target-postgres"}}`
-	vault := `{"address":"` + labEnv(t, "LIGO_TEST_BAO_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-store-vault","db_connection":"lab-pg","ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["bao-prod.ligo.lab:8200"]}`
+	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-store-vault","db_connection":"lab-pg","ca_file":"` +
+		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
 		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Zone: zone,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},
@@ -141,8 +142,8 @@ func labBinding(t *testing.T) *lab {
 	t.Cleanup(owner.Close)
 
 	m := labPlugins(t)
-	kek, err := sealing.NewTransitKEK(sealing.TransitConfig{Address: labEnv(t, "LIGO_TEST_BAO_PROD_ADDR"), AuthMount: "jwt-spiffe", Role: "ligo-sealer",
-		JWTAudience: labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE"), Mount: "transit", KeyName: "ligo-interstage"},
+	kek, err := sealing.NewTransitKEK(sealing.TransitConfig{Address: labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), AuthMount: "jwt-spiffe", Role: "ligo-sealer",
+		JWTAudience: labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE"), Mount: "transit", KeyName: "ligo-interstage"},
 		sealing.WorkloadJWT{Addr: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}, labClient(t))
 	if err != nil {
 		t.Fatal(err)
@@ -434,13 +435,13 @@ func checkRead(t *testing.T, path string) map[string]string {
 func checkAt(t *testing.T, path string, status *int) map[string]string {
 	t.Helper()
 	ctx := context.Background()
-	svid, err := workloadapi.FetchJWTSVID(ctx, jwtsvid.Params{Audience: labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}, workloadapi.WithAddr(labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")))
+	svid, err := workloadapi.FetchJWTSVID(ctx, jwtsvid.Params{Audience: labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}, workloadapi.WithAddr(labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := labClient(t)
 	call := func(method, path, token string, body []byte, out any) {
-		req, _ := http.NewRequestWithContext(ctx, method, labEnv(t, "LIGO_TEST_BAO_PROD_ADDR")+"/v1/"+path, bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, method, labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR")+"/v1/"+path, bytes.NewReader(body))
 		if token != "" {
 			req.Header.Set("X-Vault-Token", token)
 		}

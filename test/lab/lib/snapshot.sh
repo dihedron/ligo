@@ -70,13 +70,7 @@ lab_start() {
 			spire_check "$host"
 		fi
 	done
-	local zone
-	for zone in "${ZONES[@]}"; do
-		if inner_exists "bao-$zone"; then
-			bao_wait "$zone"
-			bao_unseal "$zone"
-		fi
-	done
+	secrets_apply
 	if inner_exists ldap; then
 		inner_wait ldap
 		ldap_check

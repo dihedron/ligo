@@ -17,7 +17,7 @@ lab_packages() {
 }
 
 # env_ligo: the environment of the tests on a ligo host: the database
-# directly (pg.ligo.lab), ligo's Workload API sockets, OpenBao and LDAP, and
+# directly (pg.ligo.lab), ligo's Workload API sockets, the secrets backend and LDAP, and
 # the lab CA copied to the host.
 env_ligo() {
 	local role upper
@@ -29,8 +29,8 @@ env_ligo() {
 		"LIGO_TEST_CA=/etc/ligo-lab/ca.crt" \
 		"LIGO_TEST_SPIRE_PROD_SOCKET=unix:///run/spire/prod/agent.sock" \
 		"LIGO_TEST_SPIRE_TEST_SOCKET=unix:///run/spire/test/agent.sock" \
-		"LIGO_TEST_BAO_PROD_ADDR=https://bao-prod.ligo.lab:$BAO_PORT" \
-		"LIGO_TEST_BAO_PROD_AUDIENCE=https://bao-prod.ligo.lab" \
+		"LIGO_TEST_SECRETS_PROD_ADDR=$(secrets_addr)" \
+		"LIGO_TEST_SECRETS_PROD_AUDIENCE=$(secrets_audience)" \
 		"LIGO_TEST_LDAP_URL=$LDAP_URL" \
 		"LIGO_TEST_LDAP_BASE=$LDAP_BASE" \
 		"LIGO_TEST_LDAP_BIND_PASS=$(ldap_password ligo-admin-auth)" \
@@ -78,7 +78,7 @@ deploy_tests() {
 # deploy_plugins: builds the lab plugins and installs them on every ligo
 # host as production expects (root:root, 0755, §5.3 rule 3); then registers
 # each plugin's SPIRE entry under each host's node alias, which selects on its
-# hash, and its OpenBao objects. Both change with every build, so every deploy
+# hash, and its objects on the secrets backend. Both change with every build, so every deploy
 # applies them.
 deploy_plugins() {
 	local out="$LAB_STATE_DIR/plugins" uid name sum host
@@ -108,18 +108,20 @@ deploy_plugins() {
 	store_vault_bao
 }
 
-# store_vault_bao: on bao-prod, the database secrets engine and its
+# store_vault_bao: on the secrets backend, the database secrets engine and its
 # connection lab-pg to the database ledger, the store-vault plugin's role and
 # policy, and the lab-only role the tests check its work with
 # (.specs/ligo-test-environment.md, store-vault).
 store_vault_bao() {
-	bao prod secrets list -format=json | jq -e '."database/"' >/dev/null || bao prod secrets enable database >/dev/null
+	local server aud
+	server="$(secrets_host)" aud="$(secrets_audience)"
+	secrets_cli secrets list -format=json | jq -e '."database/"' >/dev/null || secrets_cli secrets enable database >/dev/null
 	# the password goes through stdin, never on a command line
-	tr -d "\n" <"$LAB_STATE_DIR/passwords/target-admin" | bao prod write database/config/lab-pg \
+	tr -d "\n" <"$LAB_STATE_DIR/passwords/target-admin" | secrets_cli write database/config/lab-pg \
 		plugin_name=postgresql-database-plugin allowed_roles="binding-*" username=lab_target_admin password=- \
-		connection_url="postgresql://{{username}}:{{password}}@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=/etc/openbao/lab-ca.crt" \
-		>/dev/null || die "bao-prod: cannot configure the database connection lab-pg"
-	inner_exec bao-prod sh -c 'cat >/root/ligo-plugin-store-vault.hcl' <<'HCL'
+		connection_url="postgresql://{{username}}:{{password}}@pg.ligo.lab:5432/ledger?sslmode=verify-full&sslrootcert=$(server_ca "$server")" \
+		>/dev/null || die "$server: cannot configure the database connection lab-pg"
+	inner_exec "$server" sh -c 'cat >/root/ligo-plugin-store-vault.hcl' <<'HCL'
 # store-vault: the objects it keeps per binding, and nothing else
 path "kv/data/bindings/*" {
   capabilities = ["create", "update", "read"]
@@ -144,12 +146,12 @@ path "auth/jwt-spiffe/role/binding-*" {
   }
 }
 HCL
-	bao prod policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null
-	bao prod write auth/jwt-spiffe/role/ligo-plugin-store-vault role_type=jwt user_claim=sub \
-		bound_subject="spiffe://prod.lab/ligo/plugin/store-vault" bound_audiences="https://bao-prod.ligo.lab" \
+	secrets_cli policy write ligo-plugin-store-vault /root/ligo-plugin-store-vault.hcl >/dev/null
+	secrets_cli write auth/jwt-spiffe/role/ligo-plugin-store-vault role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/store-vault" bound_audiences="$aud" \
 		token_policies=ligo-plugin-store-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
-		die "bao-prod: cannot write the role ligo-plugin-store-vault"
-	inner_exec bao-prod sh -c 'cat >/root/lab-standins-check.hcl' <<'HCL'
+		die "$server: cannot write the role ligo-plugin-store-vault"
+	inner_exec "$server" sh -c 'cat >/root/lab-standins-check.hcl' <<'HCL'
 # lab only: the tests read what store-vault wrote, and the target admin's
 # credential, to cause drift that reconciliation repairs
 path "kv/data/bindings/*" {
@@ -162,11 +164,11 @@ path "database/creds/binding-*" {
   capabilities = ["read"]
 }
 HCL
-	bao prod policy write lab-standins-check /root/lab-standins-check.hcl >/dev/null
-	bao prod write auth/jwt-spiffe/role/lab-standins-check role_type=jwt user_claim=sub \
-		bound_subject="spiffe://prod.lab/ns/sys/sa/ligo" bound_audiences="https://bao-prod.ligo.lab" \
+	secrets_cli policy write lab-standins-check /root/lab-standins-check.hcl >/dev/null
+	secrets_cli write auth/jwt-spiffe/role/lab-standins-check role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ns/sys/sa/ligo" bound_audiences="$aud" \
 		token_policies=lab-standins-check token_ttl=5m token_max_ttl=15m >/dev/null ||
-		die "bao-prod: cannot write the role lab-standins-check"
+		die "$server: cannot write the role lab-standins-check"
 }
 
 # plugin_svid_wait ZONE NAME UID HOST: waits until the zone's agent on HOST
@@ -197,26 +199,27 @@ plugin_entry() {
 		-selector "unix:uid:$uid" -selector "unix:sha256:$sum" >/dev/null || die "cannot register $id"
 }
 
-# plugin_bao NAME USER PASSWORD_FILE: on bao-prod, the plugin's bootstrap
+# plugin_bao NAME USER PASSWORD_FILE: on the secrets backend, the plugin's bootstrap
 # credential (USER and the password in PASSWORD_FILE, created if missing),
 # the policy that reads it and the JWT role of the plugin's SVID.
 plugin_bao() {
-	local name="$1" user="$2" file="$3"
+	local name="$1" user="$2" file="$3" server aud
+	server="$(secrets_host)" aud="$(secrets_audience)"
 	[[ -f "$file" ]] || (umask 077 && openssl rand -hex 16 >"$file")
 	# the password goes through stdin, never on a command line
-	tr -d "\n" <"$file" | bao prod kv put -mount=kv "ligo/bootstrap/$name" username="$user" password=- >/dev/null ||
-		die "bao-prod: cannot write the bootstrap credential of $name"
-	inner_exec bao-prod sh -c "cat >/root/ligo-plugin-$name.hcl" <<HCL
+	tr -d "\n" <"$file" | secrets_cli kv put -mount=kv "ligo/bootstrap/$name" username="$user" password=- >/dev/null ||
+		die "$server: cannot write the bootstrap credential of $name"
+	inner_exec "$server" sh -c "cat >/root/ligo-plugin-$name.hcl" <<HCL
 # the bootstrap credential of $name, read only
 path "kv/data/ligo/bootstrap/$name" {
   capabilities = ["read"]
 }
 HCL
-	bao prod policy write "ligo-plugin-$name" "/root/ligo-plugin-$name.hcl" >/dev/null
-	bao prod write "auth/jwt-spiffe/role/ligo-plugin-$name" role_type=jwt user_claim=sub \
-		bound_subject="spiffe://prod.lab/ligo/plugin/$name" bound_audiences="https://bao-prod.ligo.lab" \
+	secrets_cli policy write "ligo-plugin-$name" "/root/ligo-plugin-$name.hcl" >/dev/null
+	secrets_cli write "auth/jwt-spiffe/role/ligo-plugin-$name" role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/$name" bound_audiences="$aud" \
 		token_policies="ligo-plugin-$name" token_ttl=15m token_max_ttl=1h >/dev/null ||
-		die "bao-prod: cannot write the role ligo-plugin-$name"
+		die "$server: cannot write the role ligo-plugin-$name"
 }
 
 # test_on HOST [-run REGEX]: deploys, then runs the lab tests (TestLab*, or

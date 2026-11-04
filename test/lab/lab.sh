@@ -48,7 +48,7 @@ commands:
   up [--scenario S]         build the lab (or complete a partial one); S is
                             storage, identity, ha (adds ligo2), lb (adds
                             HAProxy in front of both), otel (adds an OTLP
-                            collector) or all
+                            collector), vault (adds HashiCorp Vault) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
@@ -76,7 +76,10 @@ commands:
   cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);
                             stdin passes through, for manifests
   spire <prod|test> [args]  spire-server on that zone's server
+  secrets [openbao|vault]   print the secrets backend, or select it and stop the
+                            other's servers; then lab.sh reset and serve install
   bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
+  vault [args]              the vault CLI on vault-prod, as root token
   ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
   psql [--as ROLE | --superuser] [args]
                             psql in the pg container as ligo_ROLE (migrator, app,
@@ -248,7 +251,9 @@ main() {
 	cli) require_lab && [[ $# -ge 1 ]] && cli "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
+	secrets) require_lab && cmd_secrets "$@" ;;
 	bao) require_lab && bao "$@" ;;
+	vault) require_lab && server_cli vault-prod "$@" ;;
 	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;

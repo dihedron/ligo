@@ -39,10 +39,10 @@ func labKEK(t *testing.T) *TransitKEK {
 	}
 	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}}
 	kek, err := NewTransitKEK(TransitConfig{
-		Address:     labEnv(t, "LIGO_TEST_BAO_PROD_ADDR"),
+		Address:     labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"),
 		AuthMount:   "jwt-spiffe",
 		Role:        "ligo-sealer",
-		JWTAudience: labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE"),
+		JWTAudience: labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE"),
 		Mount:       "transit",
 		KeyName:     "ligo-interstage",
 	}, WorkloadJWT{Addr: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}, client)

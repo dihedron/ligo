@@ -73,8 +73,8 @@ confirm() {
 LAB_SELECTED=()
 
 # select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
-# identity, ha, lb, otel or all) or, when VALUE is empty, from LAB_SCENARIOS;
-# ha and otel imply identity, lb implies ha, and all is storage and identity.
+# identity, ha, lb, otel, vault or all) or, when VALUE is empty, from LAB_SCENARIOS;
+# ha, otel and vault imply identity, lb implies ha, and all is storage and identity.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
 	[[ "$value" == all ]] && value="storage identity"
@@ -85,7 +85,8 @@ select_scenarios() {
 		ha) LAB_SELECTED+=(identity ha) ;;
 		lb) LAB_SELECTED+=(identity ha lb) ;;
 		otel) LAB_SELECTED+=(identity otel) ;;
-		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb, otel or all" ;;
+		vault) LAB_SELECTED+=(identity vault) ;;
+		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb, otel, vault or all" ;;
 		esac
 	done
 }
@@ -128,6 +129,7 @@ inner_ip() {
 	spire-test) host=21 ;;
 	bao-prod) host=30 ;;
 	bao-test) host=31 ;;
+	vault-prod) host=32 ;;
 	ldap) host=40 ;;
 	ligo1) host=50 ;;
 	ligo2) host=51 ;;

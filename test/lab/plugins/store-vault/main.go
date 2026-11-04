@@ -259,7 +259,7 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 		// token_policies is a string: OpenBao's allowed_parameters globs (binding-*) refuse a JSON array
 		audience := in.WorkloadJWTAudience
 		if audience == "" {
-			audience = "https://bao-prod.ligo.lab"
+			audience = strings.TrimSuffix(in.Address, ":8200") // the lab's servers: the address without the port
 		}
 		if err := in.call(ctx, http.MethodPost, "auth/"+in.AuthMount+"/role/"+policy, token, map[string]any{"role_type": "jwt", "user_claim": "sub",
 			"bound_subject": subject, "bound_audiences": []string{audience}, "token_policies": policy, "token_ttl": "10m", "token_max_ttl": "1h"},

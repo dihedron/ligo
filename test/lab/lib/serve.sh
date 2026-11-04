@@ -304,7 +304,8 @@ serve_config() {
 	if inner_exists lb; then
 		advertise=lb.ligo.lab origin="https://$(lxd_ip):$LB_PORT"
 	fi
-	local aud="https://bao-prod.ligo.lab" bao="https://bao-prod.ligo.lab:$BAO_PORT" tp sv te
+	local aud bao host_name tp sv te
+	aud="$(secrets_audience)" bao="$(secrets_addr)" host_name="$(secrets_host).ligo.lab"
 	tp="$(sha256sum "$LAB_STATE_DIR/plugins/target-postgres" | cut -d' ' -f1)"
 	sv="$(sha256sum "$LAB_STATE_DIR/plugins/store-vault" | cut -d' ' -f1)"
 	te="$(sha256sum "$LAB_STATE_DIR/plugins/target-echo" | cut -d' ' -f1)"
@@ -404,9 +405,9 @@ secret_stores:
           db_connection: lab-pg
           ca_file: /etc/ligo-lab/ca.crt
           workload_jwt_audience: "$aud"
-          allowed_endpoints: ["bao-prod.ligo.lab:$BAO_PORT"]
+          allowed_endpoints: ["$host_name:$BAO_PORT"]
         network_flows:
-          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "bao-prod.ligo.lab", ports: [$BAO_PORT], tls: true, server_name: "bao-prod.ligo.lab" }
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "$host_name", ports: [$BAO_PORT], tls: true, server_name: "$host_name" }
 platform_providers:
   - type: postgres.v1
     binary: target-postgres

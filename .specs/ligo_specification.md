@@ -4725,7 +4725,7 @@ Further machines are added as needs emerge during development; each addition is 
 2. **Real separation where it is tested.** Tests that depend on node identity or process attestation (dedicated automation nodes, §10.6; plugin binary attestation, ADR-03) MUST run on separate machines or VMs, not only on containers sharing one kernel.
 3. **Coverage.** Every acceptance scenario (§11.2) and every invariant test (`test/invariants`, one suite per INV) runs against the lab. Scenarios that need faults (AC-08, AC-09, AC-19, AC-37 and similar) use scripted fault injection: stopping Vault/OpenBao or a webhook receiver, killing a `ligo` replica mid-workflow, and interrupting database connections.
 4. **Gate.** A change MUST NOT be merged unless the full lab suite passes for that commit, and the htmx `upgrade-check` of the pinned version reports nothing on the templates (AC-85).
-5. **Vault and OpenBao.** `ligo` supports both only if the lab suite passes against both. CI runs the suite against each; a release notes which ones were tested.
+5. **Vault and OpenBao.** `ligo` supports both only if the lab suite passes against both. The lab runs the suite against each, not CI, which has neither SPIRE nor the lab's VMs; a release notes which versions were tested.
 6. **Clean state.** Each full run starts from a freshly provisioned lab (or a documented reset to a known state), so results do not depend on leftovers from earlier runs.
 7. **No production data.** The lab never holds production data, credentials, certificates or trust bundles.
 8. **Evidence.** Test reports, including the versions of every lab component, are archived per commit and per release, as evidence for audits.
