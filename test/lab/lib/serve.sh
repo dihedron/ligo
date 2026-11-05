@@ -306,8 +306,9 @@ serve_config() {
 	if inner_exists lb; then
 		advertise=lb.ligo.lab origin="https://$(lxd_ip):$LB_PORT"
 	fi
-	local aud bao host_name tp sv te
+	local aud bao host_name tp sv te ol
 	aud="$(secrets_audience)" bao="$(secrets_addr)" host_name="$(secrets_host).ligo.lab"
+	ol="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-openldap" | cut -d' ' -f1)"
 	tp="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-postgres" | cut -d' ' -f1)"
 	sv="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-vault" | cut -d' ' -f1)"
 	te="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-echo" | cut -d' ' -f1)"
@@ -391,6 +392,25 @@ identity_providers:
   - type: svid.v1
     builtin: true
     instances: [ { name: svid-prod, zone: prod } ]
+  - type: openldap.v1
+    binary: ligo-plugin-openldap
+    sha256: "$ol"
+    instances:
+      - name: openldap-prod
+        zone: prod
+        svid_selector: { match_expr: 'path == "/ligo/plugin/openldap"', jwt_audience: ["$aud"] }
+        config:
+          url: "$LDAP_URL"
+          service_ou_dn: "ou=ligo-accounts,$LDAP_BASE"
+          allowed_endpoints: ["ldap.ligo.lab:636"]
+          ca_file: /etc/ligo-lab/ca.crt
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-openldap
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/openldap
 secret_stores:
   - type: none.v1
     builtin: true
@@ -426,12 +446,36 @@ platform_providers:
           - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
         identity_provider: { type: target-local.v1, instance: local-prod }
         secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"] }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
         config:
           host: pg.ligo.lab
           port: 5432
           database: ledger
           grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
+          ca_file: /etc/ligo-lab/ca.crt
+          allowed_endpoints: ["pg.ligo.lab:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/postgres
+      - name: pg-ledger-ldap
+        zone: prod
+        scope: "dc/corp-prod"
+        display_name: "Lab PostgreSQL ledger, accounts in the directory"
+        allowed_source_trust_domains: [prod.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
+        identity_provider: { type: openldap.v1, instance: openldap-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
+        config:
+          host: pg.ligo.lab
+          port: 5432
+          database: ledger
+          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE, LEDGER_GONE_ROLE]   # LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
           ca_file: /etc/ligo-lab/ca.crt
           allowed_endpoints: ["pg.ligo.lab:5432"]
           bootstrap_credential:
@@ -502,6 +546,9 @@ serve_admins() {
 	spire prod jwt mint -spiffeID "spiffe://prod.lab/${ids[workload]}" -audience "spiffe://prod.lab/ns/sys/sa/ligo" -ttl 10m |
 		inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/workload-jwt && chown ligo:ligo $LIGO1_E2E/workload-jwt && chmod 0600 $LIGO1_E2E/workload-jwt" ||
 		die "spire-prod: cannot mint the JWT-SVID of the workload"
+	spire prod jwt mint -spiffeID "spiffe://prod.lab/${ids[workload]}" -audience "$(secrets_audience)" -ttl 10m |
+		inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/workload-store-jwt && chown ligo:ligo $LIGO1_E2E/workload-store-jwt && chmod 0600 $LIGO1_E2E/workload-store-jwt" ||
+		die "spire-prod: cannot mint the workload's JWT-SVID for the secrets backend"
 	inner_exec spire-prod rm -rf "$dir"
 }
 
@@ -556,6 +603,7 @@ serve_test() {
 	info "start: ligo serves again"
 	serve_e2e '^TestServeE2ERestarted$' "$other" || die "TestServeE2ERestarted failed on $other"
 	serve_cli
+	serve_test_ldap "$other"
 	if inner_exists lb; then
 		section "e2e through lb"
 		E2E_SUFFIX="$(openssl rand -hex 4)" # new resources, and a fresh workload JWT-SVID
@@ -570,6 +618,43 @@ serve_test() {
 	[[ " $executors " == *" ligo1 "* && " $executors " == *" $other "* ]] || die "workflows ran as executors \"$executors\", not on every replica"
 	info "workflows ran as the executors $executors"
 	info "e2e of ligo serve passed"
+}
+
+# serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,
+# OL-11 to OL-14 and AC-10): the tests on ligo1, then what they cannot read
+# from there: the audit entries and every replica's journal.
+serve_test_ldap() {
+	section "e2e of openldap.v1"
+	local before after
+	E2E_SUFFIX="$(openssl rand -hex 4)" # a new workload: the one before saw its binding revoked
+	serve_admins
+	before="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	serve_e2e '^TestServeLDAP' ligo1 "$1" || die "TestServeLDAP failed"
+	after="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	((after - before == 2)) || die "OL-13, AC-10: $((after - before)) DELETE_COMPLETED entries, want 2"
+	serve_scan_secrets
+	info "e2e of openldap.v1 passed"
+}
+
+# serve_scan_secrets: OL-14: the passwords TestServeLDAP read from the store
+# are nowhere in ligo_serve, DBOS's checkpoints included, or in the journal of
+# ligo and its plugins on any replica. Only counts are printed.
+serve_scan_secrets() {
+	local dir host found
+	dir="$(umask 077 && mktemp -d)"
+	inner_exec ligo1 cat "$LIGO1_E2E/ldap-secrets" >"$dir/secrets"
+	(($(wc -l <"$dir/secrets") >= 2)) || { rm -rf "$dir"; die "OL-14: TestServeLDAP recorded no passwords"; }
+	lxd exec lxd -- lxc exec pg -- sudo -u postgres pg_dump -d "$SERVE_DB" >"$dir/haystack" ||
+		{ rm -rf "$dir"; die "OL-14: cannot dump $SERVE_DB"; }
+	for host in $(ligo_hosts); do
+		inner_exec "$host" journalctl --no-pager -u ligo >>"$dir/haystack" ||
+			{ rm -rf "$dir"; die "OL-14: cannot read the journal of $host"; }
+	done
+	found="$(grep -c -F -f "$dir/secrets" "$dir/haystack" || true)"
+	info "OL-14: $(wc -l <"$dir/secrets") passwords, $(wc -l <"$dir/haystack") lines searched, $found found"
+	rm -rf "$dir"
+	inner_exec ligo1 rm -f "$LIGO1_E2E/ldap-secrets"
+	[[ "$found" == 0 ]] || die "OL-14: a password is in the database or in a journal"
 }
 
 # serve_sql SQL: one value from ligo_serve, as the superuser.

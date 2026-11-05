@@ -13,8 +13,11 @@ SELECT 'CREATE ROLE "LEDGER_RO_ROLE" NOLOGIN'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'LEDGER_RO_ROLE') \gexec
 SELECT 'CREATE ROLE "LEDGER_RW_ROLE" NOLOGIN'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'LEDGER_RW_ROLE') \gexec
--- the admin grants the two roles to the principals it creates
-GRANT "LEDGER_RO_ROLE", "LEDGER_RW_ROLE" TO lab_target_admin WITH ADMIN OPTION;
+-- the principals pg_hba verifies against the directory (EXTERNAL_DIR)
+SELECT 'CREATE ROLE ligo_ldap NOLOGIN'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ligo_ldap') \gexec
+-- the admin grants these roles to the principals it creates
+GRANT "LEDGER_RO_ROLE", "LEDGER_RW_ROLE", ligo_ldap TO lab_target_admin WITH ADMIN OPTION;
 SELECT 'CREATE DATABASE ledger'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'ledger') \gexec
 

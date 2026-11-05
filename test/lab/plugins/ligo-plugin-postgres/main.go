@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,10 +23,18 @@ import (
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/dihedron/ligo/test/lab/plugins/labkit"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"google.golang.org/grpc/codes"
 )
 
 const typ = "postgres.v1"
+
+// ldapGroup is the group role whose members pg_hba verifies against the
+// directory (lib/pg.sh); every EXTERNAL_DIR role is one.
+const ldapGroup = "ligo_ldap"
+
+// undefinedObject is PostgreSQL's SQLSTATE for a role that does not exist.
+const undefinedObject = "42704"
 
 // Identifier grammars (§5.8 rule 3): nothing else reaches SQL unquoted, and
 // identifiers are quoted anyway.
@@ -70,7 +79,8 @@ func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 1,
 		PluginVersion: "lab", InstanceConfigSchemaJson: configSchema,
 		Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{
-			AcceptedIdentityModes:  []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC},
+			AcceptedIdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC,
+				pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR},
 			ClientOutputSchemaJson: outputSchema,
 		}},
 	}, nil
@@ -269,6 +279,10 @@ func owner(ctx context.Context, conn *pgx.Conn, role string) (exists bool, comme
 // caller gets a public message only.
 func failed(err error) error {
 	fmt.Fprintln(os.Stderr, "ligo-plugin-postgres:", err)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == undefinedObject { // a retry cannot bring the role back
+		return pluginsdk.Error(codes.FailedPrecondition, "ROLE_NOT_FOUND", "a granted role does not exist", false)
+	}
 	return pluginsdk.Error(codes.Unavailable, "TARGET_ERROR", "the target database refused a statement", true)
 }
 
@@ -294,8 +308,9 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 		return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_PRINCIPAL", "principal name", false)
 	}
 	mode := r.GetIdentity().GetMode()
-	if mode != pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL && mode != pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC {
-		return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "TARGET_LOCAL or DELEGATED_DYNAMIC only", false)
+	if mode != pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL && mode != pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC &&
+		mode != pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR {
+		return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE", "TARGET_LOCAL, DELEGATED_DYNAMIC or EXTERNAL_DIR only", false)
 	}
 	conn, err := in.connect(ctx)
 	if err != nil {
@@ -316,7 +331,20 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 	}
 	payload := &pluginv1.SecretProvisioningPayload{Mode: mode}
 	clientSpec := map[string]any{"endpoint": net.JoinHostPort(in.Host, strconv.Itoa(in.Port)), "database": in.Database}
-	if mode == pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
+	memberships := roles
+	switch mode {
+	case pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR:
+		// no password: the directory verifies it, and the engine forwards Stage 1's secret (§5.6)
+		clientSpec["user"] = principal
+		stmt := "ALTER ROLE " + ident
+		if !exists {
+			stmt = "CREATE ROLE " + ident + " LOGIN"
+		}
+		if _, err := conn.Exec(ctx, fmt.Sprintf("%s CONNECTION LIMIT %d", stmt, limit)); err != nil {
+			return nil, failed(err)
+		}
+		memberships = append(slices.Clone(roles), ldapGroup)
+	case pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL:
 		clientSpec["user"] = principal
 		length := minPassword(r.GetIdentity().GetMetadata()["password_length"])
 		switch {
@@ -340,7 +368,7 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 			}
 			payload.SecretUnchanged = true
 		}
-	} else {
+	default:
 		if !exists {
 			if _, err := conn.Exec(ctx, "CREATE ROLE "+ident+" NOLOGIN"); err != nil {
 				return nil, failed(err)
@@ -360,7 +388,7 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 	if _, err := conn.Exec(ctx, fmt.Sprintf("COMMENT ON ROLE %s IS '%s'", ident, tag(b))); err != nil { // the tag is "ligo:binding_id=" and a UUID
 		return nil, failed(err)
 	}
-	if err := grants(ctx, conn, principal, ident, roles); err != nil {
+	if err := grants(ctx, conn, principal, ident, memberships); err != nil {
 		return nil, failed(err)
 	}
 	spec, _ := json.Marshal(clientSpec)

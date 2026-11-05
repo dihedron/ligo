@@ -39,6 +39,7 @@ env_ligo() {
 		"LIGO_TEST_LDAP_OLIVIA_PASS=$(ldap_password olivia)" \
 		"LIGO_TEST_LDAP_LIVIA_PASS=$(ldap_password livia)" \
 		"LIGO_TEST_LDAP_IDP_PASS=$(ldap_password ligo-idp)" \
+		"LIGO_TEST_TARGET_ADMIN_PASS=$(password target-admin)" \
 		"LIGO_TEST_PLUGIN_DIR=$LIGO_PLUGINS"
 	local name
 	for name in "${LAB_PLUGINS[@]}"; do
