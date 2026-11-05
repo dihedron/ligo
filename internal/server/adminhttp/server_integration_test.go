@@ -102,6 +102,8 @@ const (
 	opID     = "spiffe://prod.lab/ops/olga"
 	appID    = "spiffe://prod.lab/ops/dora"
 	adminID  = "spiffe://prod.lab/ops/root"
+	admin2ID = "spiffe://prod.lab/ops/ada"
+	secID    = "spiffe://prod.lab/ops/sec"
 	viewerID = "spiffe://prod.lab/ops/vera"
 	bgID     = "spiffe://prod.lab/ops/glass"
 )
@@ -113,6 +115,8 @@ func (fakeDirectory) Authenticate(_ context.Context, user, password string) (aut
 	switch {
 	case user == "olivia" && password == "pw":
 		return authz.Principal{Name: "olivia", Groups: []string{"cn=ligo-viewers,ou=groups,dc=ligo,dc=lab"}}, nil
+	case user == "lena" && password == "pw":
+		return authz.Principal{Name: "lena", Groups: []string{"cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab"}}, nil
 	case user == "livia" && password == "pw":
 		return authz.Principal{Name: "livia", Groups: []string{"cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab"}}, nil
 	}
@@ -253,10 +257,13 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		{SPIFFEID: opID, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
 		{SPIFFEID: appID, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
 		{SPIFFEID: adminID, Role: config.RoleFullAccess, Scopes: []string{"*"}},
+		{SPIFFEID: admin2ID, Role: config.RoleFullAccess, Scopes: []string{"*"}},
+		{SPIFFEID: secID, Role: config.RoleApprover, Scopes: []string{"sec/*"}},
 		{SPIFFEID: viewerID, Role: config.RoleViewer, Scopes: []string{"*"}},
 		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}},
 		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Scopes: []string{"*"}},
 		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: "cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleApprover, Scopes: []string{"dc/*"}},
 	})
 	if err != nil {
 		t.Fatal(err)

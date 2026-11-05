@@ -13,8 +13,8 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 
 | | Rows | Covered | Partial | Gap | Covered at L or P | Covered only at U or B |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Scenarios (§11.2) | 92 | 91 | 1 | 0 | 17 | 15 |
-| Invariants (§4) | 26 | 21 | 5 | 0 | 3 | 3 |
+| Scenarios (§11.2) | 92 | 92 | 0 | 0 | 18 | 15 |
+| Invariants (§4) | 26 | 24 | 2 | 0 | 3 | 4 |
 
 ## Scenarios (§11.2)
 
@@ -123,17 +123,17 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | INV-04 | Covered | I | TestDelete |  |
 | INV-05 | Covered | I | TestApply |  |
 | INV-06 | Covered | I | TestFenced, TestMarkStep |  |
-| INV-07 | Partial | P | TestLabTargetPostgres, TestLabStoreVault | The lab plugins only; no conformance suite every plugin must pass. |
+| INV-07 | Partial | P | TestLabTargetPostgres, TestLabStoreVault, TestLabIdentityOpenLDAP | Known limit for v0.1.0: each plugin is tested on its own; no conformance suite every plugin must pass. |
 | INV-08 | Covered | I | TestINV08 |  |
 | INV-09 | Covered | I | TestINV09, TestAC11 |  |
 | INV-10 | Covered | P | TestLabPlugin, TestManagerStartRefusals |  |
-| INV-11 | Partial | I | TestChain, TestINV11, TestAC18 | Chain and append-only; nothing checks that *every* state-changing action audits. |
-| INV-12 | Partial | U | TestUISchemaRules, TestTemplates | Forms and `hx-nonce`; no test feeds hostile plugin data through every page. |
+| INV-11 | Covered | I | TestChain, TestINV11, TestINV11Routes (adminhttp, ui), TestAC09, TestRotate, TestAC18 | Every state-changing route of the API and the UI, read from the routers, must audit under its request ID or be listed with the reason it does not. |
+| INV-12 | Covered | U | TestINV12, TestUISchemaRules, TestTemplates | Hostile values in every string of every page and fragment; plugin data never in `hx-*`. |
 | INV-13 | Covered | I+U | TestOutputRefused, TestValidate (outputvalidation) |  |
 | INV-14 | Covered | I | TestINV14, TestStructure |  |
 | INV-15 | Covered | U | TestINV15 |  |
 | INV-16 | Covered | P | TestLabBreakGlass, TestRevertFailed |  |
-| INV-17 | Partial | U+I | TestAppendixD2Extraction, TestScopes, TestINV08 | No test named for it; the parts are covered indirectly. |
+| INV-17 | Covered | U+I | TestINV17, TestAppendixD2Extraction, TestScopes, TestINV08 |  |
 | INV-18 | Covered | I | TestINV18, TestAC49 |  |
 | INV-19 | Covered | I | TestRecheck, TestAC52 |  |
 | INV-20 | Covered | I | TestINV20, TestConsent |  |

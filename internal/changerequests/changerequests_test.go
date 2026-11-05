@@ -34,6 +34,17 @@ func status(err error) string {
 	return ""
 }
 
+// TestBuildSidesParty: a party's approvers always decide its side, even when
+// the requester acts for its scope and that scope requires no approval, which
+// the database refuses as AUTO (ADR-13 rule 6).
+func TestBuildSidesParty(t *testing.T) {
+	sides, err := BuildSides([]Candidate{{Side: "PARTY:security", Scope: "sec/infosec"}},
+		Caller{Principal: authz.Principal{Name: "alice"}, Grants: authz.Grants{grant(config.RoleFullAccess, "*")}}, policy, "")
+	if err != nil || sides[0].Basis != BasisHuman || !sides[0].ApprovalRequired || sides[0].Decision != "" {
+		t.Errorf("%+v, %v", sides, err)
+	}
+}
+
 // TestBuildSides: the basis of each side is fixed at creation (ADR-13 rule
 // 6, §7.2.3 "Sides at creation").
 func TestBuildSides(t *testing.T) {
@@ -279,6 +290,7 @@ func TestRatifiableSides(t *testing.T) {
 		err    string
 	}{
 		"requester":                     {r, livia, "", nil, "four-eyes-violation"},
+		"an SVID, not a person":         {r, Caller{Principal: authz.Principal{SPIFFEID: "spiffe://prod.lab/ops/dora"}, Grants: authz.Grants{grant(config.RoleApprover, "*")}}, "TARGET", nil, "forbidden"},
 		"several sides, distinct":       {r, marco, "", nil, "side-required"},
 		"one side chosen":               {r, marco, "TARGET", []string{"TARGET"}, ""},
 		"AUTO sides are not ratified":   {r, marco, "SOURCE", nil, "forbidden"},

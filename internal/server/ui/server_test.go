@@ -2,12 +2,14 @@ package ui
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"html/template"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -330,5 +332,143 @@ func samples() map[string]any {
 		"platforms":       []PlatformRow{{Name: "p", Serving: true, Health: "serving", TargetScopes: []string{"dc/x/*"}}},
 		"catalog":         CatalogPage{Types: []string{"oracle.v1"}, Targets: []catalog.Target{{Name: "t", State: "DEPRECATED"}}, Next: "t"},
 		"catalog-card":    CardPage{Target: tgt, Flows: []flows.Flow{{Name: "f"}}, FlowsJSON: "{}", Outcomes: []catalog.Outcome{{Source: "s", Allowed: true, Sides: []string{"TARGET"}}}},
+	}
+}
+
+// neverTainted are engine enums the templates branch on: hostile values would
+// only hide the branches, and no plugin or person sets them freely.
+var neverTainted = map[string]bool{"Type": true, "Phase": true, "Status": true, "Operation": true, "Kind": true, "Basis": true,
+	"Decision": true, "Consent": true, "State": true, "Step": true}
+
+// taint replaces, below v, every non-empty string and JSON document in the
+// structs that only says (nil: everywhere) with payload.
+func taint(v reflect.Value, payload string, only map[reflect.Type]bool, inside bool) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			taint(v.Elem(), payload, only, inside)
+		}
+	case reflect.Interface:
+		if !v.IsNil() && v.CanSet() {
+			c := reflect.New(v.Elem().Type()).Elem()
+			c.Set(v.Elem())
+			taint(c, payload, only, inside)
+			v.Set(c)
+		}
+	case reflect.Struct:
+		inside = inside || only == nil || only[v.Type()]
+		for i := range v.NumField() {
+			if f := v.Type().Field(i); f.IsExported() && !neverTainted[f.Name] {
+				taint(v.Field(i), payload, only, inside)
+			}
+		}
+	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			if inside && v.Len() > 0 && v.CanSet() {
+				doc, _ := json.Marshal(map[string]string{"x": payload})
+				v.SetBytes(doc)
+			}
+			return
+		}
+		for i := range v.Len() {
+			taint(v.Index(i), payload, only, inside)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			c := reflect.New(v.Type().Elem()).Elem()
+			c.Set(v.MapIndex(k))
+			taint(c, payload, only, inside)
+			v.SetMapIndex(k, c)
+		}
+	case reflect.String:
+		if inside && v.Len() > 0 && v.CanSet() {
+			v.SetString(payload)
+		}
+	}
+}
+
+// renderTainted answers every page and fragment, with samples tainted as above.
+func renderTainted(t *testing.T, s *Server, payload string, only map[reflect.Type]bool) map[string]string {
+	t.Helper()
+	data := samples()
+	for name, sample := range data {
+		c := reflect.New(reflect.TypeOf(sample)).Elem()
+		c.Set(reflect.ValueOf(sample))
+		taint(c, payload, only, false)
+		data[name] = c.Interface()
+	}
+	out := map[string]string{}
+	do := func(what string, h http.HandlerFunc) {
+		rec := httptest.NewRecorder()
+		s.secure(h).ServeHTTP(rec, httptest.NewRequest("GET", "/ui/x", nil))
+		if rec.Code != 200 {
+			t.Errorf("%s with %q: %d", what, payload, rec.Code)
+		}
+		out[what] = rec.Body.String()
+	}
+	for name := range s.pages.page {
+		do("page "+name, func(w http.ResponseWriter, r *http.Request) {
+			s.page(w, r, 200, name, Page{Title: "t", CSRF: "c", User: "u", Content: data[name]})
+		})
+	}
+	for _, tmpl := range s.pages.fragment.Templates() {
+		name := tmpl.Name()
+		if name == "ui" || strings.HasSuffix(name, ".html") {
+			continue
+		}
+		do("fragment "+name, func(w http.ResponseWriter, r *http.Request) { s.fragment(w, r, 200, name, data[name]) })
+	}
+	return out
+}
+
+// TestINV12 renders every page and fragment with hostile values in every
+// string of its data, and looks in the parsed document for what they could
+// have become: an element, an event handler, a script URL. Values a plugin
+// supplies must also stay out of hx-* attributes altogether (§7.4, T-05).
+func TestINV12(t *testing.T) {
+	s := newServer(t)
+	for _, payload := range []string{`"'><img src=x onerror=inv12()><script>inv12()</script>`, `javascript:inv12()`, `{{inv12}}`} {
+		for what, body := range renderTainted(t, s, payload, nil) {
+			doc, err := html.Parse(strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for node := range doc.Descendants() {
+				if node.Type != html.ElementNode {
+					continue
+				}
+				if node.Data == "script" && node.FirstChild != nil && strings.Contains(node.FirstChild.Data, "inv12") {
+					t.Errorf("%s with %q: a script element holds the value", what, payload)
+				}
+				for _, a := range node.Attr {
+					value := strings.ToLower(strings.TrimSpace(a.Val))
+					switch {
+					case strings.HasPrefix(a.Key, "on") && strings.Contains(value, "inv12"):
+						t.Errorf("%s with %q: <%s %s=%q>", what, payload, node.Data, a.Key, a.Val)
+					case (a.Key == "href" || a.Key == "src" || a.Key == "action") && strings.HasPrefix(value, "javascript:"):
+						t.Errorf("%s with %q: <%s %s=%q>", what, payload, node.Data, a.Key, a.Val)
+					}
+				}
+			}
+		}
+	}
+	plugins := map[reflect.Type]bool{reflect.TypeFor[Field](): true, reflect.TypeFor[Option](): true, reflect.TypeFor[PlatformRow](): true, reflect.TypeFor[bindings.Stage](): true}
+	seen := false
+	for what, body := range renderTainted(t, s, "inv12data", plugins) {
+		seen = seen || strings.Contains(body, "inv12data")
+		doc, err := html.Parse(strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for node := range doc.Descendants() {
+			for _, a := range node.Attr {
+				if strings.HasPrefix(a.Key, "hx-") && strings.Contains(a.Val, "inv12data") {
+					t.Errorf("%s: plugin data in <%s %s=%q>", what, node.Data, a.Key, a.Val)
+				}
+			}
+		}
+	}
+	if !seen {
+		t.Error("the plugin data was not rendered anywhere: the test checks nothing")
 	}
 }
