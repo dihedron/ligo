@@ -60,6 +60,7 @@ jobs:
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
+      LIGO_TEST_TARGET_ADMIN_DSN: postgres://lab_target_admin:target@localhost:5432/ledger?sslmode=disable
       LIGO_TEST_PG_MIGRATOR_DSN: postgres://ligo_migrator:migrator@localhost:5432/ligo?sslmode=disable
       LIGO_TEST_PG_APP_DSN: postgres://ligo_app:app@localhost:5432/ligo?sslmode=disable
       LIGO_TEST_PG_READER_DSN: postgres://ligo_reader:reader@localhost:5432/ligo?sslmode=disable
@@ -102,6 +103,9 @@ jobs:
           psql -v migrator_password=migrator -v app_password=app
           -v reader_password=reader -v dbos_password=dbos
           -f test/lab/sql/roles.sql
+
+      - name: Create the target database of ligo-plugin-postgres
+        run: psql -v admin_password=target -f test/lab/sql/target.sql
 
       - name: Test with coverage
         # unit and integration tests in one run; -coverpkg credits code with

@@ -401,7 +401,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 		Resources: map[string]changerequests.Resource{}, BreakGlassRules: cfg.BreakGlass}
 	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: requests}
 	ts := &targets.Service{DB: pools.App, Rules: targetRules, Requests: requests, Validate: targets.Plugins(plugins)}
-	bs := &bindings.Service{DB: pools.App, Rules: bindingRules, Requests: requests, Validate: bindings.Plugins(plugins), Sources: ss,
+	bs := &bindings.Service{DB: pools.App, Rules: bindingRules, Requests: requests, Validate: bindings.Plugins(plugins), Sources: ss, ExactSubject: plugins.ExactSubject,
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
 	requests.Resources["SOURCE"], requests.Resources["TARGET"], requests.Resources["BINDING"] = ss, ts, bs
 	az, err := authz.New(cfg.Authorization.Bindings)

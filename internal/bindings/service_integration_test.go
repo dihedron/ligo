@@ -737,3 +737,24 @@ func TestAC30(t *testing.T) {
 		t.Errorf("request %s %s", r.Status, sides(r))
 	}
 }
+
+// TestSourceNotExact: VS-8, a store that binds one exact SPIFFE ID refuses, when
+// the binding is filed, a source whose regex matches more (OI-1).
+func TestSourceNotExact(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	wide := "wide-src-" + w.suffix
+	if _, err := o.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), wide, `^spiffe://prod\.internal/ns/`+w.suffix+`/sa/[a-z]+$`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = o.Exec(context.Background(), "delete from sources where name = $1", wide) })
+	s.ExactSubject = func(string, string) bool { return true }
+	if _, err := s.Create(ctx, dcOp, body("wide-"+w.suffix, wide, w.dcShared, "read")); slug(err) != "source-not-exact" {
+		t.Errorf("a regex that matches more: %v", err)
+	}
+	s.ExactSubject = func(string, string) bool { return false }
+	if _, err := s.Create(ctx, dcOp, body("wide-"+w.suffix, wide, w.dcShared, "read")); err != nil {
+		t.Errorf("a store that binds no subject: %v", err)
+	}
+}

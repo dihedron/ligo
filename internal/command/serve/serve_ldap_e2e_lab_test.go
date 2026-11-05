@@ -171,10 +171,10 @@ func revoke(t *testing.T, olga, dora *admin, name string, b map[string]any) {
 	phase(t, olga, name, "")
 }
 
-// storeCredential reads the binding's credential as its workload does: the
-// location from ligo's workload API, then the secret with its JWT-SVID. The
-// passwords go to a file for lab.sh's search (INV-03, OL-14).
-func storeCredential(t *testing.T, target string) (user, password string) {
+// storeRead reads a binding's credential as its workload does: the location
+// from ligo's workload API, then the credential with its JWT-SVID. The passwords
+// go to a file for lab.sh's search (INV-03, OL-14).
+func storeRead(t *testing.T, target, pathKey string, fields func(map[string]string) (string, string)) (user, password string) {
 	t.Helper()
 	w := newWorkload(t, "workload", false)
 	var item map[string]any
@@ -227,18 +227,25 @@ func storeCredential(t *testing.T, target string) (user, password string) {
 		} `json:"auth"`
 	}
 	call(http.MethodPost, "auth/"+cfg["authMount"].(string)+"/login", "", map[string]string{"role": cfg["role"].(string), "jwt": strings.TrimSpace(string(jwt))}, &login)
-	var kv struct {
-		Data struct {
-			Data struct {
-				Username string `json:"username"`
-				Password string `json:"password"`
-			} `json:"data"`
-		} `json:"data"`
+	var answer struct {
+		Data json.RawMessage `json:"data"`
 	}
-	call(http.MethodGet, cfg["secretPath"].(string), login.Auth.ClientToken, nil, &kv)
-	user, password = kv.Data.Data.Username, kv.Data.Data.Password
-	if spec := item["spec"].(map[string]any); user == "" || password == "" || spec["user"] != user {
-		t.Fatalf("the secret's user %q, the spec's %v", user, spec["user"])
+	call(http.MethodGet, cfg[pathKey].(string), login.Auth.ClientToken, nil, &answer)
+	var data map[string]string
+	if pathKey == "secretPath" { // KV v2 nests it
+		var kv struct {
+			Data map[string]string `json:"data"`
+		}
+		if err := json.Unmarshal(answer.Data, &kv); err != nil {
+			t.Fatal("cannot decode the secret")
+		}
+		data = kv.Data
+	} else if err := json.Unmarshal(answer.Data, &data); err != nil {
+		t.Fatal("cannot decode the credential")
+	}
+	user, password = fields(data)
+	if user == "" || password == "" {
+		t.Fatal("the store gave no credential")
 	}
 	f, err := os.OpenFile(e2eEnv(t, "LIGO_E2E_SECRETS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -249,6 +256,12 @@ func storeCredential(t *testing.T, target string) (user, password string) {
 		t.Fatal(err)
 	}
 	return user, password
+}
+
+// storeCredential is a static credential, whose user is the spec's.
+func storeCredential(t *testing.T, target string) (user, password string) {
+	t.Helper()
+	return storeRead(t, target, "secretPath", func(data map[string]string) (string, string) { return data["username"], data["password"] })
 }
 
 // TestServeLDAPLifecycle: OL-11, approved, the credential from the store
@@ -343,8 +356,9 @@ func TestServeLDAPStageTwoFails(t *testing.T) {
 	if exists, descriptions := account(t, principal); !exists || len(descriptions) != 1 || descriptions[0] != tag {
 		t.Fatalf("Stage 1 left no account of this binding: %v %v", exists, descriptions)
 	}
-	if exists, comment := roleTag(t, admin, principal); !exists || comment != tag {
-		t.Fatalf("Stage 2 left no role of this binding: %v %q", exists, comment)
+	// Stage 2 is one transaction: its failure leaves no role (PG-8), and cleanup finds nothing to do
+	if exists, comment := roleTag(t, admin, principal); exists {
+		t.Fatalf("Stage 2 left a role: %q", comment)
 	}
 
 	revoke(t, olga, dora, binding, b)

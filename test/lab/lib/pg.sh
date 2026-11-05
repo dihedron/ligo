@@ -105,8 +105,10 @@ pg_target() {
 	inner_exec pg sh -c "sed -i '/^TLS_CACERT/d' /etc/ldap/ldap.conf && echo 'TLS_CACERT /etc/ligo-lab/ca.crt' >>/etc/ldap/ldap.conf"
 	inner_exec pg sh -c "sed -i '/^hostssl ledger/d' $hba && cat >>$hba" <<HBA
 hostssl ledger lab_target_admin $LAB_INNER_SUBNET scram-sha-256
+hostssl ledger lab_target_admin $LAB_SUBNET scram-sha-256
 hostssl ledger +ligo_ldap $LAB_INNER_SUBNET ldap ldapserver=ldap.ligo.lab ldapscheme=ldaps ldapprefix="uid=" ldapsuffix=",ou=ligo-accounts,$LDAP_BASE"
 hostssl ledger all $LAB_INNER_SUBNET scram-sha-256
+hostssl ledger all $LAB_SUBNET scram-sha-256
 HBA
 	inner_exec pg systemctl reload "postgresql@$v-main"
 	info "target database ledger ready (ligo-plugin-postgres)"

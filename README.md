@@ -25,9 +25,12 @@ Working:
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`);
-- the `openldap.v1` identity provider, `ligo-plugin-openldap`, with its own package ([docs/operations.md](docs/operations.md)).
+- the external plugins, each with its own package: `ligo-plugin-openldap` (identity provider), `ligo-plugin-postgres` (platform provider) and `ligo-plugin-vault` (secret store, for Vault and OpenBao).
 
-Known limit: there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07).
+Known limits of v0.1.0:
+- PostgreSQL is the only platform provider, and workloads cannot connect to it with an SVID directly (`.specs/ligo-postgres-plugin.md` §10);
+- the Vault store releases a credential to one exact SPIFFE ID, so a source covering many workloads cannot use it (`.specs/ligo-vault-plugin.md` §4);
+- there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07).
 
 Everything is tested on a lab that reproduces the production architecture (two SPIRE trust domains, OpenBao, LDAP, PostgreSQL and target systems; see [.specs/ligo-test-environment.md](.specs/ligo-test-environment.md)). The lab suite passes against OpenBao 2.7.1 and HashiCorp Vault 2.2.1. The lab also runs a toy echo service for trying bindings by hand from the CLI or the web UI ([.specs/ligo-echo-target.md](.specs/ligo-echo-target.md)).
 
@@ -42,7 +45,7 @@ make help     # list the targets
 
 ## Install
 
-Each release has deb and rpm packages and archives of `ligo` and of `ligo-plugin-openldap`. [docs/operations.md](docs/operations.md) covers installing and running them.
+Each release has deb and rpm packages and archives of `ligo` and of each plugin. [docs/operations.md](docs/operations.md) covers installing and running them.
 
 ### Verify a release
 

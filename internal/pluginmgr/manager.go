@@ -309,6 +309,22 @@ func (m *Manager) Strategies(storeType string) []string {
 	return out
 }
 
+// ExactSubject reports whether a store's strategy binds one exact SPIFFE ID
+// (OI-1, .specs/ligo-vault-plugin.md §4).
+func (m *Manager) ExactSubject(storeType, strategy string) bool {
+	for _, p := range m.procs {
+		if p.spec.Kind != pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE || p.spec.Type != storeType {
+			continue
+		}
+		for _, st := range p.described.GetSecretStore().GetSecretStorageStrategies() {
+			if st.GetName() == strategy && st.GetSubjectMatch() == pluginv1.SubjectMatch_SUBJECT_MATCH_EXACT {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // buildValidators compiles, for each platform and store instance, its
 // plugin's output schema with the instance's allowed_endpoints (§5.7).
 func (m *Manager) buildValidators() error {

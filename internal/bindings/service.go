@@ -20,6 +20,7 @@ import (
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,9 @@ type Service struct {
 	Rules    *Rules
 	Requests *changerequests.Service
 	Validate ValidateBinding
+	// ExactSubject reports whether a store's strategy binds one exact SPIFFE ID
+	// (OI-1); nil: none does.
+	ExactSubject func(storeType, strategy string) bool
 	// Start starts a binding's workflow once its change committed
 	// (§6.2.2 step 2); the sweeper starts it if this fails (§6.3).
 	Start func(ctx context.Context, bindingID uuid.UUID) error
@@ -361,6 +365,11 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	params := b.Parameters
 	if len(params) == 0 {
 		params = json.RawMessage("{}")
+	}
+	if s.ExactSubject != nil && s.ExactSubject(pl.SecretStoreType, pl.SecretStorageStrategy) {
+		if _, ok := pluginsdk.LiteralSPIFFEID(src.regex); !ok {
+			return nil, refuse(422, "source-not-exact", "the secret store of %s binds one exact SPIFFE ID, and the source's regex matches more", pl.Name)
+		}
 	}
 	resp, err := s.Validate(ctx, &pluginv1.ValidateBindingRequest{Instance: pl.Name, DefinitionJson: tgt.definition,
 		AccessLevel: b.AccessLevel, AccessLevelGrantsJson: grants, ParametersJson: params, SourceTrustDomain: src.td})

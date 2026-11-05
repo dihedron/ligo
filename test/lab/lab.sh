@@ -190,6 +190,7 @@ cmd_env() {
 		upper="$(tr '[:lower:]' '[:upper:]' <<<"$role")"
 		printf 'export LIGO_TEST_PG_%s_DSN=%q\n' "$upper" "$(pg_dsn "$role")"
 	done
+	printf 'export LIGO_TEST_TARGET_ADMIN_DSN=%q\n' "postgres://lab_target_admin:$(password target-admin)@$(lxd_ip):5432/ledger?sslmode=verify-full&sslrootcert=$LAB_STATE_DIR/pki/ca.crt"
 }
 
 cmd_test() {

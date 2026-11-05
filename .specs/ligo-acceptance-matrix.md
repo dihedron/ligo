@@ -19,6 +19,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 ## Lab rules (§11.1)
 
 - **Rule 1, tenancies.** `TestServeTopologies` runs the four topologies of ADR-13 on the lab: cloud to cloud, data centre to data centre, cloud to data centre with an additional party, and data centre to cloud. Another account's source is refused. Limit: the tenancy's workload is minted by `lab.sh`, not registered by a registrar, and it reads its binding from ligo but not its credential from the store, because the store of zone `prod` does not trust `test.lab` tokens.
+- **Shipped plugins.** `.specs/ligo-postgres-plugin.md` §9 and `.specs/ligo-vault-plugin.md` §9 list their acceptance rows, and `TestServeDynamicCredentials` runs `vault-dynamic` end to end. `SVID` mode on PostgreSQL is not offered in v0.1.0 (OI-4), and `vault.v1` accepts exact SPIFFE IDs only (OI-1, `TestSourceNotExact`).
 - **Rule 3, faults.** `lab.sh serve test-faults` stops the secrets backend under a binding's sealing (AC-09), and PostgreSQL for 10 s under bindings being applied (`TestServeFaultDatabase`): every binding converges, and no replica restarts.
 
 ## Scenarios (§11.2)
@@ -128,7 +129,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | INV-04 | Covered | I | TestDelete |  |
 | INV-05 | Covered | I | TestApply |  |
 | INV-06 | Covered | I | TestFenced, TestMarkStep |  |
-| INV-07 | Partial | P | TestLabTargetPostgres, TestLabStoreVault, TestLabIdentityOpenLDAP | Known limit for v0.1.0: each plugin is tested on its own; no conformance suite every plugin must pass. |
+| INV-07 | Partial | I+P+U | TestTargetLocal, TestForeign, TestCleanup (postgres), TestCleanup (vault), TestLabTargetPostgres, TestLabStoreVault, TestLabIdentityOpenLDAP | Known limit for v0.1.0: each plugin is tested on its own; no conformance suite every plugin must pass. |
 | INV-08 | Covered | I | TestINV08 |  |
 | INV-09 | Covered | I | TestINV09, TestAC11 |  |
 | INV-10 | Covered | P | TestLabPlugin, TestManagerStartRefusals |  |
