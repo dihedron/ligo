@@ -1,0 +1,5 @@
+# Operator's Guide: title page and PDF metadata (see docs/build.sh)
+title: "Operator's Guide"
+subtitle: "Running ligo day to day, and on call"
+author: "ligo"
+lang: en-GB

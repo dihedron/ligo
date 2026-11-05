@@ -25,7 +25,7 @@ Out of scope: `activedirectory.v1`; groups (`IdentityArtifact.groups` stays empt
 | `/usr/lib/ligo/plugins/` (`root:root`, `0755`) | both |
 | `/usr/lib/ligo/plugins/ligo-plugin-openldap` (`root:root`, `0755`) | `ligo-plugin-openldap` |
 
-- **Upgrades.** `plugins[].sha256` pins the binary, so a package update cannot silently change privileged code: after upgrading, the new binary is refused until the operator sets the new hash (`sha256sum /usr/lib/ligo/plugins/ligo-plugin-openldap`) in `server.yaml` and restarts `ligo` (a reload is not enough, §8.2). A `unix:sha256` selector in SPIRE (ADR-03 point 5) pins it too, so the entry changes as well. The binary carries only its version, so a tag always gives the same hash. The steps are in `docs/operations.md`.
+- **Upgrades.** `plugins[].sha256` pins the binary, so a package update cannot silently change privileged code: after upgrading, the new binary is refused until the operator sets the new hash (`sha256sum /usr/lib/ligo/plugins/ligo-plugin-openldap`) in `server.yaml` and restarts `ligo` (a reload is not enough, §8.2). A `unix:sha256` selector in SPIRE (ADR-03 point 5) pins it too, so the entry changes as well. The binary carries only its version, so a tag always gives the same hash. The steps are in the Operator's Guide.
 
 ## 3. Instance configuration
 
