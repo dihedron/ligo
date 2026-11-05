@@ -180,6 +180,54 @@ func (Operation) EnumDescriptor() ([]byte, []int) {
 	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{2}
 }
 
+// What a store can enforce about who reads a credential (OI-1): ligo refuses a
+// binding whose source the store could only over-approximate.
+type SubjectMatch int32
+
+const (
+	SubjectMatch_SUBJECT_MATCH_UNSPECIFIED SubjectMatch = 0 // the store releases nothing to a subject
+	SubjectMatch_SUBJECT_MATCH_EXACT       SubjectMatch = 1 // one exact SPIFFE ID
+)
+
+// Enum value maps for SubjectMatch.
+var (
+	SubjectMatch_name = map[int32]string{
+		0: "SUBJECT_MATCH_UNSPECIFIED",
+		1: "SUBJECT_MATCH_EXACT",
+	}
+	SubjectMatch_value = map[string]int32{
+		"SUBJECT_MATCH_UNSPECIFIED": 0,
+		"SUBJECT_MATCH_EXACT":       1,
+	}
+)
+
+func (x SubjectMatch) Enum() *SubjectMatch {
+	p := new(SubjectMatch)
+	*p = x
+	return p
+}
+
+func (x SubjectMatch) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SubjectMatch) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_proto_plugin_v1_plugin_proto_enumTypes[3].Descriptor()
+}
+
+func (SubjectMatch) Type() protoreflect.EnumType {
+	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[3]
+}
+
+func (x SubjectMatch) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SubjectMatch.Descriptor instead.
+func (SubjectMatch) EnumDescriptor() ([]byte, []int) {
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{3}
+}
+
 type UIFieldType int32
 
 const (
@@ -225,11 +273,11 @@ func (x UIFieldType) String() string {
 }
 
 func (UIFieldType) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_proto_plugin_v1_plugin_proto_enumTypes[3].Descriptor()
+	return file_api_proto_plugin_v1_plugin_proto_enumTypes[4].Descriptor()
 }
 
 func (UIFieldType) Type() protoreflect.EnumType {
-	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[3]
+	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[4]
 }
 
 func (x UIFieldType) Number() protoreflect.EnumNumber {
@@ -238,7 +286,7 @@ func (x UIFieldType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UIFieldType.Descriptor instead.
 func (UIFieldType) EnumDescriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{4}
 }
 
 type FlowPurpose int32
@@ -277,11 +325,11 @@ func (x FlowPurpose) String() string {
 }
 
 func (FlowPurpose) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_proto_plugin_v1_plugin_proto_enumTypes[4].Descriptor()
+	return file_api_proto_plugin_v1_plugin_proto_enumTypes[5].Descriptor()
 }
 
 func (FlowPurpose) Type() protoreflect.EnumType {
-	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[4]
+	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[5]
 }
 
 func (x FlowPurpose) Number() protoreflect.EnumNumber {
@@ -290,7 +338,7 @@ func (x FlowPurpose) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FlowPurpose.Descriptor instead.
 func (FlowPurpose) EnumDescriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{4}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{5}
 }
 
 type FlowProtocol int32
@@ -326,11 +374,11 @@ func (x FlowProtocol) String() string {
 }
 
 func (FlowProtocol) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_proto_plugin_v1_plugin_proto_enumTypes[5].Descriptor()
+	return file_api_proto_plugin_v1_plugin_proto_enumTypes[6].Descriptor()
 }
 
 func (FlowProtocol) Type() protoreflect.EnumType {
-	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[5]
+	return &file_api_proto_plugin_v1_plugin_proto_enumTypes[6]
 }
 
 func (x FlowProtocol) Number() protoreflect.EnumNumber {
@@ -339,7 +387,7 @@ func (x FlowProtocol) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FlowProtocol.Descriptor instead.
 func (FlowProtocol) EnumDescriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{5}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{6}
 }
 
 type Endpoint struct {
@@ -1515,6 +1563,7 @@ type SecretStorageStrategy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // e.g. "svid", "vault-static", "vault-dynamic"
 	IdentityModes []IdentityMode         `protobuf:"varint,2,rep,packed,name=identity_modes,json=identityModes,proto3,enum=ligo.plugin.v1.IdentityMode" json:"identity_modes,omitempty"`
+	SubjectMatch  SubjectMatch           `protobuf:"varint,3,opt,name=subject_match,json=subjectMatch,proto3,enum=ligo.plugin.v1.SubjectMatch" json:"subject_match,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1561,6 +1610,13 @@ func (x *SecretStorageStrategy) GetIdentityModes() []IdentityMode {
 		return x.IdentityModes
 	}
 	return nil
+}
+
+func (x *SecretStorageStrategy) GetSubjectMatch() SubjectMatch {
+	if x != nil {
+		return x.SubjectMatch
+	}
+	return SubjectMatch_SUBJECT_MATCH_UNSPECIFIED
 }
 
 type ConfigureInstancesRequest struct {
@@ -3531,10 +3587,11 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\"\xb7\x01\n" +
 	"\x17SecretStoreCapabilities\x12a\n" +
 	"\x19secret_storage_strategies\x18\x01 \x03(\v2%.ligo.plugin.v1.SecretStorageStrategyR\x17secretStorageStrategies\x129\n" +
-	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\"p\n" +
+	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\"\xb3\x01\n" +
 	"\x15SecretStorageStrategy\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12C\n" +
-	"\x0eidentity_modes\x18\x02 \x03(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\ridentityModes\"\xa7\x01\n" +
+	"\x0eidentity_modes\x18\x02 \x03(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\ridentityModes\x12A\n" +
+	"\rsubject_match\x18\x03 \x01(\x0e2\x1c.ligo.plugin.v1.SubjectMatchR\fsubjectMatch\"\xa7\x01\n" +
 	"\x19ConfigureInstancesRequest\x12\x12\n" +
 	"\x04zone\x18\x01 \x01(\tR\x04zone\x124\n" +
 	"\x16spiffe_workload_socket\x18\x02 \x01(\tR\x14spiffeWorkloadSocket\x12@\n" +
@@ -3687,7 +3744,10 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fOPERATION_APPLY\x10\x01\x12\x15\n" +
 	"\x11OPERATION_REAPPLY\x10\x02\x12\x14\n" +
-	"\x10OPERATION_DELETE\x10\x03*\xce\x01\n" +
+	"\x10OPERATION_DELETE\x10\x03*F\n" +
+	"\fSubjectMatch\x12\x1d\n" +
+	"\x19SUBJECT_MATCH_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13SUBJECT_MATCH_EXACT\x10\x01*\xce\x01\n" +
 	"\vUIFieldType\x12\x1d\n" +
 	"\x19UI_FIELD_TYPE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12UI_FIELD_TYPE_TEXT\x10\x01\x12\x18\n" +
@@ -3734,142 +3794,144 @@ func file_api_proto_plugin_v1_plugin_proto_rawDescGZIP() []byte {
 	return file_api_proto_plugin_v1_plugin_proto_rawDescData
 }
 
-var file_api_proto_plugin_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_api_proto_plugin_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
 var file_api_proto_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_api_proto_plugin_v1_plugin_proto_goTypes = []any{
 	(IdentityMode)(0),                    // 0: ligo.plugin.v1.IdentityMode
 	(PluginKind)(0),                      // 1: ligo.plugin.v1.PluginKind
 	(Operation)(0),                       // 2: ligo.plugin.v1.Operation
-	(UIFieldType)(0),                     // 3: ligo.plugin.v1.UIFieldType
-	(FlowPurpose)(0),                     // 4: ligo.plugin.v1.FlowPurpose
-	(FlowProtocol)(0),                    // 5: ligo.plugin.v1.FlowProtocol
-	(*Endpoint)(nil),                     // 6: ligo.plugin.v1.Endpoint
-	(*PluginErrorDetail)(nil),            // 7: ligo.plugin.v1.PluginErrorDetail
-	(*SVIDSelectorConfig)(nil),           // 8: ligo.plugin.v1.SVIDSelectorConfig
-	(*InstanceDescriptor)(nil),           // 9: ligo.plugin.v1.InstanceDescriptor
-	(*BindingContext)(nil),               // 10: ligo.plugin.v1.BindingContext
-	(*StaticSecret)(nil),                 // 11: ligo.plugin.v1.StaticSecret
-	(*IdentityArtifact)(nil),             // 12: ligo.plugin.v1.IdentityArtifact
-	(*DelegatedRoleSpec)(nil),            // 13: ligo.plugin.v1.DelegatedRoleSpec
-	(*SecretProvisioningPayload)(nil),    // 14: ligo.plugin.v1.SecretProvisioningPayload
-	(*DescribeRequest)(nil),              // 15: ligo.plugin.v1.DescribeRequest
-	(*DescribeResponse)(nil),             // 16: ligo.plugin.v1.DescribeResponse
-	(*IdentityProviderCapabilities)(nil), // 17: ligo.plugin.v1.IdentityProviderCapabilities
-	(*PlatformProviderCapabilities)(nil), // 18: ligo.plugin.v1.PlatformProviderCapabilities
-	(*SecretStoreCapabilities)(nil),      // 19: ligo.plugin.v1.SecretStoreCapabilities
-	(*SecretStorageStrategy)(nil),        // 20: ligo.plugin.v1.SecretStorageStrategy
-	(*ConfigureInstancesRequest)(nil),    // 21: ligo.plugin.v1.ConfigureInstancesRequest
-	(*ResolvedInstance)(nil),             // 22: ligo.plugin.v1.ResolvedInstance
-	(*ConfigureInstancesResponse)(nil),   // 23: ligo.plugin.v1.ConfigureInstancesResponse
-	(*HealthRequest)(nil),                // 24: ligo.plugin.v1.HealthRequest
-	(*HealthResponse)(nil),               // 25: ligo.plugin.v1.HealthResponse
-	(*UIFieldOption)(nil),                // 26: ligo.plugin.v1.UIFieldOption
-	(*UIFieldDescriptor)(nil),            // 27: ligo.plugin.v1.UIFieldDescriptor
-	(*UIForm)(nil),                       // 28: ligo.plugin.v1.UIForm
-	(*GetUISchemasRequest)(nil),          // 29: ligo.plugin.v1.GetUISchemasRequest
-	(*GetUISchemasResponse)(nil),         // 30: ligo.plugin.v1.GetUISchemasResponse
-	(*PortRange)(nil),                    // 31: ligo.plugin.v1.PortRange
-	(*NetworkFlow)(nil),                  // 32: ligo.plugin.v1.NetworkFlow
-	(*EnsureIdentityRequest)(nil),        // 33: ligo.plugin.v1.EnsureIdentityRequest
-	(*EnsureIdentityResponse)(nil),       // 34: ligo.plugin.v1.EnsureIdentityResponse
-	(*CleanupIdentityRequest)(nil),       // 35: ligo.plugin.v1.CleanupIdentityRequest
-	(*CleanupIdentityResponse)(nil),      // 36: ligo.plugin.v1.CleanupIdentityResponse
-	(*AccessLevelInput)(nil),             // 37: ligo.plugin.v1.AccessLevelInput
-	(*ValidateTargetRequest)(nil),        // 38: ligo.plugin.v1.ValidateTargetRequest
-	(*NormalizedAccessLevel)(nil),        // 39: ligo.plugin.v1.NormalizedAccessLevel
-	(*ValidateTargetResponse)(nil),       // 40: ligo.plugin.v1.ValidateTargetResponse
-	(*ValidateBindingRequest)(nil),       // 41: ligo.plugin.v1.ValidateBindingRequest
-	(*ValidateBindingResponse)(nil),      // 42: ligo.plugin.v1.ValidateBindingResponse
-	(*EnsureTargetRequest)(nil),          // 43: ligo.plugin.v1.EnsureTargetRequest
-	(*EnsureTargetResponse)(nil),         // 44: ligo.plugin.v1.EnsureTargetResponse
-	(*CleanupTargetRequest)(nil),         // 45: ligo.plugin.v1.CleanupTargetRequest
-	(*CleanupTargetResponse)(nil),        // 46: ligo.plugin.v1.CleanupTargetResponse
-	(*EnsureSecretStoreRequest)(nil),     // 47: ligo.plugin.v1.EnsureSecretStoreRequest
-	(*EnsureSecretStoreResponse)(nil),    // 48: ligo.plugin.v1.EnsureSecretStoreResponse
-	(*CleanupSecretStoreRequest)(nil),    // 49: ligo.plugin.v1.CleanupSecretStoreRequest
-	(*CleanupSecretStoreResponse)(nil),   // 50: ligo.plugin.v1.CleanupSecretStoreResponse
-	nil,                                  // 51: ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
-	nil,                                  // 52: ligo.plugin.v1.IdentityArtifact.MetadataEntry
+	(SubjectMatch)(0),                    // 3: ligo.plugin.v1.SubjectMatch
+	(UIFieldType)(0),                     // 4: ligo.plugin.v1.UIFieldType
+	(FlowPurpose)(0),                     // 5: ligo.plugin.v1.FlowPurpose
+	(FlowProtocol)(0),                    // 6: ligo.plugin.v1.FlowProtocol
+	(*Endpoint)(nil),                     // 7: ligo.plugin.v1.Endpoint
+	(*PluginErrorDetail)(nil),            // 8: ligo.plugin.v1.PluginErrorDetail
+	(*SVIDSelectorConfig)(nil),           // 9: ligo.plugin.v1.SVIDSelectorConfig
+	(*InstanceDescriptor)(nil),           // 10: ligo.plugin.v1.InstanceDescriptor
+	(*BindingContext)(nil),               // 11: ligo.plugin.v1.BindingContext
+	(*StaticSecret)(nil),                 // 12: ligo.plugin.v1.StaticSecret
+	(*IdentityArtifact)(nil),             // 13: ligo.plugin.v1.IdentityArtifact
+	(*DelegatedRoleSpec)(nil),            // 14: ligo.plugin.v1.DelegatedRoleSpec
+	(*SecretProvisioningPayload)(nil),    // 15: ligo.plugin.v1.SecretProvisioningPayload
+	(*DescribeRequest)(nil),              // 16: ligo.plugin.v1.DescribeRequest
+	(*DescribeResponse)(nil),             // 17: ligo.plugin.v1.DescribeResponse
+	(*IdentityProviderCapabilities)(nil), // 18: ligo.plugin.v1.IdentityProviderCapabilities
+	(*PlatformProviderCapabilities)(nil), // 19: ligo.plugin.v1.PlatformProviderCapabilities
+	(*SecretStoreCapabilities)(nil),      // 20: ligo.plugin.v1.SecretStoreCapabilities
+	(*SecretStorageStrategy)(nil),        // 21: ligo.plugin.v1.SecretStorageStrategy
+	(*ConfigureInstancesRequest)(nil),    // 22: ligo.plugin.v1.ConfigureInstancesRequest
+	(*ResolvedInstance)(nil),             // 23: ligo.plugin.v1.ResolvedInstance
+	(*ConfigureInstancesResponse)(nil),   // 24: ligo.plugin.v1.ConfigureInstancesResponse
+	(*HealthRequest)(nil),                // 25: ligo.plugin.v1.HealthRequest
+	(*HealthResponse)(nil),               // 26: ligo.plugin.v1.HealthResponse
+	(*UIFieldOption)(nil),                // 27: ligo.plugin.v1.UIFieldOption
+	(*UIFieldDescriptor)(nil),            // 28: ligo.plugin.v1.UIFieldDescriptor
+	(*UIForm)(nil),                       // 29: ligo.plugin.v1.UIForm
+	(*GetUISchemasRequest)(nil),          // 30: ligo.plugin.v1.GetUISchemasRequest
+	(*GetUISchemasResponse)(nil),         // 31: ligo.plugin.v1.GetUISchemasResponse
+	(*PortRange)(nil),                    // 32: ligo.plugin.v1.PortRange
+	(*NetworkFlow)(nil),                  // 33: ligo.plugin.v1.NetworkFlow
+	(*EnsureIdentityRequest)(nil),        // 34: ligo.plugin.v1.EnsureIdentityRequest
+	(*EnsureIdentityResponse)(nil),       // 35: ligo.plugin.v1.EnsureIdentityResponse
+	(*CleanupIdentityRequest)(nil),       // 36: ligo.plugin.v1.CleanupIdentityRequest
+	(*CleanupIdentityResponse)(nil),      // 37: ligo.plugin.v1.CleanupIdentityResponse
+	(*AccessLevelInput)(nil),             // 38: ligo.plugin.v1.AccessLevelInput
+	(*ValidateTargetRequest)(nil),        // 39: ligo.plugin.v1.ValidateTargetRequest
+	(*NormalizedAccessLevel)(nil),        // 40: ligo.plugin.v1.NormalizedAccessLevel
+	(*ValidateTargetResponse)(nil),       // 41: ligo.plugin.v1.ValidateTargetResponse
+	(*ValidateBindingRequest)(nil),       // 42: ligo.plugin.v1.ValidateBindingRequest
+	(*ValidateBindingResponse)(nil),      // 43: ligo.plugin.v1.ValidateBindingResponse
+	(*EnsureTargetRequest)(nil),          // 44: ligo.plugin.v1.EnsureTargetRequest
+	(*EnsureTargetResponse)(nil),         // 45: ligo.plugin.v1.EnsureTargetResponse
+	(*CleanupTargetRequest)(nil),         // 46: ligo.plugin.v1.CleanupTargetRequest
+	(*CleanupTargetResponse)(nil),        // 47: ligo.plugin.v1.CleanupTargetResponse
+	(*EnsureSecretStoreRequest)(nil),     // 48: ligo.plugin.v1.EnsureSecretStoreRequest
+	(*EnsureSecretStoreResponse)(nil),    // 49: ligo.plugin.v1.EnsureSecretStoreResponse
+	(*CleanupSecretStoreRequest)(nil),    // 50: ligo.plugin.v1.CleanupSecretStoreRequest
+	(*CleanupSecretStoreResponse)(nil),   // 51: ligo.plugin.v1.CleanupSecretStoreResponse
+	nil,                                  // 52: ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
+	nil,                                  // 53: ligo.plugin.v1.IdentityArtifact.MetadataEntry
 }
 var file_api_proto_plugin_v1_plugin_proto_depIdxs = []int32{
-	8,  // 0: ligo.plugin.v1.InstanceDescriptor.svid_selector:type_name -> ligo.plugin.v1.SVIDSelectorConfig
+	9,  // 0: ligo.plugin.v1.InstanceDescriptor.svid_selector:type_name -> ligo.plugin.v1.SVIDSelectorConfig
 	0,  // 1: ligo.plugin.v1.InstanceDescriptor.identity_mode:type_name -> ligo.plugin.v1.IdentityMode
 	2,  // 2: ligo.plugin.v1.BindingContext.operation:type_name -> ligo.plugin.v1.Operation
-	51, // 3: ligo.plugin.v1.StaticSecret.extra_fields:type_name -> ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
+	52, // 3: ligo.plugin.v1.StaticSecret.extra_fields:type_name -> ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
 	0,  // 4: ligo.plugin.v1.IdentityArtifact.mode:type_name -> ligo.plugin.v1.IdentityMode
-	52, // 5: ligo.plugin.v1.IdentityArtifact.metadata:type_name -> ligo.plugin.v1.IdentityArtifact.MetadataEntry
-	11, // 6: ligo.plugin.v1.IdentityArtifact.static_secret:type_name -> ligo.plugin.v1.StaticSecret
+	53, // 5: ligo.plugin.v1.IdentityArtifact.metadata:type_name -> ligo.plugin.v1.IdentityArtifact.MetadataEntry
+	12, // 6: ligo.plugin.v1.IdentityArtifact.static_secret:type_name -> ligo.plugin.v1.StaticSecret
 	0,  // 7: ligo.plugin.v1.SecretProvisioningPayload.mode:type_name -> ligo.plugin.v1.IdentityMode
-	11, // 8: ligo.plugin.v1.SecretProvisioningPayload.static_secret:type_name -> ligo.plugin.v1.StaticSecret
-	13, // 9: ligo.plugin.v1.SecretProvisioningPayload.delegated_role:type_name -> ligo.plugin.v1.DelegatedRoleSpec
+	12, // 8: ligo.plugin.v1.SecretProvisioningPayload.static_secret:type_name -> ligo.plugin.v1.StaticSecret
+	14, // 9: ligo.plugin.v1.SecretProvisioningPayload.delegated_role:type_name -> ligo.plugin.v1.DelegatedRoleSpec
 	1,  // 10: ligo.plugin.v1.DescribeResponse.kind:type_name -> ligo.plugin.v1.PluginKind
-	17, // 11: ligo.plugin.v1.DescribeResponse.identity_provider:type_name -> ligo.plugin.v1.IdentityProviderCapabilities
-	18, // 12: ligo.plugin.v1.DescribeResponse.platform_provider:type_name -> ligo.plugin.v1.PlatformProviderCapabilities
-	19, // 13: ligo.plugin.v1.DescribeResponse.secret_store:type_name -> ligo.plugin.v1.SecretStoreCapabilities
+	18, // 11: ligo.plugin.v1.DescribeResponse.identity_provider:type_name -> ligo.plugin.v1.IdentityProviderCapabilities
+	19, // 12: ligo.plugin.v1.DescribeResponse.platform_provider:type_name -> ligo.plugin.v1.PlatformProviderCapabilities
+	20, // 13: ligo.plugin.v1.DescribeResponse.secret_store:type_name -> ligo.plugin.v1.SecretStoreCapabilities
 	0,  // 14: ligo.plugin.v1.IdentityProviderCapabilities.produced_identity_mode:type_name -> ligo.plugin.v1.IdentityMode
 	0,  // 15: ligo.plugin.v1.PlatformProviderCapabilities.accepted_identity_modes:type_name -> ligo.plugin.v1.IdentityMode
-	20, // 16: ligo.plugin.v1.SecretStoreCapabilities.secret_storage_strategies:type_name -> ligo.plugin.v1.SecretStorageStrategy
+	21, // 16: ligo.plugin.v1.SecretStoreCapabilities.secret_storage_strategies:type_name -> ligo.plugin.v1.SecretStorageStrategy
 	0,  // 17: ligo.plugin.v1.SecretStorageStrategy.identity_modes:type_name -> ligo.plugin.v1.IdentityMode
-	9,  // 18: ligo.plugin.v1.ConfigureInstancesRequest.instances:type_name -> ligo.plugin.v1.InstanceDescriptor
-	22, // 19: ligo.plugin.v1.ConfigureInstancesResponse.resolved:type_name -> ligo.plugin.v1.ResolvedInstance
-	3,  // 20: ligo.plugin.v1.UIFieldDescriptor.field_type:type_name -> ligo.plugin.v1.UIFieldType
-	26, // 21: ligo.plugin.v1.UIFieldDescriptor.options:type_name -> ligo.plugin.v1.UIFieldOption
-	27, // 22: ligo.plugin.v1.UIForm.fields:type_name -> ligo.plugin.v1.UIFieldDescriptor
-	28, // 23: ligo.plugin.v1.GetUISchemasResponse.target_definition:type_name -> ligo.plugin.v1.UIForm
-	28, // 24: ligo.plugin.v1.GetUISchemasResponse.access_level_grants:type_name -> ligo.plugin.v1.UIForm
-	28, // 25: ligo.plugin.v1.GetUISchemasResponse.binding_parameters:type_name -> ligo.plugin.v1.UIForm
-	4,  // 26: ligo.plugin.v1.NetworkFlow.purpose:type_name -> ligo.plugin.v1.FlowPurpose
-	5,  // 27: ligo.plugin.v1.NetworkFlow.protocol:type_name -> ligo.plugin.v1.FlowProtocol
-	31, // 28: ligo.plugin.v1.NetworkFlow.ports:type_name -> ligo.plugin.v1.PortRange
-	10, // 29: ligo.plugin.v1.EnsureIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	12, // 30: ligo.plugin.v1.EnsureIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	12, // 31: ligo.plugin.v1.EnsureIdentityResponse.artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	10, // 32: ligo.plugin.v1.CleanupIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	12, // 33: ligo.plugin.v1.CleanupIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	37, // 34: ligo.plugin.v1.ValidateTargetRequest.access_levels:type_name -> ligo.plugin.v1.AccessLevelInput
-	32, // 35: ligo.plugin.v1.ValidateTargetRequest.network_flows:type_name -> ligo.plugin.v1.NetworkFlow
-	39, // 36: ligo.plugin.v1.ValidateTargetResponse.access_levels:type_name -> ligo.plugin.v1.NormalizedAccessLevel
-	10, // 37: ligo.plugin.v1.EnsureTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	12, // 38: ligo.plugin.v1.EnsureTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	14, // 39: ligo.plugin.v1.EnsureTargetResponse.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
-	6,  // 40: ligo.plugin.v1.EnsureTargetResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
-	10, // 41: ligo.plugin.v1.CleanupTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	12, // 42: ligo.plugin.v1.CleanupTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	10, // 43: ligo.plugin.v1.EnsureSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	14, // 44: ligo.plugin.v1.EnsureSecretStoreRequest.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
-	12, // 45: ligo.plugin.v1.EnsureSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	6,  // 46: ligo.plugin.v1.EnsureSecretStoreResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
-	10, // 47: ligo.plugin.v1.CleanupSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	12, // 48: ligo.plugin.v1.CleanupSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	15, // 49: ligo.plugin.v1.PluginControl.Describe:input_type -> ligo.plugin.v1.DescribeRequest
-	21, // 50: ligo.plugin.v1.PluginControl.ConfigureInstances:input_type -> ligo.plugin.v1.ConfigureInstancesRequest
-	24, // 51: ligo.plugin.v1.PluginControl.Health:input_type -> ligo.plugin.v1.HealthRequest
-	33, // 52: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:input_type -> ligo.plugin.v1.EnsureIdentityRequest
-	35, // 53: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:input_type -> ligo.plugin.v1.CleanupIdentityRequest
-	29, // 54: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v1.GetUISchemasRequest
-	38, // 55: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v1.ValidateTargetRequest
-	41, // 56: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v1.ValidateBindingRequest
-	43, // 57: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v1.EnsureTargetRequest
-	45, // 58: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v1.CleanupTargetRequest
-	47, // 59: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:input_type -> ligo.plugin.v1.EnsureSecretStoreRequest
-	49, // 60: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:input_type -> ligo.plugin.v1.CleanupSecretStoreRequest
-	16, // 61: ligo.plugin.v1.PluginControl.Describe:output_type -> ligo.plugin.v1.DescribeResponse
-	23, // 62: ligo.plugin.v1.PluginControl.ConfigureInstances:output_type -> ligo.plugin.v1.ConfigureInstancesResponse
-	25, // 63: ligo.plugin.v1.PluginControl.Health:output_type -> ligo.plugin.v1.HealthResponse
-	34, // 64: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:output_type -> ligo.plugin.v1.EnsureIdentityResponse
-	36, // 65: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:output_type -> ligo.plugin.v1.CleanupIdentityResponse
-	30, // 66: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v1.GetUISchemasResponse
-	40, // 67: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v1.ValidateTargetResponse
-	42, // 68: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v1.ValidateBindingResponse
-	44, // 69: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v1.EnsureTargetResponse
-	46, // 70: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v1.CleanupTargetResponse
-	48, // 71: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:output_type -> ligo.plugin.v1.EnsureSecretStoreResponse
-	50, // 72: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:output_type -> ligo.plugin.v1.CleanupSecretStoreResponse
-	61, // [61:73] is the sub-list for method output_type
-	49, // [49:61] is the sub-list for method input_type
-	49, // [49:49] is the sub-list for extension type_name
-	49, // [49:49] is the sub-list for extension extendee
-	0,  // [0:49] is the sub-list for field type_name
+	3,  // 18: ligo.plugin.v1.SecretStorageStrategy.subject_match:type_name -> ligo.plugin.v1.SubjectMatch
+	10, // 19: ligo.plugin.v1.ConfigureInstancesRequest.instances:type_name -> ligo.plugin.v1.InstanceDescriptor
+	23, // 20: ligo.plugin.v1.ConfigureInstancesResponse.resolved:type_name -> ligo.plugin.v1.ResolvedInstance
+	4,  // 21: ligo.plugin.v1.UIFieldDescriptor.field_type:type_name -> ligo.plugin.v1.UIFieldType
+	27, // 22: ligo.plugin.v1.UIFieldDescriptor.options:type_name -> ligo.plugin.v1.UIFieldOption
+	28, // 23: ligo.plugin.v1.UIForm.fields:type_name -> ligo.plugin.v1.UIFieldDescriptor
+	29, // 24: ligo.plugin.v1.GetUISchemasResponse.target_definition:type_name -> ligo.plugin.v1.UIForm
+	29, // 25: ligo.plugin.v1.GetUISchemasResponse.access_level_grants:type_name -> ligo.plugin.v1.UIForm
+	29, // 26: ligo.plugin.v1.GetUISchemasResponse.binding_parameters:type_name -> ligo.plugin.v1.UIForm
+	5,  // 27: ligo.plugin.v1.NetworkFlow.purpose:type_name -> ligo.plugin.v1.FlowPurpose
+	6,  // 28: ligo.plugin.v1.NetworkFlow.protocol:type_name -> ligo.plugin.v1.FlowProtocol
+	32, // 29: ligo.plugin.v1.NetworkFlow.ports:type_name -> ligo.plugin.v1.PortRange
+	11, // 30: ligo.plugin.v1.EnsureIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 31: ligo.plugin.v1.EnsureIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	13, // 32: ligo.plugin.v1.EnsureIdentityResponse.artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	11, // 33: ligo.plugin.v1.CleanupIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 34: ligo.plugin.v1.CleanupIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	38, // 35: ligo.plugin.v1.ValidateTargetRequest.access_levels:type_name -> ligo.plugin.v1.AccessLevelInput
+	33, // 36: ligo.plugin.v1.ValidateTargetRequest.network_flows:type_name -> ligo.plugin.v1.NetworkFlow
+	40, // 37: ligo.plugin.v1.ValidateTargetResponse.access_levels:type_name -> ligo.plugin.v1.NormalizedAccessLevel
+	11, // 38: ligo.plugin.v1.EnsureTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 39: ligo.plugin.v1.EnsureTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	15, // 40: ligo.plugin.v1.EnsureTargetResponse.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
+	7,  // 41: ligo.plugin.v1.EnsureTargetResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
+	11, // 42: ligo.plugin.v1.CleanupTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 43: ligo.plugin.v1.CleanupTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	11, // 44: ligo.plugin.v1.EnsureSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	15, // 45: ligo.plugin.v1.EnsureSecretStoreRequest.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
+	13, // 46: ligo.plugin.v1.EnsureSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	7,  // 47: ligo.plugin.v1.EnsureSecretStoreResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
+	11, // 48: ligo.plugin.v1.CleanupSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 49: ligo.plugin.v1.CleanupSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	16, // 50: ligo.plugin.v1.PluginControl.Describe:input_type -> ligo.plugin.v1.DescribeRequest
+	22, // 51: ligo.plugin.v1.PluginControl.ConfigureInstances:input_type -> ligo.plugin.v1.ConfigureInstancesRequest
+	25, // 52: ligo.plugin.v1.PluginControl.Health:input_type -> ligo.plugin.v1.HealthRequest
+	34, // 53: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:input_type -> ligo.plugin.v1.EnsureIdentityRequest
+	36, // 54: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:input_type -> ligo.plugin.v1.CleanupIdentityRequest
+	30, // 55: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v1.GetUISchemasRequest
+	39, // 56: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v1.ValidateTargetRequest
+	42, // 57: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v1.ValidateBindingRequest
+	44, // 58: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v1.EnsureTargetRequest
+	46, // 59: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v1.CleanupTargetRequest
+	48, // 60: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:input_type -> ligo.plugin.v1.EnsureSecretStoreRequest
+	50, // 61: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:input_type -> ligo.plugin.v1.CleanupSecretStoreRequest
+	17, // 62: ligo.plugin.v1.PluginControl.Describe:output_type -> ligo.plugin.v1.DescribeResponse
+	24, // 63: ligo.plugin.v1.PluginControl.ConfigureInstances:output_type -> ligo.plugin.v1.ConfigureInstancesResponse
+	26, // 64: ligo.plugin.v1.PluginControl.Health:output_type -> ligo.plugin.v1.HealthResponse
+	35, // 65: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:output_type -> ligo.plugin.v1.EnsureIdentityResponse
+	37, // 66: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:output_type -> ligo.plugin.v1.CleanupIdentityResponse
+	31, // 67: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v1.GetUISchemasResponse
+	41, // 68: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v1.ValidateTargetResponse
+	43, // 69: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v1.ValidateBindingResponse
+	45, // 70: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v1.EnsureTargetResponse
+	47, // 71: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v1.CleanupTargetResponse
+	49, // 72: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:output_type -> ligo.plugin.v1.EnsureSecretStoreResponse
+	51, // 73: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:output_type -> ligo.plugin.v1.CleanupSecretStoreResponse
+	62, // [62:74] is the sub-list for method output_type
+	50, // [50:62] is the sub-list for method input_type
+	50, // [50:50] is the sub-list for extension type_name
+	50, // [50:50] is the sub-list for extension extendee
+	0,  // [0:50] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_plugin_v1_plugin_proto_init() }
@@ -3891,7 +3953,7 @@ func file_api_proto_plugin_v1_plugin_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_plugin_v1_plugin_proto_rawDesc), len(file_api_proto_plugin_v1_plugin_proto_rawDesc)),
-			NumEnums:      6,
+			NumEnums:      7,
 			NumMessages:   47,
 			NumExtensions: 0,
 			NumServices:   4,

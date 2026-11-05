@@ -86,6 +86,46 @@ builds:
       - -s -w
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: ligo-plugin-postgres
+    main: ./cmd/plugins/ligo-plugin-postgres
+    binary: ligo-plugin-postgres
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    tags:
+      - osusergo
+      - netgo
+      - static_build
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: ligo-plugin-vault
+    main: ./cmd/plugins/ligo-plugin-vault
+    binary: ligo-plugin-vault
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    tags:
+      - osusergo
+      - netgo
+      - static_build
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
 # one archive per application
 archives:
   - id: ligo
@@ -113,6 +153,28 @@ archives:
       - tar.gz
     name_template: >-
       ligo-plugin-openldap_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+  - id: ligo-plugin-postgres
+    ids:
+      - ligo-plugin-postgres
+    formats:
+      - tar.gz
+    name_template: >-
+      ligo-plugin-postgres_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+  - id: ligo-plugin-vault
+    ids:
+      - ligo-plugin-vault
+    formats:
+      - tar.gz
+    name_template: >-
+      ligo-plugin-vault_
       {{- .Version }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -204,6 +266,70 @@ nfpms:
       - ligo
     description: |
       The openldap.v1 identity provider of ligo.
+    homepage: "https://github.com/dihedron/ligo"
+    maintainer: "Andrea Funtò <dihedron.dev@gmail.com>"
+    vendor: "Andrea Funtò"
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    epoch: "1"
+    release: "1"
+    section: default
+    priority: "optional"
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+        type: origin
+  - id: ligo-plugin-postgres
+    package_name: ligo-plugin-postgres
+    ids:
+      - ligo-plugin-postgres
+    bindir: /usr/lib/ligo/plugins
+    contents:
+      - dst: /usr/lib/ligo/plugins
+        type: dir
+        file_info: { mode: 0755, owner: root, group: root }
+    # no version pin: at startup ligo checks the protocol through Describe
+    dependencies:
+      - ligo
+    description: |
+      The postgres.v1 platform provider of ligo.
+    homepage: "https://github.com/dihedron/ligo"
+    maintainer: "Andrea Funtò <dihedron.dev@gmail.com>"
+    vendor: "Andrea Funtò"
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    epoch: "1"
+    release: "1"
+    section: default
+    priority: "optional"
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+        type: origin
+  - id: ligo-plugin-vault
+    package_name: ligo-plugin-vault
+    ids:
+      - ligo-plugin-vault
+    bindir: /usr/lib/ligo/plugins
+    contents:
+      - dst: /usr/lib/ligo/plugins
+        type: dir
+        file_info: { mode: 0755, owner: root, group: root }
+    # no version pin: at startup ligo checks the protocol through Describe
+    dependencies:
+      - ligo
+    description: |
+      The vault.v1 secret store of ligo.
     homepage: "https://github.com/dihedron/ligo"
     maintainer: "Andrea Funtò <dihedron.dev@gmail.com>"
     vendor: "Andrea Funtò"

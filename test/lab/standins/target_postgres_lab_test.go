@@ -72,7 +72,7 @@ func code(err error) string {
 // targetPostgres starts the stand-in with the instance pg-ledger.
 func targetPostgres(t *testing.T, strategy string) *pluginmgr.Client {
 	t.Helper()
-	cfg := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
+	cfg := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"allowed_endpoints":["pg.ligo.lab:5432"],"ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","bootstrap_credential":` + bootstrap(t, "postgres") + `}`
 	return start(t, "ligo-plugin-postgres", pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
 		&pluginv1.InstanceDescriptor{Name: "pg-ledger", ConfigJson: cfg, SecretStorageStrategy: strategy})

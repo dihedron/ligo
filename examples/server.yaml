@@ -281,9 +281,12 @@ secret_stores:
         config:
           address: "https://vault.prod.internal:8200"
           namespace: "prod"
-          spiffe_auth_mount: "jwt-spiffe"
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault-prod"
+          workload_jwt_audience: "https://vault.prod.internal"
           kv_mount: "kv"
-          db_mount: "database"
+          database_mount: "database"
+          db_connection: "oracle-prod-conn"       # vault-dynamic only
           allowed_endpoints: ["vault.prod.internal:8200"]
         network_flows:                    # ADR-16; added to every binding whose credential is in this store
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }

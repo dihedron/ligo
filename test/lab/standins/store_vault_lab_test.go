@@ -26,8 +26,9 @@ import (
 // storeVault starts the stand-in with the instance vault-prod.
 func storeVault(t *testing.T) *pluginmgr.Client {
 	t.Helper()
-	cfg := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `"}`
+	address := labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR")
+	cfg := `{"address":"` + address + `","allowed_endpoints":["` + strings.TrimPrefix(address, "https://") + `"],"auth_mount":"jwt-spiffe","role":"ligo-plugin-vault",` +
+		`"db_connection":"lab-pg","workload_jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") + `","ca_file":"` + labEnv(t, "LIGO_TEST_CA") + `"}`
 	return start(t, "ligo-plugin-vault", pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, &pluginv1.InstanceDescriptor{Name: "vault-prod", ConfigJson: cfg})
 }
 
@@ -92,7 +93,7 @@ func TestLabStoreVault(t *testing.T) {
 	t.Cleanup(func() { _, _ = cleanupStore(c, b, "vault-static") })
 	wide := binding()
 	wide.SourceSvidRegex = `^spiffe://prod\.lab/ns/standins/sa/[a-z0-9]+$`
-	if _, err := ensureStore(t, c, wide, "vault-static", static); err == nil || !strings.Contains(err.Error(), "literal SPIFFE ID") {
+	if _, err := ensureStore(t, c, wide, "vault-static", static); err == nil || !strings.Contains(err.Error(), "one exact SPIFFE ID") {
 		t.Errorf("a source matching more than one SPIFFE ID: %v", err)
 	}
 	r, err := ensureStore(t, c, b, "vault-static", static)

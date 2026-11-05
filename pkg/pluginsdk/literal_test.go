@@ -1,10 +1,10 @@
-package main
+package pluginsdk
 
 import "testing"
 
-// TestLiteralID: only a regex that matches one SPIFFE ID gives a subject a
+// TestLiteralSPIFFEID: only a regex that matches one SPIFFE ID gives a subject a
 // JWT role can bind.
-func TestLiteralID(t *testing.T) {
+func TestLiteralSPIFFEID(t *testing.T) {
 	for regex, want := range map[string]string{
 		`^spiffe://prod\.lab/ns/echo/sa/bound$`:    "spiffe://prod.lab/ns/echo/sa/bound",
 		`^spiffe://prod\.lab/ns/e2e/sa/w0a1b-c_d$`: "spiffe://prod.lab/ns/e2e/sa/w0a1b-c_d",
@@ -18,7 +18,7 @@ func TestLiteralID(t *testing.T) {
 		`^spiffe://Prod\.lab/ns/echo/sa/bound$`:    "", // not a valid trust domain
 		``:                                         "",
 	} {
-		got, ok := literalID(regex)
+		got, ok := LiteralSPIFFEID(regex)
 		if got != want || ok != (want != "") {
 			t.Errorf("%q: %q %v, want %q", regex, got, ok, want)
 		}

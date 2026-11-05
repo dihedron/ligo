@@ -1,6 +1,6 @@
 # The `openldap.v1` identity provider
 
-This file specifies `ligo-plugin-openldap`, the external identity provider that manages one directory account per binding (§0.4, §5). It is the only shipped external plugin so far: the lab's `ligo-plugin-postgres` and `ligo-plugin-vault` stay test tooling. The rules of §5.8 apply; this file states only what they leave open.
+This file specifies `ligo-plugin-openldap`, the external identity provider that manages one directory account per binding (§0.4, §5). The rules of §5.8 apply; this file states only what they leave open.
 
 Status: approved 2026-11-04, chunk plan at the end.
 

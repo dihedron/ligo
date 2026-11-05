@@ -161,9 +161,17 @@ message SecretStoreCapabilities {
   string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_auth_json
 }
 
+// What a store can enforce about who reads a credential (OI-1): ligo refuses a
+// binding whose source the store could only over-approximate.
+enum SubjectMatch {
+  SUBJECT_MATCH_UNSPECIFIED = 0;          // the store releases nothing to a subject
+  SUBJECT_MATCH_EXACT = 1;                // one exact SPIFFE ID
+}
+
 message SecretStorageStrategy {
   string name = 1;                        // e.g. "svid", "vault-static", "vault-dynamic"
   repeated IdentityMode identity_modes = 2;
+  SubjectMatch subject_match = 3;
 }
 
 message ConfigureInstancesRequest {

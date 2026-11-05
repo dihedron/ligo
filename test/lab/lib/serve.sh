@@ -377,6 +377,9 @@ identity_providers:
   - type: svid.v1
     builtin: true
     instances: [ { name: svid-prod, zone: prod } ]
+  - type: delegated-dynamic.v1
+    builtin: true
+    instances: [ { name: dynamic-prod, zone: prod } ]
   - type: openldap.v1
     binary: ligo-plugin-openldap
     sha256: "$ol"
@@ -471,6 +474,30 @@ platform_providers:
             role: ligo-plugin-postgres
             jwt_audience: "$aud"
             kv_path: kv/data/ligo/bootstrap/postgres
+      - name: pg-ledger-dynamic
+        zone: prod
+        scope: "dc/corp-prod"
+        display_name: "Lab PostgreSQL ledger, credentials on demand"
+        allowed_source_trust_domains: [prod.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
+        identity_provider: { type: delegated-dynamic.v1, instance: dynamic-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-dynamic }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
+        config:
+          host: pg.ligo.lab
+          port: 5432
+          database: ledger
+          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
+          ca_file: /etc/ligo-lab/ca.crt
+          allowed_endpoints: ["pg.ligo.lab:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-ldap
         zone: prod
         scope: "dc/corp-prod"
@@ -485,6 +512,7 @@ platform_providers:
           host: pg.ligo.lab
           port: 5432
           database: ledger
+          directory_group: ligo_ldap
           grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE, LEDGER_GONE_ROLE]   # LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
           ca_file: /etc/ligo-lab/ca.crt
           allowed_endpoints: ["pg.ligo.lab:5432"]
@@ -662,9 +690,9 @@ serve_test_topologies() {
 	section "e2e of the four topologies"
 	local before after
 	before="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
-	serve_e2e '^TestServeTopologies$' ligo1 "$1" || die "TestServeTopologies failed"
+	serve_e2e '^TestServe(Topologies|DynamicCredentials)$' ligo1 "$1" || die "TestServeTopologies or TestServeDynamicCredentials failed"
 	after="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
-	((after - before == 4)) || die "the topologies: $((after - before)) DELETE_COMPLETED entries, want 4"
+	((after - before == 5)) || die "the topologies: $((after - before)) DELETE_COMPLETED entries, want 5"
 	info "e2e of the four topologies passed"
 }
 

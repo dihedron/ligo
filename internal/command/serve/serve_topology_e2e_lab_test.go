@@ -3,6 +3,7 @@
 package serve
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -156,5 +157,29 @@ func TestServeTopologies(t *testing.T) {
 	code, body := ada.do("POST", "/v1/admin/bindings", map[string]any{"name": "topo-denied-" + x, "source": other, "target": hr, "accessLevel": "read"})
 	if code != http.StatusForbidden || !strings.Contains(fmt.Sprint(body["type"]), "interconnect-denied") {
 		t.Errorf("another account's source: %d %v", code, body)
+	}
+}
+
+// TestServeDynamicCredentials: VS-10, a binding on vault-dynamic: its workload
+// logs in with its own JWT-SVID and role, receives a credential made on demand,
+// which connects; once revoked, the role and its users are gone.
+func TestServeDynamicCredentials(t *testing.T) {
+	x := e2eEnv(t, "LIGO_E2E_SUFFIX")
+	olga, dora := newAdmin(t, "olga"), newAdmin(t, "dora")
+	source := topologySource(t, olga, dora, "dyn-src-"+x, "prod.lab", "spiffe://prod.lab/ns/e2e/sa/w"+x)
+	target := topologyTarget(t, olga, dora, "dyn-ledger-"+x, "pg-ledger-dynamic", "dc/corp-prod/ledger")
+	binding := "dyn-" + x
+	code, filed := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read"})
+	if code != http.StatusAccepted {
+		t.Fatalf("binding: %d %v", code, filed)
+	}
+	approveAll(t, dora, filed)
+	b := phase(t, olga, binding, "ACTIVE")
+	user, password := storeRead(t, target, "credsPath", func(data map[string]string) (string, string) { return data["username"], data["password"] })
+	reads(t, user, password)
+	revoke(t, olga, dora, binding, b)
+	if conn, err := ledgerConn(t, user, password); err == nil {
+		_ = conn.Close(context.Background())
+		t.Error("a credential of a revoked binding still connects")
 	}
 }

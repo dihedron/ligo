@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -23,7 +22,6 @@ import (
 	"github.com/dihedron/ligo/pkg/metadata"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/go-ldap/ldap/v3"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"google.golang.org/grpc/codes"
 )
 
@@ -88,15 +86,8 @@ func parseConfig(data []byte) (*config, error) {
 	if err := c.BootstrapCredential.Validate(); err != nil {
 		return nil, err
 	}
-	if c.CAFile != "" {
-		pem, err := os.ReadFile(c.CAFile)
-		if err != nil {
-			return nil, errors.New("ca_file cannot be read")
-		}
-		c.roots = x509.NewCertPool()
-		if !c.roots.AppendCertsFromPEM(pem) {
-			return nil, errors.New("ca_file has no certificate")
-		}
+	if c.roots, err = pluginsdk.LoadRoots(c.CAFile); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }
@@ -131,35 +122,21 @@ func (p *plugin) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureIn
 		}
 		configs[in.GetName()] = c
 	}
-	// the client lives as long as the process
-	client, err := workloadapi.New(context.Background(), workloadapi.WithAddr(r.GetSpiffeWorkloadSocket()))
+	selectors, out, err := pluginsdk.SelectInstances(ctx, r)
 	if err != nil {
-		return nil, pluginsdk.Error(codes.Unavailable, "WORKLOAD_API_UNAVAILABLE", "cannot reach the SPIRE agent", true)
+		return nil, err
 	}
 	instances := map[string]*instance{}
-	out := &pluginv1.ConfigureInstancesResponse{}
-	for _, in := range r.GetInstances() {
-		sel, err := pluginsdk.NewInstanceSVIDSelector(client, in.GetName(), in.GetTrustDomain(), pluginsdk.SelectorConfig{
-			MatchExpr: in.GetSvidSelector().GetMatchExpr(), JWTAudience: in.GetSvidSelector().GetJwtAudience()})
-		if err != nil {
-			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_SELECTOR", err.Error(), false)
-		}
-		svid, err := sel.SelectX509SVID(ctx)
-		if err != nil {
-			return nil, pluginsdk.Error(codes.FailedPrecondition, "SVID_SELECTION_FAILED", err.Error(), false)
-		}
-		c := configs[in.GetName()]
+	for name, c := range configs {
 		var vault *http.Client // nil: the SDK's, with the system roots
 		if c.roots != nil {
-			vault = &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: c.roots, MinVersion: tls.VersionTLS12}}}
+			vault = pluginsdk.HTTPClient(c.roots)
 		}
-		cred, err := pluginsdk.NewBootstrapCredential(c.BootstrapCredential, sel, vault)
+		cred, err := pluginsdk.NewBootstrapCredential(c.BootstrapCredential, selectors[name], vault)
 		if err != nil {
-			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
+			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+name+": "+err.Error(), false)
 		}
-		instances[in.GetName()] = &instance{serviceOU: c.ServiceOU, dial: dialer(c, cred)}
-		out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: svid.ID.String()})
+		instances[name] = &instance{serviceOU: c.ServiceOU, dial: dialer(c, cred)}
 	}
 	p.mu.Lock()
 	p.instances = instances

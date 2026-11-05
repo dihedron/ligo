@@ -83,7 +83,7 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
 		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-postgres","jwt_audience":"` + aud +
 		`","kv_path":"kv/data/ligo/bootstrap/postgres"}}`
-	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
+	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
 		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Zone: zone,

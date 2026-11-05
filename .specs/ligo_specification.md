@@ -2341,6 +2341,7 @@ bootstrap_credential:
 | `DELEGATED_DYNAMIC` | `delegated_role` | `vault.v1` | Stage 2 (statements only; Vault generates credentials) |
 
 - `s3-e2ee.v1` is a planned store specified with the external plugins; until it exists, only `vault.v1` and `none.v1` are available.
+- The external plugins `postgres.v1` and `vault.v1` are specified in `.specs/ligo-postgres-plugin.md` and `.specs/ligo-vault-plugin.md`. A strategy declares `subject_match`: with `SUBJECT_MATCH_EXACT`, a binding's source must be one exact SPIFFE ID (OI-1).
 - **Secret storage strategies.** A secret store declares in `Describe.secret_store.secret_storage_strategies` the strategies it serves, each with the identity modes it accepts. One store process MAY serve several strategies. `none.v1` declares `svid` (`SVID`). The Vault store declares `vault-static` (`EXTERNAL_DIR`, `TARGET_LOCAL`), `vault-dynamic` and `vault-static-rotated` (`DELEGATED_DYNAMIC`); its plugin specification defines their `config` shapes.
 - A platform chooses its strategy in `secret_store.secret_storage_strategy` (§8.1). When omitted, it is the store's only strategy that accepts the platform's identity mode; if there are several, the configuration is rejected. The engine passes the strategy to the platform (`InstanceDescriptor.secret_storage_strategy`), so the target emits a matching `DelegatedRoleSpec.role_type`, and to the store on every call (`secret_storage_strategy`). The store MUST reject a payload that does not match the strategy (`FAILED_PRECONDITION`, `INCOMPATIBLE_IDENTITY_MODE`).
 - A binding snapshots the strategy at creation (`bindings.secret_storage_strategy`, INV-08). A later change of the platform's strategy affects only new bindings.
@@ -2556,9 +2557,17 @@ message SecretStoreCapabilities {
   string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_auth_json
 }
 
+// What a store can enforce about who reads a credential (OI-1): ligo refuses a
+// binding whose source the store could only over-approximate.
+enum SubjectMatch {
+  SUBJECT_MATCH_UNSPECIFIED = 0;          // the store releases nothing to a subject
+  SUBJECT_MATCH_EXACT = 1;                // one exact SPIFFE ID
+}
+
 message SecretStorageStrategy {
   string name = 1;                        // e.g. "svid", "vault-static", "vault-dynamic"
   repeated IdentityMode identity_modes = 2;
+  SubjectMatch subject_match = 3;
 }
 
 message ConfigureInstancesRequest {
@@ -3857,9 +3866,12 @@ secret_stores:
         config:
           address: "https://vault.prod.internal:8200"
           namespace: "prod"
-          spiffe_auth_mount: "jwt-spiffe"
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault-prod"
+          workload_jwt_audience: "https://vault.prod.internal"
           kv_mount: "kv"
-          db_mount: "database"
+          database_mount: "database"
+          db_connection: "oracle-prod-conn"       # vault-dynamic only
           allowed_endpoints: ["vault.prod.internal:8200"]
         network_flows:                    # ADR-16; added to every binding whose credential is in this store
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }
@@ -4869,10 +4881,10 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 
 | ID | Issue | Proposed direction |
 | :--- | :--- | :--- |
-| OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `ligo-plugin-vault`. |
+| OI-1 | **Secondary enforcement points cannot express binding regexes.** Settled for `vault.v1`: a store declares `subject_match` in `Describe` per strategy (§5.6); with `SUBJECT_MATCH_EXACT`, `ligo` refuses, when a binding is filed, a source whose regex is not one exact SPIFFE ID (`422 source-not-exact`), as Vault's glob `*` also matches `/`. See `.specs/ligo-vault-plugin.md` §4. | A store or target with a richer form may add a `subject_match` value, accepted only when the regex translates into it exactly. |
 | OI-2 | **The example configuration wires the `oracle-prod` platform to `openldap.v1`.** Oracle cannot authenticate database users against a generic OpenLDAP directory; `EXTERNAL_DIR` on Oracle needs Centrally Managed Users with Active Directory, or Enterprise User Security. | Change the example to `target-local.v1` (or to an Active Directory identity provider once one is bundled), and make the config validator reject `oracle.v1` + `EXTERNAL_DIR` unless the platform declares `directory_integration`. |
 | OI-3 | **Privilege identifiers of existing plugins.** Narrowing of access levels (§3.10) relies on each plugin's canonical `privileges` (§5.8 rule 9). For roles this is the role name, but plugins that grant object privileges, Kafka ACLs or OpenStack roles with project scoping need a documented identifier scheme in which set inclusion really means containment. | Each plugin specification defines its scheme and its test vectors before 4.0 plugins are released; until then, a plugin emits one identifier per grant, so every grant change is treated as a widening. |
-| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `ligo-plugin-postgres` and `ligo-plugin-oracle`. |
+| OI-4 | **Targets cannot map an X.509-SVID to a principal.** Settled for `postgres.v1`: `SVID` mode is not offered in v0.1.0, as PostgreSQL's `cert` reads the CN or DN, never the URI SAN, and a CN set through a SPIRE DNS name trusts a name outside `ligo`'s control. The design to build is in `.specs/ligo-postgres-plugin.md` §10: a JWT-SVID through PostgreSQL 18 OAuth, with a validator module that enforces the regex. | Oracle's plugin specification states its own mechanism, or leaves `SVID` out too. |
 
 **Future work** (not part of this version):
 
