@@ -3506,12 +3506,12 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 - **Payload (Normative):**
   ```json
   { "eventId": "<event_id, UUIDv7>", "event": "BREAK_GLASS_USED", "occurredAt": "2026-10-14T21:03:11Z",
-    "zone": "prod", "sourceScope": "dc/corp-prod", "targetScope": "dc/corp-prod", "platformScope": "dc/corp-prod", "side": null,
+    "zone": "prod", "sourceScope": "dc/corp-prod", "targetScope": "dc/corp-prod", "platformScope": "dc/corp-prod",
     "resource": { "type": "BINDING", "id": "…", "name": "…", "source": "…", "target": "…", "platform": "oracle-prod" },
     "changeRequestId": "…", "actor": "livia", "operation": "CREATE",
     "justification": "…", "incidentReference": "INC0012345", "expiresAt": "2026-10-15T01:03:11Z" }
   ```
-  No secrets or credential locations are included.
+  No secrets or credential locations are included. Only `CR_AWAITING_APPROVAL` carries `side` and `sideScope`, the pending side and its scope.
 - **Authenticity.** Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">` using the webhook's secret (from `hmac_secret_env`). TLS is verified against `ca_cert_file`. Receivers SHOULD reject timestamps older than 5 minutes.
 
 ### 7.6 Theming, logo and color modes
