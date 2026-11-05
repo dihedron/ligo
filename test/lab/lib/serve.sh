@@ -262,34 +262,8 @@ serve_env() {
 	hooks_env
 }
 
-serve_unit() {
-	cat <<'UNIT'
-# ligo serve (lab): see .specs/ligo-test-environment.md
-[Unit]
-Description=ligo, the SPIFFE binding lifecycle service
-After=network-online.target spire-agent-prod.service spire-agent-test.service
-Wants=network-online.target
-# never give up restarting: the back-off below keeps it cheap
-StartLimitIntervalSec=0
-
-[Service]
-User=ligo
-Group=ligo
-EnvironmentFile=/etc/ligo/ligo.env
-ExecStart=/usr/local/bin/ligo serve -c /etc/ligo/server.yaml
-ExecReload=/bin/kill -HUP $MAINPID
-KillSignal=SIGTERM
-TimeoutStopSec=30
-Restart=on-failure
-# back off from 5s to 5min while a dependency (a sealed OpenBao) keeps it down
-RestartSec=5
-RestartSteps=10
-RestartMaxDelaySec=300
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-}
+# serve_unit: the unit the package ships, for the binary where the lab puts it.
+serve_unit() { sed 's|^ExecStart=/usr/bin/ligo |ExecStart=/usr/local/bin/ligo |' "$REPO_DIR/packaging/ligo.service"; }
 
 # serve_config HOST: server.yaml for HOST, with the deployed plugins' hashes.
 # serve_observability: traces to the collector, with the otel scenario.

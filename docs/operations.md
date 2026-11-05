@@ -1,10 +1,51 @@
 # Operating ligo
 
-This guide is for the people who install and run `ligo`. It grows towards the first release; for now it covers the one external plugin. The rules behind each step are in [the plugin's specification](../.specs/ligo-openldap-plugin.md).
+This guide is for the people who install and run `ligo`. The rules behind each step are in [the specification](../.specs/ligo_specification.md).
+
+## Install
+
+`ligo` needs PostgreSQL, a SPIRE agent per zone on its host, and Vault or OpenBao with Transit for sealing.
+
+1. Verify and install the package (README, *Verify a release*). It creates the system user `ligo`, the directory `/etc/ligo` (`root:ligo`, `0750`) and the unit `ligo.service`, which it neither enables nor starts.
+2. Create the database and its roles once, as a superuser, with `/usr/share/ligo/examples/roles.sql`. Keep `ligo`'s connections off any pooler that hides `application_name`: recovery of a lost replica relies on it.
+3. Write `/etc/ligo/server.yaml` (`root:ligo`, `0640`), starting from `/usr/share/ligo/examples/server.yaml`.
+4. Write `/etc/ligo/ligo.env` (`root:ligo`, `0640`) with the DSNs and secrets that `server.yaml` names by environment variable, and `LIGO_INSTANCE_ID`, the replica's own stable ID.
+5. Apply the migrations as `ligo_migrator`, with `ligo migrate`.
+6. Start it: `systemctl enable --now ligo`.
+
+The unit restarts `ligo` with a back-off while a dependency, such as a sealed OpenBao, keeps it down.
+
+## Run
+
+- **Reload.** `systemctl reload ligo` reloads certificate files only. Any other change to `server.yaml` needs a rolling restart.
+- **Replicas.** Replicas share one database. A replica that dies must come back under the same `LIGO_INSTANCE_ID`, because only then do its workflows resume. Until then, its bindings stay `PROVISIONING` or `DELETING`, and resolution keeps serving what they last had.
+- **A replica gone for good.** First confirm that the host is down, as the check on live sessions is evidence, not proof. Then run `ligo executors recover <id>`.
+- **Metrics.** Prometheus metrics are on `server.metrics_listener`, by default `127.0.0.1:9090`.
+
+## Upgrade
+
+Migrations are forward-only.
+
+1. `ligo maintenance on -m "upgrade to <version>"`
+2. `ligo maintenance status --wait-drained`, which waits until nothing is in flight.
+3. `ligo migrate`, as `ligo_migrator`, with the new binary.
+4. Roll out the new version, one replica at a time.
+5. `ligo maintenance off`
+
+The workload API and all reads keep serving during maintenance.
+
+## Back up and restore
+
+The schemas `public` and `dbos` live in one database and must be backed up together, with point-in-time recovery. After a restore:
+
+1. Start `ligo` with `--maintenance`.
+2. Run `ligo maintenance status --wait-drained`, so that the sweeper settles the bindings.
+3. Run `UPDATE bindings SET last_rotated_at = NULL`, so that every static secret is due for rotation.
+4. Run `ligo maintenance off`. The next reconcile run rotates them.
 
 ## The `openldap.v1` identity provider
 
-`ligo-plugin-openldap` creates one account per binding in an organizational unit of an OpenLDAP directory, and gives it a generated password. The password reaches the workload through the secret store, and a platform that authenticates its users against the same directory accepts it.
+Its rules are in [its specification](../.specs/ligo-openldap-plugin.md). `ligo-plugin-openldap` creates one account per binding in an organizational unit of an OpenLDAP directory, and gives it a generated password. The password reaches the workload through the secret store, and a platform that authenticates its users against the same directory accepts it.
 
 ### Install
 
