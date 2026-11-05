@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 	"uuid"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -11,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -39,6 +41,8 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		return "", err
 	}
 	f := fence{bindingID: id, workflowID: in.WorkflowID}
+	ctx, span := workflowSpan(ctx, in)
+	defer span.End()
 	fail := func(name string, err error) (string, error) {
 		if errors.Is(err, store.ErrFenced) || err.Error() == store.ErrFenced.Error() {
 			return "", err
@@ -47,6 +51,7 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		if se.Code == "PLUGIN_ERROR" && !errors.As(err, new(*StepError)) {
 			se = &StepError{Code: "WORKFLOW_ERROR", Message: err.Error()}
 		}
+		span.SetStatus(otelcodes.Error, "")
 		if _, ferr := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, e.markFailed(c, f, name, se, in) },
 			dbos.WithStepName("markFailed")); ferr != nil {
 			return "", ferr
@@ -69,11 +74,13 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 
 // cleanup cleans one stage: skipped when it has no row; its row deleted,
 // fenced, once the plugin succeeded (§6.5 steps 1 to 4, INV-04).
-func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage string) error {
+func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage string) (err error) {
 	row, err := e.stageRow(ctx, in, stage)
 	if err != nil || row == nil {
 		return err
 	}
+	ctx, end := stepSpan(ctx, stage, row.providerType)
+	defer func() { end(err) }()
 	if err := store.MarkStep(ctx, e.DB, f.bindingID, f.workflowID, "CLEANUP_"+stage, ""); err != nil {
 		return err
 	}
@@ -132,7 +139,13 @@ func (e *Engine) cleanup(ctx context.Context, f fence, in ApplyInput, stage stri
 // remove deletes the binding, its stage rows cascading, and audits
 // DELETE_COMPLETED in one fenced transaction (§6.5).
 func (e *Engine) remove(ctx context.Context, f fence, in ApplyInput) error {
-	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+	var rv *reverted
+	var start time.Time
+	if err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		var err error
+		if start, err = attemptStarted(ctx, tx, f); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, "DELETE FROM bindings WHERE id = $1 AND workflow_id = $2 AND phase = 'DELETING'", f.bindingID, f.workflowID)
 		if err != nil {
 			return err
@@ -144,6 +157,12 @@ func (e *Engine) remove(ctx context.Context, f fence, in ApplyInput) error {
 			Action: "DELETE_COMPLETED", Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID}); err != nil {
 			return err
 		}
-		return revertOutcome(ctx, tx, f, in, true)
-	})
+		rv, err = revertOutcome(ctx, tx, f, in, true)
+		return err
+	}); err != nil {
+		return err
+	}
+	rv.count()
+	finished(in.Operation, "success", start)
+	return nil
 }

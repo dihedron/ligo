@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -106,16 +108,17 @@ func (s *Server) breakGlassSubmit(w http.ResponseWriter, r *http.Request) {
 		refused(http.StatusForbidden)
 		return
 	}
-	if s.Logins.Limited(ip, sess.Username) {
+	key := sha256.Sum256([]byte(sess.CSRF)) // one per session, kept only as a hash
+	if !s.Logins.Begin(ip, sess.Username, hex.EncodeToString(key[:])) {
 		w.Header().Set("Retry-After", "60")
 		f.Errors["password"] = "Too many failed attempts. Wait a minute and try again."
 		refused(http.StatusTooManyRequests)
 		return
 	}
 	p, err := s.LDAP.Authenticate(ctx, sess.Username, r.PostFormValue("password"))
+	s.Logins.Done(ip, sess.Username, hex.EncodeToString(key[:]), errors.Is(err, adminauth.ErrInvalidCredentials))
 	switch {
 	case errors.Is(err, adminauth.ErrInvalidCredentials):
-		s.Logins.Failed(ip, sess.Username)
 		s.audited(ctx, "SESSION_LOGIN_FAILED", sess.Username, map[string]any{"username": sess.Username, "remote": ip, "path": r.URL.Path})
 		f.Errors["password"] = "The password is not valid."
 		refused(http.StatusUnauthorized)

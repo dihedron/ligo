@@ -638,6 +638,7 @@ ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
 CREATE INDEX idx_cr_status_zone ON change_requests (status, zone, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
+CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
 
 -- ---------------------------------------------------------------------------
@@ -685,6 +686,8 @@ CREATE TABLE audit_log (
     )
 );
 CREATE INDEX idx_audit_resource ON audit_log (resource_type, resource_name, id DESC);
+CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE resource_id IS NOT NULL;
+CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;

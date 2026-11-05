@@ -1,4 +1,4 @@
--- The target database of the target-postgres stand-in (phase 6): the
+-- The target database of the ligo-plugin-postgres stand-in (phase 6): the
 -- database ledger, its schema and table, the two roles an access level
 -- grants, and the admin role the plugin connects as. Idempotent: lab.sh up
 -- and every deploy run it, as the postgres superuser, with the admin's

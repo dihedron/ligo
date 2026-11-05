@@ -23,8 +23,9 @@ import (
 // TestAudited: audit entries announce their events through the hook, in
 // their transaction: one CR_AWAITING_APPROVAL per pending side, to that
 // side's scope; BINDING_REVOKED to the scopes other than the deciding
-// side's, only for consent ANY; PROPAGATION_FAILED only for a propagated
-// revision; deprecations to the scopes of the affected bindings; system
+// side's, only for consent ANY; PROPAGATION_FAILED for a propagated
+// revision that failed or one the propagator could not compose;
+// deprecations to the scopes of the affected bindings; system
 // events to every subscriber; entries that are no event write nothing.
 func TestAudited(t *testing.T) {
 	ctx := context.Background()
@@ -36,7 +37,7 @@ func TestAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.Close(ctx)
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), os.Getenv("CI") != "")
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, os.Getenv("CI") != "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestAudited(t *testing.T) {
 	t.Cleanup(owner.Close)
 	x := uuid.NewV7().String()[24:]
 	events := []string{"CR_AWAITING_APPROVAL", "BINDING_REVOKED", "PROPAGATION_FAILED", "SOURCE_DEPRECATED", "CR_INTERCONNECT_DENIED",
-		"SYSTEM_MAINTENANCE_ENABLED", "BINDING_EXPIRING"}
+		"SYSTEM_MAINTENANCE_ENABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_EXPIRING"}
 	hooks := map[string]string{"all-" + x: "", "dc-" + x: "dc/corp-prod/*", "cloud-" + x: "cloud/*"}
 	var webhooks []config.Webhook
 	for name, scope := range hooks {
@@ -62,11 +63,11 @@ func TestAudited(t *testing.T) {
 	t.Cleanup(func() { audit.Hook = nil })
 
 	src, tgt, bnd := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
-	create, revoke := uuid.NewV7(), uuid.NewV7()
+	create, revoke, revert := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = owner.Exec(ctx, "delete from notification_outbox where webhook like $1", "%-"+x)
-		_, _ = owner.Exec(ctx, "delete from change_requests where id in ($1, $2)", create, revoke)
+		_, _ = owner.Exec(ctx, "delete from change_requests where id in ($1, $2, $3)", create, revoke, revert)
 		_, _ = owner.Exec(ctx, "delete from bindings where id = $1", bnd)
 		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id = $1", tgt)
 		_, _ = owner.Exec(ctx, "delete from targets where id = $1", tgt)
@@ -103,6 +104,15 @@ func TestAudited(t *testing.T) {
 				repeat('a', 64), false, '{}', repeat('c', 64), 'dino', now() + interval '1 day', 1)`, []any{revoke, "b-" + x, bnd}},
 			{`insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind, decision, decided_by, decided_at)
 				values ($1, 'PLATFORM', 'dc/corp-prod', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now())`, []any{revoke}},
+			// a removal that every side decided, as a break-glass revert: no other scope to tell
+			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone, source_scope, target_scope,
+				platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at, expected_revision)
+				values ($1, 'BINDING', $2, NULL, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod',
+				repeat('a', 64), false, '{}', repeat('d', 64), 'dino', now() + interval '1 day', 1)`, []any{revert, "reverted-" + x}},
+			{`insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind, decision, decided_by, decided_at)
+				values ($1, 'SOURCE', 'cloud/fin-01/payments', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now()),
+				($1, 'TARGET', 'dc/corp-prod/ledger', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now()),
+				($1, 'PLATFORM', 'dc/corp-prod', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now())`, []any{revert}},
 		} {
 			if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
 				return fmt.Errorf("%s: %w", strings.Fields(q.sql)[2], err)
@@ -128,12 +138,16 @@ func TestAudited(t *testing.T) {
 			"BINDING_REVOKED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 		{"revocation applied", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, ChangeRequestID: &revoke, Action: "CR_APPROVED", Actor: "dora"},
 			"BINDING_REVOKED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"removal every side decided", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, ChangeRequestID: &revert, Action: "CR_APPROVED", Actor: "system:break-glass-revert"},
+			"BINDING_REVOKED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"failure of an apply", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROVISION_FAILURE", Actor: "system:workflow", Revision: &two},
 			"PROPAGATION_FAILED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 		{"propagation started", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROPAGATION_STARTED", Actor: "system:propagator", Revision: &two},
 			"PROPAGATION_FAILED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 		{"failure of a propagation", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROVISION_FAILURE", Actor: "system:workflow", Revision: &two},
 			"PROPAGATION_FAILED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"propagation not composed", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "PROPAGATION_FAILED", Actor: "system:propagator", Revision: &two},
+			"PROPAGATION_FAILED", map[string]int{"all": 2, "dc": 2, "cloud": 2}},
 		{"source deprecated", audit.Entry{ResourceType: "SOURCE", ResourceID: &src, ResourceName: "src-" + x, Action: "SOURCE_DEPRECATED", Actor: "carla"},
 			"SOURCE_DEPRECATED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"interconnection denied", audit.Entry{ResourceType: "BINDING", ResourceName: "denied-" + x, Action: "CR_INTERCONNECT_DENIED", Actor: "tina",
@@ -141,6 +155,8 @@ func TestAudited(t *testing.T) {
 			"CR_INTERCONNECT_DENIED", map[string]int{"all": 1, "dc": 1, "cloud": 0}},
 		{"maintenance", audit.Entry{Action: "SYSTEM_MAINTENANCE_ENABLED", Actor: "root", Snapshot: snap(map[string]string{"reason": "upgrade-" + x})},
 			"SYSTEM_MAINTENANCE_ENABLED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"executor recovered", audit.Entry{Action: "SYSTEM_EXECUTOR_RECOVERED", Actor: "ada", Snapshot: snap(map[string]string{"executor": "gone-" + x})},
+			"SYSTEM_EXECUTOR_RECOVERED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"expiry warning", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "BINDING_EXPIRY_WARNED", Actor: "system:expiry"},
 			"BINDING_EXPIRING", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"no event", audit.Entry{Action: "CONFIG_LOADED", Actor: "system:startup"}, "CONFIG_LOADED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},

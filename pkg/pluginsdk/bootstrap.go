@@ -3,9 +3,11 @@ package pluginsdk
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -88,13 +90,14 @@ type BootstrapCredential struct {
 }
 
 // NewBootstrapCredential validates cfg; client carries the TLS trust for
-// Vault (nil: http.DefaultClient).
+// Vault (nil: the system roots, TLS 1.2 or later, a 30s timeout).
 func NewBootstrapCredential(cfg BootstrapCredentialConfig, jwt JWTSource, client *http.Client) (*BootstrapCredential, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 30 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}
 	}
 	return &BootstrapCredential{cfg: cfg, jwt: jwt, client: client, now: time.Now}, nil
 }
@@ -149,8 +152,9 @@ func (b *BootstrapCredential) Get(ctx context.Context) (Credential, error) {
 	return b.cred, nil
 }
 
-// call sends one Vault request and decodes its JSON answer into out; errors
-// carry the status only, never the body.
+// call sends one Vault request and decodes its JSON answer, at most
+// maxVaultResponse bytes, into out; errors carry the status only, never the
+// body.
 func (b *BootstrapCredential) call(ctx context.Context, method, path, token string, body []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(b.cfg.Address, "/")+"/v1/"+path, bytes.NewReader(body))
 	if err != nil {
@@ -170,5 +174,8 @@ func (b *BootstrapCredential) call(ctx context.Context, method, path, token stri
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.NewDecoder(io.LimitReader(resp.Body, maxVaultResponse)).Decode(out)
 }
+
+// maxVaultResponse bounds a Vault answer: a login or a secret is a few KiB.
+const maxVaultResponse = 1 << 20

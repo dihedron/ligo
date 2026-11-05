@@ -130,10 +130,12 @@ type Entry struct {
 	OccurredAt    time.Time
 }
 
-// trail is a resource's last 20 audit entries.
-func (s *Server) trail(ctx context.Context, typ, name string) ([]Entry, error) {
+// trail is a resource's last 20 audit entries: those of the resource and of
+// its change requests, never those of a namesake.
+func (s *Server) trail(ctx context.Context, id uuid.UUID) ([]Entry, error) {
 	rows, err := s.DB.Query(ctx, `SELECT action, actor, revision, occurred_at FROM audit_log
-		WHERE resource_type = $1 AND resource_name = $2 ORDER BY id DESC LIMIT 20`, typ, name)
+		WHERE resource_id = $1 OR change_request_id IN (SELECT id FROM change_requests WHERE resource_id = $1)
+		ORDER BY id DESC LIMIT 20`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +232,7 @@ func (s *Server) binding(w http.ResponseWriter, r *http.Request) {
 		d.Flows, err = s.Bindings.Flows(ctx, v)
 	}
 	if err == nil {
-		d.Audit, err = s.trail(ctx, "BINDING", v.Metadata.Name)
+		d.Audit, err = s.trail(ctx, v.Metadata.ID)
 	}
 	if err != nil {
 		s.fail(w, r, err)

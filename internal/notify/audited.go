@@ -16,8 +16,8 @@ import (
 var sameName = []string{"BREAK_GLASS_USED", "BREAK_GLASS_EXPIRING", "BREAK_GLASS_REVERTED", "BREAK_GLASS_REVERT_FAILED",
 	"BREAK_GLASS_RATIFIED", "BREAK_GLASS_REVIEW_OVERDUE", "CR_INTERCONNECT_DENIED", "BINDING_EXPIRED", "SOURCE_DEPRECATED",
 	"TARGET_DEPRECATED", "ACCESS_LEVEL_DEPRECATED", "CONFIG_APPROVAL_POLICY_WEAKENED", "CONFIG_GOVERNANCE_POLICY_CHANGED",
-	"CONFIG_PLATFORM_CHANGED", "SYSTEM_INTERCONNECT_VIOLATIONS", "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS", "SYSTEM_MAINTENANCE_ENABLED",
-	"SYSTEM_MAINTENANCE_DISABLED"}
+	"CONFIG_PLATFORM_CHANGED", "PROPAGATION_FAILED", "SYSTEM_INTERCONNECT_VIOLATIONS", "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS", "SYSTEM_MAINTENANCE_ENABLED",
+	"SYSTEM_MAINTENANCE_DISABLED", "SYSTEM_EXECUTOR_RECOVERED"}
 
 // derived are the events announced by audit actions of another name.
 var derived = map[string]string{"BINDING_EXPIRY_WARNED": "BINDING_EXPIRING", "CR_CREATED": "CR_AWAITING_APPROVAL",
@@ -126,7 +126,13 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 			return nil, err
 		}
 		scopes = slices.DeleteFunc(scopes, func(s string) bool { return slices.Contains(deciding, s) })
-	case "PROPAGATION_FAILED": // only a revision the propagator started
+		if len(scopes) == 0 { // every side decided, as in a break-glass revert: nobody else to tell
+			return nil, nil
+		}
+	case "PROPAGATION_FAILED": // a revision the propagator could not compose, or one it started that failed
+		if e.Action == "PROPAGATION_FAILED" {
+			break
+		}
 		var propagated bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM audit_log WHERE action = 'PROPAGATION_STARTED' AND resource_type = 'BINDING'
 			AND resource_id = $1 AND revision = $2)`, e.ResourceID, e.Revision).Scan(&propagated); err != nil || !propagated {

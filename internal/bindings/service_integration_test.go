@@ -17,6 +17,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -75,7 +76,7 @@ func setup(t *testing.T) (*Service, *pgxpool.Pool, *world, *plugin) {
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,8 +299,12 @@ func TestAC47(t *testing.T) {
 func TestAC48(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
+	denied := metrics.Total(metrics.InterconnectDenied)
 	if _, err := s.Create(ctx, fin02Op, body("fin-02-x-b-"+w.suffix, w.fin02Src, w.cloudTgt, "read")); slug(err) != "interconnect-denied" {
 		t.Errorf("fin-02 to fin-01 (no rule): %v", err)
+	}
+	if metrics.Total(metrics.InterconnectDenied) != denied+1 {
+		t.Error("ligo_interconnect_denied_total not counted")
 	}
 	r, err := s.Create(ctx, fin02Op, body("fin-02-x-a-"+w.suffix, w.fin02Src, w.ledger, "read"))
 	if err != nil {

@@ -56,9 +56,13 @@ type fake struct {
 	cleanupFail  map[string]int // stage: how many cleanups fail before one succeeds
 	skipped      map[string]bool
 	laterPresent []string // INV-04 violations: a later stage's row still there
+	principals   []string // the principal name each stage received
 }
 
 func (f *fake) started(ctx context.Context, b *pluginv1.BindingContext, stage string) {
+	f.mu.Lock()
+	f.principals = append(f.principals, b.GetDerivedPrincipalName())
+	f.mu.Unlock()
 	var status, wf string
 	err := f.db.QueryRow(ctx, "SELECT status, workflow_id FROM binding_stage_state WHERE binding_id = $1 AND stage = $2", b.GetBindingId(), stage).Scan(&status, &wf)
 	if err != nil || status != "STARTED" || !strings.HasSuffix(wf, fmt.Sprintf(":r%d:a%d", b.GetRevision(), b.GetAttempt())) {
@@ -130,6 +134,9 @@ func (f *fake) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecretSt
 // cleanup records a stage's cleanup, checks that every later stage's row is
 // gone (INV-04), and fails while cleanupFail says so.
 func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage string, later ...string) (bool, error) {
+	f.mu.Lock()
+	f.principals = append(f.principals, b.GetDerivedPrincipalName())
+	f.mu.Unlock()
 	for _, l := range later {
 		var n int
 		_ = f.db.QueryRow(ctx, "SELECT count(*) FROM binding_stage_state WHERE binding_id = $1 AND stage = $2", b.GetBindingId(), l).Scan(&n)
@@ -228,7 +235,7 @@ func setupWith(t *testing.T, mode pluginv1.IdentityMode, version, keyFile, secre
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,6 +491,93 @@ func TestStageFailures(t *testing.T) {
 				t.Errorf("binding %+v", r)
 			}
 		})
+	}
+}
+
+// TestAC20: a target resource owned by another binding fails the second
+// binding, terminally and naming the cause; the first stays served.
+func TestAC20(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	first := v.active(t, "")
+	v.fake.targetFail = pluginsdk.ErrOwnedByOtherBinding("role svc_x")
+	second := v.binding(t)
+	h, err := v.engine.Start(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := wait(t, h); out != "FAILED" || err == nil {
+		t.Fatalf("workflow: %q, %v", out, err)
+	}
+	if r := v.row(t, second); r.phase != "FAILED" || r.step != "ensureTarget" || r.activeRevision != nil ||
+		!strings.Contains(r.message, "RESOURCE_OWNED_BY_OTHER_BINDING") {
+		t.Errorf("second binding %+v", r)
+	}
+	if r := v.row(t, first); r.phase != "ACTIVE" || r.activeRevision == nil || *r.activeRevision != 1 {
+		t.Errorf("first binding %+v", r)
+	}
+}
+
+// TestAC86: every stage of a workflow, apply and delete, receives the
+// binding's stored principal name.
+func TestAC86(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	var stored string
+	if err := v.owner.QueryRow(ctx, "select derived_principal_name from bindings where id = $1", id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	v.deleting(t, id)
+	h, err := v.engine.Start(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := wait(t, h); out != "DELETED" || err != nil {
+		t.Fatalf("delete: %q, %v", out, err)
+	}
+	if len(v.fake.principals) != 6 {
+		t.Errorf("%d stages recorded: %v", len(v.fake.principals), v.fake.principals)
+	}
+	for i, got := range v.fake.principals {
+		if got != stored {
+			t.Errorf("stage call %d: %s, want %s", i, got, stored)
+		}
+	}
+}
+
+// TestAC06: while r2 is provisioning, workloads are served r1; once it is
+// ACTIVE, they get r2's new service name.
+func TestAC06(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	if _, err := v.owner.Exec(ctx, `update bindings set revision = 2, attempt = 2, phase = 'PROVISIONING', operation = 'APPLY',
+		workflow_id = $2, current_step = 'INIT' where id = $1`, id, "ligo:apply:"+id.String()+":r2:a2"); err != nil {
+		t.Fatal(err)
+	}
+	served := func() (revision int64, spec string) {
+		t.Helper()
+		if err := v.owner.QueryRow(ctx, "select active_revision, active_spec::text from v_active_bindings where id = $1", id).Scan(&revision, &spec); err != nil {
+			t.Fatal(err)
+		}
+		return revision, spec
+	}
+	var during int64
+	var duringSpec string
+	v.fake.targetSpec = `{"endpoint":"db.internal:5432","serviceName":"ledger-2"}`
+	v.fake.targetHook = func(*pluginv1.EnsureTargetRequest) { during, duringSpec = served() }
+	h, err := v.engine.Start(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := wait(t, h); out != "ACTIVE" {
+		t.Fatalf("workflow: %q, %v", out, err)
+	}
+	if during != 1 || strings.Contains(duringSpec, "ledger-2") {
+		t.Errorf("during r2: r%d %s", during, duringSpec)
+	}
+	if revision, spec := served(); revision != 2 || !strings.Contains(spec, "ledger-2") {
+		t.Errorf("after r2: r%d %s", revision, spec)
 	}
 }
 

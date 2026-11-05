@@ -5,6 +5,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"google.golang.org/grpc/codes"
 )
 
 func (v *env) reconciler() *Reconciler {
@@ -60,6 +63,80 @@ func TestReconcile(t *testing.T) {
 	}
 	if rotations[true] != 1 || rotations[false] != 1 {
 		t.Errorf("rotations %v: one due, one not", v.fake.rotations)
+	}
+}
+
+// TestAC66: a binding on a deprecated target and level is still served and
+// reconciled.
+func TestAC66(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	if _, err := v.owner.Exec(ctx, "update target_access_levels set state = 'DEPRECATED' where target_id = (select target_id from bindings where id = $1)", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.owner.Exec(ctx, "update targets set state = 'DEPRECATED' where id = (select target_id from bindings where id = $1)", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.reconciler().Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := v.waitPhase(t, id, "ACTIVE"); r.phase != "ACTIVE" {
+		t.Fatalf("binding %+v", r)
+	}
+	if v.audited(t, id, "REAPPLY_STARTED") != 1 {
+		t.Error("REAPPLY_STARTED missing")
+	}
+	var served int
+	if err := v.owner.QueryRow(ctx, "select count(*) from v_active_bindings where id = $1", id).Scan(&served); err != nil || served != 1 {
+		t.Errorf("served %d (%v)", served, err)
+	}
+}
+
+// TestAC78: a re-apply refused by the target because a bound tightened fails
+// the binding, which keeps its last active snapshot.
+func TestAC78(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	before := v.row(t, id)
+	v.fake.targetFail = pluginsdk.Error(codes.FailedPrecondition, "PRIVILEGE_OUT_OF_BOUNDS", "LEDGER_RW_ROLE is not in grantable_roles", false)
+	if _, err := v.reconciler().Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := v.waitPhase(t, id, "FAILED")
+	if r.phase != "FAILED" || r.step != "ensureTarget" || !strings.Contains(r.message, "PRIVILEGE_OUT_OF_BOUNDS") {
+		t.Fatalf("binding %+v", r)
+	}
+	if r.activeRevision == nil || *r.activeRevision != 1 || r.spec != before.spec || r.auth != before.auth {
+		t.Errorf("snapshot %+v, was %+v", r, before)
+	}
+	var served int
+	if err := v.owner.QueryRow(ctx, "select count(*) from v_active_bindings where id = $1", id).Scan(&served); err != nil || served != 1 {
+		t.Errorf("served %d (%v)", served, err)
+	}
+}
+
+// TestReconcileNoRotation: a platform without rotation_interval has no
+// scheduled rotation, however old the static secret (§6.4 rotation flag).
+func TestReconcileNoRotation(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	ctx := context.Background()
+	id := v.active(t, "")
+	if _, err := v.owner.Exec(ctx, "update bindings set last_rotated_at = now() - interval '48 hours' where id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	v.fake.rotations = nil
+	r := v.reconciler()
+	r.Rotation = nil
+	if _, err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b := v.waitPhase(t, id, "ACTIVE"); b.phase != "ACTIVE" {
+		t.Fatalf("binding %+v", b)
+	}
+	if slices.Contains(v.fake.rotations, true) {
+		t.Errorf("rotations %v: none scheduled", v.fake.rotations)
 	}
 }
 

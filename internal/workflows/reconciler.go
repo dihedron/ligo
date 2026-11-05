@@ -1,9 +1,11 @@
 package workflows
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 	"uuid"
@@ -18,6 +20,7 @@ import (
 // time: it repairs drift on the targets and rotates static secrets (§6.6).
 type Reconciler struct {
 	Engine        *Engine
+	Logger        *slog.Logger             // errors of a pass; default slog.Default()
 	Interval      time.Duration            // reconciliation.interval; default 6h
 	Jitter        time.Duration            // reconciliation.jitter
 	MaxConcurrent int                      // re-applies running at once; default 4
@@ -39,7 +42,9 @@ func (r *Reconciler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
-			_, _ = r.Reconcile(ctx)
+			if _, err := r.Reconcile(ctx); err != nil && ctx.Err() == nil {
+				cmp.Or(r.Logger, slog.Default()).Error("reconciler", "error", err)
+			}
 		}
 	}
 }
@@ -110,7 +115,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 
 // reapply moves an ACTIVE binding to a REAPPLY attempt: same revision, a
 // new attempt and workflow, rotating if rotate is set or, for a static
-// secret, once rotation has passed (§6.4 rotation flag); it reports false
+// secret, once rotation has passed, never if it is 0 (§6.4 rotation flag); it reports false
 // if the binding is no longer ACTIVE. Maintenance mode refuses it.
 func (e *Engine) reapply(ctx context.Context, id uuid.UUID, actor string, rotate bool, rotation time.Duration) (bool, error) {
 	ok := false
@@ -124,7 +129,7 @@ func (e *Engine) reapply(ctx context.Context, id uuid.UUID, actor string, rotate
 			workflow_id = format('ligo:reapply:%s:r%s:a%s', id, revision, attempt + 1), current_step = 'INIT', status_message = '',
 			rotate_static_secrets = $3 OR coalesce((SELECT s.artifact->>'mode' IN ('IDENTITY_MODE_EXTERNAL_DIR', 'IDENTITY_MODE_TARGET_LOCAL')
 				FROM binding_stage_state s WHERE s.binding_id = b.id AND s.stage = 'IDENTITY'), false)
-				AND (last_rotated_at IS NULL OR last_rotated_at < now() - $2::interval),
+				AND $2::interval > interval '0' AND (last_rotated_at IS NULL OR last_rotated_at < now() - $2::interval),
 			last_transition_at = now(), updated_at = now(), updated_by = $4
 			WHERE id = $1 AND phase = 'ACTIVE' RETURNING name, revision, attempt`, id, rotation.String(), rotate, actor).Scan(&name, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {

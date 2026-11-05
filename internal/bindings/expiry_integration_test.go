@@ -4,6 +4,7 @@ package bindings
 
 import (
 	"context"
+	"github.com/dihedron/ligo/internal/metrics"
 	"slices"
 	"testing"
 	"time"
@@ -75,10 +76,14 @@ func TestAC71(t *testing.T) {
 	if _, err := o.Exec(ctx, "update system_settings set maintenance_mode = true"); err != nil {
 		t.Fatal(err)
 	}
+	revoked := metrics.Count(metrics.BindingExpirations, "revoked")
 	err = s.Expire(ctx)
 	_, _ = o.Exec(ctx, "update system_settings set maintenance_mode = false")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Count(metrics.BindingExpirations, "revoked") < revoked+1 {
+		t.Error("ligo_binding_expirations_total{result=revoked} not counted")
 	}
 	if phase, workflow, _, _, _ := bindingRow(t, o, name); phase != "DELETING" || workflow != "ligo:delete:"+id.String()+":r2:a3" {
 		t.Errorf("expired binding %s %s", phase, workflow)

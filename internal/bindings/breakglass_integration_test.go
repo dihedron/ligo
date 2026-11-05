@@ -6,11 +6,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -50,6 +52,7 @@ func breakGlassOf(t *testing.T, o *pgxpool.Pool, name string) (cr *uuid.UUID, op
 func TestAC31(t *testing.T) {
 	s, o, w, _ := setup(t)
 	name := "ledger-bg-" + w.suffix
+	before := gauge(t, s, "ligo_break_glass_open", "zone", "prod")
 	r, err := s.BreakGlass(context.Background(), livia, emergency("CREATE",
 		`"binding":`+string(body(name, ledgerSource(t, o, w, "a"), w.ledger, "read"))+`,`, `,"ttl":"1h"`))
 	if err != nil {
@@ -66,6 +69,9 @@ func TestAC31(t *testing.T) {
 	}
 	if n, _ := audited(t, o, name, "BREAK_GLASS_USED"); n != 1 {
 		t.Errorf("BREAK_GLASS_USED %d", n)
+	}
+	if v := gauge(t, s, "ligo_break_glass_open", "zone", "prod"); v != before+1 {
+		t.Errorf("ligo_break_glass_open{zone=prod} %v, was %v", v, before)
 	}
 }
 
@@ -191,8 +197,12 @@ func TestAC33(t *testing.T) {
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", ""); slug(err) != "validation-failed" {
 		t.Errorf("no comment: %v", err)
 	}
+	ratified := metrics.Total(metrics.BreakGlass)
 	if _, err := s.Ratify(ctx, ledgerApp, r.ID, "", "confirmed with the payments lead"); err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Total(metrics.BreakGlass) != ratified+1 {
+		t.Error("ligo_break_glass_total{outcome=ratified} not counted")
 	}
 	if cr, _ := breakGlassOf(t, o, name); cr != nil {
 		t.Errorf("still open: %v", cr)
@@ -395,5 +405,43 @@ func TestRevertGone(t *testing.T) {
 	}
 	if _, err := s.RevertNow(ctx, livia, bg.ID, "the incident is over"); slug(err) != "break-glass-not-open" {
 		t.Errorf("revert: %v", err)
+	}
+}
+
+// TestBreakGlassConcurrent: concurrent break-glass changes are counted one
+// after the other, so together they cannot exceed max_open (ADR-12 rule 6,
+// finding 2.5).
+func TestBreakGlassConcurrent(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	var open int
+	if err := o.QueryRow(ctx, `select count(distinct r.id) from change_requests r join change_request_sides s on s.change_request_id = r.id
+		where s.scope like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	s.Requests.Policy.BreakGlassPolicyFor("dc/corp-prod/ledger").MaxOpen = open + 1
+	const n = 5
+	bodies := make([][]byte, n)
+	for i := range bodies {
+		k := fmt.Sprintf("c%d", i)
+		bodies[i] = emergency("CREATE", `"binding":`+string(body("ledger-"+k+"-"+w.suffix, ledgerSource(t, o, w, k), w.ledger, "read"))+`,`, "")
+	}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range bodies {
+		wg.Go(func() { _, errs[i] = s.BreakGlass(ctx, livia, bodies[i]) })
+	}
+	wg.Wait()
+	applied := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			applied++
+		case slug(err) != "break-glass-limit":
+			t.Errorf("unexpected: %v", err)
+		}
+	}
+	if applied != 1 {
+		t.Errorf("%d applied, max_open allows 1 more", applied)
 	}
 }

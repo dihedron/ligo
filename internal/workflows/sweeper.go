@@ -1,10 +1,12 @@
 package workflows
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"uuid"
 
@@ -18,6 +20,7 @@ import (
 // Sweeper is the housekeeping loop one replica runs at a time (§6.3).
 type Sweeper struct {
 	Engine   *Engine
+	Logger   *slog.Logger  // errors of a sweep; default slog.Default()
 	Interval time.Duration // between sweeps; default 30s
 	Stale    time.Duration // a workflow quieter than this is checked; default 60s
 	// Retention is storage.dbos.workflow_retention: finished workflows older
@@ -42,7 +45,9 @@ func (s *Sweeper) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			_, _ = s.Sweep(ctx)
+			if _, err := s.Sweep(ctx); err != nil && ctx.Err() == nil {
+				cmp.Or(s.Logger, slog.Default()).Error("sweeper", "error", err)
+			}
 		}
 	}
 }

@@ -176,6 +176,19 @@ func TestBootstrapErrors(t *testing.T) {
 	if _, err := b.Get(ctx); err == nil {
 		t.Error("a credential without a password was accepted")
 	}
+
+	huge := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"auth":{"client_token":"`+strings.Repeat("t", maxVaultResponse)+`"}}`)
+	}))
+	defer huge.Close()
+	cfg.Address = huge.URL
+	b, _ = NewBootstrapCredential(cfg, fixedJWT("the-jwt"), huge.Client())
+	if _, err := b.Get(ctx); err == nil {
+		t.Error("an answer over 1 MiB was read")
+	}
+	if _, err := NewBootstrapCredential(cfg, fixedJWT("the-jwt"), nil); err != nil {
+		t.Errorf("default client: %v", err)
+	}
 }
 
 // TestSecretRedacted: a Secret never prints, logs or marshals its value.

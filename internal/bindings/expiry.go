@@ -10,7 +10,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/store"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -68,7 +68,13 @@ func (s *Service) Expire(ctx context.Context) error {
 	}
 	var errs []error
 	for _, id := range ids {
-		if err := s.expire(ctx, id); err != nil {
+		err := s.expire(ctx, id)
+		switch {
+		case err == nil:
+			metrics.BindingExpirations.WithLabelValues("revoked").Inc()
+		case changerequests.IsBusy(err): // revoked at a later run, already unserved
+			metrics.BindingExpirations.WithLabelValues("deferred").Inc()
+		default:
 			errs = append(errs, fmt.Errorf("binding %s: %w", id, err))
 		}
 	}
@@ -80,35 +86,10 @@ func (s *Service) expire(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	if err := s.withdrawPending(ctx, cur, actorExpiry); err != nil {
-		return err
-	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE", Kind: kindExpiry,
 		Consent: changerequests.ConsentAny, Zone: cur.zone, SourceScope: cur.sourceScope, TargetScope: cur.targetScope,
 		PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"), RequestedBy: actorExpiry,
 		Sides: []changerequests.Side{{Name: "TARGET", Scope: cur.targetScope, Basis: kindExpiry, Decision: changerequests.Approved,
 			DecidedBy: expiryApprover}}}
 	return s.Requests.System(ctx, r)
-}
-
-// withdrawPending withdraws the binding's own pending change request for
-// actor: a system change supersedes it.
-func (s *Service) withdrawPending(ctx context.Context, cur *stored, actor string) error {
-	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		var crID uuid.UUID
-		err := tx.QueryRow(ctx, `SELECT id FROM change_requests WHERE resource_type = 'BINDING' AND resource_id = $1 AND status = 'PENDING'`,
-			cur.id).Scan(&crID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if err := store.CloseRequest(ctx, tx, crID, "WITHDRAWN", actor, "superseded by a system change", ""); err != nil {
-			return err
-		}
-		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name,
-			ChangeRequestID: &crID, Action: "CR_WITHDRAWN", Actor: actor})
-		return err
-	})
 }

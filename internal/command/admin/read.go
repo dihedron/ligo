@@ -210,6 +210,19 @@ func (cmd *MaintenanceStatus) Execute([]string) error {
 	})
 }
 
+// Executors: ligo executors list|recover.
+type Executors struct {
+	List    ExecutorsList    `command:"list" description:"Show the pending workflows and live database sessions of each executor."`
+	Recover ExecutorsRecover `command:"recover" description:"Re-enqueue the pending workflows of a replica gone for good (requires admin.full_access)."`
+}
+
+type ExecutorsList struct{ Base }
+
+func (cmd *ExecutorsList) Execute([]string) error {
+	return cmd.get(path("executors"), nil, col("EXECUTOR", "executor"), col("VERSION", "applicationVersion"), col("PENDING", "pending"),
+		col("OLDEST PENDING", "oldestPending"), col("LIVE SESSIONS", "liveSessions"), col("SELF", "self"))
+}
+
 // Governance: ligo governance show|check.
 type Governance struct {
 	Show  GovernanceShow  `command:"show" description:"Show the governance policy in force and its SHA-256."`

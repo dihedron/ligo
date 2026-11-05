@@ -11,6 +11,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
@@ -172,10 +173,13 @@ func (r *Rules) narrows(current, proposed string) error {
 	n, err := regexpolicy.CheckNarrowing(current, proposed, r.Regex.NarrowingStateLimit)
 	switch {
 	case err != nil:
+		metrics.RegexNarrowingChecks.WithLabelValues("undecided").Inc()
 		return refuse(422, "widening-not-allowed", "undecided: %v", err)
 	case !n.Narrower:
+		metrics.RegexNarrowingChecks.WithLabelValues("wider").Inc()
 		return refuse(422, "widening-not-allowed", "wider: the new regex also matches %s", n.Witness)
 	}
+	metrics.RegexNarrowingChecks.WithLabelValues("narrowing").Inc()
 	return nil
 }
 

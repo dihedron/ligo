@@ -21,9 +21,36 @@ func example(t *testing.T) string {
 	return regexp.MustCompile(`<64-hex-sha256-of-[a-z-]+>`).ReplaceAllString(string(data), strings.Repeat("ab", 32))
 }
 
-var env = map[string]string{"LIGO_WEBHOOK_ONCALL_SECRET": "x", "LIGO_WEBHOOK_DBA_SECRET": "y"}
+var env = map[string]string{"LIGO_INSTANCE_ID": "ligo-1", "LIGO_WEBHOOK_ONCALL_SECRET": "x", "LIGO_WEBHOOK_DBA_SECRET": "y"}
 
 func lookupEnv(k string) (string, bool) { v, ok := env[k]; return v, ok }
+
+// TestInstanceID: PostgreSQL truncates application_name at 63 bytes, so a
+// longer ID, or one it would rewrite, would look dead (§10.2).
+func TestInstanceID(t *testing.T) {
+	cfg := parse(t, example(t))
+	for id, ok := range map[string]bool{"ligo-0": true, "ligo1.dc1_a": true, strings.Repeat("a", 58): true,
+		"": false, strings.Repeat("a", 59): false, "ligo 1": false, "ligo/1": false, "lìgo": false} {
+		err := Validate(cfg, Options{LookupEnv: func(k string) (string, bool) {
+			if k == "LIGO_INSTANCE_ID" {
+				return id, true
+			}
+			return lookupEnv(k)
+		}})
+		if got := err == nil || !strings.Contains(err.Error(), "instance ID"); got != ok {
+			t.Errorf("instance ID %q: %v", id, err)
+		}
+	}
+	unset := func(k string) (string, bool) {
+		if k == "LIGO_INSTANCE_ID" {
+			return "", false
+		}
+		return lookupEnv(k)
+	}
+	if err := Validate(cfg, Options{LookupEnv: unset}); err == nil || !strings.Contains(err.Error(), "instance ID") {
+		t.Errorf("no instance ID: %v", err)
+	}
+}
 
 func parse(t *testing.T, doc string) *Config {
 	t.Helper()
@@ -82,15 +109,16 @@ func TestRules(t *testing.T) {
 		{"unknown zone", `      - { name: "no-store-prod", zone: prod`, `      - { name: "no-store-prod", zone: nowhere`, 2, nil},
 		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
 		{"missing instance", `identity_provider: { type: "openldap.v1", instance: "ldap-prod" }`, `identity_provider: { type: "openldap.v1", instance: "ldap-nope" }`, 2, nil},
-		{"bootstrap audience", `role: "ligo-plugin-ldap-prod"
-            jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-ldap-prod"
+		{"bootstrap audience", `role: "ligo-plugin-openldap-prod"
+            jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-openldap-prod"
             jwt_audience: "https://other"`, 5, nil},
 		{"trust domain not accepted", "allowed_source_trust_domains: [test.internal]", "allowed_source_trust_domains: [test.internal, other.internal]", 6, []int{16}},
 		{"bad principal prefix", `principal_prefix: "svc_"`, `principal_prefix: "svc-"`, 6, nil},
-		{"bad sha256", `binary: "store-vault"
-    sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "store-vault"
+		{"bad sha256", `binary: "ligo-plugin-vault"
+    sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "ligo-plugin-vault"
     sha256: "ABC"`, 7, nil},
 		{"local-kek without --insecure-dev", "provider: vault-transit", "provider: local-kek", 9, nil},
+		{"tracing CA without TLS", "    insecure: false                       # true only for a collector without TLS", "    insecure: true\n    ca_cert_file: /etc/ligo/ca.crt", 9, nil},
 		{"zone domain also federated", "{ trust_domain: cloud.internal, via_zone: prod }", "{ trust_domain: prod.internal, via_zone: prod }", 12, nil},
 		{"unknown via_zone", "via_zone: prod }", "via_zone: nowhere }", 12, nil},
 		{"no auth mode", "auth_modes: [x509_svid, jwt_svid]", "auth_modes: []", 12, nil},
@@ -118,6 +146,7 @@ func TestRules(t *testing.T) {
 		{"unknown color mode", "dark:  { primary:", "dim:  { primary:", 15, nil},
 		{"flow outside allowed_endpoints", `destination: "ora-scan.prod.internal", ports: [1521]`, `destination: "ora-scan.prod.internal", ports: [1600]`, 19, nil},
 		{"invalid flow", `- { name: listener, purpose: DATA`, `- { name: Listener, purpose: DATA`, 19, nil},
+		{"invalid instance name", `name: "svid-passthrough-prod"`, `name: "Svid Passthrough"`, 1, nil},
 		{"no workload_advertise", `    destination: "ligo.prod.internal"`, `    destination: ""`, 19, nil},
 	} {
 		doc := example(t)
@@ -162,8 +191,11 @@ func TestPolicy(t *testing.T) {
 	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
 		t.Errorf("AC-51: %+v", d)
 	}
-	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 2 || len(p.SHA256()) != 64 {
+	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 3 || len(p.SHA256()) != 64 {
 		t.Errorf("policy: %+v", p)
+	}
+	if got := p.PartiesWithoutBreakGlass(); len(got) != 0 {
+		t.Errorf("the example leaves parties without break-glass: %v", got)
 	}
 }
 
@@ -210,10 +242,10 @@ func TestPluginRules(t *testing.T) {
     builtin: true`, `  - type: "none.v1"
     builtin: true
     binary: "x"`},
-		{"binary path", `binary: "store-vault"`, `binary: "../store-vault"`},
-		{"no selector", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: ''`},
-		{"selector not boolean", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'hint'`},
-		{"selector unknown field", `          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'`, `          match_expr: 'spiffeID == "x"'`},
+		{"binary path", `binary: "ligo-plugin-vault"`, `binary: "../ligo-plugin-vault"`},
+		{"no selector", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: ''`},
+		{"selector not boolean", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: 'hint'`},
+		{"selector unknown field", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: 'spiffeID == "x"'`},
 		{"config not a mapping", `          host: "ora-scan.prod.internal"`, `          allowed_endpoints: 7
           host: "ora-scan.prod.internal"`},
 		{"identity provider flows", `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"`, `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"
@@ -227,6 +259,14 @@ func TestPluginRules(t *testing.T) {
 		{"bad incident pattern", `incident_reference_pattern: '^INC[0-9]{7}$'`, `incident_reference_pattern: 'INC['`},
 		{"bad sealing provider", "provider: vault-transit", "provider: kms"},
 		{"startup_timeout too short", `  application_version: "4.0.1"`, "  startup_timeout: 1s\n  application_version: \"4.0.1\""},
+		{"max_tracked_keys too few", "max_tracked_keys: 1000000", "max_tracked_keys: 9999"},
+		{"max_tracked_keys too many", "max_tracked_keys: 1000000", "max_tracked_keys: 10000001"},
+		{"max_conns too many", "max_conns: 25", "max_conns: 1001"},
+		{"transit audience not the core identity's", `    jwt_audience: "https://vault.prod.internal"
+    mount: "transit"`, `    jwt_audience: "https://vault.other.internal"
+    mount: "transit"`},
+		{"app_statement_timeout too long", "app_statement_timeout: 5s", "app_statement_timeout: 10m"},
+		{"reader_statement_timeout too short", "reader_statement_timeout: 500ms", "reader_statement_timeout: 10ms"},
 		{"startup_timeout too long", `  application_version: "4.0.1"`, "  startup_timeout: 1h\n  application_version: \"4.0.1\""},
 		{"bad default_cross_scope", "default_cross_scope: deny", "default_cross_scope: maybe"},
 		{"bad action", "        action: deny\n", "        action: drop\n"},

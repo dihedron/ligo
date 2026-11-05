@@ -58,6 +58,7 @@ type Server struct {
 
 	limits     ratelimit.Limiter
 	loginsOnce sync.Once
+	basic      basicCache
 }
 
 // Directory authenticates LDAP users: *adminauth.LDAP.
@@ -66,7 +67,10 @@ type Directory interface {
 }
 
 // Handler routes the admin API behind authentication and rate limiting.
-func (s *Server) Handler() http.Handler { return s.middleware(s.routes()) }
+func (s *Server) Handler() http.Handler {
+	s.limits.Max = s.Listener.RateLimit.MaxTrackedKeys
+	return s.middleware(s.routes())
+}
 
 // router records the patterns it routes, which the OpenAPI document must
 // list (api/openapi/admin.v1alpha1.yaml).
@@ -187,15 +191,22 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 	case r.TLS != nil && len(r.TLS.VerifiedChains) > 0 && s.Listener.ClientSVIDAuth.Enabled:
 		p, err = adminauth.SVID(r.TLS, s.Listener.ClientSVIDAuth.AcceptedTrustDomains)
 	case basic && s.basicAllowed():
-		// the login limits count refused credentials only (§7.2.1): once
-		// either is exhausted, Basic requests of that address or user wait
+		// the login limits count refused credentials only (§7.2.1), taken
+		// before the check so concurrent ones count: once either is
+		// exhausted, Basic requests of that address or user wait
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if s.logins().Limited(ip, user) {
+		if !s.logins().Begin(ip, user, "") {
 			return changerequests.Caller{}, errLoginLimited
 		}
-		if p, err = s.LDAP.Authenticate(r.Context(), user, password); errors.Is(err, adminauth.ErrInvalidCredentials) {
-			s.logins().Failed(ip, user)
+		// a remembered login skips the directory, except for break-glass,
+		// whose groups are read at the moment of use (ADR-12)
+		var ok bool
+		if p, ok = s.basic.get(user, password, time.Now()); !ok || r.Method == http.MethodPost && r.URL.Path == "/v1/admin/break-glass" {
+			if p, err = s.LDAP.Authenticate(r.Context(), user, password); err == nil {
+				s.basic.put(user, password, p, time.Now())
+			}
 		}
+		s.logins().Done(ip, user, "", errors.Is(err, adminauth.ErrInvalidCredentials))
 	default:
 		err = adminauth.ErrInvalidCredentials
 	}
@@ -205,13 +216,17 @@ func (s *Server) authenticate(r *http.Request) (changerequests.Caller, error) {
 	return changerequests.Caller{Principal: p, Grants: s.Authz.For(p)}, nil
 }
 
-// apiRate is the caller's API rate: its bindings' rate_limit, else
-// api_per_principal_rps (default 10).
+// apiRate is the caller's API rate: the highest api_rps and burst of its
+// bindings' rate_limit, else api_per_principal_rps (default 10).
 func (s *Server) apiRate(c changerequests.Caller) ratelimit.Rate {
+	var r ratelimit.Rate
 	for _, g := range c.Grants {
 		if g.RateLimit != nil && g.RateLimit.APIRPS > 0 {
-			return ratelimit.Rate{PerSecond: g.RateLimit.APIRPS, Burst: float64(max(g.RateLimit.Burst, 1))}
+			r = ratelimit.Rate{PerSecond: max(r.PerSecond, g.RateLimit.APIRPS), Burst: max(r.Burst, float64(g.RateLimit.Burst), 1)}
 		}
+	}
+	if r.PerSecond > 0 {
+		return r
 	}
 	rps := s.Listener.RateLimit.APIPerPrincipalRPS
 	if rps <= 0 {
@@ -226,7 +241,8 @@ func (s *Server) logins() *ratelimit.Logins {
 	s.loginsOnce.Do(func() {
 		if s.Logins == nil {
 			rl := s.Listener.RateLimit
-			s.Logins = &ratelimit.Logins{PerIPPerMin: rl.LoginPerIPPerMin, PerUserPerMin: rl.LoginPerUserPerMin}
+			s.Logins = &ratelimit.Logins{PerIPPerMin: rl.LoginPerIPPerMin, PerUserPerMin: rl.LoginPerUserPerMin,
+				PerUserGlobalPerMin: rl.LoginPerUserGlobalPerMin, MaxKeys: rl.MaxTrackedKeys}
 		}
 	})
 	return s.Logins

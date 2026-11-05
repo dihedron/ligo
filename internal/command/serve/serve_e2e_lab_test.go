@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,10 +91,11 @@ func newAdmin(t *testing.T, who string) *admin {
 	t.Helper()
 	a := &admin{t: t, base: e2eEnv(t, "LIGO_E2E_ADMIN")}
 	var cfg *tls.Config
-	if who == "olivia" {
-		a.user, a.pass = "olivia", e2eEnv(t, "LIGO_TEST_LDAP_OLIVIA_PASS")
+	switch who {
+	case "olivia", "livia":
+		a.user, a.pass = who, e2eEnv(t, "LIGO_TEST_LDAP_"+strings.ToUpper(who)+"_PASS")
 		cfg = ligoTLS(t, "")
-	} else {
+	default:
 		cfg = ligoTLS(t, who)
 	}
 	a.client = &http.Client{Timeout: 90 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
@@ -111,6 +113,9 @@ func (a *admin) do(method, path string, body any) (int, map[string]any) {
 	req, _ := http.NewRequest(method, a.base+path, rd)
 	if a.user != "" {
 		req.SetBasicAuth(a.user, a.pass)
+	}
+	if id := os.Getenv("LIGO_E2E_TRACE"); id != "" { // lab.sh serve test-otel: a sampled caller
+		req.Header.Set("traceparent", "00-"+id+"-b7ad6b7169203331-01")
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
@@ -180,6 +185,7 @@ func names(t *testing.T) (source, target, binding string) {
 // binding becomes ACTIVE; olivia, a viewer by LDAP, reads it.
 func TestServeE2EApply(t *testing.T) {
 	olga, dora, olivia := newAdmin(t, "olga"), newAdmin(t, "dora"), newAdmin(t, "olivia")
+	dora.base = e2eEnv(t, "LIGO_E2E_ADMIN2") // the replica that runs the workflow
 	source, target, binding := names(t)
 	x := e2eEnv(t, "LIGO_E2E_SUFFIX")
 
@@ -190,6 +196,17 @@ func TestServeE2EApply(t *testing.T) {
 		t.Fatalf("source: %d %v", code, filed)
 	}
 	approveAll(t, dora, filed)
+
+	// AC-14: the real plugin refuses a role outside its grantable_roles
+	if code, b := olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
+		"metadata":     map[string]string{"name": "dba-" + target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
+		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
+		"accessLevels": []any{map[string]any{"name": "admin", "grants": map[string][]string{"roles": {"DBA"}}}},
+		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
+			"ports": []int{5432}, "tls": true, "serverName": "pg.ligo.lab"}},
+		"visibility": map[string]string{"mode": "PRIVATE"}}); code != http.StatusUnprocessableEntity || !strings.Contains(fmt.Sprint(b), "grantable_roles") {
+		t.Errorf("a level granting DBA: %d %v", code, b)
+	}
 
 	code, filed = olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
 		"metadata":     map[string]string{"name": target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
@@ -203,6 +220,12 @@ func TestServeE2EApply(t *testing.T) {
 	}
 	if cr := approveAll(t, dora, filed); len(cr["sides"].([]any)) != 2 {
 		t.Errorf("target sides: %v", cr["sides"])
+	}
+
+	// AC-14: binding parameters cannot add a role
+	if code, b := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read",
+		"parameters": map[string][]string{"roles": {"DBA"}}}); code != http.StatusUnprocessableEntity {
+		t.Errorf("parameters adding a role: %d %v", code, b)
 	}
 
 	code, filed = olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read"})

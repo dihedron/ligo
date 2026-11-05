@@ -165,6 +165,32 @@ func (p *Policy) BreakGlassPolicyFor(scope string) *BreakGlassPolicy {
 	return nil
 }
 
+// UncoveredParty is an additional party of an interconnection rule whose
+// scope no break-glass policy covers.
+type UncoveredParty struct {
+	Rule  string `json:"rule"`
+	Party string `json:"party"`
+	Scope string `json:"scope"`
+}
+
+// PartiesWithoutBreakGlass lists the parties that make every break-glass
+// change under their rule refused (ADR-12); none when no policy exists, as
+// break-glass is then not in use.
+func (p *Policy) PartiesWithoutBreakGlass() []UncoveredParty {
+	if len(p.BreakGlassPolicies) == 0 {
+		return nil
+	}
+	var found []UncoveredParty
+	for _, r := range p.Interconnects.Rules {
+		for _, a := range r.AdditionalApprovals {
+			if p.BreakGlassPolicyFor(a.Scope) == nil {
+				found = append(found, UncoveredParty{r.Name, a.Name, a.Scope})
+			}
+		}
+	}
+	return found
+}
+
 // Canonical returns the RFC 8785 canonical JSON of the policy, with the
 // platforms sorted by name.
 func (p *Policy) Canonical() ([]byte, error) {

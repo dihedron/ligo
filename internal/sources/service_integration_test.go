@@ -12,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -52,7 +53,7 @@ func setup(t *testing.T) (*Service, *pgxpool.Pool) {
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,9 +178,13 @@ func TestNarrowingPropagates(t *testing.T) {
 	if _, err := s.Update(ctx, alice, src.Metadata.Name, body(t, narrow, map[string]any{"expectedRevision": 2})); slug(err) != "revision-conflict" {
 		t.Errorf("stale revision: %v", err)
 	}
+	narrowed := metrics.Count(metrics.RegexNarrowingChecks, "narrowing")
 	r, err := s.Update(ctx, alice, src.Metadata.Name, body(t, narrow, map[string]any{"expectedRevision": 1}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Count(metrics.RegexNarrowingChecks, "narrowing") != narrowed+1 {
+		t.Error("ligo_regex_narrowing_checks_total{result=narrowing} not counted")
 	}
 	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
 		t.Fatal(err)
@@ -215,6 +220,7 @@ func TestStates(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
 	src := registered(t, s, owner)
+	retired, _, _, _ := row(t, owner, src.Metadata.Name)
 	if _, err := s.SetState(ctx, eve, src.Metadata.Name, "deprecate", 1, "", nil); slug(err) != "not-found" {
 		t.Errorf("caller without a role on the scope: %v", err)
 	}
@@ -238,6 +244,24 @@ func TestStates(t *testing.T) {
 	}
 	if _, err := s.SetState(ctx, alice, src.Metadata.Name, "reactivate", revision, "", nil); slug(err) != "not-found" {
 		t.Errorf("a retired source is final: %v", err)
+	}
+
+	// AC-67: the row remains, its name is free again, and ligo cannot delete a source
+	r, err := s.Create(ctx, alice, body(t, src, nil))
+	if err != nil {
+		t.Fatalf("a new source under a retired name: %v", err)
+	}
+	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	var rows, active int
+	var fresh uuid.UUID
+	if err := owner.QueryRow(ctx, `select count(*), count(*) filter (where state = 'ACTIVE'), (array_agg(id) filter (where state = 'ACTIVE'))[1]
+		from sources where name = $1`, src.Metadata.Name).Scan(&rows, &active, &fresh); err != nil || rows != 2 || active != 1 || fresh == retired {
+		t.Errorf("%d rows, %d active, new id %s, retired %s (%v)", rows, active, fresh, retired, err)
+	}
+	if _, err := s.DB.Exec(ctx, "delete from sources where id = $1", retired); err == nil {
+		t.Error("ligo_app deleted a source")
 	}
 }
 

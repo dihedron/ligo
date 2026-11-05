@@ -99,7 +99,7 @@ func walkForbidden(n *syntax.Regexp, isRoot, inRepeat bool) error {
 	return nil
 }
 
-// checkNode applies rules 7a to 7d and 7f to one node.
+// checkNode applies rules 7a to 7d, 7f and 7g to one node.
 func checkNode(n *syntax.Regexp, isRoot, inRepeat bool) error {
 	if n.Flags&syntax.FoldCase != 0 {
 		return invalid("7a", "case-insensitive matching is forbidden")
@@ -119,6 +119,8 @@ func checkNode(n *syntax.Regexp, isRoot, inRepeat bool) error {
 		if isRoot {
 			return invalid("7f", "top-level alternation is forbidden")
 		}
+	case syntax.OpWordBoundary, syntax.OpNoWordBoundary:
+		return invalid("7g", `word boundary assertions (\b, \B) are forbidden`)
 	}
 	return nil
 }

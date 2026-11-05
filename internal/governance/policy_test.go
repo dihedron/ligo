@@ -197,3 +197,23 @@ func TestPolicyRoundTrip(t *testing.T) {
 		t.Errorf("round trip: %v, %s != %s", err, back.SHA256(), p.SHA256())
 	}
 }
+
+// TestPartiesWithoutBreakGlass: a party whose scope no break-glass policy
+// covers is reported with its rule, since a break-glass change needing it is
+// always refused (ADR-12); without any policy, break-glass is simply not in use.
+func TestPartiesWithoutBreakGlass(t *testing.T) {
+	p := &Policy{}
+	p.Interconnects.Rules = []InterconnectRule{
+		{Name: "plain"},
+		{Name: "covered", AdditionalApprovals: []AdditionalApproval{{Name: "ops", Scope: "dc/ops"}}},
+		{Name: "gap", AdditionalApprovals: []AdditionalApproval{{Name: "ops", Scope: "dc/ops"}, {Name: "security", Scope: "sec/infosec"}}},
+	}
+	if got := p.PartiesWithoutBreakGlass(); len(got) != 0 {
+		t.Errorf("without policies: %v", got)
+	}
+	p.BreakGlassPolicies = []BreakGlassPolicy{{Scopes: []string{"dc/*"}}}
+	got := p.PartiesWithoutBreakGlass()
+	if len(got) != 1 || got[0] != (UncoveredParty{Rule: "gap", Party: "security", Scope: "sec/infosec"}) {
+		t.Errorf("got %v", got)
+	}
+}

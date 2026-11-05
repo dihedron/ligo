@@ -12,6 +12,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -134,14 +135,17 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.withdrawPending(ctx, cur, actor); err != nil {
-		return nil, err
+	if cur.breakGlassCR == nil || *cur.breakGlassCR != bg.ID {
+		return nil, refuse(409, "break-glass-not-open", "the break-glass change %s was ratified, reverted or closed", bg.ID)
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE",
 		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Zone: cur.zone, SourceScope: cur.sourceScope,
 		TargetScope: cur.targetScope, PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),
 		RequestedBy: actor, RevertsID: &bg.ID}
 	for _, sd := range bg.Sides {
+		if strings.HasPrefix(sd.Name, "PARTY:") {
+			continue // a revocation has no additional parties (change_request_check)
+		}
 		r.Sides = append(r.Sides, changerequests.Side{Name: sd.Name, Scope: sd.Scope, Basis: changerequests.KindSystemRevert,
 			Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: comment})
 	}
@@ -151,6 +155,9 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 		err := json.Unmarshal(bg.RevertPayload, &b)
 		if err == nil {
 			err = s.revalidate(ctx, &b, cur)
+			if e := (*changerequests.Error)(nil); err != nil && !errors.As(err, &e) {
+				return nil, err // the plugin or the database failed, not the payload: the next run retries
+			}
 		}
 		if r.Payload, _ = json.Marshal(b); err != nil {
 			if err := s.Requests.SystemFailed(ctx, r, err.Error(), audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id,
@@ -224,7 +231,8 @@ func (s *Service) RetireInlineSources(ctx context.Context) error {
 // sources kept for other bindings), once each, and audits
 // BREAK_GLASS_REVIEW_OVERDUE (§6.3).
 func (s *Service) OverdueReviews(ctx context.Context) error {
-	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	var overdue [][2]string // zone and operation of each change, counted once this commits
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE change_requests c SET review_overdue_notified_at = now()
 			WHERE c.kind = 'BREAK_GLASS' AND c.status = 'APPLIED' AND c.review_overdue_notified_at IS NULL
 			AND c.requested_at + make_interval(secs => c.break_glass_ttl_seconds) < now()
@@ -234,7 +242,7 @@ func (s *Service) OverdueReviews(ctx context.Context) error {
 			AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id)
 			AND (c.resource_type <> 'SOURCE' OR EXISTS (SELECT 1 FROM bindings b WHERE b.source_id = c.resource_id
 				AND NOT EXISTS (SELECT 1 FROM change_requests x WHERE x.depends_on_cr_id = c.id AND x.resource_id = b.id)))
-			RETURNING c.id, c.resource_type, c.resource_name, c.resource_id`)
+			RETURNING c.id, c.resource_type, c.resource_name, c.resource_id, coalesce(c.zone, ''), c.operation::text`)
 		if err != nil {
 			return err
 		}
@@ -242,10 +250,12 @@ func (s *Service) OverdueReviews(ctx context.Context) error {
 		for rows.Next() {
 			e := audit.Entry{Action: "BREAK_GLASS_REVIEW_OVERDUE", Actor: actorRevert}
 			var id uuid.UUID
-			if err := rows.Scan(&id, &e.ResourceType, &e.ResourceName, &e.ResourceID); err != nil {
+			var zone, op string
+			if err := rows.Scan(&id, &e.ResourceType, &e.ResourceName, &e.ResourceID, &zone, &op); err != nil {
 				rows.Close()
 				return err
 			}
+			overdue = append(overdue, [2]string{zone, op})
 			e.ChangeRequestID = &id
 			entries = append(entries, e)
 		}
@@ -259,4 +269,10 @@ func (s *Service) OverdueReviews(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err == nil {
+		for _, o := range overdue {
+			metrics.BreakGlass.WithLabelValues(o[0], o[1], "review_overdue").Inc()
+		}
+	}
+	return err
 }

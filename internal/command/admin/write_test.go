@@ -148,6 +148,7 @@ func TestWriteCommands(t *testing.T) {
 		"/v1/admin/change-requests/c1/ratify":             {applied},
 		"/v1/admin/change-requests/c1/revert":             {applied},
 		"/v1/admin/maintenance":                           {`{"maintenanceMode":true,"inFlight":0}`},
+		"/v1/admin/executors/ligo1/recover":               {`{"executor":"ligo1","recovered":1,"otherVersions":0}`},
 		"/v1/admin/break-glass":                           {applied},
 		"/v1/admin/governance/evaluate":                   {`{"resourceType":"BINDING","name":"b1","consent":"ALL","sides":[]}`},
 	})
@@ -164,6 +165,8 @@ func TestWriteCommands(t *testing.T) {
 	bgDel := &BreakGlassDelete{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1", TTL: "4h"}, ExpectedRevision: 3}
 	bgDel.Args.Name = "b1"
 	bgFile := manifest(t, "kind: Source\nmetadata: {name: s9}\n---\n{kind: Binding, name: b1, source: s9, target: t1, accessLevel: read}\n")
+	recoverYes := &ExecutorsRecover{Base: b, Yes: true}
+	recoverYes.Args.ID = "ligo1"
 	for _, tc := range []struct {
 		name          string
 		run           func([]string) error
@@ -188,6 +191,7 @@ func TestWriteCommands(t *testing.T) {
 		{"revert", (&ChangeRequestRevert{Base: b, Comment: "over", Args: crID{"c1"}}).Execute, "POST /v1/admin/change-requests/c1/revert", `{"comment":"over"}`},
 		{"maintenance on", (&MaintenanceOn{Base: b, Reason: "upgrade"}).Execute, "PUT /v1/admin/maintenance", `{"enabled":true,"reason":"upgrade"}`},
 		{"maintenance off", (&MaintenanceOff{Base: b}).Execute, "PUT /v1/admin/maintenance", `{"enabled":false,"reason":""}`},
+		{"executors recover", recoverYes.Execute, "POST /v1/admin/executors/ligo1/recover", ""},
 		{"break-glass apply", (&BreakGlassApply{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1"}, File: bgFile}).Execute,
 			"POST /v1/admin/break-glass", `"inlineSource":{"kind":"Source","metadata":{"name":"s9"}}`},
 		{"break-glass delete", bgDel.Execute, "POST /v1/admin/break-glass", `"operation":"DELETE"`},
@@ -211,6 +215,28 @@ func TestWriteCommands(t *testing.T) {
 		if got != tc.request || !strings.Contains(body, tc.body) {
 			t.Errorf("%s: %q %s", tc.name, got, body)
 		}
+	}
+	// recover asks for the executor ID, and nothing else will do
+	asked := &ExecutorsRecover{Base: b}
+	asked.Args.ID = "ligo1"
+	f.mu.Lock()
+	before := len(f.requests)
+	f.mu.Unlock()
+	for _, answer := range []string{"", "y\n", "ligo2\n"} {
+		recoverInput = strings.NewReader(answer)
+		if err := asked.Execute(nil); err == nil {
+			t.Errorf("recover confirmed by %q", answer)
+		}
+	}
+	f.mu.Lock()
+	if len(f.requests) != before {
+		t.Errorf("recover called the API unconfirmed: %v", f.requests[before:])
+	}
+	f.mu.Unlock()
+	recoverInput = strings.NewReader("ligo1\n")
+	t.Cleanup(func() { recoverInput = os.Stdin })
+	if err := asked.Execute(nil); err != nil {
+		t.Errorf("recover confirmed: %v", err)
 	}
 	if err := (&TargetRevoke{Base: b, Comment: "x", Args: NameArg{"t1"}}).Execute(nil); err == nil {
 		t.Error("revoke-bindings without --source or --source-scope")

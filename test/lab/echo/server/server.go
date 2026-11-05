@@ -1,7 +1,7 @@
 // Command echo-server is the lab's echo target (lab only, not hardened;
 // .specs/ligo-test-environment.md, "The echo target on ligo1"): it echoes a
 // line of text with the client's identity to the clients its access list
-// or its users admit, and target-echo keeps those lists through its
+// or its users admit, and ligo-plugin-echo keeps those lists through its
 // control API.
 package main
 
@@ -52,7 +52,7 @@ type state struct {
 type Server struct {
 	Mode        string
 	TrustDomain spiffeid.TrustDomain // of the clients
-	ControlID   spiffeid.ID          // target-echo's SPIFFE ID, the only control client
+	ControlID   spiffeid.ID          // ligo-plugin-echo's SPIFFE ID, the only control client
 	StatePath   string
 	SVIDs       x509svid.Source
 	Bundles     x509bundle.Source
@@ -233,7 +233,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	}
 }
 
-// Control is the control API, for target-echo only (mTLS, AuthorizeID).
+// Control is the control API, for ligo-plugin-echo only (mTLS, AuthorizeID).
 func (s *Server) Control() *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /acl/{id}", s.putACL)
@@ -306,7 +306,7 @@ func (s *Server) putUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getUser answers 204 if the user exists, 404 if not: target-echo keeps a
+// getUser answers 204 if the user exists, 404 if not: ligo-plugin-echo keeps a
 // user's password unless it is new or rotated.
 func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()

@@ -91,6 +91,14 @@ func New(pool *pgxpool.Pool, opts Options) *Cache {
 // Appendix A validator (ligo_resolution_invalid_regex_total).
 func (c *Cache) InvalidRegexes() int64 { return c.invalid.Load() }
 
+// Age is the time since the last successful full load
+// (ligo_resolution_cache_age_seconds).
+func (c *Cache) Age() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return time.Since(c.synced)
+}
+
 // Ready reports whether the cache has been loaded at least once.
 func (c *Cache) Ready() bool {
 	c.mu.RLock()

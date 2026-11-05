@@ -36,15 +36,15 @@ func labprobe(t *testing.T, expr string) Spec {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := `{"bootstrap_credential":{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_BAO_PROD_ADDR") +
-		`","auth_mount":"jwt-spiffe","role":"ligo-plugin-labprobe","jwt_audience":"` + labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE") +
+	cfg := `{"bootstrap_credential":{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") +
+		`","auth_mount":"jwt-spiffe","role":"ligo-plugin-labprobe","jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") +
 		`","kv_path":"kv/data/ligo/bootstrap/labprobe"},"ca_file":"` + labEnv(t, "LIGO_TEST_CA") + `"}`
 	return Spec{
 		Type: "labprobe.v1", Kind: store, Binary: "labprobe", SHA256: sum,
 		Zone: config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")},
 		Instances: []*pluginv1.InstanceDescriptor{{
 			Name: "labprobe-prod", ConfigJson: cfg,
-			SvidSelector: &pluginv1.SVIDSelectorConfig{MatchExpr: expr, JwtAudience: []string{labEnv(t, "LIGO_TEST_BAO_PROD_AUDIENCE")}},
+			SvidSelector: &pluginv1.SVIDSelectorConfig{MatchExpr: expr, JwtAudience: []string{labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}},
 		}},
 	}
 }

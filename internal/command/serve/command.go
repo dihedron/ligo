@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -29,6 +31,8 @@ import (
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/dihedron/ligo/internal/notify"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/ratelimit"
@@ -42,8 +46,12 @@ import (
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/dihedron/ligo/internal/theme"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // drain is how long shutdown waits for active requests (§8.2).
@@ -100,6 +108,18 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := config.Validate(cfg, config.Options{InsecureDev: cmd.InsecureDev}); err != nil {
 		return err
 	}
+	// traces (§10.1): off unless observability.tracing.otlp_endpoint is set
+	stopTracing, err := tracing.Setup(ctx, cfg.Observability.Tracing, cfg.Service.ApplicationVersion, os.Getenv(cfg.Service.InstanceIDEnv))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := stopTracing(flush); err != nil {
+			log.Warn("tracing shutdown", "error", err)
+		}
+	}()
 	t := cfg.UI.Theme
 	look, err := theme.Load(theme.Files{Directory: t.Directory, CSS: t.CSSFile, Logo: t.LogoFile, LogoDark: t.LogoDarkFile,
 		Favicon: t.FaviconFile, Fonts: t.FontsDir, Colors: t.Colors}, theme.Options{Logger: log})
@@ -124,6 +144,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := store.CheckDSN(dbosDSN, cmd.insecureDB); err != nil {
+		return fmt.Errorf("serve: storage.postgres.dbos_dsn_env: %w", err)
+	}
 
 	// 3. SPIRE: every zone, the composite bundle source, the core identity,
 	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
@@ -145,7 +168,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	cancel()
 
 	// 2. database, and the checks that need it
-	pools, err := store.Open(ctx, appDSN, readerDSN, cmd.insecureDB)
+	maxConns := int32(pg.MaxConns) //nolint:gosec // validated between 1 and 1000 (§8.2 rule 9)
+	pools, err := store.Open(ctx, appDSN, readerDSN, store.Limits{Instance: os.Getenv(cfg.Service.InstanceIDEnv), MaxConns: maxConns, AppStatementTimeout: pg.AppStatementTimeout,
+		ReaderStatementTimeout: pg.ReaderStatementTimeout}, cmd.insecureDB)
 	if err != nil {
 		return err
 	}
@@ -235,25 +260,77 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			rotation[pl.Name] = pl.RotationInterval
 		}
 	}
-	run((&workflows.Sweeper{Engine: engine, Retention: cfg.Storage.DBOS.WorkflowRetention, Bindings: s.Bindings,
+	run((&workflows.Sweeper{Engine: engine, Logger: log, Retention: cfg.Storage.DBOS.WorkflowRetention, Bindings: s.Bindings,
 		ExpiryWarning: cfg.Bindings.ExpiryWarning}).Run)
 	if rc := cfg.Reconciliation; rc.Enabled {
-		run((&workflows.Reconciler{Engine: engine, Interval: rc.Interval, Jitter: rc.Jitter, MaxConcurrent: rc.MaxConcurrent, Rotation: rotation}).Run)
+		run((&workflows.Reconciler{Engine: engine, Logger: log, Interval: rc.Interval, Jitter: rc.Jitter, MaxConcurrent: rc.MaxConcurrent, Rotation: rotation}).Run)
 	}
-	run((&bindings.Propagator{Service: s.Bindings, Interval: cfg.Propagation.Interval, MaxConcurrent: cfg.Propagation.MaxConcurrent}).Run)
+	run((&bindings.Propagator{Service: s.Bindings, Logger: log, Interval: cfg.Propagation.Interval, MaxConcurrent: cfg.Propagation.MaxConcurrent}).Run)
 	dispatcher, err := notify.NewDispatcher(pools.App, cfg.Notifications.Webhooks, log)
 	if err != nil {
 		return err
 	}
 	run(dispatcher.Run)
+	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, time.Hour) })
+	run(func(ctx context.Context) { zones.WatchConflicts(ctx, log, time.Minute) })
 
-	// 9. the workload and admin listeners
+	// the metrics: the process-wide ones, and this run's database and cache
+	// gauges in a registry of its own (§10.1)
+	overdue := map[string]time.Duration{}
+	for p, t := range rotation {
+		if t > 0 {
+			overdue[p] = t + cfg.Reconciliation.Interval + cfg.Reconciliation.Jitter
+		}
+	}
+	scraped := prometheus.NewRegistry()
+	scraped.MustRegister(&gauges.DB{Pool: pools.App, Logger: log, Rotation: overdue, Timeout: 10 * time.Second},
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "ligo_resolution_cache_age_seconds", Help: "Time since the resolution cache's last full load."},
+			func() float64 { return cache.Age().Seconds() }),
+		prometheus.NewCounterFunc(prometheus.CounterOpts{Name: "ligo_resolution_invalid_regex_total", Help: "Bindings left out of the resolution cache for an invalid regex."},
+			func() float64 { return float64(cache.InvalidRegexes()) }))
+	exposed := promhttp.HandlerFor(prometheus.Gatherers{metrics.Registry, scraped}, promhttp.HandlerOpts{ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)})
+
+	// 9. the workload, admin and metrics listeners
 	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
 	u, err := ui.New(look, cfg.UI.Theme, log)
 	if err != nil {
 		return err
 	}
-	return cmd.listen(ctx, log, cfg, zones, w, s, u)
+	return cmd.listen(ctx, log, cfg, zones, w, s, u, exposed)
+}
+
+// traced gives each HTTP request a span named after the listener and the
+// method, its trace context from the traceparent header; gRPC calls get
+// theirs from the gRPC server instead.
+func traced(listener string, h http.Handler) http.Handler {
+	return otelhttp.NewHandler(h, listener, otelhttp.WithSpanNameFormatter(func(op string, r *http.Request) string { return op + " " + r.Method }),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return !strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc")
+		}))
+}
+
+// verifyAudit verifies the audit chain at once and then every interval,
+// for ligo_audit_chain_valid; a broken chain is also logged.
+func verifyAudit(ctx context.Context, log *slog.Logger, db store.Querier, interval time.Duration) {
+	for {
+		r, err := audit.Verify(ctx, db)
+		switch {
+		case err != nil:
+			if ctx.Err() == nil {
+				log.Warn("audit chain verification", "error", err)
+			}
+		case r.Valid:
+			metrics.AuditChainValid.Set(1)
+		default:
+			metrics.AuditChainValid.Set(0)
+			log.Error("the audit chain is broken", "first_broken", r.FirstBroken, "entries", r.Entries)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 // notReady says which dependency was not ready, and that the deadline
@@ -271,7 +348,7 @@ func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, zones *identit
 	var err error
 	switch ss := cfg.SecretSealing; ss.Provider {
 	case "vault-transit":
-		kek, err = sealing.NewTransitKEK(ss.VaultTransit, zones, &http.Client{Timeout: 10 * time.Second})
+		kek, err = sealing.NewTransitKEK(ss.VaultTransit, zones, nil)
 	case "local-kek":
 		kek, err = sealing.NewLocalKEK(ss.LocalKEKFile, cmd.InsecureDev)
 	default:
@@ -340,7 +417,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 // both; SIGHUP reloads the certificate files, everything else needs a
 // restart.
 func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
-	s *adminhttp.Server, u *ui.Server) error {
+	s *adminhttp.Server, u *ui.Server, exposed http.Handler) error {
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
 	s.Bundles, s.Logger = zones, log
 	var directory *adminauth.LDAP
@@ -354,7 +431,8 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 		s.LDAP = directory
 	}
 	// the UI's sessions share the directory, the roles and the failed-login limits with the API (§7.3)
-	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin}
+	logins := &ratelimit.Logins{PerIPPerMin: al.RateLimit.LoginPerIPPerMin, PerUserPerMin: al.RateLimit.LoginPerUserPerMin,
+		PerUserGlobalPerMin: al.RateLimit.LoginPerUserGlobalPerMin, MaxKeys: al.RateLimit.MaxTrackedKeys}
 	s.Logins = logins
 	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
 	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg
@@ -373,20 +451,28 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
-	failed := make(chan error, 2)
+	failed := make(chan error, 3)
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", exposed)
+	ml := cfg.Server.MetricsListener
 	servers := map[string]*http.Server{
-		"workload": {Addr: wl.ListenAddress, Handler: w.Handler(), TLSConfig: w.TLSConfig(workloadCert)},
-		"admin":    {Addr: al.ListenAddress, Handler: adminHandler(s, u), TLSConfig: s.TLSConfig(adminCert)},
+		"workload": {Addr: wl.ListenAddress, Handler: traced("workload", w.Handler()), TLSConfig: w.TLSConfig(workloadCert)},
+		"admin":    {Addr: al.ListenAddress, Handler: traced("admin", adminHandler(s, u)), TLSConfig: s.TLSConfig(adminCert)},
+		"metrics":  {Addr: ml.ListenAddress, Handler: mux}, // plain HTTP, no auth (§10.1): a loopback or management address
 	}
 	for name, srv := range servers {
 		srv.ReadHeaderTimeout, srv.ErrorLog = 10*time.Second, slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 		go func() {
-			if err := srv.ListenAndServeTLS("", ""); !errors.Is(err, http.ErrServerClosed) {
+			serve := func() error { return srv.ListenAndServeTLS("", "") }
+			if srv.TLSConfig == nil {
+				serve = srv.ListenAndServe
+			}
+			if err := serve(); !errors.Is(err, http.ErrServerClosed) {
 				failed <- fmt.Errorf("serve: %s listener: %w", name, err)
 			}
 		}()
 	}
-	log.Info("serving", "workload", wl.ListenAddress, "admin", al.ListenAddress)
+	log.Info("serving", "workload", wl.ListenAddress, "admin", al.ListenAddress, "metrics", ml.ListenAddress)
 	var stopErr error
 	for done := false; !done; {
 		select {
@@ -517,7 +603,7 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 	}
 	var groups []string
 	for _, b := range cfg.Authorization.Bindings {
-		if b.LDAPGroupDN != "" {
+		if b.LDAPGroupDN != "" && !slices.Contains(groups, b.LDAPGroupDN) {
 			groups = append(groups, b.LDAPGroupDN)
 		}
 	}

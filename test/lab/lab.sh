@@ -34,6 +34,12 @@ source "$LAB_DIR/lib/pg.sh"
 source "$LAB_DIR/lib/snapshot.sh"
 # shellcheck source=lib/serve.sh
 source "$LAB_DIR/lib/serve.sh"
+# shellcheck source=lib/lb.sh
+source "$LAB_DIR/lib/lb.sh"
+# shellcheck source=lib/otel.sh
+source "$LAB_DIR/lib/otel.sh"
+# shellcheck source=lib/hooks.sh
+source "$LAB_DIR/lib/hooks.sh"
 
 usage() {
 	cat <<USAGE
@@ -41,23 +47,33 @@ usage: lab.sh <command> [options]
 
 commands:
   preflight                 check that this machine can run the lab
-  up [--scenario S]         build the lab (or complete a partial one)
+  up [--scenario S]         build the lab (or complete a partial one); S is
+                            storage, identity, ha (adds ligo2), lb (adds
+                            HAProxy in front of both), otel (adds an OTLP
+                            collector), vault (adds HashiCorp Vault), webhook
+                            (adds a webhook receiver) or all
   down                      destroy the lab: VMs, network, project, storage
                             pool and state, after confirmation
   status                    show the lab's VMs and what was recorded
   env                       print the integration tests' environment, as
                             export lines: eval "\$(test/lab/lab.sh env)"
-  env --on ligo1            the environment of the tests on ligo1, one
-                            VAR=value per line
-  deploy                    build the lab-tagged tests and copy them to ligo1
-  test --on ligo1 [-run REGEX]
-                            deploy, then run them on ligo1 as the user ligo
+  env --on HOST             the environment of the tests on a ligo host
+                            (ligo1, ligo2), one VAR=value per line
+  deploy                    build the lab-tagged tests and the plugins and copy
+                            them to every ligo host
+  test --on HOST [-run REGEX]
+                            deploy, then run them on HOST as the user ligo
   test [-run REGEX] [pkg...]
                             run "go test -tags integration" (default ./...)
                             with that environment
-  serve install|start|stop|reload|status|logs|test
-                            ligo serve on ligo1 (database ligo_serve), and
-                            its e2e with reload, stop and start
+  serve [--on HOST|all] install|start|stop|reload|status|logs|test
+                            ligo serve on every ligo host (default all; one
+                            database, ligo_serve), and its e2e with reload,
+                            stop and start; test always runs on all;
+                            test-ha (with ligo2) the HA e2e, which stops and
+                            kills replicas; test-otel (with otel) the traces;
+                            test-webhook (with webhook and ligo2) the webhooks,
+                            which stops the receiver and the replicas
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
@@ -65,7 +81,10 @@ commands:
   cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);
                             stdin passes through, for manifests
   spire <prod|test> [args]  spire-server on that zone's server
+  secrets [openbao|vault]   print the secrets backend, or select it and stop the
+                            other's servers; then lab.sh reset and serve install
   bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
+  vault [args]              the vault CLI on vault-prod, as root token
   ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
   psql [--as ROLE | --superuser] [args]
                             psql in the pg container as ligo_ROLE (migrator, app,
@@ -111,6 +130,15 @@ cmd_up() {
 		identity_bao_up
 		ldap_up
 	fi
+	if selected lb; then
+		lb_up
+	fi
+	if selected otel; then
+		otel_up
+	fi
+	if selected webhook; then
+		hooks_up
+	fi
 	# a new snapshot when there is none, or when up added inner instances
 	if ! has_snapshot || [[ "$(env_get '.snapshot_instances // ""')" != "$(inner_names)" ]]; then
 		lab_snapshot
@@ -146,8 +174,8 @@ cmd_status() {
 cmd_env() {
 	require_lab
 	if [[ "${1:-}" == --on ]]; then
-		[[ "${2:-}" == ligo1 ]] || die "env --on: only ligo1"
-		env_ligo1
+		ligo_host "${2:-}"
+		env_ligo
 		return
 	fi
 	local role upper
@@ -160,9 +188,10 @@ cmd_env() {
 cmd_test() {
 	require_lab
 	if [[ "${1:-}" == --on ]]; then
-		[[ "${2:-}" == ligo1 ]] || die "test --on: only ligo1"
+		ligo_host "${2:-}"
+		local host="$2"
 		shift 2
-		test_ligo1 "$@"
+		test_on "$host" "$@"
 		return
 	fi
 	local args=() pkgs=()
@@ -230,7 +259,9 @@ main() {
 	cli) require_lab && [[ $# -ge 1 ]] && cli "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
+	secrets) require_lab && cmd_secrets "$@" ;;
 	bao) require_lab && bao "$@" ;;
+	vault) require_lab && server_cli vault-prod "$@" ;;
 	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;

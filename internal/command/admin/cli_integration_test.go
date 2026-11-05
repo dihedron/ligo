@@ -68,7 +68,7 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	_ = conn.Close(ctx)
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), os.Getenv("CI") != "")
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, os.Getenv("CI") != "")
 	if err != nil {
 		t.Fatal(err)
 	}

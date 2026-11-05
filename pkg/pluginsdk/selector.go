@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/expr-lang/expr/vm"
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
 // SVIDEvalEnv is the environment of a selector expression; its expr names
@@ -152,4 +154,21 @@ func (s *InstanceSVIDSelector) FetchJWT(ctx context.Context) (string, error) {
 	s.jwt = svid.Marshal()
 	s.jwtUntil = issued.Add(svid.Expiry.Sub(issued) * 8 / 10)
 	return s.jwt, nil
+}
+
+// PrintSVIDs prints the SPIFFE IDs the agent at socket issues to this binary,
+// run as this user, one per line, and returns the exit code: how an operator
+// checks a plugin's SPIRE registration ("NAME -svids SOCKET").
+func PrintSVIDs(socket string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	svids, err := workloadapi.FetchX509SVIDs(ctx, workloadapi.WithAddr(socket))
+	if err != nil {
+		_, _ = os.Stderr.WriteString(err.Error() + "\n")
+		return 1
+	}
+	for _, s := range svids {
+		_, _ = os.Stdout.WriteString(s.ID.String() + "\n")
+	}
+	return 0
 }

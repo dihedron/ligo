@@ -1,14 +1,18 @@
 package bindings
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -20,6 +24,7 @@ const actorPropagator = "system:propagator"
 // changes at new revisions, one replica at a time (§6.8).
 type Propagator struct {
 	Service       *Service
+	Logger        *slog.Logger  // errors of a pass; default slog.Default()
 	Interval      time.Duration // propagation.interval; default 5s
 	MaxConcurrent int           // propagation.max_concurrent; default 8
 }
@@ -37,7 +42,9 @@ func (p *Propagator) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			_, _ = p.Propagate(ctx)
+			if _, err := p.Propagate(ctx); err != nil && ctx.Err() == nil {
+				cmp.Or(p.Logger, slog.Default()).Error("propagator", "error", err)
+			}
 		}
 	}
 }
@@ -120,9 +127,13 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
 	// no caller: the change was approved on the source or target (§6.8)
 	if _, err := s.resolve(ctx, nil, b, cur, &governance.Policy{}, "", nil); err != nil {
-		return false, err
+		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
+			return false, s.failPropagation(ctx, id, e)
+		}
+		return false, err // the plugin or the database failed: the row stays, the next run retries
 	}
 	started := false
+	var cause string // SOURCE or TARGET, for ligo_propagation_started_total
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		sn, err := lockSnapshot(ctx, tx, b)
 		if err != nil {
@@ -136,7 +147,6 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		} else if err != nil {
 			return err
 		}
-		var cause string
 		var causeCR uuid.UUID
 		err = tx.QueryRow(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1 RETURNING cause, cause_change_request_id",
 			id).Scan(&cause, &causeCR)
@@ -166,10 +176,52 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 	if errors.Is(err, errBusy) {
 		return false, nil
 	}
+	if err == nil && started {
+		metrics.PropagationStarted.WithLabelValues(cause).Inc()
+	}
 	return started, err
 }
 
 var errBusy = errors.New("bindings: busy")
+
+// failPropagation ends a propagation whose revision cannot be composed:
+// the row goes, the binding is FAILED with the refusal, keeping its last
+// active snapshot, and PROPAGATION_FAILED is audited and announced (§6.8).
+func (s *Service) failPropagation(ctx context.Context, id uuid.UUID, refusal *changerequests.Error) error {
+	var cause string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		cur, err := load(ctx, tx, "b.id = $1", id, true)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if cur.phase == "PROVISIONING" || cur.phase == "DELETING" {
+			return nil // busy since: the next run defers it
+		}
+		var causeCR uuid.UUID
+		err = tx.QueryRow(ctx, "DELETE FROM binding_propagation_queue WHERE binding_id = $1 RETURNING cause, cause_change_request_id",
+			id).Scan(&cause, &causeCR)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && cur.phase == "DELETE_FAILED" {
+			cause = ""
+			return nil
+		} else if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE bindings SET phase = 'FAILED', status_message = $2, last_transition_at = now(),
+			updated_at = now(), updated_by = $3 WHERE id = $1`, id, refusal.Error(), actorPropagator); err != nil {
+			return err
+		}
+		snapshot, _ := json.Marshal(map[string]any{"cause": cause, "error": refusal.Error()})
+		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &id, ResourceName: cur.name, ChangeRequestID: &causeCR,
+			Action: "PROPAGATION_FAILED", Actor: actorPropagator, Revision: &cur.revision, Snapshot: snapshot})
+		return err
+	})
+	if err == nil && cause != "" {
+		metrics.PropagationFailed.WithLabelValues(cause).Inc()
+	}
+	return err
+}
 
 // deferPropagation counts a deferral of a busy binding's row, auditing the
 // first one (§6.8).

@@ -35,6 +35,7 @@ import (
 // its own version's workflows).
 func testConfig(t *testing.T, socket, kek, admin string, workload ...string) string {
 	t.Helper()
+	t.Setenv("LIGO_INSTANCE_ID", "ligo-test")
 	data, err := os.ReadFile("testdata/server.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -95,9 +96,18 @@ func TestServe(t *testing.T) {
 		defer func() { _ = l.Close() }()
 		return l.Addr().String()
 	}
-	admin, wl := free(), free()
+	admin, wl, mon := free(), free(), free()
+	path := testConfig(t, socket, kek, admin, wl)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), "metrics_listener:\n    listen_address: \"127.0.0.1:0\"",
+		"metrics_listener:\n    listen_address: \""+mon+"\"", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	cmd := &Serve{ConfigFile: testConfig(t, socket, kek, admin, wl), InsecureDev: true, MaintenanceMode: true, insecureDB: os.Getenv("CI") != ""}
+	cmd := &Serve{ConfigFile: path, InsecureDev: true, MaintenanceMode: true, insecureDB: os.Getenv("CI") != ""}
 	running, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- cmd.run(running, slog.New(slog.DiscardHandler)) }()
@@ -163,6 +173,20 @@ func TestServe(t *testing.T) {
 			t.Errorf("GET /ui/static/app.js: %d %v", resp.StatusCode, resp.Header)
 		}
 	}
+	// the metrics listener: plain HTTP, the process-wide metrics and this run's
+	// database and cache gauges (§10.1)
+	if resp, err := http.Get("http://" + mon + "/metrics"); err != nil {
+		t.Errorf("metrics listener: %v", err)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		for _, want := range []string{"ligo_db_scrape_success 1", `ligo_propagation_queue_depth{priority="0"}`, `ligo_bindings_expiring{within="7d"}`,
+			"ligo_resolution_cache_age_seconds ", "ligo_resolution_invalid_regex_total 0", "ligo_interconnect_violations 0", "go_goroutines "} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("GET /metrics lacks %s", want)
+			}
+		}
+	}
 	// the workload listener resolves vera's bindings from the loaded cache: none
 	if resp, err := client.Get("https://" + wl + "/v1/bindings"); err != nil {
 		t.Errorf("workload listener: %v", err)
@@ -215,7 +239,7 @@ func TestServeStartupTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	err = (&Serve{ConfigFile: path, InsecureDev: true}).run(context.Background(), slog.New(slog.DiscardHandler))
+	err = (&Serve{ConfigFile: path, InsecureDev: true, insecureDB: os.Getenv("CI") != ""}).run(context.Background(), slog.New(slog.DiscardHandler))
 	if err == nil || !strings.Contains(err.Error(), "SPIRE not ready within service.startup_timeout (5s)") {
 		t.Errorf("an unreachable agent: %v", err)
 	}

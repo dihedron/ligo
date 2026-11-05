@@ -63,17 +63,14 @@ lab_start() {
 	done
 	inner_wait pg
 	pg_wait_ready
-	if inner_exists ligo1; then
-		inner_wait ligo1
-		spire_check
-	fi
-	local zone
-	for zone in "${ZONES[@]}"; do
-		if inner_exists "bao-$zone"; then
-			bao_wait "$zone"
-			bao_unseal "$zone"
+	local host
+	for host in ligo1 ligo2; do
+		if inner_exists "$host"; then
+			inner_wait "$host"
+			spire_check "$host"
 		fi
 	done
+	secrets_apply
 	if inner_exists ldap; then
 		inner_wait ldap
 		ldap_check

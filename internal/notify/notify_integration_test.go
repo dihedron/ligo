@@ -18,6 +18,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -75,7 +76,7 @@ func TestDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = conn.Close(ctx)
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), os.Getenv("CI") != "")
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, os.Getenv("CI") != "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +158,12 @@ func TestDelivery(t *testing.T) {
 		where webhook = $1 and delivered_at is null`, oncall); err != nil {
 		t.Fatal(err)
 	}
+	given := metrics.Count(metrics.NotificationsAbandoned, oncall)
 	if _, err := d.Dispatch(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if metrics.Count(metrics.NotificationsAbandoned, oncall) != given+1 {
+		t.Error("ligo_notifications_abandoned_total not counted")
 	}
 	var abandoned bool
 	if err := owner.QueryRow(ctx, "select abandoned_at is not null from notification_outbox where webhook = $1 and delivered_at is null", oncall).

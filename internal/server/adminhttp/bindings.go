@@ -16,6 +16,10 @@ import (
 type Workflows interface {
 	Retry(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error)
 	Rotate(ctx context.Context, bindingID uuid.UUID, actor string) (dbos.WorkflowHandle[string], error)
+	ExecutorID() string
+	ApplicationVersion() string
+	Pending(ctx context.Context) ([]dbos.WorkflowStatus, error)
+	Resume(ctx context.Context, ids []string) error
 }
 
 func (s *Server) bindingRoutes(mux *router) {
@@ -179,7 +183,7 @@ func (s *Server) getBinding(w http.ResponseWriter, r *http.Request) {
 		stages, err = s.Bindings.Stages(r.Context(), v)
 	}
 	if err == nil {
-		entries, _, err = s.auditPage(r.Context(), "BINDING", v.Metadata.Name, nil, 20)
+		entries, _, err = s.auditPage(r.Context(), v.Metadata.ID, nil, 20)
 	}
 	if err != nil {
 		s.fail(w, r, err)

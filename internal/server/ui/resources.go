@@ -60,7 +60,7 @@ func (s *Server) source(w http.ResponseWriter, r *http.Request) {
 		d.Bindings, _, err = s.Bindings.List(ctx, c, bindings.Filter{Source: v.Metadata.Name, Limit: 200})
 	}
 	if err == nil {
-		d.Audit, err = s.trail(ctx, "SOURCE", v.Metadata.Name)
+		d.Audit, err = s.trail(ctx, v.Metadata.ID)
 	}
 	if err != nil {
 		s.fail(w, r, err)
@@ -120,7 +120,7 @@ func (s *Server) target(w http.ResponseWriter, r *http.Request) {
 		d.Bindings, _, err = s.Bindings.List(ctx, c, bindings.Filter{Target: v.Metadata.Name, Limit: 200})
 	}
 	if err == nil {
-		d.Audit, err = s.trail(ctx, "TARGET", v.Metadata.Name)
+		d.Audit, err = s.trail(ctx, v.Metadata.ID)
 	}
 	if err != nil {
 		s.fail(w, r, err)

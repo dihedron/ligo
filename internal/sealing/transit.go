@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,7 @@ type TransitConfig struct {
 	JWTAudience string `yaml:"jwt_audience"`
 	Mount       string `yaml:"mount"`
 	KeyName     string `yaml:"key_name"`
+	CACertFile  string `yaml:"ca_cert_file"` // CAs trusted for address; default the system roots
 }
 
 // JWTFetcher provides the JWT-SVID ligo logs in to Vault with.
@@ -46,7 +49,8 @@ type TransitKEK struct {
 // errForbidden is a 403 from Vault: the token expired or was revoked.
 var errForbidden = errors.New("permission denied")
 
-// NewTransitKEK returns a Transit KEK. client may be nil.
+// NewTransitKEK returns a Transit KEK. client may be nil: the default
+// trusts ca_cert_file, if set, and times out after 10s.
 func NewTransitKEK(cfg TransitConfig, jwt JWTFetcher, client *http.Client) (*TransitKEK, error) {
 	u, err := url.Parse(cfg.Address)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
@@ -61,10 +65,17 @@ func NewTransitKEK(cfg TransitConfig, jwt JWTFetcher, client *http.Client) (*Tra
 		}
 	}
 	if client == nil {
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
+		tc := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.CACertFile != "" {
+			pem, err := os.ReadFile(cfg.CACertFile) //nolint:gosec // the path comes from the operator's configuration
+			if err != nil {
+				return nil, fmt.Errorf("vault_transit.ca_cert_file: %w", err)
+			}
+			if tc.RootCAs = x509.NewCertPool(); !tc.RootCAs.AppendCertsFromPEM(pem) {
+				return nil, fmt.Errorf("vault_transit.ca_cert_file %s: no certificate", cfg.CACertFile)
+			}
 		}
+		client = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: tc}}
 	}
 	cfg.Address = strings.TrimSuffix(cfg.Address, "/")
 	return &TransitKEK{cfg: cfg, jwt: jwt, client: client}, nil

@@ -89,7 +89,7 @@ LDIF
 # ldap_seed adds the entries of seed.ldif that are missing, with fresh
 # password hashes.
 ldap_seed() {
-	if inner_exec ldap ldapsearch -LLL -Q -Y EXTERNAL -H ldapi:/// -b "ou=users,$LDAP_BASE" -s base dn 2>/dev/null | grep -q '^dn:'; then
+	if inner_exec ldap ldapsearch -LLL -Q -Y EXTERNAL -H ldapi:/// -b "ou=users,$LDAP_BASE" -s base dn 2>/dev/null | grep '^dn:' >/dev/null; then
 		info "ldap: directory already seeded"
 		return
 	fi
@@ -115,7 +115,7 @@ ldap_check() {
 		ldapsearch_as ligo-admin-auth -b "$LDAP_BASE" -s base dn >/dev/null 2>&1 && break
 		sleep 1
 	done
-	ldapsearch_as ligo-admin-auth -b "ou=users,$LDAP_BASE" "(uid=marco)" dn | grep -q "^dn: uid=marco," ||
+	ldapsearch_as ligo-admin-auth -b "ou=users,$LDAP_BASE" "(uid=marco)" dn | grep "^dn: uid=marco," >/dev/null ||
 		die "ldap: ligo-admin-auth cannot find uid=marco over ldaps"
 	local groups
 	groups="$(ldapsearch_as ligo-admin-auth -b "ou=groups,$LDAP_BASE" "(member=uid=marco,ou=users,$LDAP_BASE)" cn | awk '/^cn:/ {print $2}' | sort | tr '\n' ' ')"
@@ -127,7 +127,7 @@ ldap_check() {
 		-D "uid=marco,ou=users,$LDAP_BASE" -w wrong >/dev/null 2>&1; then
 		die "ldap: a wrong password binds"
 	fi
-	if inner_exec ldap env LDAPTLS_CACERT=/etc/ldap/lab-ca.crt ldapsearch -LLL -x -H "$LDAP_URL" -b "ou=users,$LDAP_BASE" "(uid=marco)" dn 2>/dev/null | grep -q '^dn:'; then
+	if inner_exec ldap env LDAPTLS_CACERT=/etc/ldap/lab-ca.crt ldapsearch -LLL -x -H "$LDAP_URL" -b "ou=users,$LDAP_BASE" "(uid=marco)" dn 2>/dev/null | grep '^dn:' >/dev/null; then
 		die "ldap: anonymous search finds people"
 	fi
 	if inner_exec ldap ldapsearch -LLL -x -H ldap://127.0.0.1 -b "$LDAP_BASE" -s base 2>/dev/null; then

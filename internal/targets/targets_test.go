@@ -269,6 +269,9 @@ func TestMetadata(t *testing.T) {
 		"description":       func(t *Target) { t.Description = strings.Repeat("x", 4097) },
 		"long URL":          func(t *Target) { t.DocumentationURL = "https://wiki.example.org/" + strings.Repeat("x", 500) },
 		"relative URL":      func(t *Target) { t.DocumentationURL = "wiki/ledger" },
+		"javascript URL":    func(t *Target) { t.DocumentationURL = "javascript:alert(1)" },
+		"data URL":          func(t *Target) { t.DocumentationURL = "data:text/html,x" },
+		"file URL":          func(t *Target) { t.DocumentationURL = "file:///etc/passwd" },
 		"level description": func(t *Target) { t.AccessLevels[0].Description = strings.Repeat("x", 1025) },
 		"visibility":        func(t *Target) { t.Visibility.Mode = "SECRET" },
 	} {

@@ -40,6 +40,7 @@ type Config struct {
 	IdentityProviders []InstanceProvider `yaml:"identity_providers"`
 	SecretStores      []InstanceProvider `yaml:"secret_stores"`
 	PlatformProviders []PlatformProvider `yaml:"platform_providers"`
+	Observability     Observability      `yaml:"observability"`
 }
 
 type Service struct {
@@ -49,6 +50,26 @@ type Service struct {
 	// StartupTimeout bounds the wait for SPIRE and the sealer at startup:
 	// past it ligo exits, for its supervisor to restart it (§8.2).
 	StartupTimeout time.Duration `yaml:"startup_timeout"`
+}
+
+// Observability configures traces (§10.1); metrics have their listener.
+type Observability struct {
+	Tracing Tracing `yaml:"tracing"`
+}
+
+// Tracing exports OpenTelemetry spans to an OTLP/gRPC collector; an empty
+// endpoint turns tracing off.
+type Tracing struct {
+	OTLPEndpoint string   `yaml:"otlp_endpoint"`
+	SampleRatio  *float64 `yaml:"sample_ratio"` // default 0.1
+	Insecure     bool     `yaml:"insecure"`     // a collector without TLS
+	CACertFile   string   `yaml:"ca_cert_file"` // CAs trusted for the collector; default the system roots
+}
+
+// MetricsListener serves GET /metrics (Prometheus, §10.1) in plain HTTP,
+// without authentication: bind it to a loopback or management address.
+type MetricsListener struct {
+	ListenAddress string `yaml:"listen_address"`
 }
 
 // WorkloadAdvertise is served as the "ligo" flow (ADR-16).
@@ -78,6 +99,7 @@ type CoreIdentity struct {
 type Server struct {
 	WorkloadListener WorkloadListener `yaml:"workload_listener"`
 	AdminListener    AdminListener    `yaml:"admin_listener"`
+	MetricsListener  MetricsListener  `yaml:"metrics_listener"`
 }
 
 type WorkloadListener struct {
@@ -140,9 +162,11 @@ type Session struct {
 }
 
 type AdminRateLimit struct {
-	LoginPerIPPerMin   int     `yaml:"login_per_ip_per_min"`
-	LoginPerUserPerMin int     `yaml:"login_per_user_per_min"`
-	APIPerPrincipalRPS float64 `yaml:"api_per_principal_rps"`
+	LoginPerIPPerMin         int     `yaml:"login_per_ip_per_min"`
+	LoginPerUserPerMin       int     `yaml:"login_per_user_per_min"`
+	LoginPerUserGlobalPerMin int     `yaml:"login_per_user_global_per_min"`
+	APIPerPrincipalRPS       float64 `yaml:"api_per_principal_rps"`
+	MaxTrackedKeys           int     `yaml:"max_tracked_keys"` // addresses, users and principals whose buckets are kept; default 1000000
 }
 
 type AdminAuth struct {
@@ -223,10 +247,9 @@ type Postgres struct {
 	AppDSNEnv              string        `yaml:"app_dsn_env"`
 	ReaderDSNEnv           string        `yaml:"reader_dsn_env"`
 	DBOSDSNEnv             string        `yaml:"dbos_dsn_env"`
-	MaxConns               int           `yaml:"max_conns"`
-	AppStatementTimeout    time.Duration `yaml:"app_statement_timeout"`
-	ReaderStatementTimeout time.Duration `yaml:"reader_statement_timeout"`
-	SSLMode                string        `yaml:"sslmode"`
+	MaxConns               int           `yaml:"max_conns"`                // per pool; default pgx's
+	AppStatementTimeout    time.Duration `yaml:"app_statement_timeout"`    // default 5s
+	ReaderStatementTimeout time.Duration `yaml:"reader_statement_timeout"` // default 500ms
 }
 
 type DBOS struct {
@@ -431,8 +454,18 @@ func Parse(data []byte) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Observability.Tracing.SampleRatio == nil {
+		r := 0.1
+		c.Observability.Tracing.SampleRatio = &r
+	}
+	if c.Server.MetricsListener.ListenAddress == "" {
+		c.Server.MetricsListener.ListenAddress = "127.0.0.1:9090"
+	}
 	if c.Service.StartupTimeout == 0 {
 		c.Service.StartupTimeout = time.Minute
+	}
+	if c.Server.AdminListener.RateLimit.MaxTrackedKeys == 0 {
+		c.Server.AdminListener.RateLimit.MaxTrackedKeys = 1_000_000
 	}
 	if c.Plugins.RPCTimeout == 0 {
 		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6

@@ -16,13 +16,19 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/outputvalidation"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/store"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 )
 
@@ -221,6 +227,7 @@ type ApplyInput struct {
 	AccessLevel          string          `json:"accessLevel"`
 	RequestedSpec        json.RawMessage `json:"requestedSpec"`
 	Wiring               Wiring          `json:"wiring"`
+	TraceParent          string          `json:"traceParent,omitempty"` // the starting request's trace (§10.1), journaled for a recovery
 }
 
 // Start starts the workflow of a PROVISIONING or DELETING binding under its
@@ -230,6 +237,7 @@ func (e *Engine) Start(ctx context.Context, bindingID uuid.UUID) (dbos.WorkflowH
 	if err != nil {
 		return nil, err
 	}
+	in.TraceParent = traceParent(ctx)
 	switch {
 	case phase == "PROVISIONING" && in.Operation != "DELETE":
 		return dbos.RunWorkflow(e.DBOS, e.apply, in, dbos.WithWorkflowID(in.WorkflowID))
@@ -298,10 +306,81 @@ type fence struct {
 	workflowID string
 }
 
+// stepSpan starts a step's span and returns the function that ends it and
+// observes its duration (ligo_step_duration_seconds); it runs inside the
+// step, so DBOS's replays of completed steps count nothing. A failed span
+// gets an error status, never the error's text (§10.1: no secrets in spans).
+func stepSpan(ctx context.Context, stage, providerType string) (context.Context, func(error)) {
+	start := time.Now()
+	ctx, span := tracing.Tracer().Start(ctx, "step "+stage, trace.WithAttributes(attribute.String("ligo.stage", stage),
+		attribute.String("ligo.provider_type", providerType)))
+	return ctx, func(err error) {
+		result := "success"
+		if err != nil {
+			result = "failure"
+			span.SetStatus(otelcodes.Error, "")
+		}
+		span.End()
+		metrics.StepDuration.WithLabelValues(stage, providerType, result).Observe(time.Since(start).Seconds())
+	}
+}
+
+// workflowSpan starts the span of a workflow run, and puts it in the DBOS
+// context its steps inherit; a replay after a recovery starts a new one.
+func workflowSpan(ctx dbos.Context, in ApplyInput) (dbos.Context, trace.Span) {
+	c, span := startWorkflowSpan(ctx, in)
+	return dbos.From(ctx, c), span
+}
+
+// startWorkflowSpan starts the span in the trace of the request that started
+// the workflow, if any: DBOS runs it on its own context, which has none.
+func startWorkflowSpan(ctx context.Context, in ApplyInput) (context.Context, trace.Span) {
+	ctx = propagation.TraceContext{}.Extract(ctx, propagation.MapCarrier{"traceparent": in.TraceParent})
+	return tracing.Tracer().Start(ctx, "workflow "+in.Operation, trace.WithAttributes(attribute.String("ligo.binding_id", in.BindingID),
+		attribute.String("ligo.binding", in.BindingName), attribute.String("ligo.workflow_id", in.WorkflowID),
+		attribute.Int64("ligo.revision", in.Revision), attribute.Int64("ligo.attempt", in.Attempt)))
+}
+
+// traceParent is ctx's trace context as a W3C traceparent, empty without one.
+func traceParent(ctx context.Context) string {
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
+	return carrier.Get("traceparent")
+}
+
+// attemptStarted is the time the attempt's phase was entered, read in its
+// closing transaction, for ligo_workflow_duration_seconds.
+func attemptStarted(ctx context.Context, tx pgx.Tx, f fence) (time.Time, error) {
+	var t time.Time
+	err := tx.QueryRow(ctx, "SELECT last_transition_at FROM bindings WHERE id = $1 AND workflow_id = $2", f.bindingID, f.workflowID).Scan(&t)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, store.ErrFenced
+	}
+	return t, err
+}
+
+// finished observes an attempt's duration once its closing transaction
+// commits.
+func finished(op, result string, start time.Time) {
+	if !start.IsZero() {
+		metrics.WorkflowDuration.WithLabelValues(op, result).Observe(time.Since(start).Seconds())
+	}
+}
+
+// reverted is a break-glass revert's outcome, counted once its transaction
+// commits (ligo_break_glass_total).
+type reverted struct{ zone, operation, outcome string }
+
+func (r *reverted) count() {
+	if r != nil {
+		metrics.BreakGlass.WithLabelValues(r.zone, r.operation, r.outcome).Inc()
+	}
+}
+
 // revertOutcome audits BREAK_GLASS_REVERTED or BREAK_GLASS_REVERT_FAILED
 // when the attempt's revision was started by a SYSTEM_REVERT, retries
-// included (§6.3).
-func revertOutcome(ctx context.Context, tx pgx.Tx, f fence, in ApplyInput, ok bool) error {
+// included (§6.3); it returns the outcome, or nil for no revert.
+func revertOutcome(ctx context.Context, tx pgx.Tx, f fence, in ApplyInput, ok bool) (*reverted, error) {
 	started, action := "APPLY_STARTED", "BREAK_GLASS_REVERTED"
 	if in.Operation == "DELETE" {
 		started = "DELETE_STARTED"
@@ -310,18 +389,23 @@ func revertOutcome(ctx context.Context, tx pgx.Tx, f fence, in ApplyInput, ok bo
 		action = "BREAK_GLASS_REVERT_FAILED"
 	}
 	var cr uuid.UUID
-	err := tx.QueryRow(ctx, `SELECT a.change_request_id FROM audit_log a JOIN change_requests c ON c.id = a.change_request_id
+	r := &reverted{outcome: "reverted"}
+	if !ok {
+		r.outcome = "revert_failed"
+	}
+	err := tx.QueryRow(ctx, `SELECT a.change_request_id, coalesce(bg.zone, ''), bg.operation::text FROM audit_log a
+		JOIN change_requests c ON c.id = a.change_request_id JOIN change_requests bg ON bg.id = c.reverts_cr_id
 		WHERE a.resource_type = 'BINDING' AND a.resource_name = $1 AND a.resource_id = $2 AND a.revision = $3 AND a.action = $4
-		AND c.kind = 'SYSTEM_REVERT' ORDER BY a.id DESC LIMIT 1`, in.BindingName, f.bindingID, in.Revision, started).Scan(&cr)
+		AND c.kind = 'SYSTEM_REVERT' ORDER BY a.id DESC LIMIT 1`, in.BindingName, f.bindingID, in.Revision, started).Scan(&cr, &r.zone, &r.operation)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: &f.bindingID, ResourceName: in.BindingName,
 		ChangeRequestID: &cr, Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID})
-	return err
+	return r, err
 }
 
 // markFailed records a terminal error of the attempt: FAILED for an apply,
@@ -331,7 +415,14 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 	if in.Operation == "DELETE" {
 		from, to, action = "DELETING", "DELETE_FAILED", "DELETE_FAILURE"
 	}
-	return pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+	var rv *reverted
+	var propagated string // the cause of the propagation that started this revision, if any
+	var start time.Time
+	if err := pgx.BeginFunc(ctx, e.DB, func(tx pgx.Tx) error {
+		var err error
+		if start, err = attemptStarted(ctx, tx, f); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `UPDATE bindings SET phase = $5, current_step = $3, status_message = left($4, 2048),
 			last_transition_at = now(), updated_at = now() WHERE id = $1 AND workflow_id = $2 AND phase = $6`,
 			f.bindingID, f.workflowID, step, cause.Error(), to, from)
@@ -346,6 +437,21 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 			Action: action, Actor: "system:workflow", Revision: &in.Revision, Attempt: &in.Attempt, WorkflowID: f.workflowID, Snapshot: snap}); err != nil {
 			return err
 		}
-		return revertOutcome(ctx, tx, f, in, false)
-	})
+		// a revision the propagator started: ligo_propagation_failed_total, by its cause
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT snapshot->>'cause' FROM audit_log WHERE action = 'PROPAGATION_STARTED'
+			AND resource_type = 'BINDING' AND resource_id = $1 AND revision = $2 ORDER BY id DESC LIMIT 1), '')`,
+			f.bindingID, in.Revision).Scan(&propagated); err != nil {
+			return err
+		}
+		rv, err = revertOutcome(ctx, tx, f, in, false)
+		return err
+	}); err != nil {
+		return err
+	}
+	rv.count()
+	finished(in.Operation, "failure", start)
+	if propagated != "" && in.Operation != "DELETE" {
+		metrics.PropagationFailed.WithLabelValues(propagated).Inc()
+	}
+	return nil
 }

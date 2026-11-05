@@ -370,7 +370,7 @@ func (s *Server) bindingOperate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	act := s.Workflows.Retry
-	if r.PathValue("op") == "rotate" {
+	if strings.HasSuffix(r.URL.Path, "/rotate") {
 		act = s.Workflows.Rotate
 	}
 	if _, err := act(ctx, m.ID, c.ID()); err != nil {

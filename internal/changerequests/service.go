@@ -15,6 +15,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -217,7 +218,6 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 		return err
 	}
 	maxTTL, defaultTTL := 24*time.Hour, 24*time.Hour
-	var policies []*governance.BreakGlassPolicy
 	for _, sd := range sides {
 		if sd.Basis != BasisBreakGlass {
 			continue
@@ -227,9 +227,6 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 			return refuse(403, "forbidden", "no break-glass policy covers %s", sd.Scope)
 		}
 		maxTTL, defaultTTL = min(maxTTL, p.MaxTTL), min(defaultTTL, p.DefaultTTL)
-		if !slices.Contains(policies, p) {
-			policies = append(policies, p)
-		}
 	}
 	if r.TTL == 0 {
 		r.TTL = defaultTTL
@@ -238,9 +235,6 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 		e := refuse(422, "validation-failed", "ttl %s: between 5m and %s", r.TTL, maxTTL)
 		e.Fields = map[string]string{"ttl": "Between 5m and " + maxTTL.String() + ", the break-glass policy's maximum for these sides."}
 		return e
-	}
-	if err := s.checkOpen(ctx, policies); err != nil {
-		return err
 	}
 	for i, it := range items {
 		it.r.Kind, it.r.Justification, it.r.TTL = KindBreakGlass, r.Justification, r.TTL
@@ -254,6 +248,25 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 	return s.file(ctx, items...)
 }
 
+// withdrawPending withdraws the pending request on r's resource, if any, in
+// the name of r's requester, and adds its audit entry to entries.
+func withdrawPending(ctx context.Context, tx pgx.Tx, r *Request, entries []audit.Entry) ([]audit.Entry, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT id FROM change_requests WHERE resource_type = $1 AND resource_name = $2 AND status = 'PENDING' FOR UPDATE`,
+		r.ResourceType, r.ResourceName).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entries, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := store.CloseRequest(ctx, tx, id, "WITHDRAWN", r.RequestedBy, "superseded by a system change", ""); err != nil {
+		return nil, err
+	}
+	return append(entries, audit.Entry{ResourceType: r.ResourceType, ResourceID: r.ResourceID, ResourceName: r.ResourceName,
+		ChangeRequestID: &id, Action: "CR_WITHDRAWN", Actor: r.RequestedBy}), nil
+}
+
 // appliedIn reports whether the request id of items was applied.
 func appliedIn(items []filed, id uuid.UUID) bool {
 	return slices.ContainsFunc(items, func(it filed) bool { return it.r.ID == id && it.r.Status == "APPLIED" })
@@ -265,8 +278,10 @@ type filed struct {
 	r   *Request
 }
 
-// checkOpen refuses a change that would exceed a policy's max_open
-// unratified break-glass changes, each counted once per policy.
+// checkOpen refuses a break-glass change whose sides would exceed their
+// policy's max_open unratified break-glass changes, each counted once per
+// policy. It runs in the filing transaction, under a lock all break-glass
+// filings share, so concurrent ones are counted one after the other.
 // OpenBreakGlass is the SQL condition, over a change request r and one of
 // its sides s, of an unratified side of a break-glass change that is still
 // open (ADR-12): a binding CREATE or UPDATE while its binding references it
@@ -278,9 +293,19 @@ const OpenBreakGlass = `r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.re
 	AND CASE WHEN r.operation = 'DELETE' THEN r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) > now()
 		ELSE EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = r.id) END`
 
-// shortcut: counted before the transaction, so two concurrent emergencies can exceed max_open by one; lock if that matters.
-func (s *Service) checkOpen(ctx context.Context, policies []*governance.BreakGlassPolicy) error {
-	rows, err := s.DB.Query(ctx, `SELECT DISTINCT r.id, s.scope FROM change_requests r
+func (s *Service) checkOpen(ctx context.Context, tx pgx.Tx, items []filed) error {
+	var policies []*governance.BreakGlassPolicy
+	for _, it := range items {
+		for _, sd := range it.r.Sides {
+			if p := s.Policy.BreakGlassPolicyFor(sd.Scope); sd.Basis == BasisBreakGlass && p != nil && !slices.Contains(policies, p) {
+				policies = append(policies, p)
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ligo_break_glass'))`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT r.id, s.scope FROM change_requests r
 		JOIN change_request_sides s ON s.change_request_id = r.id WHERE `+OpenBreakGlass)
 	if err != nil {
 		return err
@@ -370,6 +395,10 @@ func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, e
 	r.ID, r.Status, r.PolicySHA256, r.ExpiresAt = uuid.NewV7(), "PENDING", s.Policy.SHA256(), time.Now().Add(s.TTL)
 	decider := r.Sides[0].DecidedBy
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		entries, err := withdrawPending(ctx, tx, r, nil) // as file does: it would hold the name
+		if err != nil {
+			return err
+		}
 		if err := insert(ctx, tx, r); err != nil {
 			return err
 		}
@@ -380,8 +409,8 @@ func (s *Service) SystemFailed(ctx context.Context, r *Request, reason string, e
 		for i := range extra {
 			extra[i].ChangeRequestID = &r.ID
 		}
-		return appendAll(ctx, tx, append([]audit.Entry{entry(r, "CR_CREATED", r.RequestedBy, "", nil),
-			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})}, extra...))
+		return appendAll(ctx, tx, append(append(entries, entry(r, "CR_CREATED", r.RequestedBy, "", nil),
+			entry(r, "CR_APPLY_FAILED", decider, "", map[string]any{"error": limit(reason)})), extra...))
 	})
 }
 
@@ -396,7 +425,20 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 				return err
 			}
 		}
+		if items[0].r.Kind == KindBreakGlass {
+			if err := s.checkOpen(ctx, tx, items); err != nil {
+				return err
+			}
+		}
 		var entries []audit.Entry
+		if k := items[0].r.kind(); k == KindSystemRevert || k == "SYSTEM_EXPIRY" {
+			// a system change supersedes the resource's pending request, which
+			// would hold its name (uq_cr_one_pending_per_resource)
+			var err error
+			if entries, err = withdrawPending(ctx, tx, items[0].r, entries); err != nil {
+				return err
+			}
+		}
 		for _, it := range items {
 			r := it.r
 			if err := insert(ctx, tx, r); err != nil {
@@ -438,6 +480,11 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 	}
 	for _, it := range items {
 		applied(ctx, it.res, it.r)
+		for _, sd := range it.r.Sides {
+			if sd.Basis == BasisDelegated && sd.Decision == Approved {
+				metrics.DelegatedApprovals.WithLabelValues(it.r.RequestedBy, it.r.Zone, it.r.Operation).Inc()
+			}
+		}
 	}
 	return applyErr
 }

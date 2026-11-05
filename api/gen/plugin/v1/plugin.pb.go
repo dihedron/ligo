@@ -3045,12 +3045,14 @@ func (x *EnsureTargetResponse) GetDeclaredEndpoints() []*Endpoint {
 	return nil
 }
 
+// CleanupTarget removes everything the binding owns on the platform, found by
+// binding ID or derived principal name, whatever the revision (§6.5).
 type CleanupTargetRequest struct {
 	state                   protoimpl.MessageState `protogen:"open.v1"`
 	Instance                string                 `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
 	Binding                 *BindingContext        `protobuf:"bytes,2,opt,name=binding,proto3" json:"binding,omitempty"`
-	Identity                *IdentityArtifact      `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"` // non-secret; MAY be empty
-	RequestedSpecJson       []byte                 `protobuf:"bytes,4,opt,name=requested_spec_json,json=requestedSpecJson,proto3" json:"requested_spec_json,omitempty"`
+	Identity                *IdentityArtifact      `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`                                                                  // non-secret; MAY be empty
+	RequestedSpecJson       []byte                 `protobuf:"bytes,4,opt,name=requested_spec_json,json=requestedSpecJson,proto3" json:"requested_spec_json,omitempty"`                     // the latest revision's: informative, MAY never have been provisioned
 	FinalizedClientSpecJson []byte                 `protobuf:"bytes,5,opt,name=finalized_client_spec_json,json=finalizedClientSpecJson,proto3" json:"finalized_client_spec_json,omitempty"` // MAY be empty after partial failure
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache

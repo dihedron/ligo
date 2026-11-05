@@ -62,7 +62,7 @@ Identifiers derived from the **application** use the `ligo` prefix:
 | Cookies | `__Host-ligo_*` | `__Host-ligo_session` |
 | HTTP headers | `X-Ligo-*` | `X-Ligo-Signature` |
 | File system paths | `/etc/ligo`, `/usr/lib/ligo` | `/usr/lib/ligo/plugins` |
-| SPIFFE paths | `/ligo/plugin/<binary>`, `/ns/sys/sa/ligo` | `spiffe://prod.internal/ns/sys/sa/ligo` |
+| SPIFFE paths | `/ligo/plugin/<backend>`, `/ns/sys/sa/ligo` | `spiffe://prod.internal/ns/sys/sa/ligo` |
 | Vault/OpenBao objects | `ligo-*`, `kv/data/ligo/…` | `ligo-sealer`, `ligo-interstage`, `kv/data/ligo/bootstrap/oracle-prod` |
 | URNs, annotations, ownership tags | `ligo` | `urn:ligo:problem:<slug>`, `x-ligo-endpoint`, `ligo:binding_id=<uuid>` |
 | go-plugin handshake | `LIGO_PLUGIN` | `MagicCookieKey: "LIGO_PLUGIN"` |
@@ -442,12 +442,12 @@ Code generators and maintainers MUST preserve these decisions.
 - **Problem:** During an incident, a binding may be needed (or must be changed or removed) immediately in an approval-required scope, when no approver is reachable. Without a defined emergency path, people work around the system (direct database or target changes), which leaves no audit trail and no clean-up.
 - **Decision:** A **break-glass** change of a **binding** is applied immediately without prior approval, under compensating controls. Because in an emergency the consuming workloads may not be registered yet, a break-glass binding `CREATE` MAY define its source inline; the source is then registered by a break-glass source change in the same transaction, under the same controls. Targets cannot be published by break-glass: a target describes a resource that already exists and its review is never urgent.
   1. **Who.** Only members of a dedicated per-scope LDAP group bound to the role `break_glass` (people only; never SPIFFE principals; DB-enforced). Group membership is re-checked against LDAP at the moment of use, and the person must re-authenticate (password re-entry in the UI, or Basic credentials on the API request itself).
-     - **Every side.** The person MUST hold `break_glass` on the scope of **every** side that would otherwise need a decision (ADR-13): the source scope, the target scope and any additional party. An emergency group of one scope can never grant itself access to another scope's resources, or push a binding to another scope's workloads. An inline source needs `break_glass` on the source scope, which a binding across scopes needs anyway.
+     - **Every side.** The person MUST hold `break_glass` on the scope of **every** side that would otherwise need a decision (ADR-13): the source scope, the target scope and any additional party. An emergency group of one scope can never grant itself access to another scope's resources, or push a binding to another scope's workloads. An inline source needs `break_glass` on the source scope, which a binding across scopes needs anyway. A side whose scope no break-glass policy covers refuses the change (`403`), so break-glass reaches a scope, an additional party's included, only where a policy names it. Startup warns of an additional party left out (§8.2 rule 18), and leaving one out is a legitimate way to keep that party's approval out of the emergency path.
   2. **What must be given.** A justification (at least `min_justification_length` characters), an incident reference (optionally checked against `incident_reference_pattern`), and a TTL (between 5 minutes and the most restrictive `max_ttl` among the break-glass policies of the change's sides).
   3. **Time-limited.** A break-glass `CREATE` or `UPDATE` is **reverted automatically** when its TTL expires, unless it is **ratified** first: each side that was decided by break-glass needs a ratification by an approver of that side's scope, a person other than the requester (and a different person per side when distinct approvers are required, ADR-13 rule 7). Reverting a `CREATE` deletes the binding (and then retires an inline source, unless it has other bindings by then); reverting an `UPDATE` re-applies the binding's previous desired state, stored with the change request. Ratifying the `SOURCE` side of a binding with an inline source also ratifies the source's own break-glass change. While a break-glass change is open, the binding accepts no other updates (`409 break-glass-open`); deleting it and ratifying or reverting the break-glass change remain possible.
   4. **Emergency deletes are not reverted.** A break-glass `DELETE` revokes access. Restoring that access automatically could re-grant it to a compromised workload, so it is final. It still requires ratification; if none happens within its TTL, a `BREAK_GLASS_REVIEW_OVERDUE` alert is raised.
   5. **Announced.** Every use, upcoming expiry, revert, revert failure, ratification and overdue review is audited, sent to the SIEM, and delivered to configured HTTPS webhooks (§7.5). Webhook delivery never blocks the emergency change.
-  6. **Bounded.** At most `max_open` unratified break-glass changes per break-glass policy entry at a time (each side counts against its own policy). A change counts while it is open: a `CREATE` or `UPDATE` while its binding references it (until every side is ratified, it is reverted or the binding is deleted), an emergency `DELETE` until its TTL ends. An inline source's change counts with its binding's, not on its own. The dashboard's banner lists the same open changes. All other validation (regex, the target's access levels and the platform's privilege bounds, trust domains, output validation) still applies.
+  6. **Bounded.** At most `max_open` unratified break-glass changes per break-glass policy entry at a time (each side counts against its own policy). A change counts while it is open: a `CREATE` or `UPDATE` while its binding references it (until every side is ratified, it is reverted or the binding is deleted), an emergency `DELETE` until its TTL ends. An inline source's change counts with its binding's, not on its own. The count is taken in the filing transaction under a lock all break-glass filings share, so concurrent filings cannot exceed `max_open` together. The dashboard's banner lists the same open changes. All other validation (regex, the target's access levels and the platform's privilege bounds, trust domains, output validation) still applies.
 - **Rationale.** The emergency path must be faster than the workaround, or people will use the workaround. Immediate application with a short TTL makes the default outcome "access disappears again", so an emergency grant cannot quietly become permanent. Making a second person ratify anything that is to last restores four eyes after the fact, and requiring the role and a ratification on every side keeps the emergency path within two-sided consent. Fresh re-authentication and a fresh group check reduce the value of a stolen session. Residual risk: misuse is possible within the TTL (R-07).
 
 ### ADR-13: Governance Scopes and Two-Sided Consent
@@ -886,7 +886,7 @@ Flows within an item are ordered target, platform, secret store, `ligo`, each gr
 | `accessLevels[].description` | Yes | Yes | Owner | |
 | `accessLevels[].state` | `ACTIVE` | Yes | Owner | `RETIRED` only when no binding uses the level. |
 | `networkFlows` | Yes | Yes | Owner and platform | Served at once to workloads and the catalog; no re-apply. |
-| `displayName`, `description`, `labels`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | |
+| `displayName`, `description`, `labels`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | `documentationUrl`: an absolute `https` or `http` URL with a host, at most 512 characters. |
 | `metadata.state` | `ACTIVE` | Yes | Owner | `RETIRED` only without bindings, and final. |
 
 When the target scope equals the platform scope, "owner and platform" is a single `OWNER` side.
@@ -1350,7 +1350,7 @@ erDiagram
 | `ligo_reader` | `SELECT` on the views `v_active_bindings` and `v_active_binding_flows` only. |
 | `ligo_dbos` | Whatever DBOS requires on the `dbos` schema (EXT-08). No access to `public` tables. |
 
-- **Connection pools:** `app` (statement timeout 5s), `reader` (statement timeout 500ms), and DBOS's own pool. All connections MUST use TLS with `sslmode=verify-full`.
+- **Connection pools:** `app` (statement timeout `storage.postgres.app_statement_timeout`, default 5s), `reader` (`reader_statement_timeout`, default 500ms), each with at most `max_conns` connections (default pgx's), and DBOS's own pool. All connections MUST use TLS with `sslmode=verify-full`: a DSN without it, DBOS's included, fails startup. The `reader` pool serves workload resolution only, as its role can read nothing but the two views; the admin side, the catalog included, reads through `app`.
 
 ### 4.2 Migration `migrations/001_init_schema.sql`
 
@@ -1997,6 +1997,7 @@ ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
 CREATE INDEX idx_cr_status_zone ON change_requests (status, zone, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
+CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
 
 -- ---------------------------------------------------------------------------
@@ -2044,6 +2045,8 @@ CREATE TABLE audit_log (
     )
 );
 CREATE INDEX idx_audit_resource ON audit_log (resource_type, resource_name, id DESC);
+CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE resource_id IS NOT NULL;
+CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;
@@ -2133,7 +2136,7 @@ GRANT SELECT ON v_active_bindings, v_active_binding_flows TO ligo_reader;
 The audit action vocabulary (**Normative**) is (`resource_type` and `resource_name` identify the resource; `SESSION_*`, `CONFIG_*` and `SYSTEM_*` actions may have none):
 - Change requests: `CR_CREATED` (snapshot includes the consent rule, the sides and their bases), `CR_SIDE_APPROVED` (snapshot: side, scope, basis; for `DELEGATED` also `approvalReference` and `automationContext`), `CR_SIDE_DECLINED`, `CR_APPROVED` (the consent rule is satisfied; the change is applied), `CR_REJECTED`, `CR_WITHDRAWN`, `CR_EXPIRED`, `CR_APPLY_FAILED`, `CR_INTERCONNECT_DENIED` (snapshot: scopes and rule; no change request is stored), `CR_DEPENDENCY_FAILED` (a binding create whose inline source was not registered)
 - Sources and targets: `SOURCE_REGISTERED`, `SOURCE_UPDATED` (snapshot: changed fields; for a narrowing, old and new regex), `SOURCE_DEPRECATED`, `SOURCE_REACTIVATED`, `SOURCE_RETIRED`, `TARGET_PUBLISHED`, `TARGET_UPDATED` (snapshot: changed fields, added levels, narrowed levels, flow changes), `TARGET_DEPRECATED`, `TARGET_REACTIVATED`, `TARGET_RETIRED`, `ACCESS_LEVEL_DEPRECATED`, `ACCESS_LEVEL_REACTIVATED`, `ACCESS_LEVEL_RETIRED`
-- Propagation: `PROPAGATION_ENQUEUED` (on the source or target: the cause and the number of bindings), `PROPAGATION_STARTED` (on each binding: cause and new revision), `PROPAGATION_DEFERRED` (binding busy; snapshot: attempts)
+- Propagation: `PROPAGATION_ENQUEUED` (on the source or target: the cause and the number of bindings), `PROPAGATION_STARTED` (on each binding: cause and new revision), `PROPAGATION_DEFERRED` (binding busy; snapshot: attempts), `PROPAGATION_FAILED` (the new revision could not be composed; snapshot: cause and refusal)
 - Workflow starts: `APPLY_STARTED`, `REAPPLY_STARTED`, `DELETE_STARTED`
 - Workflow outcomes: `PROVISION_SUCCESS`, `PROVISION_FAILURE`, `DELETE_COMPLETED`, `DELETE_FAILURE`
 - Expiry: `BINDING_EXPIRY_WARNED`, `BINDING_EXPIRED` (the `SYSTEM_EXPIRY` revocation was applied)
@@ -2143,7 +2146,7 @@ The audit action vocabulary (**Normative**) is (`resource_type` and `resource_na
 - Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, the governance policy with its SHA-256, and each platform's privilege bounds, allowed endpoints and flows, which the next start compares for rule 19, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
 - Governance: `SOURCE_RESCOPED`, `TARGET_RESCOPED`, `BINDING_RESCOPED` (snapshot: old and new scopes, §8.2 rule 17)
 - Break-glass: `BREAK_GLASS_USED`, `BREAK_GLASS_RATIFIED` (one per ratified side; the snapshot says whether the change is now fully ratified), `BREAK_GLASS_REVERT_STARTED`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE` (snapshots include justification, incident reference and expiry)
-- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
+- System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_EXECUTOR_RECOVERED` (§10.2), `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` (snapshot: the additional parties that no break-glass policy covers, with their rules, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
 
 ### 4.3 Audit hash chain & lock ordering
 Every audit insert MUST run inside a database transaction that:
@@ -2226,6 +2229,8 @@ FROM v_active_bindings WHERE id = $1;
 - Plugins are either **internal** (compiled in: `svid.v1`, `target-local.v1`, `delegated-dynamic.v1`, `none.v1`) or **external** (separate binaries hosted via HashiCorp `go-plugin` over gRPC).
 - Both kinds implement the same Go interfaces, generated from §5.9.
 - Internal plugins are subject to the same output validation (INV-13) as external ones.
+- An external plugin's binary and package are `ligo-plugin-<backend>`, where `<backend>` is its type without the version (`openldap.v1`: `ligo-plugin-openldap`); its SPIFFE path is `/ligo/plugin/<backend>` and its Vault role starts with `ligo-plugin-<backend>`. Its kind comes from `Describe`, not from its name.
+- The external identity provider `openldap.v1` is specified in `.specs/ligo-openldap-plugin.md`.
 
 ### 5.2 Process topology (ADR-03)
 - The plugin manager spawns one process per `(type, zone)`. Each process receives `ConfigureInstances` containing only its zone's instances (for target plugins, its zone's platforms) and that zone's `spiffe_workload_socket`.
@@ -2242,7 +2247,7 @@ FROM v_active_bindings WHERE id = $1;
 4. **Integrity.**
    - The SHA-256 of each binary is verified against `server.yaml` before every spawn (go-plugin `SecureConfig`, EXT-11).
    - To close the check-then-exec race, implementations SHOULD open the binary, hash it from the open file descriptor, and execute that descriptor (Linux `/proc/self/fd/N`, or `execveat` with `AT_EMPTY_PATH`).
-5. **Logging.** Plugin stderr and hclog output pass through the redacting logger (§10.1).
+5. **Logging.** Plugin stdout, stderr and hclog output pass through the redacting logger (§10.1), one whole line at a time: a line split across writes is joined first, and a line over 64 KiB is dropped, never logged in pieces. The logger also looks inside nested objects of a plugin's JSON log lines, and into error values.
 6. **Timeouts.** Every RPC carries a deadline of `plugins.rpc_timeout` (default 60s).
 7. **Concurrency.** At most `plugins.max_concurrent_rpcs_per_instance` (default 4) concurrent `Ensure*`/`Cleanup*` RPCs per logical instance. This is enforced by a host-side semaphore.
 
@@ -2310,6 +2315,7 @@ Oracle, OpenLDAP and Active Directory do not accept SVIDs. A plugin instance tha
 - Credentials are configured as `config.bootstrap_credential`, read from Vault using the instance's JWT-SVID.
 - Static credentials on disk or in `server.yaml` are prohibited.
 - Credentials are held only in memory, renewed per Vault lease, and MUST NOT be logged or returned in any RPC.
+- The SDK's reader holds its lock while it calls Vault, so the call is bounded: without a client from the plugin, it uses the system roots, TLS 1.2 or later and a 30s timeout; with any client, a response is read up to 1 MiB.
 
 **Normative** (config shape).
 ```yaml
@@ -2351,7 +2357,7 @@ bootstrap_credential:
   3. check every entry in `declared_endpoints` against the same `allowed_endpoints`.
 - **Endpoint matching.** An endpoint is allowed when an `allowed_endpoints` entry has the same host (case-insensitive; an address must lie within an address or CIDR entry) and either no port, which allows any port, or the endpoint's port. An endpoint without a port, including a URL without one, is allowed only by an entry without a port: a URL scheme does not imply a default port.
 - A validation failure is a terminal error (`OUTPUT_VALIDATION_FAILED`) and is audited.
-- **Target network flows** (ADR-16, INV-24) are checked against the platform's `allowed_endpoints` when a target change request is created and again when it is applied: a DNS-name destination MUST equal an allowed host; an IP address or CIDR destination MUST lie within an allowed CIDR entry (`allowed_endpoints` accepts CIDR entries for this purpose); when the allowed entry has a port, every port of the flow MUST equal it. A failure is `422 flow-destination-not-allowed`. The same check applies at startup to the configured flows of platforms and secret stores (§8.2 rule 19).
+- **Target network flows** (ADR-16, INV-24) are checked against the platform's `allowed_endpoints` when a target change request is created and again when it is applied: a DNS-name destination MUST equal an allowed host; an IP address or CIDR destination MUST lie within an allowed CIDR entry (`allowed_endpoints` accepts CIDR entries for this purpose); an entry with a port allows that port only, so each port of the flow, and each port of a port range, MUST be allowed by some entry (the database stores neighbouring ports as one range, so ports allowed one by one stay allowed when read back). A failure is `422 flow-destination-not-allowed`. The same check applies at startup to the configured flows of platforms and secret stores (§8.2 rule 19).
 
 ### 5.8 Plugin implementation rules (normative for every plugin)
 1. **Idempotency (INV-07).**
@@ -2376,7 +2382,7 @@ bootstrap_credential:
    - Errors are returned as gRPC status codes with a `PluginErrorDetail` (§5.9).
    - Neither `status.message` nor `public_message` may contain secrets or full SQL statements.
    - The host persists **only** `code` and `public_message`.
-6. **Logging.** No secret values, no bootstrap credentials, no SQL text containing `IDENTIFIED BY`.
+6. **Logging.** No secret values, no bootstrap credentials, no SQL text that sets a password (`IDENTIFIED BY`, or PostgreSQL's `PASSWORD` followed by a literal).
 7. **Targets are register-only (ADR-15).** `ValidateTarget` and `ValidateBinding` MUST NOT change anything on the platform. They MAY read from it (for example, to confirm that a schema and the roles named by an access level exist) when `check_existence` is set, using the platform's bootstrap credential with read-only use.
 8. **Parameters never add privilege.** `ValidateBinding` MUST reject parameters that would grant anything beyond the access level (for example extra roles, or a schema other than the target's). The privileges it returns MUST equal those of the access level.
 9. **Canonical privileges.** `ValidateTarget` returns, for each access level, `privileges`: a sorted, duplicate-free list of identifiers such that, for two levels of the same target, `privileges(A) ⊆ privileges(B)` implies that everything `A` grants is also granted by `B` (§3.10). Identifiers are stable across plugin versions; a plugin that changes them MUST bump its major type version (`oracle.v2`). Where containment cannot be guaranteed (for example a grant with conditions the plugin cannot compare), the plugin MUST emit an identifier unique to that grant.
@@ -2719,11 +2725,13 @@ message EnsureTargetResponse {
   repeated Endpoint declared_endpoints = 3;
 }
 
+// CleanupTarget removes everything the binding owns on the platform, found by
+// binding ID or derived principal name, whatever the revision (§6.5).
 message CleanupTargetRequest {
   string instance = 1;
   BindingContext binding = 2;
   IdentityArtifact identity = 3;           // non-secret; MAY be empty
-  bytes requested_spec_json = 4;
+  bytes requested_spec_json = 4;           // the latest revision's: informative, MAY never have been provisioned
   bytes finalized_client_spec_json = 5;    // MAY be empty after partial failure
 }
 message CleanupTargetResponse { bool skipped_not_owner = 1; }
@@ -2832,7 +2840,7 @@ Applying a binding change request whose consent rule is satisfied, a propagation
 3. If step 2 fails, or the process crashes between commit and start, the **sweeper** (§6.3) starts the workflow.
 
 ### 6.3 Sweeper
-Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`, performs the following:
+Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`, performs the following. The sweeper, the reconciler and the propagator log the errors of a pass at `ERROR`, and retry at the next one.
 - For each binding in `PROVISIONING`/`DELETING` with `last_transition_at < now() - 60s`, query DBOS for `workflow_id` (EXT-03):
   - **not found:** start the workflow with that ID. This is idempotent.
   - **terminal error or cancelled, while the binding is not terminal:** run the fenced failure transition (`FAILED`/`DELETE_FAILED`, `status_message = "workflow terminated unexpectedly"`).
@@ -2841,19 +2849,19 @@ Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`
 - **Dependencies.** A `PENDING` binding `CREATE` whose `depends_on_cr_id` request ended other than `APPLIED` moves to `FAILED_TO_APPLY` (`apply_error = "inline source not registered"`, audit `CR_DEPENDENCY_FAILED`).
 - **Binding expiry (INV-25):**
   - For each binding whose `expires_at` is within `bindings.expiry_warning` and whose `expiry_warned_at` is `NULL`, emit `BINDING_EXPIRING` (to the owners of all three scopes), audit `BINDING_EXPIRY_WARNED` and set `expiry_warned_at`. Changing `expires_at` clears `expiry_warned_at`.
-  - For each binding whose `expires_at` has passed and that is not busy and not already `DELETING`/`DELETE_FAILED`, create a `SYSTEM_EXPIRY` change request (`operation = 'DELETE'`, `consent = 'ANY'`, `requested_by = 'system:binding-expiry'`, `decided_by = 'system:expiry'`, `expected_revision` = the current revision) with one `TARGET` side (basis `SYSTEM_EXPIRY`, approved by `system:expiry`), and apply it via §6.2.2, during maintenance too. Audit `BINDING_EXPIRED`. Busy bindings are retried on the next run; resolution already stopped serving them at `expires_at`. An expired binding's own pending change request, if any, is withdrawn first (`CR_WITHDRAWN`, `decided_by = 'system:binding-expiry'`).
+  - For each binding whose `expires_at` has passed and that is not busy and not already `DELETING`/`DELETE_FAILED`, create a `SYSTEM_EXPIRY` change request (`operation = 'DELETE'`, `consent = 'ANY'`, `requested_by = 'system:binding-expiry'`, `decided_by = 'system:expiry'`, `expected_revision` = the current revision) with one `TARGET` side (basis `SYSTEM_EXPIRY`, approved by `system:expiry`), and apply it via §6.2.2, during maintenance too. Audit `BINDING_EXPIRED`. Busy bindings are retried on the next run; resolution already stopped serving them at `expires_at`. An expired binding's own pending change request, if any, is withdrawn in the same transaction (`CR_WITHDRAWN`, `decided_by = 'system:binding-expiry'`).
 - **Break-glass (ADR-12):**
   - For each binding whose `break_glass_expires_at` is within `warn_before` and whose `break_glass_warned_at` is `NULL`, emit `BREAK_GLASS_EXPIRING` and set `break_glass_warned_at`.
-  - For each binding whose `break_glass_expires_at` has passed and that is not busy, create a `SYSTEM_REVERT` change request (`requested_by = 'system:break-glass-expiry'`, `decided_by = 'system:break-glass-revert'`, `reverts_cr_id` = the break-glass change) with one side for each side of the break-glass change (same names and scopes, basis `SYSTEM_REVERT`, approved by `system:break-glass-revert`), and start it via §6.2: a `DELETE` if the break-glass change was a `CREATE`, otherwise an `UPDATE` to its `revert_payload`, bypassing `expectedRevision` but not validation: the revert payload is re-validated with creation steps 2–6, 8 and 9 (§7.2.3; the system needs no RBAC check), and a validation failure, including an interconnection policy that now denies the pair, is treated as a failed revert. Audit `BREAK_GLASS_REVERT_STARTED`. Busy bindings are retried on the next run. A pending change request of the binding, if any, is withdrawn first (`CR_WITHDRAWN`, `decided_by` = the revert's requester): the revert supersedes it, and a pending request would hold the binding's name (`uq_cr_one_pending_per_resource`). The same applies to `/revert`.
+  - For each binding whose `break_glass_expires_at` has passed and that is not busy, create a `SYSTEM_REVERT` change request (`requested_by = 'system:break-glass-expiry'`, `decided_by = 'system:break-glass-revert'`, `reverts_cr_id` = the break-glass change) with one side for each `SOURCE`, `TARGET` and `PLATFORM` side of the break-glass change (same names and scopes, basis `SYSTEM_REVERT`, approved by `system:break-glass-revert`; additional parties are left out, as a revocation has none), and start it via §6.2: a `DELETE` if the break-glass change was a `CREATE`, otherwise an `UPDATE` to its `revert_payload`, bypassing `expectedRevision` but not validation: the revert payload is re-validated with creation steps 2–6, 8 and 9 (§7.2.3; the system needs no RBAC check), and a validation failure, including an interconnection policy that now denies the pair, is treated as a failed revert; a plugin or database that cannot answer records nothing, and the next run retries, so an outage postpones the revert of an expired `UPDATE` with no `BREAK_GLASS_REVERT_FAILED`, only the sweeper's `ERROR` log (R-07). Audit `BREAK_GLASS_REVERT_STARTED`. Busy bindings are retried on the next run. A pending change request of the binding, if any, is withdrawn in the same transaction (`CR_WITHDRAWN`, `decided_by` = the revert's requester): the revert supersedes it, and a pending request would hold the binding's name (`uq_cr_one_pending_per_resource`). A revert that fails validation withdraws it too, because its failed record passes through `PENDING` under the same name. The same applies to `/revert`, which first requires the binding to still reference the break-glass change (`409 break-glass-not-open` otherwise, with nothing withdrawn or recorded).
   - When a revert workflow ends, audit and announce `BREAK_GLASS_REVERTED` or `BREAK_GLASS_REVERT_FAILED`. A failed revert leaves the emergency state served until an operator retries it, so it MUST be alerted on.
-  - **Inline source.** When the revert of a break-glass binding `CREATE` with an inline source completes, and the source then has no binding, a `SYSTEM_REVERT` source change retires it (one `OWNER` side, basis `SYSTEM_REVERT`). If it has bindings by then (added through normal consent), it stays, and its break-glass change falls under the overdue-review rule until ratified.
+  - **Inline source.** When the revert of a break-glass binding `CREATE` with an inline source completes, and the source then has no binding, a `SYSTEM_REVERT` source change retires it (one `OWNER` side, basis `SYSTEM_REVERT`), withdrawing the source's pending change request, if any, in the same transaction, as above. If it has bindings by then (added through normal consent), it stays, and its break-glass change falls under the overdue-review rule until ratified.
   - For each break-glass change that is unratified (at least one of its `BREAK_GLASS` sides has no ratification), whose `requested_at + break_glass_ttl_seconds` has passed, that has not been reverted by an applied `SYSTEM_REVERT`, and whose `review_overdue_notified_at` is `NULL` (emergency deletes, and changes whose binding was deleted), emit `BREAK_GLASS_REVIEW_OVERDUE` and set `review_overdue_notified_at`.
 - **Notification dispatcher** (singleton, advisory lock `ligo_notifier`): deliver due `notification_outbox` rows (§7.5); purge delivered or abandoned rows after 30 days.
 
 ### 6.4 Apply and reapply workflow (`ApplyBindingWorkflow`)
 
 **Rotation flag** (`rotate_static_secrets`), set when the workflow is started:
-- `true` for: `CREATE`; any new revision whose `source_svid_regex` differs from the previous revision's (a propagated narrowing); any update, propagation or retry from `FAILED`; an explicit rotate; a scheduled rotation (the binding uses a static-secret identity mode, `EXTERNAL_DIR` or `TARGET_LOCAL`, and `last_rotated_at` is `NULL` or older than the platform's `rotation_interval`).
+- `true` for: `CREATE`; any new revision whose `source_svid_regex` differs from the previous revision's (a propagated narrowing); any update, propagation or retry from `FAILED`; an explicit rotate; a scheduled rotation (the binding uses a static-secret identity mode, `EXTERNAL_DIR` or `TARGET_LOCAL`, and `last_rotated_at` is `NULL` or older than the platform's `rotation_interval`; a platform without `rotation_interval`, or with `0`, has no scheduled rotation).
 - `false` for: scheduled reconcile, and updates or propagations from `ACTIVE` that do not change the regex.
 - **Rationale.** A narrowed regex removes workloads that may have read the static secret while they were covered; rotating it makes sure they cannot keep using it.
 
@@ -2914,6 +2922,7 @@ For each stage in `[SECRET_STORE, TARGET, IDENTITY]`:
 1. If no `binding_stage_state` row exists for the stage, skip it.
 2. `markStep(CLEANUP_<STAGE>)`.
 3. Call `Cleanup*` with the row's `provider_type`/`provider_instance` (not the current config) and its non-secret artifact. `CleanupSecretStore` and `CleanupTarget` additionally receive the IDENTITY row's non-secret artifact, if any, and `CleanupTarget` also receives `requested_spec`.
+   Cleanup MUST remove everything the binding owns on the provider, found by the binding ID or the derived principal name, which stay the same across revisions. The inputs describe the latest revision, which a failed apply may never have provisioned, or only partly: `requested_spec` and the `BindingContext` (`revision`, `source_svid_regex`, `access_level`) are informative, and a plugin MUST NOT limit its cleanup to them.
 4. On success, delete the stage row (fenced). If `skipped_not_owner` is set, insert audit `CLEANUP_SKIPPED_NOT_OWNER`.
 
 Finally, in one fenced transaction: delete the `bindings` row (stage rows cascade) and insert audit `DELETE_COMPLETED` as the final operation before `COMMIT`.
@@ -2938,6 +2947,7 @@ An applied change of a source or target that affects provisioning is carried int
 - **Start.** For each row, it runs §6.2.2 with the trigger "propagation": `revision + 1` composed from the current source and target, `op = APPLY`, actor `system:propagator`, audit `PROPAGATION_STARTED` with the cause. No change request is created: the change was approved on the source or target, and the propagation adds no access that the binding's sides have not consented to (narrowing only removes access, definitions and flows are owned by the target and platform owners).
 - **Busy bindings.** A binding in `PROVISIONING` or `DELETING` keeps its row; `attempts` is incremented, audit `PROPAGATION_DEFERRED` at the first deferral, and the row is retried on the next run. A binding with a pending change request is propagated anyway (as for reconciliation, §6.6): when that request is applied, its new revision is composed from the then-current source and target.
 - **Failures.** A propagated revision that fails ends in `FAILED` like any apply (§6.4); its queue row was deleted at start. The binding keeps serving its last active snapshot, but resolution already applies the narrowed source regex (INV-01). `ligo_propagation_failed_total` counts these, and the binding's owners are notified (`PROPAGATION_FAILED`). A retry re-applies the same revision.
+- **Refused composition.** If the new revision cannot be composed, because `ligo` or the plugin refuses it (for example a platform's privilege bounds tightened so `ValidateBinding` fails), the row is deleted, the binding moves to `FAILED` with the refusal as `status_message`, keeping its last active snapshot, and `PROPAGATION_FAILED` is audited and announced to the binding's scopes; `ligo_propagation_failed_total` counts it. A retry re-applies the binding's current revision; the change is carried in by the next change of the source, target or binding that composes. A plugin or database that cannot answer is not a refusal: the row stays and the next run retries.
 - **Maintenance.** While maintenance mode is on, the propagator starts nothing, except rows with priority 0, which remove access and therefore proceed, like break-glass reverts.
 - **Rate.** A change of a widely used source or target can enqueue many bindings. They are drained at the configured concurrency, narrowings first; `ligo_propagation_queue_depth{priority}` and `ligo_propagation_oldest_seconds` expose the backlog (§10.1).
 - **Rationale.** Copying the composed state into each binding revision keeps provisioning deterministic and auditable, but means that a resource change is not provisioned until each binding has been re-applied. The queue makes that eventual step durable and visible; prioritising narrowings and letting them run during maintenance bounds the window during which removed access still exists on the target, and resolution closes the window at once for the workload API.
@@ -3068,7 +3078,7 @@ gRPC errors map to `UNAUTHENTICATED`, `RESOURCE_EXHAUSTED` and `UNAVAILABLE`.
 #### 7.2.1 Authentication
 | Path prefix | Accepted credentials |
 | :--- | :--- |
-| `/v1/admin/*` | (a) mTLS X.509-SVID (verified against the composite bundle set of `client_svid_auth.accepted_trust_domains`), mapped through `authorization.bindings[].spiffe_id`; (b) LDAP via `Authorization: Basic`, **only** if `allow_basic_auth: true` (default `false`). Session cookies MUST be ignored. |
+| `/v1/admin/*` | (a) mTLS X.509-SVID (verified against the composite bundle set of `client_svid_auth.accepted_trust_domains`), mapped through `authorization.bindings[].spiffe_id`; (b) LDAP via `Authorization: Basic`, **only** if `allow_basic_auth: true` (default `false`). A request with both is authenticated by its SVID when `client_svid_auth` is enabled, and the Basic credentials are ignored; break-glass therefore needs a connection without a client SVID (ADR-12 rule 1). Session cookies MUST be ignored. |
 | `/ui/*` | `__Host-ligo_session` cookie. `POST /ui/login` accepts form credentials. |
 
 **LDAP rules (T-04):**
@@ -3076,7 +3086,7 @@ gRPC errors map to `UNAUTHENTICATED`, `RESOURCE_EXHAUSTED` and `UNAVAILABLE`.
 - Usernames MUST match `^[a-zA-Z0-9._-]{1,64}$` (note: colons `:` are disallowed, preventing collision with the reserved `system:*` identities). Apply `ldap.EscapeFilter` for search filters.
 - Search with the service account, then bind as the found user DN. Exactly one entry MUST match.
 - Use `ldaps://` with the configured CA only.
-- Group membership is resolved per `authorization.bindings[].ldap_group_dn`, using `group_membership_filter` (default `(member=%s)` with the escaped user DN). Nested groups are resolved only if `nested_groups: true`.
+- Group membership is resolved per distinct `authorization.bindings[].ldap_group_dn`, using `group_membership_filter` (default `(member=%s)` with the escaped user DN). Nested groups are resolved only if `nested_groups: true`.
 
 #### 7.2.2 Authorization (RBAC)
 Roles are scoped by governance scope patterns (§3.9). A principal's effective permissions are the union of all matching role bindings. "A role on a resource" means that role on:
@@ -3178,8 +3188,10 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `GET` | `/v1/admin/break-glass` | viewer | Open and recent break-glass changes with expiry countdown and ratification state (keyset-paginated). |
 | `POST` | `/v1/admin/change-requests/{id}/ratify` | approver of a break-glass side | Ratify one side of a break-glass change. Body `{"comment": "…", "side": "…"}` (`comment` required; `side` selected as for approval). The ratifier MUST differ from the requester, and from the ratifiers of the other sides when distinct approvers are required. Audit `BREAK_GLASS_RATIFIED`. When every `BREAK_GLASS` side is ratified, the binding's expiry is cleared. Ratifying the `SOURCE` side also ratifies the inline source's break-glass change. |
 | `POST` | `/v1/admin/change-requests/{id}/revert` | approver of any side, or the requester | Revert an open break-glass `CREATE`/`UPDATE` now, by the same `SYSTEM_REVERT` as expiry (`requested_by` = the caller). Body `{"comment": "…"}`: why, required (`422` without); kept as the revert's sides' `decision_comment` and audited with it. The sweeper's reverts at expiry carry the comment `TTL expired`. |
-| `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource. |
+| `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource: those carrying its id and those of its change requests (a create's included), never those of a retired or deleted namesake or of a refused attempt on its name. A binding is seen with its party scopes, as by its `GET`. The last 20 entries of the `GET`s and the UI follow the same rule. |
 | `GET` | `/v1/admin/audit/verify` | viewer | Verifies the hash chain: `{"valid": true, "entries": N}`, or the first broken `id`. |
+| `GET` | `/v1/admin/executors` | viewer | `{"items": [{"executor": "...", "applicationVersion": "...", "pending": N, "oldestPending": "...", "liveSessions": M, "self": bool}]}`: one row per executor and version with pending workflows, and one per other executor with live sessions (§10.2). |
+| `POST` | `/v1/admin/executors/{id}/recover` | `admin.full_access` | Re-enqueues the pending workflows of a replica gone for good (§10.2): `{"executor": "...", "recovered": N, "otherVersions": M}`. `409 executor-alive`, `409 executor-self`. Allowed in maintenance mode. Audited. |
 
 **Keyset Pagination Convention (Normative):**
 All paginated endpoints accept `pageSize` (default `50`, max `200`) and an optional `pageToken` query parameter, and return `{"items": [...], "nextPageToken": "<token>|null"}`. SQL `OFFSET` MUST NOT be used. `pageToken` is the base64url-encoded (unpadded) JSON of the keyset cursor:
@@ -3227,7 +3239,7 @@ A `trusted_automation` principal whose `platforms` do not include a target's pla
 - **Authentication.** Through the API, `POST /v1/admin/break-glass` requires LDAP Basic credentials on the request itself, so it is available only when `allow_basic_auth` is enabled; SVID callers get `403`. Through the UI, the form requires password re-entry, verified by an LDAP bind. In both cases membership in the `break_glass` group of every side's scope is checked against LDAP at that moment. A failed re-authentication is audited as `SESSION_LOGIN_FAILED` and counts towards the login rate limits.
 - **Validation.** `CREATE` and `UPDATE` run the binding creation pipeline (with the `break_glass` check of "Sides at creation" in place of the operator check); an inline source runs the source pipeline in the same way and is created in the same transaction as the binding (both requests `BREAK_GLASS`, the binding's `depends_on_cr_id` set). `DELETE` runs the revocation pipeline, where acting for a side also includes holding `break_glass` on it. `ttl` is a Go duration string between `5m` and the most restrictive `max_ttl` among the break-glass policies of the change's `BREAK_GLASS` sides (default: the most restrictive `default_ttl`); `justification` must have at least `min_justification_length` characters; `incidentReference` must match `incident_reference_pattern` if configured. Refused in maintenance mode (`503`), when no side needs a decision (`422`), if the binding has an open break-glass change (`409 break-glass-open`) and if a side's policy has `max_open` open changes (`429 break-glass-limit`).
 - **Revert payload.** For an `UPDATE`, `revert_payload` is the normalized payload of the binding's requested state immediately before the break-glass change (its current `revision`, whether or not that revision is active).
-- **Ratify** (one transaction): lock the binding row (`FOR UPDATE`) if it exists; require `bindings.break_glass_cr_id` to equal the change request (for a `CREATE`/`UPDATE` whose binding still exists); select the side as for approval (eligible: `BREAK_GLASS` sides not yet ratified whose scope the caller is approver for; `400 side-required` and `403 distinct-approver-required` as for approval); set the side's `ratified_by`, `ratified_at`, `ratification_comment` with a compare-and-set on `ratified_by IS NULL` (and, for the `SOURCE` side with an inline source, the same on the source change's `OWNER` side); if every `BREAK_GLASS` side is now ratified, clear the binding's `break_glass_*` fields; insert outbox rows and audit `BREAK_GLASS_RATIFIED`. If a revert has already started (the binding no longer references the change) or the side is already ratified, return `409 break-glass-not-open`. Because ratify and the revert start both lock the binding row first, exactly one of them wins.
+- **Ratify** (one transaction): lock the binding row (`FOR UPDATE`) if it exists; refuse a change reverted by an applied `SYSTEM_REVERT`; for a `CREATE`/`UPDATE` whose binding still exists and is not being deleted (`operation = DELETE`, `DELETING` or a failed delete), require `bindings.break_glass_cr_id` to equal the change request; select the side as for approval (eligible: `BREAK_GLASS` sides not yet ratified whose scope the caller is approver for; `400 side-required` and `403 distinct-approver-required` as for approval); set the side's `ratified_by`, `ratified_at`, `ratification_comment` with a compare-and-set on `ratified_by IS NULL` (and, for the `SOURCE` side with an inline source, the same on the source change's `OWNER` side); if every `BREAK_GLASS` side is now ratified, clear the binding's `break_glass_*` fields; insert outbox rows and audit `BREAK_GLASS_RATIFIED`. If a revert has already started (the binding no longer references the change) or the side is already ratified, return `409 break-glass-not-open`. Because ratify and the revert start both lock the binding row first, exactly one of them wins.
 - **Revert now**: allowed while the binding references the change; it starts the same `SYSTEM_REVERT` as expiry, with `requested_by` = the caller. Otherwise `409 break-glass-not-open`.
 
 **Normalized payload and hash (Normative).** For `CREATE` and `UPDATE`, `change_requests.payload` is the normalized desired state of the resource:
@@ -3369,6 +3381,8 @@ Source change requests carry `ownerScope`; target change requests carry `ownerSc
 | `rate-limited` | 429 |
 | `break-glass-limit` | 429 |
 | `maintenance` | 503 (with `Retry-After: 60`) |
+| `executor-alive` | 409 |
+| `executor-self` | 409 |
 
 #### 7.2.4 Catalog, visibility and the binding wizard
 - **Visibility (Normative).** A source or target is visible to a principal who holds any role on its scope (for a target, also on its platform's scope), or, beyond them, according to `visibility`: `LISTED` to holders of any role on a scope matching `visibleTo`; `PUBLIC` to every authenticated principal with any role. A binding is visible to holders of a role on any of its three scopes or on a party's scope; seeing a binding shows the names and scopes of its source and target even when those are not otherwise visible, because the link concerns both. Everything else is `404`.
@@ -3386,9 +3400,9 @@ Source change requests carry `ownerScope`; target change requests carry `ownerSc
    - Clear the temporary pre-login cookie by setting `__Host-ligo_prelogin=; Max-Age=0; Secure; HttpOnly; SameSite=Strict; Path=/`.
    - Rotate (re-issue) the session token on every privilege change.
 3. Timeouts: idle 30m, absolute 8h. Group membership is re-checked against LDAP every `authz_recheck_interval` (default 5m). Losing all roles revokes the session.
-4. Every non-`GET` `/ui/*` request MUST carry an `X-CSRF-Token` header equal to the session's `csrf_token` (constant-time compare). It MUST also carry `Sec-Fetch-Site: same-origin`, or an `Origin` header equal to the listener's configured external origin.
+4. Every non-`GET` `/ui/*` request MUST carry an `X-CSRF-Token` header equal to the session's `csrf_token` (constant-time compare). It MUST also carry `Sec-Fetch-Site: same-origin`, or an `Origin` header equal to the listener's configured external origin. Both are checked before the session is touched: a refused request neither updates `last_seen_at` nor re-checks the roles.
 5. `POST /ui/logout` sets `revoked_at` and clears `__Host-ligo_session` (`Max-Age=0`).
-6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `api_per_principal_rps`. The login limits count failed logins only (refused credentials, on the UI login or on a Basic API request): while either is exhausted, every login or Basic request from that address or for that user gets `429`, the right password included; successful Basic requests count only against `api_per_principal_rps`, so that the CLI, which sends Basic credentials on every request, is not throttled by them. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password.
+6. Rate limits: `login_per_ip_per_min`, `login_per_user_per_min`, `login_per_user_global_per_min`, `api_per_principal_rps`, `max_tracked_keys`. The login limits count failed logins only (refused credentials, on the UI login or on a Basic API request): a login spends three buckets: its address (`login_per_ip_per_min`), its address and user (`login_per_user_per_min`), and its user from any address (`login_per_user_global_per_min`, default 50, so that guessing spread over addresses is stopped while one address cannot lock a user out); while one of them is exhausted, the login or Basic request gets `429`, the right password included. A break-glass re-authentication in a UI session spends its address and that session (at `login_per_user_per_min`) instead, so no one outside the session can block it; its failures also spend the user's bucket (T-36); successful Basic requests count only against `api_per_principal_rps` (or the principal's bindings' `rate_limit`: the highest `api_rps` and `burst` among them), so that the CLI, which sends Basic credentials on every request, is not throttled by them. A successful Basic login is remembered for 10s, keyed by an HMAC of the user and password under a key of the process (no password is kept), so that the CLI does not cost a directory round trip on each request; a group removed, or a password changed, in LDAP therefore takes up to 10s to apply on the API. `POST /v1/admin/break-glass` always asks the directory (ADR-12 rule 1). Refused credentials are never remembered. Failed logins are audited (`SESSION_LOGIN_FAILED`) without the password. Each login takes a token from each of its buckets before the directory is asked and gets it back unless the credentials are refused, so logins checked at the same time all count. `max_tracked_keys` (default 1000000) bounds the addresses, users and principals whose buckets are kept: when it is reached, full buckets (the same as none) are pruned, at most once a second, and while there is still no room a new address, user or principal gets `429`; existing buckets are never forgotten.
 
 ### 7.4 HTMX Web GUI
 
@@ -3444,7 +3458,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `POST` | `/ui/login` | Authenticate; clears pre-login cookie; `200 OK` with `HX-Redirect: /ui/bindings`. |
 | `POST` | `/ui/logout` | Revoke the session; `200 OK` with `HX-Redirect: /ui/login`. |
 | `GET` | `/ui/catalog` | Catalog of targets (§7.2.4): search, filters by platform type, platform, owner scope and label; deprecated targets marked. |
-| `GET` | `/ui/catalog/{target}` | Target card: description, contacts, documentation, access levels with privileges, flows (with a "copy for verification" JSON button), and, per source of the user, whether a binding would be allowed and which sides it needs. "Request access" opens the wizard. |
+| `GET` | `/ui/catalog/{target}` | Target card: description, contacts, documentation, access levels with privileges, flows (with a "copy for verification" JSON button), and, per source of the user, whether a binding would be allowed and which sides it needs (computed on each request from all active sources, not paginated, so its cost grows with their number). "Request access" opens the wizard. |
 | `GET` | `/ui/sources` · `/ui/sources/{name}` | Sources the user can see; detail with identity, samples, metadata, bindings and audit trail. |
 | `GET` | `/ui/sources/new-form` · `/ui/sources/{name}/edit-form` | Source forms. The regex field calls `/ui/sources/test`. Immutable fields are read-only. |
 | `POST` | `/ui/sources/test` | Regex tester (Appendix A, scope resolution, samples, overlaps, narrowing check with witness), using the **same** Go code as production. |
@@ -3485,7 +3499,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 
 `ligo` announces security-relevant events to configured HTTPS webhooks, such as an on-call or ticketing system.
 
-- **Events:** `BREAK_GLASS_USED`, `BREAK_GLASS_EXPIRING`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_RATIFIED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CR_AWAITING_APPROVAL` (one per pending side, so that each owner's queue or ticketing system learns of its own decisions), `CR_INTERCONNECT_DENIED`, `BINDING_REVOKED` (a binding revoked or downgraded by one side, announced to the other scopes), `BINDING_EXPIRING`, `BINDING_EXPIRED`, `SOURCE_DEPRECATED`, `TARGET_DEPRECATED`, `ACCESS_LEVEL_DEPRECATED` (announced to the scopes of the affected bindings), `PROPAGATION_FAILED`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`, `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`, `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED`. Each webhook subscribes to a subset.
+- **Events:** `BREAK_GLASS_USED`, `BREAK_GLASS_EXPIRING`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_RATIFIED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CR_AWAITING_APPROVAL` (one per pending side, so that each owner's queue or ticketing system learns of its own decisions), `CR_INTERCONNECT_DENIED`, `BINDING_REVOKED` (a binding revoked or downgraded by one side, announced to the other scopes; not sent when no other scope remains, as for a break-glass revert, which has its own event), `BINDING_EXPIRING`, `BINDING_EXPIRED`, `SOURCE_DEPRECATED`, `TARGET_DEPRECATED`, `ACCESS_LEVEL_DEPRECATED` (announced to the scopes of the affected bindings), `PROPAGATION_FAILED`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`, `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`, `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED`, `SYSTEM_EXECUTOR_RECOVERED`. Each webhook subscribes to a subset.
 - **Scope filter.** A webhook MAY set `scopes` (scope patterns). It then receives only events about a resource or change request that has a scope matching the filter (for `CR_AWAITING_APPROVAL`, the pending side's scope must match; for deprecation events, the scope of an affected binding). Configuration and system events are delivered regardless of the filter.
 - **Durability (Normative).** Notifications use a transactional outbox: the `notification_outbox` row is inserted in the same transaction as the event (§4.3 lock order), so an event is never lost and never announced unless it committed. A singleton dispatcher (§6.3) delivers due rows with `POST`, retries with exponential backoff (10s doubling to 15m) and abandons a row after 24h (`abandoned_at`, metric `ligo_notifications_abandoned_total{webhook}`, logged at `ERROR`). Delivery is at-least-once; receivers deduplicate on `eventId`. `eventId` is a UUIDv7 generated by the application, not the outbox row number, because a row number can be reused after a database restore (§10.4) and receivers would then drop new events as duplicates.
 - **Never blocking.** A webhook failure never delays or blocks the change it announces.
@@ -3548,7 +3562,7 @@ Additionally, `ui.theme.product_name` (default `ligo`) sets the page title and t
 - **SVG safety.** SVG can contain scripts. The UI displays logos only through `<img>`, where scripts never run, and every SVG response carries `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'` **instead of** the §7.4 policy, together with `X-Content-Type-Options: nosniff`, so a script in an SVG cannot run even if a user opens the logo URL directly.
 - **External resources.** The CSP allows styles, images and fonts only from `ligo` itself. A `theme.css` that references remote URLs (`@import`, `url(https://…)`) is not rejected, but the browser blocks those requests; startup logs a `WARN` for every non-relative `url(` or `@import` found in it.
 
-**Integrity and audit.** Theme files are part of the configuration. They MUST be owned by root and not writable by the `ligo` user (as for `server.yaml`, T-22), and their SHA-256 values are included in the `CONFIG_LOADED` audit snapshot, so any change to the UI's appearance is visible in the audit log. The security-relevant UI (the maintenance banner, the break-glass banner and form, the four-eyes messages) is always rendered by the server, whatever the theme. CSS can still hide elements, so `theme.css` MUST NOT hide or obscure them, and theme changes need the same change control as `server.yaml` (T-27).
+**Integrity and audit.** Theme files are part of the configuration. They MUST be owned by root and not writable by the `ligo` user (as for `server.yaml`, T-22). The check applies to the opened file, so a symlink is judged by its target and needs no check of its own; the directory is not checked, because `ligo` cannot create a root-owned file to put there. Their SHA-256 values are included in the `CONFIG_LOADED` audit snapshot, so any change to the UI's appearance is visible in the audit log. The security-relevant UI (the maintenance banner, the break-glass banner and form, the four-eyes messages) is always rendered by the server, whatever the theme. CSS can still hide elements, so `theme.css` MUST NOT hide or obscure them, and theme changes need the same change control as `server.yaml` (T-27).
 
 **Contrast check.** For colors given in `ui.theme.colors`, startup computes the WCAG contrast ratio of each text token against its background (`--color-text` on `--color-bg` and `--color-surface`, each `-contrast` token on its base color) in both modes, and logs a `WARN` below 4.5:1. `theme.css` is not analysed; its accessibility is the operator's responsibility.
 
@@ -3564,7 +3578,7 @@ service:
   application_version: "4.0.1"          # passed to DBOS (EXT-09)
   instance_id_env: "LIGO_INSTANCE_ID"  # unique per replica
   startup_timeout: 60s                   # SPIRE and the sealer must be ready within it (5s–10m, default 60s), §8.2
-  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16)
+  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16); the same on every replica, so that every replica serves the same flows and ETags
     destination: "ligo.prod.internal"
     port: 8443
     server_name: "ligo.prod.internal"
@@ -3606,7 +3620,17 @@ server:
     client_svid_auth: { enabled: true, accepted_trust_domains: [prod.internal] }
     allow_basic_auth: false
     session: { idle_timeout: 30m, absolute_timeout: 8h, authz_recheck_interval: 5m }
-    rate_limit: { login_per_ip_per_min: 10, login_per_user_per_min: 5, api_per_principal_rps: 10 }
+    rate_limit: { login_per_ip_per_min: 10, login_per_user_per_min: 5, login_per_user_global_per_min: 50, api_per_principal_rps: 10, max_tracked_keys: 1000000 }
+
+  metrics_listener:                       # GET /metrics, plain HTTP and no authentication (§10.1): loopback or a management network
+    listen_address: "127.0.0.1:9090"     # default
+
+observability:
+  tracing:                                # OpenTelemetry traces (§10.1)
+    otlp_endpoint: ""                     # host:port of an OTLP/gRPC collector; empty: tracing off (default)
+    sample_ratio: 0.1                     # share of new traces kept (0 to 1, default 0.1); a sampled caller's are always kept
+    insecure: false                       # true only for a collector without TLS
+    # ca_cert_file: "/etc/ligo/tls/corp-ca.crt"   # CAs trusted for the collector; default the system roots
 
 admin_auth:
   ldap:
@@ -3635,6 +3659,7 @@ authorization:                            # roles are granted on governance scop
     - { ldap_group_dn: "cn=cloud-fin01-payments-devs,ou=groups,dc=corp,dc=internal",  role: operator,    scopes: ["cloud/fin-01/payments"] }
     - { ldap_group_dn: "cn=cloud-fin01-payments-leads,ou=groups,dc=corp,dc=internal", role: approver,    scopes: ["cloud/fin-01/payments"] }
     - { ldap_group_dn: "cn=cloud-fin01-breakglass,ou=groups,dc=corp,dc=internal",     role: break_glass, scopes: ["cloud/fin-01/*"] }
+    - { ldap_group_dn: "cn=infosec-breakglass,ou=groups,dc=corp,dc=internal",         role: break_glass, scopes: ["sec/infosec"] }
     # Information Security, an additional party for cloud-to-data-centre connections (ADR-14)
     - { ldap_group_dn: "cn=infosec-approvers,ou=groups,dc=corp,dc=internal",     role: approver,    scopes: ["sec/infosec"] }
     # Delegated approval (ADR-11): SPIFFE principals only; see §10.6 for identity requirements.
@@ -3643,7 +3668,7 @@ authorization:                            # roles are granted on governance scop
       scopes: ["dc/corp-prod/*"]
       platforms: ["oracle-prod"]                   # optional; omit to cover every platform in the scopes
       approval_reference_pattern: '^CHG[0-9]{7}$'  # optional; RE2, fully anchored
-      rate_limit: { api_rps: 50, burst: 200 }      # optional; overrides admin_listener.rate_limit.api_per_principal_rps
+      rate_limit: { api_rps: 50, burst: 200 }      # optional; overrides admin_listener.rate_limit.api_per_principal_rps (the highest of a principal's bindings applies)
   approval:
     required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"] # scopes whose sides need an approver (ADR-09)
     require_distinct_approvers_across_scopes: true        # ADR-13 rule 7 (default true)
@@ -3707,7 +3732,6 @@ storage:
     max_conns: 25
     app_statement_timeout: 5s
     reader_statement_timeout: 500ms
-    sslmode: verify-full
   dbos:
     workflow_retention: 168h
 
@@ -3721,6 +3745,7 @@ secret_sealing:
     jwt_audience: "https://vault.prod.internal"
     mount: "transit"
     key_name: "ligo-interstage"
+    # ca_cert_file: "/etc/ligo/tls/corp-ca.crt"   # CAs trusted for address; default the system roots
   # local_kek_file: "/etc/ligo/dev/kek"   # local-kek only: 32-byte key, not group- or world-readable
 
 plugins:
@@ -3751,6 +3776,7 @@ break_glass:                              # ADR-12; role holders are set in auth
   policies:                               # first entry whose pattern matches a side's scope applies to that side
     - { scopes: ["dc/corp-prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
     - { scopes: ["cloud/fin-01/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+    - { scopes: ["sec/infosec"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
 
 notifications:                            # §7.5
   webhooks:
@@ -3791,13 +3817,13 @@ identity_providers:
       - { name: "vault-dynamic-db-test", zone: test, config: {} }
   - type: "openldap.v1"
     builtin: false
-    binary: "id-openldap"                 # relative to plugins.directory
-    sha256: "<64-hex-sha256-of-id-openldap>"
+    binary: "ligo-plugin-openldap"                 # relative to plugins.directory
+    sha256: "<64-hex-sha256-of-ligo-plugin-openldap>"
     instances:
       - name: "ldap-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/id-openldap"'
+          match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           url: "ldaps://openldap.prod.internal:636"
@@ -3808,7 +3834,7 @@ identity_providers:
             address: "https://vault.prod.internal:8200"
             namespace: "prod"
             auth_mount: "jwt-spiffe"
-            role: "ligo-plugin-ldap-prod"
+            role: "ligo-plugin-openldap-prod"
             jwt_audience: "https://vault.prod.internal"
             kv_path: "kv/data/ligo/bootstrap/ldap-prod"
 
@@ -3819,13 +3845,13 @@ secret_stores:
       - { name: "no-store-prod", zone: prod, config: {} }
   - type: "vault.v1"
     builtin: false
-    binary: "store-vault"
-    sha256: "<64-hex-sha256-of-store-vault>"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
     instances:
       - name: "vault-prod"
         zone: prod
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault" && hint == "vault-prod"'
+          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           address: "https://vault.prod.internal:8200"
@@ -3839,7 +3865,7 @@ secret_stores:
       - name: "vault-test"
         zone: test
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/store-vault"'
+          match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           address: "https://vault.test.internal:8200"
@@ -3854,8 +3880,8 @@ secret_stores:
 platform_providers:                       # plugin types and the platforms that use them (§3.4)
   - type: "oracle.v1"
     builtin: false
-    binary: "target-oracle"
-    sha256: "<64-hex-sha256-of-target-oracle>"
+    binary: "ligo-plugin-oracle"
+    sha256: "<64-hex-sha256-of-ligo-plugin-oracle>"
     platforms:
       - name: "oracle-prod"
         zone: prod
@@ -3873,7 +3899,7 @@ platform_providers:                       # plugin types and the platforms that 
         allowed_source_trust_domains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
         rotation_interval: 720h
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.prod.internal"]
         config:
           host: "ora-scan.prod.internal"
@@ -3898,7 +3924,7 @@ platform_providers:                       # plugin types and the platforms that 
         secret_store: { type: "vault.v1", instance: "vault-test" }
         allowed_source_trust_domains: [test.internal]
         svid_selector:
-          match_expr: 'path == "/ligo/plugin/target-oracle"'
+          match_expr: 'path == "/ligo/plugin/oracle"'
           jwt_audience: ["https://vault.test.internal"]
         config:
           host: "ora-test.test.internal"
@@ -3920,7 +3946,7 @@ platform_providers:                       # plugin types and the platforms that 
 ### 8.2 Configuration validation & Daemon Startup/Shutdown Sequence
 
 **Validation rules (at startup; failures are fatal):**
-1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique.
+1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique. The replica's instance ID, the value of `service.instance_id_env`, is set and matches `^[A-Za-z0-9._-]{1,58}$` (§10.2).
 2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
 3. The wiring satisfies the §5.6 matrix and the plugins' Describe capabilities (§5.9: an identity provider produces exactly one mode, a platform provider lists the modes it accepts); the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
 4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
@@ -3928,7 +3954,7 @@ platform_providers:                       # plugin types and the platforms that 
 6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`, checked after every plugin has described itself and before any `ConfigureInstances` (§5.2). The schema MUST compile as JSON Schema 2020-12: a plugin with an empty or invalid schema is refused. An omitted `config` is validated as `{}`. A failure names the instance and the schema location that failed.
-9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`. `service.startup_timeout` is between 5s and 10m.
+9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`; with `vault-transit`, `vault_transit.jwt_audience` is one of `core_identity.svid_selector.jwt_audience` (as rule 5 for plugins). `admin_listener.rate_limit.max_tracked_keys` is between 10000 and 10000000. `observability.tracing.ca_cert_file` is not set together with `insecure`. `storage.postgres.max_conns`, if set, is between 1 and 1000, and `app_statement_timeout` and `reader_statement_timeout`, if set, between 100ms and 5m. `service.startup_timeout` is between 5s and 10m; `observability.tracing.sample_ratio` between 0 and 1.
 10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
 12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone. `workload_listener.auth_modes` is not empty and lists only `x509_svid` and `jwt_svid`; `jwt_svid` requires `expected_jwt_audience`.
@@ -3942,8 +3968,8 @@ platform_providers:                       # plugin types and the platforms that 
     - Interconnection rule names are unique and match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (`default` is reserved); `action` is `allow` or `deny`; `default_cross_scope` is `allow` or `deny`; `additional_approvals` appear only on `allow` rules, with unique names matching `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$` and a valid scope path; `distinct_approvers` is a boolean.
     - Every `name_prefixes` entry has `resources` ⊆ {`source`, `target`, `binding`}. A placeholder `{n}` greater than the number of segments of a scope the entry matches is an error when that scope is used (at creation, `422 validation-failed`), and at startup for the scopes of existing resources. A resolved prefix MUST match `^[a-z0-9][-a-z0-9]{0,31}$`.
     - The **governance policy** is the RFC 8785 (JCS) canonical JSON of `authorization.approval.required_scopes`, `require_distinct_approvers_across_scopes`, `governance.source_scopes`, `governance.name_prefixes`, `governance.interconnects`, `break_glass.policies` and the sorted list of `(platform, scope, target_scopes)` triples, with lowerCamelCase field names and durations in whole seconds (§7.2.3 "JSON naming"). Its SHA-256 is stored on every change request (`policy_sha256`) and in `CONFIG_LOADED`.
-17. **Scope drift** (checked after the database is connected). For every source that is not `RETIRED`, the scope derived from its regex with the current extractor MUST equal its stored scope. For every target that is not `RETIRED`, its stored `platform_scope` MUST equal its platform's `scope`, and its scope MUST still match the platform's `target_scopes`. For every binding, the three scopes MUST equal those of its source, its target and its target's platform. Otherwise startup fails, naming the resources, unless `--accept-scope-changes` is given. With that flag, `ligo` re-scopes, in one transaction per source or target together with its bindings (`SET LOCAL ligo.rescope = 'on'`, the only way the immutability triggers allow a scope change): update the scopes, move every `PENDING` change request of the affected resources and bindings to `FAILED_TO_APPLY` (`apply_error = "re-scoped"`), and audit `SOURCE_RESCOPED`, `TARGET_RESCOPED` and `BINDING_RESCOPED` with the old and new scopes. A source whose regex no longer resolves at all, and a target whose scope no longer matches its platform's `target_scopes`, are fatal errors even with the flag: their owners must retire them, or the configuration must be corrected.
-18. **Interconnection violations** (checked after rule 17). Every cross-scope binding is evaluated against the current interconnection policy. Bindings the policy would deny are logged at `WARN`, listed in one `SYSTEM_INTERCONNECT_VIOLATIONS` audit entry (announced by webhook), and counted in `ligo_interconnect_violations`. They are not changed (ADR-14 rule 6).
+17. **Scope drift** (checked after the database is connected). For every source that is not `RETIRED`, the scope derived from its regex with the current extractor MUST equal its stored scope. For every target that is not `RETIRED`, its stored `platform_scope` MUST equal its platform's `scope`, and its scope MUST still match the platform's `target_scopes`. For every binding, the three scopes MUST equal those of its source, its target and its target's platform. Otherwise startup fails, naming the resources, unless `--accept-scope-changes` is given. With that flag, `ligo` re-scopes, in one transaction per source or target together with its bindings (`SET LOCAL ligo.rescope = 'on'`, the only way the immutability triggers allow a scope change): update the scopes, move every `PENDING` change request of the affected resources and bindings to `FAILED_TO_APPLY` (`apply_error = "re-scoped"`), and audit `SOURCE_RESCOPED`, `TARGET_RESCOPED` and `BINDING_RESCOPED` with the old and new scopes. A pending `CREATE` of a source or target has no resource yet and is left as it is: its approval re-derives the scope, so a request filed under the old configuration fails then with `409 normalization-drift` (`FAILED_TO_APPLY`), and nothing is created with a stale scope. A source whose regex no longer resolves at all, and a target whose scope no longer matches its platform's `target_scopes`, are fatal errors even with the flag: their owners must retire them, or the configuration must be corrected.
+18. **Interconnection violations** (checked after rule 17). Every cross-scope binding is evaluated against the current interconnection policy. Bindings the policy would deny are logged at `WARN`, listed in one `SYSTEM_INTERCONNECT_VIOLATIONS` audit entry (announced by webhook), and counted in `ligo_interconnect_violations`. They are not changed (ADR-14 rule 6). Then, when any break-glass policy exists, every `additional_approvals` scope that no policy covers is logged at `WARN` and listed in one `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` audit entry: startup continues, and break-glass under that rule stays refused (ADR-12 rule 1).
 19. **Platforms** (checked after rule 18, once plugins are running). Every platform's and secret store's `network_flows` follow the flow schema (§3.3) with destinations inside their `allowed_endpoints` (§5.7); `service.workload_advertise` is set. A change of a platform's privilege bounds, endpoints or flows since the previous `CONFIG_LOADED` is audited `CONFIG_PLATFORM_CHANGED`. Every `ACTIVE` or `DEPRECATED` access level is re-checked against its platform's current privilege bounds (with `ValidateTarget`, without `check_existence`); levels now outside the bounds are listed in `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (audit and webhook, gauge `ligo_privilege_bound_violations`). They are not changed: re-applying their bindings fails in `EnsureTarget` (§5.8 rule 3) until the target owner narrows or retires the level. Every target flow is re-checked against its platform's current `allowed_endpoints`; flows outside it are omitted from effective flow lists and reported in the same entry.
 
 **Daemon Startup Sequence (`ligo serve`, Normative):**
@@ -3980,7 +4006,7 @@ ligo/
 │       └── workload/v1alpha1/workload.proto
 ├── cmd/
 │   ├── ligo/                            # jessevdk/go-flags CLI + daemon (Section 8.4)
-│   └── plugins/{id-openldap,target-oracle,target-postgres,store-vault}/   # external plugins: specified separately
+│   └── plugins/{ligo-plugin-openldap,ligo-plugin-oracle,ligo-plugin-postgres,ligo-plugin-vault}/   # external plugins: specified separately
 ├── internal/
 │   ├── adminauth/                       # LDAP, SVID mTLS principal mapping, sessions, CSRF
 │   ├── audit/                           # hash-chained writer + verifier
@@ -4060,6 +4086,7 @@ type Options struct {
 	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
 	Audit    AuditCommand         `command:"audit" description:"Query and verify the cryptographic audit log."`
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
+	Exec   ExecutorsCommand     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required scopes (ADR-12)."`
 	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
 	Migrate MigrateCommand      `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
@@ -4388,6 +4415,26 @@ type MaintenanceStatusCommand struct {
 }
 
 // ---------------------------------------------------------------------------
+// Executors subcommands: `ligo executors list|recover` (§10.2)
+// ---------------------------------------------------------------------------
+type ExecutorsCommand struct {
+	List    ExecutorsListCommand    `command:"list" description:"Show the pending workflows and live database sessions of each executor."`
+	Recover ExecutorsRecoverCommand `command:"recover" description:"Re-enqueue the pending workflows of a replica gone for good (requires admin.full_access)."`
+}
+
+type ExecutorsListCommand struct {
+	ClientOptions
+}
+
+type ExecutorsRecoverCommand struct {
+	ClientOptions
+	Yes  bool `long:"yes" description:"Do not ask for confirmation."`
+	Args struct {
+		ID string `positional-arg-name:"executor-id" description:"The instance ID of the replica gone for good."`
+	} `positional-args:"yes" required:"yes"`
+}
+
+// ---------------------------------------------------------------------------
 // Break-glass subcommands: `ligo break-glass apply|delete|list` (people only;
 // requires server allow_basic_auth, because credentials must be presented on the request)
 // ---------------------------------------------------------------------------
@@ -4505,6 +4552,7 @@ type GovCheckCommand struct {
 | T-33 | Info disclosure | 2 | **Catalog disclosure.** Browsing the catalog or sources reveals the existence, owners, privileges or network layout of systems to people who should not know them. | `PRIVATE` by default for sources and targets; `LISTED` only to configured scope patterns; the catalog additionally filtered by the interconnection policy (ADR-14 rule 7); `404` for everything else; platform configuration beyond the documented fields is never exposed; flows of a target shown only to principals who can see it. |
 | T-34 | EoP / Repudiation | 2/6 | **Overlapping sources.** Two sources of the same scope match overlapping workloads, so a workload receives bindings that were approved for the other source's audience, without the reviewers noticing. | Overlaps reported by the regex tester and shown on the source change request (§7.2.3); the source owner is the same scope in both cases, so no cross-owner escalation is possible; "what can this workload reach" queries in the admin API; access reviews (FW-4). Residual risk R-10. |
 | T-35 | Tampering / Spoofing | 2/4 | **Misleading flows.** A target owner declares flows that point workloads, or the verification tool, at a host they control, or the platform's flows are edited to hide a required route. | Target flow destinations restricted to the platform's `allowed_endpoints` (INV-24), checked at creation, at apply and at startup; flow changes need the platform owner's consent; platform and secret-store flows only in `server.yaml`; flows are declarative (`ligo` never connects to them) and the served connection coordinates still pass output validation (INV-13). |
+| T-36 | Denial of service | 2/4 | **Login lockout.** An attacker without an account sends wrong passwords for an administrator's user name, so the login limits refuse that administrator, the right password included, and during an incident also the break-glass re-authentication of the people responding. | The per-user limit is per address and user; the limit per user from any address is ten times higher, so a lockout needs many addresses; a break-glass re-authentication in a session is limited per session, not per user; refused logins are audited (`SESSION_LOGIN_FAILED`). Residual: a distributed attacker can still lock out logins (not open sessions) for a user; the limits are per replica (§10.2), so guessing across N replicas gets N times the attempts, bounded by the directory's lockout policy. |
 
 ### 9.3 Accepted residual risks
 | ID | Risk |
@@ -4515,7 +4563,7 @@ type GovCheckCommand struct {
 | R-04 | JWT-SVID replay within its TTL when `jwt_svid` mode is used. |
 | R-05 | Compromise of the `ligo_app` database role. |
 | R-06 | For delegated change requests, review quality depends on the upstream approval process; `ligo` records the reference but cannot verify that the referenced approval exists or covers the change. |
-| R-07 | A break-glass change can be misused within its TTL (at most the most restrictive `max_ttl` of its sides' policies) before automatic revert or review. Emergency deletes are not reverted. |
+| R-07 | A break-glass change can be misused within its TTL (at most the most restrictive `max_ttl` of its sides' policies) before automatic revert or review. Emergency deletes are not reverted. An outage of the platform's plugin extends an expired `UPDATE` beyond its TTL until the revert can be validated (§6.3). |
 | R-08 | Governance scopes are only as trustworthy as the assignment of SPIFFE ID paths in SPIRE (T-29). `ligo` cannot detect a workload registered under the wrong tenancy. |
 | R-09 | An interconnection rule with `distinct_approvers: false` lets one person approve both sides for the scope pairs it covers. Such rules are visible in the governance policy and audited when added. |
 | R-10 | Two sources of the same scope may overlap (T-34). Overlaps are reported, not refused, because a narrower source for a subset of workloads is a legitimate pattern. |
@@ -4527,8 +4575,8 @@ type GovCheckCommand struct {
 
 ### 10.1 Observability
 - **Logs:** structured JSON. Every request and workflow log line carries `request_id`, `binding_id`, `workflow_id`, `attempt` (and `source_id` or `target_id` for changes of those resources). A redacting logger masks `password`, `private_key_pem`, `token`, `Authorization`, and values matching `IDENTIFIED BY \S+`.
-- **Traces:** OpenTelemetry spans for HTTP and gRPC handlers, each workflow, each step and each plugin RPC. Trace context propagates to plugins via gRPC metadata. No secrets in span attributes.
-- **Metrics (Prometheus, Normative names).** No metric carries a scope label, because the number of scopes is unbounded; per-scope views come from the admin API and the audit log.
+- **Traces:** OpenTelemetry spans for HTTP and gRPC handlers, each workflow, each step and each plugin RPC. Trace context propagates to plugins via gRPC metadata. No secrets in span attributes: a failed span, a plugin RPC's included, carries an error status and code, never the error's text. Spans are exported over OTLP/gRPC to `observability.tracing.otlp_endpoint` (off when empty, the default), over TLS verified against `ca_cert_file` (default the system roots; a change needs a restart) unless `insecure` is set, sampled at `sample_ratio` (default 0.1) for new traces and always when the caller's trace is sampled (W3C `traceparent`). A workflow joins the trace of the request that started it: the `traceparent` travels in its journaled input, so a run recovered after a crash stays in that trace. A workflow started in the background (reconciler, sweeper, propagator) starts a new trace. Workflow spans carry `ligo.binding_id`, `ligo.binding`, `ligo.workflow_id`, `ligo.revision` and `ligo.attempt`; step spans `ligo.stage` and `ligo.provider_type`.
+- **Metrics (Prometheus, Normative names).** No metric carries a scope label, because the number of scopes is unbounded; per-scope views come from the admin API and the audit log. They are served at `GET /metrics` on the metrics listener (`server.metrics_listener.listen_address`, default `127.0.0.1:9090`), in plain HTTP without authentication: it MUST be bound to a loopback or management address. Gauges of the database's state (bindings, change requests and their pending sides, sources, targets, the propagation queue, expiring bindings, open break-glass changes, overdue rotations) are computed from the database at each scrape, so every replica reports the same values; `ligo_db_scrape_success` is `0` when one of those queries failed. `ligo_audit_chain_valid` comes from a verification of the whole chain at startup and then hourly, on each replica.
   - `ligo_bindings{phase,zone}`
   - `ligo_workflow_duration_seconds{op,result}`
   - `ligo_step_duration_seconds{stage,provider_type,result}`
@@ -4552,12 +4600,19 @@ type GovCheckCommand struct {
   - `ligo_notifications_abandoned_total{webhook}`
   - `ligo_delegated_approvals_total{principal,zone,operation}` (SHOULD be alerted on for unusual rates)
   - `ligo_bundle_conflicts_total{trust_domain,socket_zone}` (bundles discarded because they came from a non-authoritative socket, §7.1; SHOULD be alerted on)
+  - `ligo_db_scrape_success` (gauge: whether the last scrape's database queries all succeeded)
   - `ligo_rotation_overdue{zone,platform}` (gauge: `ACTIVE` bindings in a static-secret identity mode whose `last_rotated_at` is `NULL` or older than `rotation_interval` + `reconciliation.interval` + `reconciliation.jitter`; SHOULD be alerted on when non-zero)
 
 ### 10.2 High availability
 - Multiple replicas are supported. Each replica has a unique DBOS executor ID (`instance_id_env`).
+- **A replica keeps its executor ID (Normative).** DBOS recovers, when a replica starts, only the workflows pending under that replica's own executor ID; no other replica takes them over. A replica that dies MUST therefore be started again under the same `instance_id_env` value (a systemd unit on its host, a Kubernetes StatefulSet ordinal); its workflows then resume from their last checkpoint, and until then its bindings stay `PROVISIONING` or `DELETING` while resolution keeps serving their last active snapshot. Two live replicas MUST NOT share an ID: the one that restarts would recover, and run a second time, the workflows the other is still running, whose plugin calls are not checkpointed (a rotation could store a secret the target does not have); the `workflow_id` fencing (ADR-08) cannot tell the two runs apart, as they share the ID.
+- **Recovering a replica gone for good (Normative).** When a replica cannot come back under its ID, `ligo executors recover <id>` (`POST /v1/admin/executors/{id}/recover`) re-enqueues its `PENDING` workflows of the current `application_version` with `dbos.ResumeWorkflows` (EXT-20). Any replica of that version dequeues them and becomes their executor; they resume from their last checkpoint, and the old ID does not run them again if it returns. Workflows of other versions stay put and are counted in the answer. Starting the replica again remains the rule; this is the exception.
+  - **Sign of life.** Each replica names its app and reader sessions `ligo/<id>` in `application_name` and keeps at least one open in each pool. Recovery is refused with `409 executor-alive` while such a session exists, and with `409 executor-self` for the replica's own ID. There is no force option. DBOS names its own sessions after the application, so they do not count. The PostgreSQL connections MUST NOT go through a pooler that hides or reuses `application_name`: the sessions would not be attributable and recovery would pass the check.
+  - **The check is evidence, not proof.** A replica that lost only its database connections still runs, and an in-flight plugin call can overlap the second run. The operator MUST confirm that the host is down; the CLI asks for the executor ID unless given `--yes`.
+  - **Lost hosts.** A host that loses power leaves its sessions open until the server's TCP keepalives end them, by default about two hours on Linux. Set `tcp_keepalives_idle` to 60, `tcp_keepalives_interval` to 10 and `tcp_keepalives_count` to 6 on PostgreSQL, or end the sessions with `pg_terminate_backend`. A live replica reconnects, so it is still refused.
+  - Recovery requires `admin.full_access`, is allowed in maintenance mode, and audits and announces `SYSTEM_EXECUTOR_RECOVERED` (§7.5; snapshot: executor, workflow IDs, count of other versions) before it resumes; asking again after a failure is safe.
 - Singletons (sweeper, reconciler, propagator, notification dispatcher) use PostgreSQL advisory locks.
-- The resolution cache is per replica.
+- The resolution cache is per replica, and so are the rate limits (§7.3 rule 6): with N replicas behind a load balancer, a client can fail N times as many logins; the directory's own lockout policy is the cluster-wide bound (T-36).
 
 ### 10.3 Maintenance mode and upgrades
 **Maintenance mode (Normative).** Maintenance mode is a single cluster-wide setting stored in `system_settings` (§4.2). It is turned on and off at runtime with `PUT /v1/admin/maintenance` (or `ligo maintenance on|off`), restricted to `admin.full_access` and audited. `ligo serve --maintenance` turns it on at startup. While it is on:
@@ -4670,16 +4725,16 @@ Further machines are added as needs emerge during development; each addition is 
 **Rules.**
 1. **Production-like security.** The lab uses the production security settings: TLS everywhere with certificate verification, Vault/OpenBao Transit sealing (never `local-kek` or `--insecure-dev`), SVID mTLS between components, root-owned plugin binaries with checksums, and approval required for the data-centre scope of `prod.lab` and for at least one tenancy.
 2. **Real separation where it is tested.** Tests that depend on node identity or process attestation (dedicated automation nodes, §10.6; plugin binary attestation, ADR-03) MUST run on separate machines or VMs, not only on containers sharing one kernel.
-3. **Coverage.** Every acceptance scenario (§11.2) and every invariant test (`test/invariants`, one suite per INV) runs against the lab. Scenarios that need faults (AC-08, AC-09, AC-19, AC-37 and similar) use scripted fault injection: stopping Vault/OpenBao or a webhook receiver, killing a `ligo` replica mid-workflow, and interrupting database connections.
+3. **Coverage.** Every acceptance scenario (§11.2) and every invariant runs against the lab, and `.specs/ligo-acceptance-matrix.md` names its tests. Scenarios that need faults (AC-08, AC-09, AC-19, AC-37 and similar) use scripted fault injection: stopping Vault/OpenBao or a webhook receiver, killing a `ligo` replica mid-workflow, and interrupting database connections.
 4. **Gate.** A change MUST NOT be merged unless the full lab suite passes for that commit, and the htmx `upgrade-check` of the pinned version reports nothing on the templates (AC-85).
-5. **Vault and OpenBao.** `ligo` supports both only if the lab suite passes against both. CI runs the suite against each; a release notes which ones were tested.
+5. **Vault and OpenBao.** `ligo` supports both only if the lab suite passes against both. The lab runs the suite against each, not CI, which has neither SPIRE nor the lab's VMs; a release notes which versions were tested.
 6. **Clean state.** Each full run starts from a freshly provisioned lab (or a documented reset to a known state), so results do not depend on leftovers from earlier runs.
 7. **No production data.** The lab never holds production data, credentials, certificates or trust bundles.
 8. **Evidence.** Test reports, including the versions of every lab component, are archived per commit and per release, as evidence for audits.
 
 ### 11.2 Acceptance scenarios
 
-Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11.1).
+Each scenario MUST be an automated test run on the lab (§11.1). Tests live next to the code they test; `.specs/ligo-acceptance-matrix.md` is the index, with each scenario's test and level.
 
 | ID | Given | When | Then |
 | :--- | :--- | :--- | :--- |
@@ -4770,7 +4825,7 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | AC-78 | `LEDGER_RW_ROLE` is removed from `oracle-prod`'s `grantable_roles` | Restart; then reconciliation of a `write` binding; then a new binding at `write` | `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` lists level `write`; the re-apply fails in `EnsureTarget` and the binding keeps its last active snapshot; the new binding gets `422 validation-failed`. |
 | AC-79 | Source S of `cloud/fin-01/payments` has bindings to three targets of `dc/corp-prod/ledger` | A ledger operator calls bulk revocation for S | Three `DELETE` change requests with consent `ANY`, each with a `TARGET` side, are filed and applied after approval; S's other bindings are untouched. |
 | AC-81 | Appendix D.3 | The reference vectors run | Every inclusion result and witness matches; results agree with brute-force enumeration over short strings. |
-| AC-82 | A fragment is altered in transit by a test proxy to include `<button hx-post="/ui/bindings/x/rotate">` without `hx-nonce`, and one with a copy of the page's nonce | The fragment is swapped and the buttons are clicked | `hx-csp` strips the htmx attributes (`htmx:security:strip`) and no request is sent; the copied page nonce is scrubbed. Removing `trusted-types htmx` from the CSP blocks all htmx processing (fail closed). No CSP violation is reported during normal use of every page. |
+| AC-82 | A fragment is altered in transit by a test proxy to include `<button hx-post="/ui/bindings/x/rotate">` without `hx-nonce`, and one with a copy of the page's nonce | The fragment is swapped and the buttons are clicked | `hx-csp` strips the htmx attributes (`htmx:security:strip`) and no request is sent; the copied page nonce is scrubbed. A CSP that does not allow the Trusted Types policy `htmx` blocks all htmx processing (fail closed). No CSP violation is reported during normal use of every page. |
 | AC-83 | A form submission returns `409`, `422`, `403` and `500` in turn | The browser receives each response | `409` and `422` appear in the form's error container; `403` in the global error container; `500` replaces nothing and shows the generic banner with the `request_id`. |
 | AC-84 | A binding is `PROVISIONING`, its status row is polling | The workflow completes | The final row is shown and no further `status-row` request is made. An approval that waits 70 s on a slow plugin (fault-injected) is not cut off by the browser. |
 | AC-85 | The UI has been used for creates, approvals and navigation, including back navigation | Browser storage is inspected | `localStorage` and `sessionStorage` contain no page content; `htmx.min.js` and `hx-csp.min.js` match the SHA-256 values in `web/static/VERSIONS`; `npx htmx.org@4.0.0 upgrade-check` reports nothing on `web/templates/`. |
@@ -4801,8 +4856,9 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 | EXT-17 | OpenBao | OpenBao is API-compatible with Vault for every feature `ligo` and its plugins use: Transit `encrypt`/`decrypt` with key versioning, KV v2, the Database Secrets Engine, and JWT auth roles. Verified by running the lab suite against both (§11.1 rule 5). | Support only the product whose lab run passes; document the difference. |
 | EXT-18 | Go `regexp/syntax` | `syntax.Parse(p, syntax.Perl)` merges consecutive literal characters (including escaped ones such as `\.`) into one `OpLiteral` node at the top level of a concatenation, and keeps a capture group or alternation as a separate node, so the leading literal is exactly the pattern's fixed beginning (§3.9, Appendix A). Verified with Go 1.24.7 by the Appendix D vectors. Re-run them on every Go upgrade. | Compute the fixed beginning by walking the top-level concatenation and joining leading literal nodes. |
 | EXT-19 | Go `regexp/syntax` | `syntax.Compile` of a simplified `syntax.Perl` parse produces only the instruction kinds handled by Appendix D.3 (`Alt`, `AltMatch`, `Capture`, `Nop`, `EmptyWidth`, `Rune`, `Rune1`, `RuneAny`, `RuneAnyNotNL`, `Match`, `Fail`); `Inst.MatchRune` handles `InstRune` only (not `RuneAny*`, which D.3 matches itself); `^` and `$` compile to `EmptyBeginText` and `EmptyEndText`. Verified with Go 1.24.7 by the D.3 tests. | Extend the D.3 instruction switch; any unknown instruction makes the check return `ErrUnsupported` (fail closed). |
+| EXT-20 | `dbos-transact-golang` | `ResumeWorkflows` re-enqueues the `PENDING` workflow of another executor; the dequeuing replica becomes its executor, finished steps do not run again, and the old executor does not run it when it returns. | Recovery only by starting the replica again under the same ID. |
 
-**Verified on `dbos-transact-golang` v1.8.0** (`internal/workflows/ext_integration_test.go`, run on the lab): EXT-01 holds (`RunAsStep`; steps are not retried unless `WithStepMaxRetries` is set, so §6.1 rule 3 needs no option). EXT-02 holds (`WithWorkflowID`; the default reuse policy returns the existing workflow without running its steps again). EXT-03 holds (`RetrieveWorkflow` and `GetStatus`; an unknown ID is an error; `dbos.workflow_status` is readable with SQL). EXT-05: cron schedules exist (`CreateSchedule`), but `ligo` keeps its internal ticker and advisory locks. EXT-06 holds: finished workflows are listed by age (`ListWorkflows` with `WithFilterCreatedBefore`) and deleted (`DeleteWorkflows`), which the retention job uses. EXT-07 holds (JSON serialization of DTOs by default). EXT-08 holds (its own DSN and the schema `dbos` owned by `ligo_dbos`, without access to `public`). EXT-09 holds (recovery re-enqueues only the workflows of the executor's application version).
+**Verified on `dbos-transact-golang` v1.8.0** (`internal/workflows/ext_integration_test.go`, run on the lab): EXT-01 holds (`RunAsStep`; steps are not retried unless `WithStepMaxRetries` is set, so §6.1 rule 3 needs no option). EXT-02 holds (`WithWorkflowID`; the default reuse policy returns the existing workflow without running its steps again). EXT-03 holds (`RetrieveWorkflow` and `GetStatus`; an unknown ID is an error; `dbos.workflow_status` is readable with SQL). EXT-05: cron schedules exist (`CreateSchedule`), but `ligo` keeps its internal ticker and advisory locks. EXT-06 holds: finished workflows are listed by age (`ListWorkflows` with `WithFilterCreatedBefore`) and deleted (`DeleteWorkflows`), which the retention job uses. EXT-07 holds (JSON serialization of DTOs by default). EXT-08 holds (its own DSN and the schema `dbos` owned by `ligo_dbos`, without access to `public`). EXT-09 holds (recovery re-enqueues only the workflows of the executor's application version). EXT-20 holds (`TestEXT20`).
 
 **Verified on `go-ldap/ldap/v3` v3.4.15:** EXT-13 holds, and the DN helper exists too: `ldap.EscapeFilter` escapes the username in `user_filter` and the user DN in `group_membership_filter`; `ldap.EscapeDN` (RFC 4514) is available, so `adminauth` implements no escaping of its own. go-ldap requires `golang.org/x/crypto` (for `md4`, used by NTLM), which govulncheck flags at module level with GO-2026-5932: the deprecated `openpgp` package of that module is unsafe by design. Nothing in `ligo` or go-ldap imports `openpgp`, govulncheck reports the code unaffected, and no fixed version exists; the advisory is accepted and goes away when `x/crypto` drops the package.
 
@@ -4812,10 +4868,10 @@ Each scenario MUST be an automated test (`test/acceptance`) run on the lab (§11
 
 | ID | Issue | Proposed direction |
 | :--- | :--- | :--- |
-| OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `store-vault`. |
+| OI-1 | **Secondary enforcement points cannot express binding regexes.** `ligo` decides which workloads *see* a binding, but the credential itself is released by another system: Vault's JWT/SPIFFE auth role, a Keystone federation mapping, a Kafka ACL. These match subjects with globs or exact values, not RE2 regexes, and Vault's glob `*` also matches `/`. If the store's constraint is broader than the binding's regex, workloads that `ligo` rejects can still obtain the credential, which defeats segment confinement (Appendix A) at the point that matters. | Each store or target that enforces subjects declares in `Describe` what it can express (`exact`, `glob`, `regex`). `ligo` accepts a binding only if its regex translates exactly into that form, and rejects it at validation otherwise. Alternatively, the constraint can be a strict subset (an explicit list of SPIFFE IDs). To be decided before implementing `ligo-plugin-vault`. |
 | OI-2 | **The example configuration wires the `oracle-prod` platform to `openldap.v1`.** Oracle cannot authenticate database users against a generic OpenLDAP directory; `EXTERNAL_DIR` on Oracle needs Centrally Managed Users with Active Directory, or Enterprise User Security. | Change the example to `target-local.v1` (or to an Active Directory identity provider once one is bundled), and make the config validator reject `oracle.v1` + `EXTERNAL_DIR` unless the platform declares `directory_integration`. |
 | OI-3 | **Privilege identifiers of existing plugins.** Narrowing of access levels (§3.10) relies on each plugin's canonical `privileges` (§5.8 rule 9). For roles this is the role name, but plugins that grant object privileges, Kafka ACLs or OpenStack roles with project scoping need a documented identifier scheme in which set inclusion really means containment. | Each plugin specification defines its scheme and its test vectors before 4.0 plugins are released; until then, a plugin emits one identifier per grant, so every grant change is treated as a widening. |
-| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `target-postgres` and `target-oracle`. |
+| OI-4 | **Targets cannot map an X.509-SVID to a principal.** In `SVID` mode the workload authenticates to the target with its own SVID. The SPIFFE ID is in the certificate's URI SAN; the subject carries no identity (SPIRE sets the CN only from the entry's first DNS name, and `spiffe://…` is not a DNS name). PostgreSQL's `cert` authentication maps the subject CN or DN (`pg_ident.conf`), Oracle's `IDENTIFIED EXTERNALLY AS '<DN>'` one exact DN; neither reads the URI SAN, nor can express `source_svid_regex`. Mapping a CN set through SPIRE DNS names trusts a name outside `ligo`'s control instead of the SPIFFE ID. The target must also trust the CA bundle of every allowed source trust domain, kept current through rotations, and nobody is assigned to do it. | Each target plugin specification states its mechanism or leaves `SVID` out of `supported_identity_modes` (§8.2 rule 3 then refuses `svid.v1` on that platform). Candidates: a JWT-SVID with PostgreSQL 18 OAuth (`OAUTHBEARER`) and a validator module that verifies it against the SPIFFE bundle and matches `sub` against the regex; a proxy that verifies the URI SAN (but then the target no longer sees the workload's identity). To be decided before implementing `ligo-plugin-postgres` and `ligo-plugin-oracle`. |
 
 **Future work** (not part of this version):
 
@@ -4858,7 +4914,8 @@ Input: `pattern`, `trustDomain`, and `regex_policy`. The pattern is accepted onl
    - (c) any `OpCharClass` whose inclusive rune ranges `[lo, hi]` contain `'/'` (`0x2F`). Classes such as `[a-z0-9-]` and `[^/]` are accepted; `[^a]`, `\S`, `\W` and `\pP` are rejected because they include `/`;
    - (d) any `OpLiteral` containing `'/'` that lies anywhere inside a **repeating or optional** node: `OpStar` (`*`), `OpPlus` (`+`), `OpQuest` (`?`), or `OpRepeat` other than exactly `{1}`;
    - (e) `OpBeginText`/`OpEndText` anywhere except positions 0 and last at the top level;
-   - (f) `OpAlternate` at the top level. This is already implied by rule 4; alternation nested inside the pattern, such as `(worker-1|worker-2)` or `(?:api|web)/replica-[0-9]+`, is allowed.
+   - (f) `OpAlternate` at the top level. This is already implied by rule 4; alternation nested inside the pattern, such as `(worker-1|worker-2)` or `(?:api|web)/replica-[0-9]+`, is allowed;
+   - (g) `OpWordBoundary` and `OpNoWordBoundary` (`\b`, `\B`): the narrowing and overlap checks (§3.10) support no assertion other than the text anchors, so a regex with them could never be narrowed.
 8. `regexp.Compile(pattern)` succeeds. The compiled program is the one used for matching (§4.5, `/ui/sources/test`).
 
 ### A.3 Rationale for each rule

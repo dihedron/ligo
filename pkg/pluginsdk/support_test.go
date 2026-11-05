@@ -17,9 +17,10 @@ func TestRedactingHandler(t *testing.T) {
 	log := slog.New(NewRedactingHandler(slog.NewTextHandler(&out, nil)))
 	log.With("api_token", "tok-1").WithGroup("g").Info("ALTER USER x IDENTIFIED BY msg-pw",
 		"password", "pw-1", "Client_Secret", "sec-1", "sql", `create user x identified by "pw-2"`,
-		slog.Group("inner", "bootstrap_credential", "cred-1", "user", "admin"), "count", 3)
+		slog.Group("inner", "bootstrap_credential", "cred-1", "user", "admin"), "count", 3,
+		"Authorization", "Bearer jwt-1", "private_key_pem", "-----BEGIN PRIVATE KEY----- pem-1") // §10.1
 	got := out.String()
-	for _, leak := range []string{"tok-1", "msg-pw", "pw-1", "sec-1", "pw-2", "cred-1"} {
+	for _, leak := range []string{"tok-1", "msg-pw", "pw-1", "sec-1", "pw-2", "cred-1", "jwt-1", "pem-1"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("%q leaked: %s", leak, got)
 		}

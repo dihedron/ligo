@@ -10,7 +10,13 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/pluginmgr"
+	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"go.opentelemetry.io/otel"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -92,5 +98,74 @@ func TestManager(t *testing.T) {
 	}
 	if p.OutputValidator(pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, "local-prod") != nil {
 		t.Error("a built-in with an output schema") // built-ins declare none
+	}
+}
+
+// TestTraceParent: the workflow of a request joins the request's trace and
+// follows its sampling through the journaled input, whatever the ratio, on
+// a recovery too; without a caller's trace (a background start, or
+// tracing off) the workflow starts its own.
+func TestTraceParent(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracing.Provider(rec, 0, "test", "a"))
+	t.Cleanup(func() { otel.SetTracerProvider(before) })
+	if got := traceParent(context.Background()); got != "" {
+		t.Errorf("without a span: %q", got)
+	}
+	id := "0af7651916cd43dd8448eb211c80319c"
+	in := ApplyInput{TraceParent: "00-" + id + "-b7ad6b7169203331-01"}
+	ctx := propagation.TraceContext{}.Extract(context.Background(), propagation.MapCarrier{"traceparent": in.TraceParent})
+	if got := traceParent(ctx); got != in.TraceParent {
+		t.Errorf("traceParent: %q, want %q", got, in.TraceParent)
+	}
+	joined := func(in ApplyInput) trace.SpanContext {
+		t.Helper()
+		_, span := startWorkflowSpan(context.Background(), in)
+		span.End()
+		return span.SpanContext()
+	}
+	if sc := joined(in); sc.TraceID().String() != id || !sc.IsSampled() {
+		t.Errorf("a sampled caller: %v", sc)
+	}
+	if sc := joined(ApplyInput{}); sc.IsSampled() {
+		t.Errorf("no caller, ratio 0: %v", sc)
+	}
+	if sc := joined(ApplyInput{TraceParent: "not a traceparent"}); sc.IsSampled() {
+		t.Errorf("a bad value, ratio 0: %v", sc)
+	}
+}
+
+// TestStepSpan: a step's span names its stage, carries the provider type,
+// and on failure has an error status without the error's text, which may
+// hold a plugin's details (§10.1: no secrets in spans); its duration is
+// observed.
+func TestStepSpan(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	before := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracing.Provider(rec, 1, "test", "a"))
+	t.Cleanup(func() { otel.SetTracerProvider(before) })
+	ctx, root := otel.Tracer("test").Start(context.Background(), "workflow")
+	c, end := stepSpan(ctx, "TARGET", "echo.v1")
+	if c == ctx {
+		t.Error("the step's context carries no span")
+	}
+	end(errors.New("ALTER USER x IDENTIFIED BY s3cr3t"))
+	root.End()
+	ended := rec.Ended()
+	if len(ended) != 2 {
+		t.Fatalf("%d spans", len(ended))
+	}
+	s := ended[0]
+	attrs := map[string]string{}
+	for _, a := range s.Attributes() {
+		attrs[string(a.Key)] = a.Value.String()
+	}
+	if s.Name() != "step TARGET" || attrs["ligo.stage"] != "TARGET" || attrs["ligo.provider_type"] != "echo.v1" ||
+		s.Parent().SpanID() != root.SpanContext().SpanID() {
+		t.Errorf("span %s %v, parent %s", s.Name(), attrs, s.Parent().SpanID())
+	}
+	if s.Status().Code != otelcodes.Error || s.Status().Description != "" || len(s.Events()) != 0 {
+		t.Errorf("status %+v, events %v: the error must not be recorded", s.Status(), s.Events())
 	}
 }

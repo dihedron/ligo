@@ -32,7 +32,7 @@ cmd_echo() {
 
 # echo_install: the echo servers, their identity, the users echo-bound and
 # echo-unbound, and the two targets (after lab.sh serve install, which
-# deploys target-echo and configures the echo platforms).
+# deploys ligo-plugin-echo and configures the echo platforms).
 echo_install() {
 	section "The echo target on ligo1"
 	inner_exec ligo1 systemctl -q is-active ligo || die "ligo does not run on ligo1: lab.sh serve install"
@@ -59,7 +59,7 @@ After=network-online.target
 User=echo
 StateDirectory=$name
 ExecStart=/usr/local/bin/echo-server --mode $mode --data :$data --control :$control --state /var/lib/$name/state.json \\
-  --socket unix:///run/spire/prod/agent.sock --control-id spiffe://prod.lab/ligo/plugin/target-echo
+  --socket unix:///run/spire/prod/agent.sock --control-id spiffe://prod.lab/ligo/plugin/echo
 Restart=on-failure
 
 [Install]
@@ -124,7 +124,7 @@ echo_client() {
 	shift 2
 	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" || die "no user $user on ligo1"
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/prod/agent.sock -- \
-		/usr/local/bin/echo-client --target "$target" "$@"
+		/usr/local/bin/echo-client --target "$target" --audience "$(secrets_audience)" "$@"
 }
 
 # expect CODE PATTERN USER TARGET ARGS: runs the client and checks its exit

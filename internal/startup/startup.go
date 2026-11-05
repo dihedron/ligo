@@ -25,6 +25,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
@@ -54,7 +55,7 @@ type Checks struct {
 // stops startup.
 func (c *Checks) Run(ctx context.Context) error {
 	c.policy = c.Config.Policy()
-	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.scopes, c.interconnects} {
+	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.scopes, c.interconnects, c.breakGlassParties} {
 		if err := check(ctx); err != nil {
 			return err
 		}
@@ -571,7 +572,6 @@ func failPending(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]a
 // interconnects is rule 18: cross-scope bindings that the current policy
 // would deny are logged and audited, never changed (ADR-14 rule 6). It
 // returns nothing to stop startup.
-// shortcut: no ligo_interconnect_violations gauge until metrics (phase 10).
 func (c *Checks) interconnects(ctx context.Context) error {
 	rows, err := c.DB.Query(ctx, "SELECT name, source_scope, target_scope FROM bindings WHERE source_scope <> target_scope ORDER BY name")
 	if err != nil {
@@ -597,10 +597,24 @@ func (c *Checks) interconnects(ctx context.Context) error {
 			found = append(found, violation{p[0], p[1], p[2], d.Rule})
 		}
 	}
+	metrics.InterconnectViolations.Set(float64(len(found)))
 	if len(found) == 0 {
 		return nil
 	}
 	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_INTERCONNECT_VIOLATIONS", Actor: actor, Snapshot: snapshot(map[string]any{"bindings": found})})
+}
+
+// breakGlassParties warns of the parties that no break-glass policy covers,
+// so that the refusal shows before an incident (rule 18, ADR-12).
+func (c *Checks) breakGlassParties(ctx context.Context) error {
+	found := c.policy.PartiesWithoutBreakGlass()
+	if len(found) == 0 {
+		return nil
+	}
+	for _, f := range found {
+		c.Logger.Warn("no break-glass policy covers an additional party: break-glass under this rule is always refused", "rule", f.Rule, "party", f.Party, "scope", f.Scope)
+	}
+	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_BREAK_GLASS_PARTY_UNCOVERED", Actor: actor, Snapshot: snapshot(map[string]any{"parties": found})})
 }
 
 // Platforms is the part of rule 19 that needs the plugins: every ACTIVE or
@@ -612,7 +626,6 @@ func (c *Checks) interconnects(ctx context.Context) error {
 // the flows are left out of effective flows.
 // shortcut: one ValidateTarget call per level, to name the level that
 // fails; batch per target if startup grows slow with many targets.
-// shortcut: no ligo_privilege_bound_violations gauge until metrics (phase 10).
 func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget) error {
 	rows, err := c.DB.Query(ctx, `SELECT t.name, t.platform, t.definition, l.name, l.grants FROM targets t
 		JOIN target_access_levels l ON l.target_id = t.id
@@ -681,6 +694,7 @@ func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget)
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	metrics.PrivilegeBoundViolations.Set(float64(len(found)))
 	if len(found) == 0 {
 		return nil
 	}

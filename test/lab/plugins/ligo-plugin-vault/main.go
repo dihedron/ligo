@@ -1,4 +1,4 @@
-// Command store-vault is a lab plugin (test tooling, never shipped, not
+// Command ligo-plugin-vault is a lab plugin (test tooling, never shipped, not
 // hardened): a stand-in for the vault.v1 secret store, so that phase 6 runs
 // its workflows against a real OpenBao. It logs in with its own JWT-SVID
 // and keeps, per binding, a secret or a database role and the policy that
@@ -138,7 +138,7 @@ func (in *instance) call(ctx context.Context, method, path, token string, body a
 	}
 	resp, err := in.client.Do(req)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store-vault:", method, path, err)
+		fmt.Fprintln(os.Stderr, "ligo-plugin-vault:", method, path, err)
 		return unavailable()
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -147,7 +147,7 @@ func (in *instance) call(ctx context.Context, method, path, token string, body a
 	case resp.StatusCode == http.StatusNotFound && absentOK:
 		return nil
 	case resp.StatusCode >= 300:
-		fmt.Fprintln(os.Stderr, "store-vault:", method, path, resp.StatusCode)
+		fmt.Fprintln(os.Stderr, "ligo-plugin-vault:", method, path, resp.StatusCode)
 		return unavailable()
 	case out != nil:
 		return json.Unmarshal(data, out)
@@ -241,7 +241,7 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 		subject, ok := literalID(r.GetBinding().GetSourceSvidRegex())
 		if !ok {
 			return nil, pluginsdk.Error(codes.FailedPrecondition, "INCOMPATIBLE_IDENTITY_MODE",
-				"the lab's store-vault binds workloads by one literal SPIFFE ID: the source's regex must be ^spiffe://…$", false)
+				"the lab's ligo-plugin-vault binds workloads by one literal SPIFFE ID: the source's regex must be ^spiffe://…$", false)
 		}
 		readPath = "kv/data/bindings/" + id
 		if s := payload.GetStaticSecret(); s != nil && !payload.GetSecretUnchanged() {
@@ -259,7 +259,7 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 		// token_policies is a string: OpenBao's allowed_parameters globs (binding-*) refuse a JSON array
 		audience := in.WorkloadJWTAudience
 		if audience == "" {
-			audience = "https://bao-prod.ligo.lab"
+			audience = strings.TrimSuffix(in.Address, ":8200") // the lab's servers: the address without the port
 		}
 		if err := in.call(ctx, http.MethodPost, "auth/"+in.AuthMount+"/role/"+policy, token, map[string]any{"role_type": "jwt", "user_claim": "sub",
 			"bound_subject": subject, "bound_audiences": []string{audience}, "token_policies": policy, "token_ttl": "10m", "token_max_ttl": "1h"},

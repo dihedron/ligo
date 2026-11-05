@@ -25,6 +25,10 @@ lint: ## check that the code is clean (gofmt, go vet, golangci-lint); every buil
 # and in CI; telemetry off
 REDOCLY_VERSION := 1.34.3
 
+.PHONY: htmx-check
+htmx-check: ## run the pinned htmx's upgrade-check on the templates (§11.1 rule 4; downloads htmx from npm, so not in CI)
+	@cd "$$(mktemp -d)" && npx --yes htmx.org@4.0.0 upgrade-check "$(CURDIR)/web/templates/"
+
 .PHONY: openapi-lint
 openapi-lint: ## lint api/openapi/admin.v1alpha1.yaml with Redocly CLI, as CI does; warnings fail too (needs npx)
 	@command -v npx >/dev/null 2>&1 || { echo "npx is not installed: install Node.js" >&2; exit 1; }
@@ -102,9 +106,12 @@ secrets: scanners ## scan the history and the working tree for secrets with gitl
 # Go files, such as the root)
 .PHONY: vuln
 vuln: ## check go.mod and the code for known vulnerabilities with govulncheck, lab-tagged tests included (run before every commit)
-	@go run golang.org/x/vuln/cmd/govulncheck@latest -C cmd/ligo -scan module
-	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-	@go run golang.org/x/vuln/cmd/govulncheck@latest -tags 'integration lab' ./...
+	@# all three always run: a finding in one must not hide the others
+	@rc=0; \
+	go run golang.org/x/vuln/cmd/govulncheck@latest -C cmd/ligo -scan module || rc=1; \
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./... || rc=1; \
+	go run golang.org/x/vuln/cmd/govulncheck@latest -tags 'integration lab' ./... || rc=1; \
+	exit $$rc
 
 # PROTOS are the protobuf contracts; the generated Go code is committed
 PROTOS := api/proto/plugin/v1/plugin.proto api/proto/workload/v1alpha1/workload.proto

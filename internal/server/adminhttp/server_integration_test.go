@@ -30,6 +30,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/adminauth"
+	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
@@ -119,7 +120,10 @@ func (fakeDirectory) Authenticate(_ context.Context, user, password string) (aut
 }
 
 // fakeWorkflows records the operational actions it is asked for.
-type fakeWorkflows struct{ calls []string }
+type fakeWorkflows struct {
+	calls   []string
+	pending []dbos.WorkflowStatus
+}
 
 func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	f.calls = append(f.calls, "retry "+actor)
@@ -129,6 +133,18 @@ func (f *fakeWorkflows) Retry(_ context.Context, id uuid.UUID, actor string) (db
 func (f *fakeWorkflows) Rotate(_ context.Context, id uuid.UUID, actor string) (dbos.WorkflowHandle[string], error) {
 	f.calls = append(f.calls, "rotate "+actor)
 	return nil, nil
+}
+
+func (f *fakeWorkflows) ExecutorID() string         { return "ligo-self" }
+func (f *fakeWorkflows) ApplicationVersion() string { return "v2" }
+
+func (f *fakeWorkflows) Pending(context.Context) ([]dbos.WorkflowStatus, error) {
+	return f.pending, nil
+}
+
+func (f *fakeWorkflows) Resume(_ context.Context, ids []string) error {
+	f.calls = append(f.calls, "resume "+strings.Join(ids, ","))
+	return nil
 }
 
 // fakePlugins: oracle-prod serves, every other platform is unreachable.
@@ -195,7 +211,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		t.Fatal(err)
 	}
 	_ = conn.Close(ctx)
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,6 +541,93 @@ func TestMaintenanceAPI(t *testing.T) {
 // TestSourcesAPI: register a source through approval, show and list it,
 // narrow it with a diff of the samples it drops, test regexes; refusals
 // are problems (§7.2.3 sources).
+// TestExecutorsAPI: a replica gone for good is recovered, only by
+// admin.full_access, only for this application version, never while it has
+// sessions, and never for the replica itself (§10.2).
+func TestExecutorsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	admin, viewer := v.client(t, adminID), v.client(t, viewerID)
+	fake := v.s.Workflows.(*fakeWorkflows)
+	gone, alive := "gone-"+v.suffix, "alive-"+v.suffix
+	old := time.Now().Add(-time.Hour)
+	fake.pending = []dbos.WorkflowStatus{
+		{ID: "w1", ExecutorID: gone, ApplicationVersion: "v2", CreatedAt: time.Now()},
+		{ID: "w2", ExecutorID: gone, ApplicationVersion: "v2", CreatedAt: old},
+		{ID: "w3", ExecutorID: gone, ApplicationVersion: "v1", CreatedAt: old},
+		{ID: "w4", ExecutorID: alive, ApplicationVersion: "v2", CreatedAt: old},
+		{ID: "w5", ExecutorID: "ligo-self", ApplicationVersion: "v2", CreatedAt: old},
+	}
+	ctx := context.Background()
+	live, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{Instance: alive}, insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(live.Close)
+
+	r := v.do(t, viewer, "GET", "/v1/admin/executors", nil)
+	if r.code != 200 {
+		t.Fatalf("list: %d %v", r.code, r.body)
+	}
+	rows := map[string]map[string]any{}
+	for _, it := range r.body["items"].([]any) {
+		row := it.(map[string]any)
+		rows[row["executor"].(string)+"/"+fmt.Sprint(row["applicationVersion"])] = row
+	}
+	if row := rows[gone+"/v2"]; row == nil || row["pending"] != 2.0 || row["liveSessions"] != 0.0 || row["self"] != false ||
+		row["oldestPending"] != old.UTC().Format(time.RFC3339Nano) && !strings.HasPrefix(fmt.Sprint(row["oldestPending"]), old.Format("2006-01-02T15:04")) {
+		t.Errorf("the executor gone: %v", row)
+	}
+	if row := rows[alive+"/v2"]; row == nil || row["pending"] != 1.0 || row["liveSessions"].(float64) < 2 {
+		t.Errorf("the live executor: %v", row)
+	}
+	if row := rows["ligo-self/v2"]; row == nil || row["self"] != true {
+		t.Errorf("this replica: %v", row)
+	}
+
+	if r := v.do(t, viewer, "POST", "/v1/admin/executors/"+gone+"/recover", nil); r.code != 403 {
+		t.Errorf("a viewer recovers: %d", r.code)
+	}
+	if r := v.do(t, admin, "POST", "/v1/admin/executors/ligo-self/recover", nil); r.code != 409 || r.slug() != "urn:ligo:problem:executor-self" {
+		t.Errorf("this replica: %d %s", r.code, r.slug())
+	}
+	if r := v.do(t, admin, "POST", "/v1/admin/executors/"+alive+"/recover", nil); r.code != 409 || r.slug() != "urn:ligo:problem:executor-alive" {
+		t.Errorf("a live executor: %d %s", r.code, r.slug())
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("resumed after a refusal: %v", fake.calls)
+	}
+	var start int64
+	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0) from audit_log").Scan(&start); err != nil {
+		t.Fatal(err)
+	}
+	// allowed in maintenance: it finishes work, it starts none
+	if _, err := v.owner.Exec(ctx, "update system_settings set maintenance_mode = true, maintenance_reason = 'x'"); err != nil {
+		t.Fatal(err)
+	}
+	r = v.do(t, admin, "POST", "/v1/admin/executors/"+gone+"/recover", nil)
+	if r.code != 200 || r.body["recovered"] != 2.0 || r.body["otherVersions"] != 1.0 {
+		t.Errorf("recover: %d %v", r.code, r.body)
+	}
+	if fmt.Sprint(fake.calls) != "[resume w1,w2]" {
+		t.Errorf("resumed: %v", fake.calls)
+	}
+	var snapshot, actor string
+	if err := v.owner.QueryRow(ctx, "select snapshot::text, actor from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and id > $1", start).Scan(&snapshot, &actor); err != nil ||
+		actor != adminID || !strings.Contains(snapshot, gone) || !strings.Contains(snapshot, "w1") {
+		t.Errorf("audit: %q by %q (%v)", snapshot, actor, err)
+	}
+	// nothing of this version left: nothing to resume or audit
+	fake.calls, fake.pending = nil, fake.pending[2:3]
+	r = v.do(t, admin, "POST", "/v1/admin/executors/"+gone+"/recover", nil)
+	if r.code != 200 || r.body["recovered"] != 0.0 || r.body["otherVersions"] != 1.0 || len(fake.calls) != 0 {
+		t.Errorf("recover with nothing to do: %d %v %v", r.code, r.body, fake.calls)
+	}
+	var n int
+	if err := v.owner.QueryRow(ctx, "select count(*) from audit_log where action = 'SYSTEM_EXECUTOR_RECOVERED' and id > $1", start).Scan(&n); err != nil || n != 1 {
+		t.Errorf("audit entries: %d (%v)", n, err)
+	}
+}
+
 func TestSourcesAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)
@@ -1055,5 +1158,50 @@ func TestGovernanceAPI(t *testing.T) {
 	if err := v.owner.QueryRow(ctx, "select coalesce(max(id), 0), (select count(*) from change_requests where resource_name like 'eval-%') from audit_log").
 		Scan(&after, &filed); err != nil || after != before || filed != 0 {
 		t.Errorf("the dry run stored something: audit %d to %d, %d requests (%v)", before, after, filed, err)
+	}
+}
+
+// TestAuditNamesake: a resource's audit holds its own entries and those of
+// its change requests, the create's included, never those of a namesake or
+// of a refused attempt on its name (finding 2.4).
+func TestAuditNamesake(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	olga, dora, viewer := v.client(t, opID), v.client(t, appID), v.client(t, viewerID)
+	name := "aud-src-" + v.suffix
+	created := v.do(t, olga, "POST", "/v1/admin/sources", map[string]any{"metadata": map[string]string{"name": name},
+		"identity":   map[string]any{"trustDomain": "prod.internal", "svidRegex": `^spiffe://prod\.internal/ns/aud/sa/w$`},
+		"visibility": map[string]string{"mode": "PRIVATE"}})
+	cr, _ := created.body["changeRequest"].(map[string]any)
+	if ok := v.do(t, dora, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve",
+		map[string]string{"payloadSha256": cr["payloadSha256"].(string)}); ok.code != 200 {
+		t.Fatalf("approve: %+v", ok)
+	}
+	other, refused := uuid.NewV7(), uuid.NewV7()
+	err := pgx.BeginFunc(context.Background(), v.owner, func(tx pgx.Tx) error {
+		if _, err := audit.Append(context.Background(), tx, audit.Entry{ResourceType: "SOURCE", ResourceID: &other, ResourceName: name,
+			Action: "SOURCE_RETIRED", Actor: "t"}); err != nil {
+			return err
+		}
+		_, err := audit.Append(context.Background(), tx, audit.Entry{ResourceType: "SOURCE", ResourceName: name, ChangeRequestID: &refused,
+			Action: "CR_REJECTED", Actor: "t"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := func(items []any) (out []string) {
+		for _, i := range items {
+			out = append(out, i.(map[string]any)["action"].(string))
+		}
+		return out
+	}
+	for _, got := range [][]any{
+		v.do(t, viewer, "GET", "/v1/admin/sources/"+name+"/audit", nil).body["items"].([]any),
+		v.do(t, viewer, "GET", "/v1/admin/sources/"+name, nil).body["audit"].([]any),
+	} {
+		a := actions(got)
+		if slices.Contains(a, "SOURCE_RETIRED") || slices.Contains(a, "CR_REJECTED") || !slices.Contains(a, "CR_CREATED") {
+			t.Errorf("audit: %v", a)
+		}
 	}
 }

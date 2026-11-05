@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -40,7 +41,7 @@ func setup(t *testing.T) *Pools {
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	p, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	p, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +60,43 @@ func owner(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
+// TestSessions: a named instance keeps a session open in both pools, and the
+// app role sees the reader's, which it does not own (§10.2).
+func TestSessions(t *testing.T) {
+	ctx := context.Background()
+	setup(t)
+	id := "t-" + uuid.NewV7().String()
+	p, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), Limits{Instance: id}, insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.App.Config().MinConns != 1 || p.Reader.Config().MinConns != 1 {
+		t.Errorf("MinConns: app %d, reader %d", p.App.Config().MinConns, p.Reader.Config().MinConns)
+	}
+	var app, reader string
+	if err := p.App.QueryRow(ctx, "SELECT current_user").Scan(&app); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Reader.QueryRow(ctx, "SELECT current_user").Scan(&reader); err != nil || app == reader {
+		t.Fatalf("roles %q and %q (%v)", app, reader, err)
+	}
+	found, err := Sessions(ctx, p.App)
+	if err != nil || found[id] < 2 {
+		t.Errorf("sessions of %s: %v (%v)", id, found, err)
+	}
+	p.Close()
+	other := setup(t)
+	for end := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		found, err := Sessions(ctx, other.App)
+		if err == nil && found[id] == 0 {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("sessions after closing: %v (%v)", found, err)
+		}
+	}
+}
+
 func TestPools(t *testing.T) {
 	ctx := context.Background()
 	p := setup(t)
@@ -66,6 +104,18 @@ func TestPools(t *testing.T) {
 		var got string
 		if err := pool.QueryRow(ctx, "show statement_timeout").Scan(&got); err != nil || got != want {
 			t.Errorf("statement_timeout = %q (%v), want %q", got, err, want)
+		}
+	}
+	set, err := Open(ctx, dsn(t, "APP"), dsn(t, "READER"), Limits{MaxConns: 3, AppStatementTimeout: 2 * time.Second,
+		ReaderStatementTimeout: time.Second}, insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	for pool, want := range map[*pgxpool.Pool]string{set.App: "2s", set.Reader: "1s"} {
+		var got string
+		if err := pool.QueryRow(ctx, "show statement_timeout").Scan(&got); err != nil || got != want || pool.Config().MaxConns != 3 {
+			t.Errorf("statement_timeout = %q (%v), want %q; max_conns %d, want 3", got, err, want, pool.Config().MaxConns)
 		}
 	}
 	var user string

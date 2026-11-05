@@ -73,7 +73,8 @@ confirm() {
 LAB_SELECTED=()
 
 # select_scenarios VALUE: sets LAB_SELECTED from a --scenario value (storage,
-# identity or all) or, when VALUE is empty, from LAB_SCENARIOS.
+# identity, ha, lb, otel, vault, webhook or all) or, when VALUE is empty, from LAB_SCENARIOS;
+# ha, otel, vault and webhook imply identity, lb implies ha, and all is storage and identity.
 select_scenarios() {
 	local value="${1:-$LAB_SCENARIOS}" scenario
 	[[ "$value" == all ]] && value="storage identity"
@@ -81,9 +82,28 @@ select_scenarios() {
 	for scenario in $value; do
 		case "$scenario" in
 		storage | identity) LAB_SELECTED+=("$scenario") ;;
-		*) die "unknown scenario \"$scenario\": storage, identity or all" ;;
+		ha) LAB_SELECTED+=(identity ha) ;;
+		lb) LAB_SELECTED+=(identity ha lb) ;;
+		otel) LAB_SELECTED+=(identity otel) ;;
+		vault) LAB_SELECTED+=(identity vault) ;;
+		webhook) LAB_SELECTED+=(identity webhook) ;;
+		*) die "unknown scenario \"$scenario\": storage, identity, ha, lb, otel, vault, webhook or all" ;;
 		esac
 	done
+}
+
+# ligo_host NAME: fails unless NAME is a ligo host of this lab.
+ligo_host() {
+	local hosts
+	hosts="$(ligo_hosts | xargs)"
+	[[ -n "$1" && " $hosts " == *" $1 "* ]] || die "no ligo host \"$1\": $hosts"
+}
+
+# ligo_hosts: the ligo replicas, one per line: ligo1, and ligo2 when up
+# works on the ha scenario or built it before.
+ligo_hosts() {
+	echo ligo1
+	if selected ha || inner_exists ligo2; then echo ligo2; fi
 }
 
 # selected SCENARIO: true when the command works on SCENARIO.
@@ -110,8 +130,13 @@ inner_ip() {
 	spire-test) host=21 ;;
 	bao-prod) host=30 ;;
 	bao-test) host=31 ;;
+	vault-prod) host=32 ;;
 	ldap) host=40 ;;
 	ligo1) host=50 ;;
+	ligo2) host=51 ;;
+	lb) host=60 ;;
+	otel) host=70 ;;
+	hooks) host=71 ;;
 	*) die "no address for $1" ;;
 	esac
 	printf '%s.%s' "$(prefix24 "$LAB_INNER_SUBNET")" "$host"
@@ -143,7 +168,7 @@ lxd_reachable() { lxc query /1.0 >/dev/null 2>&1; }
 # again through "sg lxd".
 ensure_lxd_access() {
 	lxd_reachable || [[ -n "${LAB_SG_DONE:-}" ]] || ! command -v lxc >/dev/null && return 0
-	if getent group lxd | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)"; then
+	if getent group lxd | cut -d: -f4 | tr ',' '\n' | grep -x "$(id -un)" >/dev/null; then
 		export LAB_SG_DONE=1
 		exec sg lxd -c "$(printf '%q ' "$LAB_DIR/lab.sh" "$@")"
 	fi

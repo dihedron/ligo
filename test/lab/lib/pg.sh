@@ -59,6 +59,10 @@ ssl_cert_file = '/etc/postgresql/ligo-lab/server.crt'
 ssl_key_file = '/etc/postgresql/ligo-lab/server.key'
 ssl_min_protocol_version = 'TLSv1.3'
 password_encryption = 'scram-sha-256'
+# a lost host's sessions end in about two minutes, for ligo executors recover
+tcp_keepalives_idle = 60
+tcp_keepalives_interval = 10
+tcp_keepalives_count = 6
 CONF
 	inner_exec pg sh -c "cat >$conf/pg_hba.conf" <<HBA
 # ligo lab (test/lab): the superuser over the Unix socket, the ligo roles
@@ -85,7 +89,7 @@ pg_roles() {
 	info "database ligo and roles ligo_migrator, ligo_app, ligo_reader, ligo_dbos created"
 }
 
-# pg_target creates the target database of the target-postgres stand-in
+# pg_target creates the target database of the ligo-plugin-postgres stand-in
 # (sql/target.sql, idempotent) and lets any role reach that database, and
 # only it, over TLS from the inner network, as a workload would.
 pg_target() {
@@ -99,7 +103,7 @@ pg_target() {
 		inner_exec pg sh -c "echo 'hostssl ledger all $LAB_INNER_SUBNET scram-sha-256' >>$hba"
 		inner_exec pg systemctl reload "postgresql@$v-main"
 	fi
-	info "target database ledger ready (target-postgres)"
+	info "target database ledger ready (ligo-plugin-postgres)"
 }
 
 # pg_dsn ROLE [HOST ROOTCERT DATABASE]: the DSN of ligo_ROLE, verifying the
@@ -133,10 +137,12 @@ pg_wait_ready() {
 
 # pg_record writes env.json.
 pg_record() {
-	local version fingerprint
+	local version fingerprint scenarios
 	version="$(pg_superuser -tAc 'show server_version')"
+	# the scenarios built so far, and this command's
+	scenarios="$( (env_get '.scenarios // ""' 2>/dev/null; printf '%s\n' "${LAB_SELECTED[@]}") | tr ' ' '\n' | awk 'NF && !seen[$0]++' | xargs)"
 	fingerprint="$(inner config get pg volatile.base_image)"
-	jq -n --arg scenarios "$LAB_SCENARIOS" --arg image "$LAB_IMAGE" --arg fingerprint "$fingerprint" \
+	jq -n --arg scenarios "$scenarios" --arg image "$LAB_IMAGE" --arg fingerprint "$fingerprint" \
 		--arg pg "$version" --arg ip "$(pg_ip)" --arg published "$(lxd_ip):5432" --arg inner_lxd "$(inner version 2>/dev/null | awk '/Server version/ {print $3}')" --arg driver "$(lxc storage show "$LAB_STORAGE_POOL" | awk '/^driver:/ {print $2}')" \
 		--arg ca "$(sha256sum "$LAB_STATE_DIR/pki/ca.crt" | cut -d' ' -f1)" \
 		--arg cert "$(sha256sum "$LAB_STATE_DIR/pki/pg.crt" | cut -d' ' -f1)" \

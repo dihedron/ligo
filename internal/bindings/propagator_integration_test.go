@@ -9,7 +9,12 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
+	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 )
 
 // enqueue changes the source of binding name to regex, a new revision,
@@ -86,8 +91,12 @@ func TestAC61(t *testing.T) {
 	if p := propagation(t, o, name); !p.queued {
 		t.Fatal("not queued") // INV-26: queued until re-applied
 	}
+	begun := metrics.Total(metrics.PropagationStarted)
 	if _, err := (&Propagator{Service: s, MaxConcurrent: 100}).Propagate(ctx); err != nil {
 		t.Log(err) // rows of other packages' tests
+	}
+	if metrics.Total(metrics.PropagationStarted) < begun+1 {
+		t.Error("ligo_propagation_started_total not counted")
 	}
 	p := propagation(t, o, name)
 	var id uuid.UUID
@@ -236,5 +245,47 @@ func TestPropagatorSingleton(t *testing.T) {
 	defer func() { _, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock(hashtext('ligo_propagator'))") }()
 	if n, err := (&Propagator{Service: s}).Propagate(ctx); err != nil || n != 0 {
 		t.Errorf("under another replica's lock: %d started, %v", n, err)
+	}
+}
+
+// TestPropagateRefused: a revision that cannot be composed fails the
+// binding at once, its row gone and PROPAGATION_FAILED audited; a plugin
+// that cannot answer leaves the row for the next run (§6.8).
+func TestPropagateRefused(t *testing.T) {
+	s, o, w, p := setup(t)
+	ctx := context.Background()
+	refused, transient := "dd-r-"+w.suffix, "dd-u-"+w.suffix
+	active(t, s, o, dcOp, refused, source(t, o, w, "r"), w.dcShared, "read", "", dcApp)
+	active(t, s, o, dcOp, transient, source(t, o, w, "u"), w.dcShared, "read", "", dcApp)
+	cr := enqueue(t, o, refused, "", 1)
+	enqueue(t, o, transient, "", 1)
+	var refusedID, transientID uuid.UUID
+	if err := o.QueryRow(ctx, "select (select id from bindings where name = $1), (select id from bindings where name = $2)",
+		refused, transient).Scan(&refusedID, &transientID); err != nil {
+		t.Fatal(err)
+	}
+	p.twist = func(r *pluginv1.ValidateBindingResponse) { r.Valid = false }
+	failed := metrics.Total(metrics.PropagationFailed)
+	if ok, err := s.propagate(ctx, refusedID); err != nil || ok {
+		t.Errorf("refused: %t %v", ok, err)
+	}
+	if got := propagation(t, o, refused); got.phase != "FAILED" || got.queued || got.revision != 1 {
+		t.Errorf("refused binding %+v", got)
+	}
+	if n, by := audited(t, o, refused, "PROPAGATION_FAILED"); n != 1 || by != cr {
+		t.Errorf("PROPAGATION_FAILED %d by %s", n, by)
+	}
+	if metrics.Total(metrics.PropagationFailed) != failed+1 {
+		t.Error("ligo_propagation_failed_total not counted")
+	}
+	p.twist = nil
+	s.Validate = func(context.Context, *pluginv1.ValidateBindingRequest) (*pluginv1.ValidateBindingResponse, error) {
+		return nil, grpcstatus.Error(codes.Unavailable, "plugin restarting")
+	}
+	if ok, err := s.propagate(ctx, transientID); err == nil || ok {
+		t.Errorf("transient: %t %v", ok, err)
+	}
+	if got := propagation(t, o, transient); got.phase != "ACTIVE" || !got.queued {
+		t.Errorf("transient binding %+v", got)
 	}
 }

@@ -71,7 +71,7 @@ func setup(t *testing.T) (*Service, *fake, *pgxpool.Pool) {
 	if _, err := migrate.Apply(ctx, conn, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), insecure)
+	pools, err := store.Open(ctx, dsn(t, "APP"), dsn(t, "READER"), store.Limits{}, insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,5 +311,14 @@ func TestBusy(t *testing.T) {
 	}
 	if st, by := statusOf(t, owner, a.ID); st != "FAILED_TO_APPLY" || by != "system:auto-approve" {
 		t.Errorf("request complete at creation: %s by %s", st, by)
+	}
+	// AC-07a: nothing is left pending, so a retry once idle goes through
+	f.apply = nil
+	retry := &Request{ResourceType: "SOURCE", ResourceName: a.ResourceName, Operation: "CREATE",
+		Consent: ConsentAll, OwnerScope: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
+	err = s.Create(ctx, alice, retry, []Candidate{{Side: "OWNER", Scope: payments}}, "")
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", retry.ID) })
+	if err != nil || retry.Status != "APPLIED" {
+		t.Errorf("retry: %s, %v", retry.Status, err)
 	}
 }

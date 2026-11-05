@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
@@ -383,6 +385,38 @@ func (b *Base) maintenance(on bool, reason string) error {
 	return b.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
 		var v any
 		return v, maintenanceColumns, c.Do(ctx, "PUT", path("maintenance"), nil, map[string]any{"enabled": on, "reason": reason}, &v)
+	})
+}
+
+type ExecutorsRecover struct {
+	Base
+	Yes  bool `long:"yes" description:"Do not ask for confirmation."`
+	Args struct {
+		ID string `positional-arg-name:"executor-id" description:"The instance ID of the replica gone for good."`
+	} `positional-args:"yes" required:"yes"`
+}
+
+// recoverInput is where the confirmation is read; tests replace it.
+var recoverInput io.Reader = os.Stdin
+
+func (cmd *ExecutorsRecover) Execute([]string) error {
+	id := cmd.Args.ID
+	if !cmd.Yes {
+		_, _ = fmt.Fprintf(cmd.writer(), "Other replicas will run the pending workflows of executor %s.\n"+
+			"Confirm that its host is down: a replica only cut off from the database would run them a second time.\n"+
+			"Type the executor ID to continue: ", id)
+		line, err := bufio.NewReader(recoverInput).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if strings.TrimSpace(line) != id {
+			return errors.New("not confirmed: nothing was changed")
+		}
+	}
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		var v any
+		return v, []client.Column{col("EXECUTOR", "executor"), col("RECOVERED", "recovered"), col("OTHER VERSIONS", "otherVersions")},
+			c.Do(ctx, "POST", path("executors", id, "recover"), nil, nil, &v)
 	})
 }
 

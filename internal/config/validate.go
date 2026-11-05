@@ -35,6 +35,8 @@ var (
 	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess}
 	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	maxPlatformFlow = 32
+	// instanceIDRE leaves room for "ligo/" in the 63 bytes of application_name
+	instanceIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,58}$`)
 )
 
 // checker collects the failures of every rule, so that one run reports them
@@ -56,6 +58,9 @@ func Validate(cfg *Config, opts Options) error {
 		opts.LookupEnv = os.LookupEnv
 	}
 	c := &checker{}
+	if id, _ := opts.LookupEnv(cfg.Service.InstanceIDEnv); !instanceIDRE.MatchString(id) {
+		c.failf(1, "service.instance_id_env %q: the instance ID %q must match %s", cfg.Service.InstanceIDEnv, id, instanceIDRE)
+	}
 	zones := c.zones(cfg)
 	c.instances(cfg, zones)
 	c.trustDomains(cfg, zones)
@@ -174,6 +179,9 @@ func (c *checker) instanceProviders(kind string, list []InstanceProvider, zones 
 			if names[in.Name] {
 				c.failf(1, "%s instance %q is defined twice", kind, in.Name)
 			}
+			if !ruleNameRE.MatchString(in.Name) {
+				c.failf(1, "%s instance %q: the name must match %s", kind, in.Name, ruleNameRE)
+			}
 			names[in.Name] = true
 			zoneOf[p.Type][in.Name] = in.Zone
 			if _, ok := zones[in.Zone]; !ok {
@@ -280,8 +288,29 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if t := cfg.Service.StartupTimeout; t < 5*time.Second || t > 10*time.Minute {
 		c.failf(9, "service.startup_timeout %s: between 5s and 10m", t)
 	}
+	if n := cfg.Server.AdminListener.RateLimit.MaxTrackedKeys; n < 10_000 || n > 10_000_000 {
+		c.failf(9, "admin_listener.rate_limit.max_tracked_keys %d: between 10000 and 10000000", n)
+	}
+	if pg := cfg.Storage.Postgres; pg.MaxConns < 0 || pg.MaxConns > 1000 {
+		c.failf(9, "storage.postgres.max_conns %d: between 1 and 1000", pg.MaxConns)
+	}
+	for k, t := range map[string]time.Duration{"app_statement_timeout": cfg.Storage.Postgres.AppStatementTimeout,
+		"reader_statement_timeout": cfg.Storage.Postgres.ReaderStatementTimeout} {
+		if t != 0 && (t < 100*time.Millisecond || t > 5*time.Minute) {
+			c.failf(9, "storage.postgres.%s %s: between 100ms and 5m", k, t)
+		}
+	}
+	if r := cfg.Observability.Tracing.SampleRatio; r != nil && (*r < 0 || *r > 1) {
+		c.failf(9, "observability.tracing.sample_ratio %v: between 0 and 1", *r)
+	}
+	if t := cfg.Observability.Tracing; t.Insecure && t.CACertFile != "" {
+		c.failf(9, "observability.tracing: ca_cert_file with insecure: a collector without TLS has no certificate to verify")
+	}
 	switch cfg.SecretSealing.Provider {
 	case "vault-transit":
+		if a := cfg.SecretSealing.VaultTransit.JWTAudience; !slices.Contains(cfg.CoreIdentity.SVIDSelector.JWTAudience, a) {
+			c.failf(9, "secret_sealing.vault_transit.jwt_audience %q is not in core_identity.svid_selector.jwt_audience", a)
+		}
 	case "local-kek":
 		if !opts.InsecureDev {
 			c.failf(9, "secret_sealing.provider local-kek requires --insecure-dev")

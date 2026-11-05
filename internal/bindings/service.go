@@ -16,6 +16,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -351,7 +352,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 			return nil, refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), src.scope, tgt.scope)
 		}
 		if res.decision = p.Evaluate(src.scope, tgt.scope); !res.decision.Allowed {
-			return nil, s.denied(ctx, *c, b, res)
+			return nil, s.denied(ctx, *c, b, cur, res)
 		}
 		if err := s.Rules.checkExpiry(b.ExpiresAt, time.Now()); err != nil {
 			return nil, err
@@ -401,17 +402,22 @@ func (res *resolved) actsFor(c changerequests.Caller) error {
 }
 
 // denied audits a binding the interconnection policy refuses; nothing else
-// is stored (ADR-14 rule 3).
-func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Binding, res *resolved) error {
+// is stored (ADR-14 rule 3). cur, the binding changed, is nil for a create.
+func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Binding, cur *stored, res *resolved) error {
 	snap, _ := json.Marshal(map[string]string{"sourceScope": res.sourceScope, "targetScope": res.targetScope, "rule": res.decision.Rule})
+	var id *uuid.UUID
+	if cur != nil {
+		id = &cur.id
+	}
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceName: b.Name, Action: "CR_INTERCONNECT_DENIED",
+		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceID: id, ResourceName: b.Name, Action: "CR_INTERCONNECT_DENIED",
 			Actor: c.ID(), Snapshot: snap})
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	metrics.InterconnectDenied.WithLabelValues(res.decision.Rule).Inc()
 	return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceScope, res.targetScope, res.decision.Rule)
 }
 
