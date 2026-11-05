@@ -91,7 +91,10 @@ pg_roles() {
 
 # pg_target creates the target database of the ligo-plugin-postgres stand-in
 # (sql/target.sql, idempotent) and lets any role reach that database, and
-# only it, over TLS from the inner network, as a workload would.
+# only it, over TLS from the inner network, as a workload would: members of
+# ligo_ldap by the directory, whose CA libldap reads from ldap.conf, and the
+# others by password. The first matching line wins, so they are rewritten in
+# that order, after the admin: holding ADMIN on ligo_ldap makes it a member.
 pg_target() {
 	local file="$LAB_STATE_DIR/passwords/target-admin" v hba
 	[[ -f "$file" ]] || (umask 077 && openssl rand -hex 16 >"$file")
@@ -99,10 +102,13 @@ pg_target() {
 		die "pg: cannot create the target database ledger"
 	v="$(pg_version)"
 	hba="/etc/postgresql/$v/main/pg_hba.conf"
-	if ! inner_exec pg grep -q '^hostssl ledger' "$hba"; then
-		inner_exec pg sh -c "echo 'hostssl ledger all $LAB_INNER_SUBNET scram-sha-256' >>$hba"
-		inner_exec pg systemctl reload "postgresql@$v-main"
-	fi
+	inner_exec pg sh -c "sed -i '/^TLS_CACERT/d' /etc/ldap/ldap.conf && echo 'TLS_CACERT /etc/ligo-lab/ca.crt' >>/etc/ldap/ldap.conf"
+	inner_exec pg sh -c "sed -i '/^hostssl ledger/d' $hba && cat >>$hba" <<HBA
+hostssl ledger lab_target_admin $LAB_INNER_SUBNET scram-sha-256
+hostssl ledger +ligo_ldap $LAB_INNER_SUBNET ldap ldapserver=ldap.ligo.lab ldapscheme=ldaps ldapprefix="uid=" ldapsuffix=",ou=ligo-accounts,$LDAP_BASE"
+hostssl ledger all $LAB_INNER_SUBNET scram-sha-256
+HBA
+	inner_exec pg systemctl reload "postgresql@$v-main"
 	info "target database ledger ready (ligo-plugin-postgres)"
 }
 

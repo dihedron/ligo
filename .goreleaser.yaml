@@ -64,6 +64,28 @@ builds:
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitBranch={{.Branch}}'
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GoReleaserVersion={{.Env._GORELEASER_VERSION}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
+  # operators pin this binary's hash (plugins[].sha256), so its version is the
+  # only value stamped in it: the same source gives the same hash
+  - id: ligo-plugin-openldap
+    main: ./cmd/plugins/ligo-plugin-openldap
+    binary: ligo-plugin-openldap
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    tags:
+      - osusergo
+      - netgo
+      - static_build
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
 # one archive per application
 archives:
   - id: ligo
@@ -84,6 +106,17 @@ archives:
       - goos: windows
         formats:
           - zip
+  - id: ligo-plugin-openldap
+    ids:
+      - ligo-plugin-openldap
+    formats:
+      - tar.gz
+    name_template: >-
+      ligo-plugin-openldap_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
 
 upx:
   - # Whether to enable it or not.
@@ -118,6 +151,11 @@ nfpms:
     package_name: ligo
     ids:
       - ligo
+    bindir: /usr/bin
+    contents: &plugins_directory
+      - dst: /usr/lib/ligo/plugins
+        type: dir
+        file_info: { mode: 0755, owner: root, group: root }
     description: |
       ligo, the SPIFFE binding lifecycle service.
     homepage: "https://github.com/dihedron/ligo"
@@ -140,6 +178,35 @@ nfpms:
       signature:
         key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
         # verified by debsig-verify (see the README)
+        type: origin
+  - id: ligo-plugin-openldap
+    package_name: ligo-plugin-openldap
+    ids:
+      - ligo-plugin-openldap
+    bindir: /usr/lib/ligo/plugins
+    contents: *plugins_directory
+    # no version pin: at startup ligo checks the protocol through Describe
+    dependencies:
+      - ligo
+    description: |
+      The openldap.v1 identity provider of ligo.
+    homepage: "https://github.com/dihedron/ligo"
+    maintainer: "Andrea Funtò <dihedron.dev@gmail.com>"
+    vendor: "Andrea Funtò"
+    license: "AGPL-3.0"
+    formats:
+      - rpm
+      - deb
+    epoch: "1"
+    release: "1"
+    section: default
+    priority: "optional"
+    rpm:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
+    deb:
+      signature:
+        key_file: '{{ if index .Env "GPG_KEY_FILE" }}{{ .Env.GPG_KEY_FILE }}{{ end }}'
         type: origin
 source:
   enabled: true

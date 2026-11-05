@@ -74,6 +74,8 @@ commands:
                             kills replicas; test-otel (with otel) the traces;
                             test-webhook (with webhook and ligo2) the webhooks,
                             which stops the receiver and the replicas
+                            test-faults stops the secrets backend and PostgreSQL
+                            under bindings being applied
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]

@@ -23,7 +23,7 @@ Out of scope: `activedirectory.v1`; groups (`IdentityArtifact.groups` stays empt
 | `/usr/lib/ligo/plugins/` (`root:root`, `0755`) | both |
 | `/usr/lib/ligo/plugins/ligo-plugin-openldap` (`root:root`, `0755`) | `ligo-plugin-openldap` |
 
-- **Upgrades.** `plugins[].sha256` pins the binary, so a package update cannot silently change privileged code: after upgrading, the new binary is refused until the operator sets the new hash (`sha256sum /usr/lib/ligo/plugins/ligo-plugin-openldap`) in `server.yaml` and restarts or reloads `ligo`.
+- **Upgrades.** `plugins[].sha256` pins the binary, so a package update cannot silently change privileged code: after upgrading, the new binary is refused until the operator sets the new hash (`sha256sum /usr/lib/ligo/plugins/ligo-plugin-openldap`) in `server.yaml` and restarts `ligo` (a reload is not enough, §8.2). A `unix:sha256` selector in SPIRE (ADR-03 point 5) pins it too, so the entry changes as well. The binary carries only its version, so a tag always gives the same hash. The steps are in `docs/operations.md`.
 
 ## 3. Instance configuration
 
@@ -120,7 +120,7 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 - `ou=ligo-accounts` and the service account `cn=ligo-idp` already exist, with their access rules (`test/lab/lib/ldap.sh`).
 - New: SPIRE entry `spiffe://prod.lab/ligo/plugin/openldap`, an OpenBao and Vault role, and the KV secret `ligo/bootstrap/openldap` with `cn=ligo-idp`'s DN and password.
 - OL-9's stopped directory is a port nothing listens on: tests run on `ligo1`, which cannot stop `slapd`.
-- The lab's `ligo-plugin-postgres` also accepts `EXTERNAL_DIR`: it creates the role with no password and tagged, and grants as usual. `pg_hba` verifies members of a new group role `ligo_ldap` with `ldap ldapscheme=ldaps`, `ldapprefix="uid="` and `ldapsuffix=",ou=ligo-accounts,dc=ligo,dc=lab"`.
+- The lab's `ligo-plugin-postgres` also accepts `EXTERNAL_DIR`: it creates the role with no password and tagged, and grants as usual. `pg_hba` verifies members of a new group role `ligo_ldap` with `ldap ldapscheme=ldaps`, `ldapprefix="uid="` and `ldapsuffix=",ou=ligo-accounts,dc=ligo,dc=lab"`. Holding `ADMIN` on `ligo_ldap` makes `lab_target_admin` a member, so a `scram-sha-256` line for it comes first: the first match wins.
 - A new platform `pg-ledger-ldap` uses them, beside `pg-ledger`, whose tests do not change.
 
 ## 10. Chunks

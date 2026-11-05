@@ -635,6 +635,9 @@ func TestAC09(t *testing.T) {
 	if len(v.fake.rotations) != 2 || !v.fake.rotations[1] {
 		t.Errorf("rotation per attempt %v", v.fake.rotations)
 	}
+	if n := v.audited(t, id, "APPLY_STARTED"); n != 1 { // INV-11: the retry's; the fixture started the first attempt directly
+		t.Errorf("APPLY_STARTED %d times", n)
+	}
 }
 
 // TestAC08: ligo is killed after S5; the next process recovers the

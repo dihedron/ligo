@@ -233,6 +233,9 @@ func TestRotate(t *testing.T) {
 	if len(v.fake.rotations) != 1 || !v.fake.rotations[0] {
 		t.Errorf("rotations %v", v.fake.rotations)
 	}
+	if n := v.audited(t, id, "REAPPLY_STARTED"); n != 1 { // INV-11
+		t.Errorf("REAPPLY_STARTED %d times", n)
+	}
 	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'FAILED' where id = $1", id); err != nil {
 		t.Fatal(err)
 	}

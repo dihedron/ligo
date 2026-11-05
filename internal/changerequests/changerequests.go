@@ -206,8 +206,8 @@ func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side
 // DELEGATED side.
 func side(cand Candidate, c Caller, p *governance.Policy) (s Side, g *authz.Grant) {
 	s = Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
-	if c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
-		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
+	if !strings.HasPrefix(cand.Side, "PARTY:") && c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
+		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover // a party's approvers always decide (ADR-13 rule 6)
 	} else if g = c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
 		s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
 	} else {
@@ -285,6 +285,9 @@ func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]
 func RatifiableSides(r *Request, c Caller, side string) ([]string, error) {
 	if c.ID() == r.RequestedBy {
 		return nil, refuse(403, "four-eyes-violation", "the requester cannot ratify its own break-glass change")
+	}
+	if c.Principal.SPIFFEID != "" {
+		return nil, refuse(403, "forbidden", "a break-glass change is ratified by a person, not by an SVID")
 	}
 	var eligible []string
 	for _, s := range r.Sides {

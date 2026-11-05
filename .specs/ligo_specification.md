@@ -3829,6 +3829,7 @@ identity_providers:
           url: "ldaps://openldap.prod.internal:636"
           service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
           allowed_endpoints: ["openldap.prod.internal:636"]
+          # ca_file: "/etc/ligo/tls/corp-ca.crt"   # roots for the directory and for the Vault below; default the system roots
           bootstrap_credential:
             source: vault
             address: "https://vault.prod.internal:8200"

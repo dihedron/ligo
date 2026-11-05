@@ -5,6 +5,7 @@
 # second replica ligo2").
 
 LIGO1_E2E=/home/ligo/e2e
+LIGO_E2E_SECRETS=/home/ligo/e2e-secrets # outside LIGO1_E2E, which serve_admins empties
 SERVE_DB=ligo_serve
 
 # cmd_serve [--on HOST|all] ACTION: start, stop, reload, status and logs act
@@ -25,6 +26,7 @@ cmd_serve() {
 	test-ha) serve_test_ha ;;
 	test-otel) serve_test_otel ;;
 	test-webhook) serve_test_webhook ;;
+	test-faults) serve_test_faults ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -36,7 +38,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel or test-webhook" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook or test-faults" ;;
 	esac
 }
 
@@ -306,8 +308,9 @@ serve_config() {
 	if inner_exists lb; then
 		advertise=lb.ligo.lab origin="https://$(lxd_ip):$LB_PORT"
 	fi
-	local aud bao host_name tp sv te
+	local aud bao host_name tp sv te ol
 	aud="$(secrets_audience)" bao="$(secrets_addr)" host_name="$(secrets_host).ligo.lab"
+	ol="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-openldap" | cut -d' ' -f1)"
 	tp="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-postgres" | cut -d' ' -f1)"
 	sv="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-vault" | cut -d' ' -f1)"
 	te="$(sha256sum "$LAB_STATE_DIR/plugins/ligo-plugin-echo" | cut -d' ' -f1)"
@@ -331,7 +334,7 @@ server:
     listen_address: "0.0.0.0:8443"
     tls_source: spiffe
     auth_modes: [x509_svid, jwt_svid]
-    accepted_trust_domains: [prod.lab]
+    accepted_trust_domains: [prod.lab, test.lab]
     expected_jwt_audience: "spiffe://prod.lab/ns/sys/sa/ligo"
   admin_listener:
     listen_address: "0.0.0.0:9443"
@@ -355,6 +358,11 @@ authorization:
     # the HA e2e: a second approver (AC-50), and an administrator for maintenance (AC-26)
     - { spiffe_id: "spiffe://prod.lab/ops/sam", role: approver, scopes: ["dc/corp-prod/*"] }
     - { spiffe_id: "spiffe://prod.lab/ops/ada", role: admin.full_access, scopes: ["*"] }
+    # the topologies' e2e: two tenancies and an Information Security party (ADR-13, ADR-14)
+    - { spiffe_id: "spiffe://prod.lab/ops/paula", role: operator, scopes: ["cloud/fin-01/payments"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/pia", role: approver, scopes: ["cloud/fin-01/payments"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/hana", role: operator, scopes: ["cloud/fin-01/hr", "cloud/fin-01/ledger"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/sean", role: approver, scopes: ["sec/infosec"] }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     # the web UI's echo guide: carol files, dave approves (.specs/ligo-echo-target.md)
@@ -362,16 +370,20 @@ authorization:
     - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, scopes: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, scopes: ["dc/corp-prod/*"] } # livia
   approval:
-    required_scopes: ["dc/corp-prod/*"]
+    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/payments"]
     require_distinct_approvers_across_scopes: false
     change_request_ttl: 72h
 governance:
   source_scopes:
     - { trust_domain: prod.lab, mode: static, scope: "dc/corp-prod" }
+    - { trust_domain: test.lab, mode: path_template, path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/', scope_template: 'cloud/\${1}/\${2}' }
   interconnects:
     default_cross_scope: deny
     rules:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
+      - { name: cloud-within-account, from: ["cloud/fin-01/*"], to: ["cloud/fin-01/*"], action: allow }
+      - { name: cloud-to-dc, from: ["cloud/fin-01/*"], to: ["dc/corp-prod/*"], action: allow, additional_approvals: [ { name: security, scope: "sec/infosec" } ] }
+      - { name: dc-to-cloud, from: ["dc/corp-prod"], to: ["cloud/fin-01/*"], action: allow }
 break_glass:
   min_justification_length: 20
   policies:
@@ -391,6 +403,25 @@ identity_providers:
   - type: svid.v1
     builtin: true
     instances: [ { name: svid-prod, zone: prod } ]
+  - type: openldap.v1
+    binary: ligo-plugin-openldap
+    sha256: "$ol"
+    instances:
+      - name: openldap-prod
+        zone: prod
+        svid_selector: { match_expr: 'path == "/ligo/plugin/openldap"', jwt_audience: ["$aud"] }
+        config:
+          url: "$LDAP_URL"
+          service_ou_dn: "ou=ligo-accounts,$LDAP_BASE"
+          allowed_endpoints: ["ldap.ligo.lab:636"]
+          ca_file: /etc/ligo-lab/ca.crt
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-openldap
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/openldap
 secret_stores:
   - type: none.v1
     builtin: true
@@ -421,17 +452,66 @@ platform_providers:
         zone: prod
         scope: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger"
-        allowed_source_trust_domains: [prod.lab]
+        allowed_source_trust_domains: [prod.lab, test.lab]
         network_flows:
           - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
         identity_provider: { type: target-local.v1, instance: local-prod }
         secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"] }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
         config:
           host: pg.ligo.lab
           port: 5432
           database: ledger
           grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
+          ca_file: /etc/ligo-lab/ca.crt
+          allowed_endpoints: ["pg.ligo.lab:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/postgres
+      - name: pg-ledger-cloud
+        zone: prod
+        scope: "cloud/fin-01/ledger"
+        target_scopes: ["cloud/fin-01/*"]
+        display_name: "Lab PostgreSQL ledger, owned by a tenancy"
+        allowed_source_trust_domains: [prod.lab, test.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
+        identity_provider: { type: target-local.v1, instance: local-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
+        config:
+          host: pg.ligo.lab
+          port: 5432
+          database: ledger
+          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
+          ca_file: /etc/ligo-lab/ca.crt
+          allowed_endpoints: ["pg.ligo.lab:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/postgres
+      - name: pg-ledger-ldap
+        zone: prod
+        scope: "dc/corp-prod"
+        display_name: "Lab PostgreSQL ledger, accounts in the directory"
+        allowed_source_trust_domains: [prod.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
+        identity_provider: { type: openldap.v1, instance: openldap-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
+        config:
+          host: pg.ligo.lab
+          port: 5432
+          database: ledger
+          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE, LEDGER_GONE_ROLE]   # LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
           ca_file: /etc/ligo-lab/ca.crt
           allowed_endpoints: ["pg.ligo.lab:5432"]
           bootstrap_credential:
@@ -486,7 +566,8 @@ YAML
 # max_token_ttl.
 serve_admins() {
 	local who dir="/root/e2e" f
-	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX")
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean
+		[workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX" [dcload]="ns/topo/sa/w$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
 	for who in "${!ids[@]}"; do
 		inner_exec spire-prod mkdir -m 0700 "$dir/$who"
@@ -502,7 +583,18 @@ serve_admins() {
 	spire prod jwt mint -spiffeID "spiffe://prod.lab/${ids[workload]}" -audience "spiffe://prod.lab/ns/sys/sa/ligo" -ttl 10m |
 		inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/workload-jwt && chown ligo:ligo $LIGO1_E2E/workload-jwt && chmod 0600 $LIGO1_E2E/workload-jwt" ||
 		die "spire-prod: cannot mint the JWT-SVID of the workload"
+	spire prod jwt mint -spiffeID "spiffe://prod.lab/${ids[workload]}" -audience "$(secrets_audience)" -ttl 10m |
+		inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/workload-store-jwt && chown ligo:ligo $LIGO1_E2E/workload-store-jwt && chmod 0600 $LIGO1_E2E/workload-store-jwt" ||
+		die "spire-prod: cannot mint the workload's JWT-SVID for the secrets backend"
 	inner_exec spire-prod rm -rf "$dir"
+	# the tenancy's workloads, as the registrar tenants cannot influence would register them (lab: minted)
+	inner_exec spire-test sh -c "rm -rf $dir && mkdir -m 0700 $dir"
+	spire test x509 mint -spiffeID "spiffe://test.lab/acct/fin-01/tenant/payments/ns/topo/sa/w$E2E_SUFFIX" -ttl 1h -write "$dir" >/dev/null 2>&1 ||
+		die "spire-test: cannot mint the SVID of the tenancy's workload"
+	for f in svid.pem key.pem; do
+		inner_exec spire-test cat "$dir/$f" | inner_exec ligo1 sh -c "cat >$LIGO1_E2E/cloudload-$f && chown ligo:ligo $LIGO1_E2E/cloudload-$f && chmod 0600 $LIGO1_E2E/cloudload-$f"
+	done
+	inner_exec spire-test rm -rf "$dir"
 }
 
 # serve_e2e RUN HOST [OTHER]: runs the e2e tests matching RUN as the user
@@ -515,7 +607,7 @@ serve_e2e() {
 		envs+=(--env "$line")
 	done < <(env_ligo)
 	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_ADMIN2=https://$other.ligo.lab:9443"
-		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E"
+		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SECRETS=$LIGO_E2E_SECRETS"
 		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" --env "LIGO_E2E_TRACE=${E2E_TRACE:-}")
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
 		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
@@ -556,6 +648,8 @@ serve_test() {
 	info "start: ligo serves again"
 	serve_e2e '^TestServeE2ERestarted$' "$other" || die "TestServeE2ERestarted failed on $other"
 	serve_cli
+	serve_test_ldap "$other"
+	serve_test_topologies "$other"
 	if inner_exists lb; then
 		section "e2e through lb"
 		E2E_SUFFIX="$(openssl rand -hex 4)" # new resources, and a fresh workload JWT-SVID
@@ -569,7 +663,109 @@ serve_test() {
 	executors="$(pg_superuser -d "$SERVE_DB" -tAc "select string_agg(distinct executor_id, ' ' order by executor_id) from dbos.workflow_status")"
 	[[ " $executors " == *" ligo1 "* && " $executors " == *" $other "* ]] || die "workflows ran as executors \"$executors\", not on every replica"
 	info "workflows ran as the executors $executors"
+	serve_scan_secrets
 	info "e2e of ligo serve passed"
+}
+
+# serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,
+# OL-11 to OL-14 and AC-10): the tests on ligo1, then what they cannot read
+# from there: the audit entries and every replica's journal.
+serve_test_ldap() {
+	section "e2e of openldap.v1"
+	local before after
+	E2E_SUFFIX="$(openssl rand -hex 4)" # a new workload: the one before saw its binding revoked
+	serve_admins
+	before="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	serve_e2e '^TestServeLDAP' ligo1 "$1" || die "TestServeLDAP failed"
+	after="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	((after - before == 2)) || die "OL-13, AC-10: $((after - before)) DELETE_COMPLETED entries, want 2"
+	info "e2e of openldap.v1 passed"
+}
+
+# serve_test_topologies OTHER: the four topologies of ADR-13, each bound,
+# served to its workload and revoked; a pair no rule allows is refused.
+serve_test_topologies() {
+	section "e2e of the four topologies"
+	local before after
+	before="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	serve_e2e '^TestServeTopologies$' ligo1 "$1" || die "TestServeTopologies failed"
+	after="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
+	((after - before == 4)) || die "the topologies: $((after - before)) DELETE_COMPLETED entries, want 4"
+	info "e2e of the four topologies passed"
+}
+
+# serve_scan_secrets: INV-03 and OL-14: the passwords the e2e read from the
+# store are nowhere in ligo_serve, DBOS's checkpoints included, or in the
+# journal of ligo and its plugins on any replica. Only counts are printed.
+serve_scan_secrets() {
+	local dir host found
+	dir="$(umask 077 && mktemp -d)"
+	inner_exec ligo1 cat "$LIGO_E2E_SECRETS" >"$dir/secrets"
+	(($(wc -l <"$dir/secrets") >= 3)) || { rm -rf "$dir"; die "INV-03: the e2e recorded no passwords"; }
+	lxd exec lxd -- lxc exec pg -- sudo -u postgres pg_dump -d "$SERVE_DB" >"$dir/haystack" ||
+		{ rm -rf "$dir"; die "INV-03: cannot dump $SERVE_DB"; }
+	for host in $(ligo_hosts); do
+		inner_exec "$host" journalctl --no-pager -u ligo >>"$dir/haystack" ||
+			{ rm -rf "$dir"; die "INV-03: cannot read the journal of $host"; }
+	done
+	found="$(grep -c -F -f "$dir/secrets" "$dir/haystack" || true)"
+	info "INV-03: $(wc -l <"$dir/secrets") passwords, $(wc -l <"$dir/haystack") lines searched, $found found"
+	rm -rf "$dir"
+	inner_exec ligo1 rm -f "$LIGO_E2E_SECRETS"
+	[[ "$found" == 0 ]] || die "OL-14: a password is in the database or in a journal"
+}
+
+# serve_test_faults: the faults of §11.1 rule 3 that stop a service: the
+# secrets backend under a binding's sealing (AC-09), and PostgreSQL under
+# bindings in flight. Each service is started again whatever the test did.
+serve_test_faults() {
+	deploy_tests
+	section "the secrets backend stopped (AC-09)"
+	local other server unit rc=0
+	other="$(ligo_hosts | tail -1)"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_e2e '^TestServeFaultWarm$' ligo1 "$other" || die "TestServeFaultWarm failed"
+	server="$(secrets_host)"
+	unit=openbao
+	[[ "$(secrets_backend)" == vault ]] && unit=vault
+	inner_exec "$server" systemctl stop "$unit"
+	serve_e2e '^TestServeFaultTransitDown$' ligo1 "$other" || rc=1
+	inner_exec "$server" systemctl start "$unit"
+	bao_wait "$server"
+	bao_unseal "$server"
+	((rc == 0)) || die "TestServeFaultTransitDown failed"
+	serve_e2e '^TestServeFaultTransitBack$' ligo1 "$other" || die "TestServeFaultTransitBack failed"
+	[[ "$(serve_sql "select count(*) from audit_log where resource_name = 'fault-seal-$E2E_SUFFIX' and action = 'APPLY_STARTED' and attempt = 2")" == 1 ]] ||
+		die "AC-09: the retry was not attempt 2"
+
+	section "PostgreSQL stopped under bindings in flight"
+	local v inflight="" pid host before=()
+	v="$(pg_version)"
+	for host in $(ligo_hosts); do
+		before+=("$(inner_exec "$host" systemctl show -p NRestarts --value ligo)")
+	done
+	serve_e2e '^TestServeFaultDatabase$' ligo1 "$other" &
+	pid=$!
+	for _ in $(seq 1 600); do
+		inflight="$(serve_sql "select count(*) from bindings where name like 'fdb-$E2E_SUFFIX-%' and phase = 'PROVISIONING'")"
+		[[ "$inflight" -gt 0 ]] && break
+		sleep 0.1
+	done
+	inner_exec pg systemctl stop "postgresql@$v-main"
+	info "PostgreSQL stopped with $inflight bindings in flight"
+	sleep 10
+	inner_exec pg systemctl start "postgresql@$v-main"
+	wait "$pid" || die "TestServeFaultDatabase failed"
+	[[ "$inflight" -gt 0 ]] || die "no binding was in flight when PostgreSQL stopped: the test proved nothing"
+	local i=0
+	for host in $(ligo_hosts); do
+		[[ "$(inner_exec "$host" systemctl show -p NRestarts --value ligo)" == "${before[$i]}" ]] ||
+			die "ligo on $host restarted during the outage"
+		i=$((i + 1))
+	done
+	info "every binding converged and no replica restarted"
+	info "the faults passed"
 }
 
 # serve_sql SQL: one value from ligo_serve, as the superuser.
