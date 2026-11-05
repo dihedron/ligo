@@ -40,4 +40,5 @@ go.work.sum
 
 # lab test environment (test/lab)
 test/lab/.state/
+test/lab/.evidence/
 test/lab/lab.local.env

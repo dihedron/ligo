@@ -40,6 +40,8 @@ source "$LAB_DIR/lib/lb.sh"
 source "$LAB_DIR/lib/otel.sh"
 # shellcheck source=lib/hooks.sh
 source "$LAB_DIR/lib/hooks.sh"
+# shellcheck source=lib/release.sh
+source "$LAB_DIR/lib/release.sh"
 
 usage() {
 	cat <<USAGE
@@ -92,6 +94,9 @@ commands:
                             psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
                             postgres over the Unix socket
+  release-run               destroy the lab, build a new one and run every suite
+                            on OpenBao and on Vault, keeping the evidence in
+                            test/lab/.evidence (a clean tree only)
   snapshot                  save the VMs as the lab's baseline
   reset                     return the VMs to the baseline (an empty
                             database), and wait until it answers
@@ -265,6 +270,7 @@ main() {
 	bao) require_lab && bao "$@" ;;
 	vault) require_lab && server_cli vault-prod "$@" ;;
 	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
+	release-run) cmd_release_run ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;
 	stop) require_lab && lab_stop ;;
