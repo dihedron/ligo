@@ -33,7 +33,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-07a | Covered | I | TestBusy |  |
 | AC-08 | Covered | I+P | TestAC08, TestLabTransit | A real SIGKILL of a child process; the Transit path separately on the lab. |
 | AC-09 | Covered | I | TestAC09, TestTransitUnavailable | Transit simulated, not stopped on the lab, which §11.1 rule 3 names as a fault to inject. |
-| AC-10 | Partial | I | TestAC10 | Fake plugins: the lab has no `openldap.v1` provider, so no real LDAP account is removed. |
+| AC-10 | Covered | L+I | TestServeLDAPStageTwoFails, TestAC10 | The real `openldap.v1` plugin and directory on the lab, fake plugins in TestAC10. |
 | AC-11 | Covered | I | TestAC11 |  |
 | AC-12 | Covered | L | TestServeE2ERestarted, TestRefresh, TestDelete |  |
 | AC-13 | Covered | I | TestOutputRefused |  |
