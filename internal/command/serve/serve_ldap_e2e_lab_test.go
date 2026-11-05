@@ -173,7 +173,7 @@ func revoke(t *testing.T, olga, dora *admin, name string, b map[string]any) {
 
 // storeCredential reads the binding's credential as its workload does: the
 // location from ligo's workload API, then the secret with its JWT-SVID. The
-// passwords go to a file for lab.sh's search (OL-14).
+// passwords go to a file for lab.sh's search (INV-03, OL-14).
 func storeCredential(t *testing.T, target string) (user, password string) {
 	t.Helper()
 	w := newWorkload(t, "workload", false)
@@ -240,7 +240,7 @@ func storeCredential(t *testing.T, target string) (user, password string) {
 	if spec := item["spec"].(map[string]any); user == "" || password == "" || spec["user"] != user {
 		t.Fatalf("the secret's user %q, the spec's %v", user, spec["user"])
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "ldap-secrets"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(e2eEnv(t, "LIGO_E2E_SECRETS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}

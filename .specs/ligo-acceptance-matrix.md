@@ -13,8 +13,13 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 
 | | Rows | Covered | Partial | Gap | Covered at L or P | Covered only at U or B |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Scenarios (§11.2) | 92 | 92 | 0 | 0 | 18 | 15 |
-| Invariants (§4) | 26 | 24 | 2 | 0 | 3 | 4 |
+| Scenarios (§11.2) | 92 | 92 | 0 | 0 | 19 | 15 |
+| Invariants (§4) | 26 | 25 | 1 | 0 | 4 | 4 |
+
+## Lab rules (§11.1)
+
+- **Rule 1, tenancies.** `TestServeTopologies` runs the four topologies of ADR-13 on the lab: cloud to cloud, data centre to data centre, cloud to data centre with an additional party, and data centre to cloud. Another account's source is refused. Limit: the tenancy's workload is minted by `lab.sh`, not registered by a registrar, and it reads its binding from ligo but not its credential from the store, because the store of zone `prod` does not trust `test.lab` tokens.
+- **Rule 3, faults.** `lab.sh serve test-faults` stops the secrets backend under a binding's sealing (AC-09), and PostgreSQL for 10 s under bindings being applied (`TestServeFaultDatabase`): every binding converges, and no replica restarts.
 
 ## Scenarios (§11.2)
 
@@ -32,7 +37,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-07 | Covered | I | TestUpdate, TestBusy |  |
 | AC-07a | Covered | I | TestBusy |  |
 | AC-08 | Covered | I+P | TestAC08, TestLabTransit | A real SIGKILL of a child process; the Transit path separately on the lab. |
-| AC-09 | Covered | I | TestAC09, TestTransitUnavailable | Transit simulated, not stopped on the lab, which §11.1 rule 3 names as a fault to inject. |
+| AC-09 | Covered | L+I | TestServeFaultTransitDown, TestServeFaultTransitBack, TestAC09, TestTransitUnavailable | `lab.sh serve test-faults` stops the real backend, OpenBao and Vault. |
 | AC-10 | Covered | L+I | TestServeLDAPStageTwoFails, TestAC10 | The real `openldap.v1` plugin and directory on the lab, fake plugins in TestAC10. |
 | AC-11 | Covered | I | TestAC11 |  |
 | AC-12 | Covered | L | TestServeE2ERestarted, TestRefresh, TestDelete |  |
@@ -119,7 +124,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | :--- | :--- | :--- | :--- | :--- |
 | INV-01 | Covered | U | TestINV01, TestRefresh |  |
 | INV-02 | Covered | I | TestINV02, TestApply |  |
-| INV-03 | Partial | I+U+L | TestAC08 (canary), TestLogsRedacted, TestServeTraceFile, TestServeWebhookFile | Each path checked where it is; no scan of tables, checkpoints and logs after a full lab run. |
+| INV-03 | Covered | I+U+L | TestAC08 (canary), TestLogsRedacted, TestServeTraceFile, TestServeWebhookFile, `serve_scan_secrets` | After `lab.sh serve test`, the passwords the e2e read from the store are searched for in a `pg_dump` of `ligo_serve`, DBOS checkpoints included, and in every replica's journal. |
 | INV-04 | Covered | I | TestDelete |  |
 | INV-05 | Covered | I | TestApply |  |
 | INV-06 | Covered | I | TestFenced, TestMarkStep |  |

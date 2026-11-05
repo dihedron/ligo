@@ -88,6 +88,7 @@ func TestServeE2EWorkload(t *testing.T) {
 		list[0]["auth"] == nil || list[0]["spec"] == nil || list[0]["platformType"] != "postgres.v1" {
 		t.Fatalf("GET /v1/bindings: %d %v", code, body)
 	}
+	storeCredential(t, target) // INV-03: the password goes to lab.sh's search
 	if code, _, _ := w.get("/v1/bindings", etag); code != http.StatusNotModified {
 		t.Errorf("If-None-Match: %d", code)
 	}
