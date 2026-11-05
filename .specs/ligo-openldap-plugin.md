@@ -20,6 +20,8 @@ Out of scope: `activedirectory.v1`; groups (`IdentityArtifact.groups` stays empt
 | Path | Package |
 | :--- | :--- |
 | `/usr/bin/ligo` | `ligo` |
+| `/usr/lib/systemd/system/ligo.service` | `ligo` |
+| `/usr/share/ligo/examples/` (`server.yaml`, `roles.sql`) | `ligo` |
 | `/usr/lib/ligo/plugins/` (`root:root`, `0755`) | both |
 | `/usr/lib/ligo/plugins/ligo-plugin-openldap` (`root:root`, `0755`) | `ligo-plugin-openldap` |
 

@@ -152,10 +152,21 @@ nfpms:
     ids:
       - ligo
     bindir: /usr/bin
-    contents: &plugins_directory
+    contents:
       - dst: /usr/lib/ligo/plugins
         type: dir
         file_info: { mode: 0755, owner: root, group: root }
+      - src: packaging/ligo.service
+        dst: /usr/lib/systemd/system/ligo.service
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: examples/server.yaml
+        dst: /usr/share/ligo/examples/server.yaml
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: test/lab/sql/roles.sql
+        dst: /usr/share/ligo/examples/roles.sql
+        file_info: { mode: 0644, owner: root, group: root }
+    scripts:
+      postinstall: packaging/postinstall.sh
     description: |
       ligo, the SPIFFE binding lifecycle service.
     homepage: "https://github.com/dihedron/ligo"
@@ -184,7 +195,10 @@ nfpms:
     ids:
       - ligo-plugin-openldap
     bindir: /usr/lib/ligo/plugins
-    contents: *plugins_directory
+    contents:
+      - dst: /usr/lib/ligo/plugins
+        type: dir
+        file_info: { mode: 0755, owner: root, group: root }
     # no version pin: at startup ligo checks the protocol through Describe
     dependencies:
       - ligo
