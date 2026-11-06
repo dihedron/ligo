@@ -226,6 +226,7 @@ type Governance struct {
 	SourceScopes  []governance.SourceScope `yaml:"source_scopes"`
 	NamePrefixes  []governance.NamePrefix  `yaml:"name_prefixes"`
 	Interconnects governance.Interconnects `yaml:"interconnects"`
+	Accounts      *governance.Accounts     `yaml:"accounts"`
 }
 
 type BindingsPolicy struct {

@@ -60,8 +60,8 @@ Sources and targets sit on separate branches, `app` and `data`, because a projec
 Rules, checked at startup (§8.2):
 
 1. `{account}`, `{project}` and `{tenancy}` each match one whole segment, and each value MUST match `^[a-z][a-z0-9]*$`. This is narrower than a scope segment on purpose: see §5.
-2. A scope is **account-managed** when it matches the form of `scope` or lies below it. All others, such as `dc/corp-prod`, need no account and behave as in v0.1.0. `source_scope` and `target_scope` MUST lie below `scope`.
-3. `ldap_groups` patterns may use `{account}` and `{project}`, and every placeholder of a rule's `scope` MUST appear in its `group_dn`. Tenancies have no groups of their own: the account's approvers and the platform's decide for them.
+2. A scope is **account-managed** when it matches the form of `scope` or lies below it. All others, such as `dc/corp-prod`, need no account and behave as in v0.1.0. `source_scope` and `target_scope` MUST lie below `scope`. They MUST NOT overlap, so that a project and a tenancy of one name can never be one scope.
+3. `ldap_groups` patterns may use `{account}` and `{project}`, and every placeholder of a rule's `scope` MUST appear in its `group_dn`. A rule's role is `viewer`, `operator`, `approver` or `break_glass`: never `trusted_automation`, which is for machines, or a global role. Tenancies have no groups of their own: the account's approvers and the platform's decide for them.
 4. The whole section is optional. Without it, ligo behaves as v0.1.0.
 
 Static role bindings keep working and add to these grants. People with `*` or `cloud/*` are the domain-wide operators and approvers of requirement 1.

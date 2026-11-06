@@ -39,6 +39,10 @@ var (
 	instanceIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,58}$`)
 )
 
+// accountRoles are the roles a group of an account may give: people's roles
+// on the account's scopes, never trusted_automation or a global one.
+var accountRoles = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass}
+
 // checker collects the failures of every rule, so that one run reports them
 // all.
 type checker struct {
@@ -446,6 +450,29 @@ func (c *checker) governance(cfg *Config) {
 		}
 		names[r.Name] = true
 		c.interconnectRule(r)
+	}
+	c.accounts(cfg)
+}
+
+// accounts checks governance.accounts, when present (.specs/ligo-tenancy.md
+// §4, §9.1): without approval on every account, an account operator's own
+// sides would be approved automatically.
+func (c *checker) accounts(cfg *Config) {
+	a := cfg.Governance.Accounts
+	if a == nil {
+		return
+	}
+	if err := a.Validate(); err != nil {
+		c.failf(16, "governance.accounts: %v", err)
+		return
+	}
+	for i, r := range a.LDAPGroups.Roles {
+		if !slices.Contains(accountRoles, r.Role) {
+			c.failf(16, "governance.accounts.ldap_groups.roles[%d]: role %q must be one of %v", i, r.Role, accountRoles)
+		}
+	}
+	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredScopes, func(p string) bool { return governance.ScopeMatches(p, a.SampleScope()) }) {
+		c.failf(16, "governance.accounts: approval.required_scopes must cover every account of %q", a.Scope)
 	}
 }
 
