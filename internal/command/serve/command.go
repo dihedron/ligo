@@ -71,7 +71,11 @@ type Serve struct {
 
 // SetGlobals receives the root's --log-level.
 func (cmd *Serve) SetGlobals(g *client.Globals) {
-	_ = cmd.level.UnmarshalText([]byte(g.LogLevel)) // the parser allows debug, info, warn and error only
+	if g.LogLevel == "off" {
+		cmd.level = slog.Level(1000) // above every level logged
+		return
+	}
+	_ = cmd.level.UnmarshalText([]byte(g.LogLevel)) // the parser allows debug, info, warn, error and off only
 }
 
 // Execute runs until SIGINT or SIGTERM, then shuts down in order.

@@ -4066,7 +4066,7 @@ package main
 
 // GlobalOptions holds flags common across all commands.
 type GlobalOptions struct {
-	LogLevel string `short:"l" long:"log-level" env:"LIGO_LOG_LEVEL" default:"info" choice:"debug" choice:"info" choice:"warn" choice:"error" description:"Set logging verbosity."`
+	LogLevel string `short:"l" long:"log-level" env:"LIGO_LOG_LEVEL" default:"info" choice:"debug" choice:"info" choice:"warn" choice:"error" choice:"off" description:"Set logging verbosity."`
 	Format   string `short:"o" long:"output" env:"LIGO_OUTPUT" default:"table" choice:"table" choice:"json" choice:"yaml" description:"Output format for CLI commands."`
 }
 
