@@ -146,6 +146,16 @@
 | `governance.interconnects.rules.additional_approvals.name` | The party; its side is `PARTY:<name>`. | |
 | `governance.interconnects.rules.additional_approvals.scope` | Its scope, whose approvers decide. | A scope path |
 | `governance.interconnects.rules.distinct_approvers` | `false` lets one person approve both sides for these pairs. | Audited risk |
+| `governance.accounts` | The structure of account-managed scopes. Absent: no accounts. | Optional |
+| `governance.accounts.scope` | An account's root, such as `cloud/{account}`. `approval.required_scopes` must cover it. | Contains `{account}` |
+| `governance.accounts.source_scope` | A project's scope, such as `cloud/{account}/app/{project}`. | Below `scope`, not overlapping `target_scope` |
+| `governance.accounts.target_scope` | A tenancy's scope, such as `cloud/{account}/data/{tenancy}`. | Below `scope` |
+| `governance.accounts.ldap_groups` | Roles from the directory, one rule for all accounts. | |
+| `governance.accounts.ldap_groups.search_base` | The DN every group lies below. | |
+| `governance.accounts.ldap_groups.roles` | The rules. | |
+| `governance.accounts.ldap_groups.roles.group_dn` | A DN with `{account}`, optionally `{project}`, each one whole value. | The same depth in every rule |
+| `governance.accounts.ldap_groups.roles.role` | `viewer`, `operator`, `approver` or `break_glass`. | |
+| `governance.accounts.ldap_groups.roles.scope` | The scope it gives, at or below `scope`. May end in `/*`. | Only placeholders of its `group_dn` |
 | `regex_policy` | Limits on source regexes. | |
 | `regex_policy.max_length` | Longest regex. | |
 | `regex_policy.min_literal_path_segments` | Fixed path segments a regex must begin with. | |
