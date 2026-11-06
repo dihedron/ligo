@@ -77,6 +77,8 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 
 **`-svids SOCKET`**: not an RPC. Run by hand as the plugin's user, the binary prints the SPIFFE IDs the agent at `SOCKET` issues to it, to check its SPIRE registration, and exits. Nothing secret is printed.
 
+**`version [-v]`**: not an RPC. Prints the version in one line, or in detail with `-v`, as `ligo version` does. The build stamps only what the commit and tag fix, so the same source gives the same hash; build time and branch stay empty.
+
 **Connections.** One connection per call, with a 10 s timeout, closed at the end of the call. No pool: calls are rare, and each one reads the current credential.
 
 ## 6. Errors

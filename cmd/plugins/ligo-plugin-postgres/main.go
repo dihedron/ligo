@@ -26,6 +26,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/command/version"
 	"github.com/dihedron/ligo/pkg/metadata"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
@@ -646,6 +647,9 @@ func (p *plugin) GetUISchemas(_ context.Context, r *pluginv1.GetUISchemasRequest
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "version" {
+		os.Exit(version.Run(os.Args[2:]))
+	}
 	if len(os.Args) == 3 && os.Args[1] == "-svids" {
 		os.Exit(pluginsdk.PrintSVIDs(os.Args[2]))
 	}

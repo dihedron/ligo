@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dihedron/ligo/pkg/metadata"
+	flags "github.com/jessevdk/go-flags"
 	"github.com/joho/godotenv"
 )
 
@@ -42,6 +43,22 @@ func (cmd *Version) Execute(args []string) error {
 	}
 	slog.Debug("command done")
 	return nil
+}
+
+// Run runs the command with args and returns the exit code: how a plugin, which
+// has no other commands, answers "NAME version [-v]".
+func Run(args []string) int {
+	var cmd Version
+	if _, err := flags.ParseArgs(&cmd, args); err != nil {
+		if flags.WroteHelp(err) {
+			return 0
+		}
+		return 2
+	}
+	if err := cmd.Execute(nil); err != nil {
+		return 1
+	}
+	return 0
 }
 
 // relevantEnv reports whether an environment entry concerns the application

@@ -68,6 +68,8 @@ It is not a superuser. If it also holds `ADMIN` on `directory_group`, it counts 
 
 **`-svids SOCKET`**: as `openldap.v1`.
 
+**`version [-v]`**: as `openldap.v1`.
+
 ## 7. Errors
 
 Messages are fixed. PostgreSQL's text can echo a statement, so only the SQLSTATE is logged.

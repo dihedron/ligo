@@ -64,3 +64,20 @@ func capture(t *testing.T, f func() error) string {
 	out, _ := io.ReadAll(r)
 	return string(out)
 }
+
+// TestRun is how a plugin answers "NAME version [-v]".
+func TestRun(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{nil, 0},
+		{[]string{"-v"}, 0},
+		{[]string{"--verbose"}, 0},
+		{[]string{"--nonsense"}, 2},
+	} {
+		if got := Run(tc.args); got != tc.want {
+			t.Errorf("Run(%v) = %d, want %d", tc.args, got, tc.want)
+		}
+	}
+}

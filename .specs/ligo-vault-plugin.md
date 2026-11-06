@@ -66,6 +66,8 @@ The finalized client auth gives `address`, `authMount`, `role`, `policy`, and `s
 
 **`-svids SOCKET`**: as `openldap.v1`.
 
+**`version [-v]`**: as `openldap.v1`.
+
 ## 7. What the plugin's role may do
 
 The operator gives the plugin's JWT role a policy that allows, and only allows:

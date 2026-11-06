@@ -20,6 +20,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/command/version"
 	"github.com/dihedron/ligo/pkg/metadata"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/go-ldap/ldap/v3"
@@ -299,6 +300,9 @@ func failure(err error) error {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "version" {
+		os.Exit(version.Run(os.Args[2:]))
+	}
 	if len(os.Args) == 3 && os.Args[1] == "-svids" {
 		os.Exit(pluginsdk.PrintSVIDs(os.Args[2]))
 	}
