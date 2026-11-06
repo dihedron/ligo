@@ -1,0 +1,5 @@
+# Architecture and Design: title page and PDF metadata (see docs/build.sh)
+title: "Architecture and Design"
+subtitle: "How ligo manages bindings, and why it is safe"
+author: "ligo"
+lang: en-GB

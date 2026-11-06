@@ -370,6 +370,10 @@ sboms:
     
 checksum:
   name_template: "checksums.txt"
+  # the release documents too (make docs): the signature of the checksums file
+  # then covers them like the packages (T-7)
+  extra_files:
+    - glob: ./build/docs/*.pdf
 
 # the checksums file covers every archive, package and SBOM: its detached
 # signature, made with the packaging key whose fingerprint is in
@@ -391,6 +395,9 @@ signs:
       - "${artifact}"
 
 release:
+  # the release documents (make release builds them first): .specs/ligo-docs.md
+  extra_files:
+    - glob: ./build/docs/*.pdf
   footer: |
     ---
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
