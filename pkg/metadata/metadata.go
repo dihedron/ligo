@@ -125,7 +125,6 @@ func PrintFull(writer io.Writer) {
 	_, _ = fmt.Fprintf(writer, "  - Git Tag                   : %s\n", GitTag)
 	_, _ = fmt.Fprintf(writer, "  - Git Branch                : %s\n", GitBranch)
 	_, _ = fmt.Fprintf(writer, "  - Git Tree State            : %s\n", GitTreeState)
-	_, _ = fmt.Fprintf(writer, "  - Git Time                  : %s\n", GitTime)
 	_, _ = fmt.Fprintf(writer, "  - Build Commit              : %s\n", GitCommit)
 	_, _ = fmt.Fprintf(writer, "  - Variable Name (.env)      : %s\n", DotEnvVarName)
 }

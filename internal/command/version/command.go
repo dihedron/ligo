@@ -17,7 +17,7 @@ type Version struct {
 	// Verbose is the flag that indicates whether to print verbose information about the application.
 	Verbose bool `short:"v" long:"verbose" description:"Print verbose information about the application."`
 	// DotEnv is the optional path to the .env file.
-	DotEnv *string `short:"D" long:"dotenv" description:"The path to the .env file." optional:"true" env:"LIGO_DOTENV"`
+	DotEnv *string `short:"D" long:"dotenv" description:"The path to the .env file." env:"LIGO_DOTENV"`
 }
 
 // Execute is the real implementation of the Version command.
@@ -65,14 +65,18 @@ func Run(args []string) int {
 // (LIGO_* settings) and returns it for printing, with the values of secrets
 // masked.
 func relevantEnv(env string) (string, bool) {
-	name, _, _ := strings.Cut(env, "=")
+	name, value, _ := strings.Cut(env, "=")
 	if !strings.HasPrefix(name, "LIGO_") {
 		return "", false
 	}
-	for _, secret := range []string{"PASSWORD", "SECRET", "TOKEN", "PASSCODE"} {
+	for _, secret := range []string{"PASSWORD", "SECRET", "TOKEN", "PASSCODE", "DSN"} {
 		if strings.Contains(name, secret) {
 			return name + "=********", true
 		}
+	}
+	// userinfo in a URL may hold a password, even if the URL does not parse
+	if strings.Contains(name, "URL") && strings.Contains(value, "@") {
+		return name + "=********", true
 	}
 	return env, true
 }

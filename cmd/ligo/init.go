@@ -32,8 +32,9 @@ func init() {
 		slog.Info("loading .env file", "path", dotenv)
 		if err := godotenv.Load(dotenv); err != nil {
 			slog.Error("error loading .env file", "error", err)
+		} else {
+			slog.Info("successfully loaded .env file", "path", dotenv)
 		}
-		slog.Info("successfully loaded .env file", "path", dotenv)
 	}
 
 	// get log elevel from environment variable where, given
@@ -62,7 +63,6 @@ func init() {
 			options.Level = slog.LevelError
 		case "off", "none", "null", "nil", "no", "n":
 			options.Level = LevelNone
-			return
 		}
 	}
 

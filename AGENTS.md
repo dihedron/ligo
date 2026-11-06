@@ -15,10 +15,11 @@
 5. **Compliance Audit:** Before finishing a task, verify that the implementation matches the API contracts, data models, and edge cases defined in the active spec.
 6. **No Secrets in Commits:** Before committing anything, check with all available local tools (e.g. gitleaks, trufflehog) that no secrets are in the sources being committed. 
 7. **No vulnerable dependencies in Commits:** Before committing, run govulncheck and check that there are no vulnerable dependencies in `go.mod`.
-8. **No unneeded backward compatibility:** Backward compatibility is not necessary (and should be avoided if it complicates code, introduces warts or hinders comprehension of the design and the code) until the product is released, and even then it may be worth evaluating costs and benefits of keeping the product backward-compatible versus bumping the product's major version. Always ask for the user's choice unless the decision is trivial.
+8. **No unneeded backward compatibility:** Backward compatibility is not necessary (and should be avoided if it complicates code, introduces warts or hinders comprehension of the design and the code) until a product's major version (e.g. v1.0.0) is released, and even then it may be worth evaluating costs and benefits of keeping the product backward-compatible versus bumping the product's major version. Always ask for the user's choice unless the decision is trivial.
 9. **Fuzzy Testing and Benchmarking:** Propose fuzzy testing and benchmarking when reasonable.
 10. **Lab Testing:** Whenever applicable, propose to set up a lab environment to cover complex integration scenarios; don't shy away from proposing more coverage scenarios, including lengthy stress tests and chaos monkey to check for correctness under random conditions (e.g. race conditions, malfunctions), whenever reasonable.
 11. **Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. 
+12. **Sane Commits:** run `go test ./... before every commit and check that everything is still sane.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers; propose additional libraries where applicable.
@@ -31,7 +32,7 @@
 * `internal/` - Private application and library code.
 * `pkg/` - Public library code (e.g. the build metadata injected at link time).
 * `.specs/` - Feature design documents and architectural specifications.
-* 
+
 ## Command line
 Each application supports command line switches.
 The command line arguments parsing is based on `github.com/jessevdk/go-flags`. Where applicable, the command line follows the simple convention:

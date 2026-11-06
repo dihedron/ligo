@@ -13,4 +13,7 @@ func TestPrintFullUsesWriter(t *testing.T) {
 	if !strings.Contains(out.String(), "Version") {
 		t.Fatalf("nothing written: %q", out.String())
 	}
+	if n := strings.Count(out.String(), "Git Time"); n != 1 {
+		t.Errorf("Git Time printed %d times", n)
+	}
 }
