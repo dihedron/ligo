@@ -159,3 +159,49 @@ func TestVisible(t *testing.T) {
 		t.Error("break_glass alone sees a PUBLIC resource")
 	}
 }
+
+// account_admin manages the registry and nothing else (spec §7.3).
+func TestAccountAdmin(t *testing.T) {
+	admin := Grants{{Role: config.RoleAccountAdmin}}
+	if !admin.AccountAdmin() {
+		t.Error("account_admin is no account admin")
+	}
+	if !(Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}).AccountAdmin() {
+		t.Error("admin.full_access includes account_admin")
+	}
+	if (Grants{{Role: config.RoleOperator, Scopes: []string{"*"}}}).AccountAdmin() {
+		t.Error("an operator is no account admin")
+	}
+	if admin.Viewer() {
+		t.Error("account_admin alone reads resources")
+	}
+	if admin.Sees("cloud/acme") || admin.ActsFor("cloud/acme", "") || admin.CanApprove("cloud/acme") || admin.Operator("cloud/acme") {
+		t.Error("account_admin alone reaches a scope")
+	}
+	if admin.Visible([]string{"cloud/acme"}, "PUBLIC", nil) {
+		t.Error("account_admin alone sees PUBLIC resources")
+	}
+}
+
+func TestInScopes(t *testing.T) {
+	const account = "cloud/acme/*"
+	for _, c := range []struct {
+		gs   Grants
+		want bool
+	}{
+		{Grants{{Role: config.RoleViewer, Scopes: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/*"}}}, true},
+		{Grants{{Role: config.RoleApprover, Scopes: []string{"cloud/acme/*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acme/app/p1"}}}, true},
+		{Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/globex/*"}}}, false},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acmesub/*"}}}, false},
+		{Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}, false},
+		{Grants{{Role: config.RoleAccountAdmin}}, false},
+		{nil, false},
+	} {
+		if got := c.gs.InScopes(account); got != c.want {
+			t.Errorf("%+v: %v", c.gs, got)
+		}
+	}
+}

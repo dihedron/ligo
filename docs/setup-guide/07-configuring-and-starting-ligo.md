@@ -62,6 +62,7 @@ Roles are granted on scope patterns. A pattern matches whole segments only, and 
 | `break_glass` | Apply emergency changes. People only, by `ldap_group_dn` |
 | `trusted_automation` | File changes approved by delegation. SPIFFE principals only, with a reference to an upstream approval |
 | `admin.full_access` | All of the above except deciding one's own requests, and maintenance and recovery |
+| `account_admin` | Register, retire and list accounts, and nothing else. Global: it takes no `scopes`. `admin.full_access` includes it |
 
 ```yaml
 authorization:

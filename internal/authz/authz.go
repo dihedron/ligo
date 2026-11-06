@@ -91,10 +91,16 @@ func (a *Authorizer) For(p Principal) Grants {
 // Grants are the effective grants of a principal: the union of its bindings.
 type Grants []Grant
 
-// Viewer reports whether the grants may read: any role but break_glass
-// alone (§7.2.2).
+// reads reports whether a role lets its holder read resources: account_admin
+// manages the registry only, and break_glass alone reads nothing (§7.2.2).
+func (g *Grant) reads() bool {
+	return g.Role != config.RoleBreakGlass && g.Role != config.RoleAccountAdmin
+}
+
+// Viewer reports whether the grants may read: any role but break_glass or
+// account_admin alone (§7.2.2).
 func (gs Grants) Viewer() bool {
-	return gs.has(func(g *Grant) bool { return g.Role != config.RoleBreakGlass })
+	return gs.has((*Grant).reads)
 }
 
 func (gs Grants) has(match func(*Grant) bool) bool {
@@ -109,6 +115,18 @@ func (gs Grants) has(match func(*Grant) bool) bool {
 // FullAccess reports the admin.full_access role.
 func (gs Grants) FullAccess() bool {
 	return gs.has(func(g *Grant) bool { return g.Role == config.RoleFullAccess })
+}
+
+// AccountAdmin reports whether the principal may change the account registry.
+func (gs Grants) AccountAdmin() bool {
+	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleAccountAdmin })
+}
+
+// InScopes reports whether a role that reads reaches anywhere in pattern.
+func (gs Grants) InScopes(pattern string) bool {
+	return gs.FullAccess() || gs.has(func(g *Grant) bool {
+		return g.reads() && slices.ContainsFunc(g.Scopes, func(s string) bool { return governance.PatternsOverlap(s, pattern) })
+	})
 }
 
 // Sees reports whether any role other than break_glass covers one of the
@@ -143,7 +161,7 @@ func (gs Grants) Visible(scopes []string, mode string, visibleTo []string) bool 
 		return true
 	}
 	return gs.has(func(g *Grant) bool {
-		if g.Role == config.RoleBreakGlass {
+		if !g.reads() {
 			return false
 		}
 		return mode == "PUBLIC" || mode == "LISTED" && slices.ContainsFunc(g.Scopes, func(s string) bool {

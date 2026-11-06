@@ -144,9 +144,11 @@ The 30-character limit keeps `{account}_{tenancy}` within PostgreSQL's 63 charac
 
 ### 7.2 Lifecycle
 
-- **Registering applies at once**, with no change request, and is audited (`ACCOUNT_REGISTERED`). It grants nothing by itself: no source or target exists yet, and those still need consent.
-- **Retiring** needs no active resources (`409 account-in-use`) and is audited (`ACCOUNT_RETIRED`). A retired account's name is never reused, because audit entries and SPIFFE paths refer to it.
-- **An unregistered or retired account is refused** on an account-managed scope: `422 account-not-registered`, when a source is registered and a target published, and again when a change request is re-validated at approval.
+- **Registering applies at once**, with no change request, and is audited (`SYSTEM_ACCOUNT_REGISTERED`). It grants nothing by itself: no source or target exists yet, and those still need consent.
+- **Retiring** needs no active resources (`409 account-in-use`) and is audited (`SYSTEM_ACCOUNT_RETIRED`). A retired account's name is never reused, because audit entries and SPIFFE paths refer to it.
+- **An unregistered or retired account is refused** on an account-managed scope: `422 account-not-registered`, when a source is registered and a target published, and again when a change request is re-validated at approval. A segment in the account's place that is outside the grammar, such as `cloud/a-b`, is such a scope: no account can have that name, so it is refused and does not count as needing no account.
+- **The structure can change.** Startup compares each resource's stored account with its scope's (§8.2 rule 17) and, with `--accept-scope-changes`, corrects it and audits `SOURCE_RESCOPED` or `TARGET_RESCOPED` with `column: account`. A resource cannot move into an account that is not registered, even with the flag: restore the configuration, register the account, and start again.
+- **Maintenance mode** refuses registering and retiring with `503 maintenance`, like every other change.
 - Replicas learn of changes through `LISTEN`/`NOTIFY`, as the resolution cache does (§4.5), with its periodic full reload.
 
 ### 7.3 Who may do it
@@ -268,7 +270,7 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 | TN-14 | The platform approver filed it | Decides `TARGET` | Refused: the requester never decides | I |
 | TN-15 | Register on one replica | Login on the other at once | Effective within the notify delay | L |
 | TN-16 | An existing target that does not match | Startup | Fatal, naming it | I |
-| TN-17 | Every account route, each role | Mutating without `account_admin` | `403`, audited | I |
+| TN-17 | Every account route, each role | Mutating without `account_admin` | `403`, logged with the request as every refusal is; the changes themselves are audited | I |
 | TN-18 | A user in `cn=approvers,ou=app01,ou=acme,…` | Login | `approver` on `cloud/acme/app/app01`, not on `cloud/acme/app/app02` or `cloud/acme/data/*` | L |
 | TN-19 | Rules with the account at depth 5 and the project at depth 7; a rule with the account elsewhere | Startup | Accepted; refused | U |
 

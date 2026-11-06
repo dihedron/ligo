@@ -17,6 +17,9 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `sample-not-matched` | 422 | A sample SPIFFE ID does not match the regex | Fix either |
 | `scope-unresolvable` | 422 | The regex's fixed beginning identifies no single scope | Make its beginning fixed enough |
 | `source-not-exact` | 422 | The Vault store releases to one exact SPIFFE ID, and this regex matches more | Register one source per workload |
+| `account-not-registered` | 422 | The scope belongs to an account that is not registered, or is retired | Have an `account_admin` register it, or correct the scope |
+| `account-exists` | 409 | The account exists, or once did: a retired name is never reused | Choose another name |
+| `account-in-use` | 409 | The account still has sources or targets that are not retired | Retire them first; the `detail` counts them |
 | `widening-not-allowed` | 422 | A source can only narrow, and this would add workloads, or the check was undecided | Register a new source |
 | `flow-destination-not-allowed` | 422 | A flow's destination is outside the platform's `allowed_endpoints` | Fix the flow, or ask the platform team |
 | `interconnect-denied` | 403 | The interconnection policy denies this pair of scopes | Ask whoever owns `governance.interconnects` |

@@ -59,6 +59,7 @@ type Rules struct {
 	Extractors   map[string]*governance.Extractor
 	NamePrefixes []governance.NamePrefix
 	Regex        regexpolicy.Policy
+	Accounts     *governance.Accounts // nil: no accounts
 }
 
 // NewRules extracts the rules from a validated configuration.
@@ -71,7 +72,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 			}
 		}
 	}
-	r := &Rules{Extractors: map[string]*governance.Extractor{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy}
+	r := &Rules{Extractors: map[string]*governance.Extractor{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Governance.Accounts}
 	for _, ss := range cfg.Governance.SourceScopes {
 		if !accepted[ss.TrustDomain] {
 			continue

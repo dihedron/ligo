@@ -77,6 +77,7 @@ func setup(t *testing.T) *env {
 		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+v.x)
+		_, _ = owner.Exec(ctx, "delete from accounts where name like $1", "%"+v.x)
 	})
 	return v
 }
@@ -480,5 +481,73 @@ func TestPlatforms(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0], `"level": "admin"`) || !strings.Contains(got[0], "DBA is not grantable") ||
 		!strings.Contains(got[0], `"flow": "legacy"`) || strings.Contains(got[0], `"level": "read"`) || strings.Contains(got[0], `"flow": "ledger"`) {
 		t.Errorf("violations: %v", got)
+	}
+}
+
+// Rule 17 for the account column: a change of the structure moves resources
+// between accounts, only into registered ones and only with the flag.
+func TestAccountDrift(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	td := account + ".internal"
+	c := v.checks(t)
+	scope := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Extractors[td] = static
+	src := v.source(t, "acs-"+x, scope, td)
+	tgt := v.target(t, "act-"+x, "oracle-prod", scope, "dc/corp-prod")
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}"}
+	stored := func(table string, id uuid.UUID) string {
+		t.Helper()
+		var a string
+		if err := v.owner.QueryRow(ctx, "select coalesce(account, '') from "+table+" where id = $1", id).Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+
+	c.AcceptScopeChanges = true
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "`+account+`" of scope`) ||
+		!strings.Contains(err.Error(), "target act-"+x+`: account "`+account+`" of scope`) || !strings.Contains(err.Error(), "register it") {
+		t.Fatalf("an unregistered account, even with the flag: %v", err)
+	}
+	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
+	c.AcceptScopeChanges = false
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "" to "`+account+`"`) {
+		t.Fatalf("drift without the flag: %v", err)
+	}
+	c.AcceptScopeChanges = true
+	before := v.lastAudit(t)
+	if err := c.scopes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := stored("sources", src), stored("targets", tgt); a != account || b != account {
+		t.Errorf("accounts %q, %q", a, b)
+	}
+	var n int
+	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where id > $1 and action in ('SOURCE_RESCOPED', 'TARGET_RESCOPED')
+		and snapshot->>'column' = 'account' and snapshot->>'new' = $2`, before, account).Scan(&n); err != nil || n != 2 {
+		t.Errorf("audited %d (%v)", n, err)
+	}
+	c.AcceptScopeChanges = false
+	if err := c.scopes(ctx); err != nil {
+		t.Errorf("settled: %v", err)
+	}
+	// the structure removed: the resources are no longer account-managed
+	c.Config.Governance.Accounts = nil
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), `account "`+account+`" to ""`) {
+		t.Fatalf("structure removed: %v", err)
+	}
+	c.AcceptScopeChanges = true
+	if err := c.scopes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a := stored("sources", src); a != "" {
+		t.Errorf("account %q", a)
 	}
 }

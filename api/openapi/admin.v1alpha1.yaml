@@ -471,6 +471,56 @@ paths:
       responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- operations --------------------------------------------------------------
+  /v1/admin/accounts:
+    post:
+      tags: [accounts]
+      operationId: registerAccount
+      summary: Register an account, at once (account_admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string, pattern: "^[a-z][a-z0-9]*$", maxLength: 30 }
+                displayName: { type: string, maxLength: 128 }
+      responses:
+        "201": { $ref: "#/components/responses/Account" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [accounts]
+      operationId: listAccounts
+      summary: The accounts visible to the caller (account_admin, or a role in the account).
+      parameters:
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/accounts/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      summary: An account and its counts of sources, targets and bindings.
+      responses:
+        "200": { $ref: "#/components/responses/Account" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
+  /v1/admin/accounts/{name}/retire:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [accounts]
+      operationId: retireAccount
+      summary: Retire an account with no active source or target (account_admin). Its name is never reused.
+      responses:
+        "200": { $ref: "#/components/responses/Account" }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
   /v1/admin/maintenance:
     get:
       tags: [operations]
@@ -593,6 +643,27 @@ components:
         decision: { type: [string, "null"] }
         decidedBy: { type: string }
   responses:
+    Account:
+      description: An account; counts only for a single account read.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name, status, registeredBy, registeredAt]
+            properties:
+              name: { type: string }
+              displayName: { type: string }
+              status: { type: string, enum: [ACTIVE, RETIRED] }
+              registeredBy: { type: string }
+              registeredAt: { type: string, format: date-time }
+              retiredBy: { type: string }
+              retiredAt: { type: string, format: date-time }
+              counts:
+                type: object
+                properties:
+                  sources: { type: integer }
+                  targets: { type: integer }
+                  bindings: { type: integer }
     Problem:
       description: An RFC 9457 problem.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }

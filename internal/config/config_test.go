@@ -329,3 +329,20 @@ func TestAccounts(t *testing.T) {
 		})
 	}
 }
+
+// account_admin is global: it takes no scopes; every other role needs them.
+func TestAccountAdminBinding(t *testing.T) {
+	load := func(role, scopes string) error {
+		doc := strings.Replace(example(t), "  bindings:\n", "  bindings:\n    - { spiffe_id: \"spiffe://prod.internal/ops/reg\", role: "+role+scopes+" }\n", 1)
+		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
+	}
+	if err := load(RoleAccountAdmin, ""); err != nil {
+		t.Errorf("no scopes: %v", err)
+	}
+	if err := load(RoleAccountAdmin, `, scopes: ["*"]`); err == nil || !strings.Contains(err.Error(), "takes no scopes") {
+		t.Errorf("with scopes: %v", err)
+	}
+	if err := load(RoleViewer, ""); err == nil || !strings.Contains(err.Error(), "scopes is required") {
+		t.Errorf("a viewer without scopes: %v", err)
+	}
+}

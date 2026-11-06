@@ -32,7 +32,7 @@ var (
 	sha256RE        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	ruleNameRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	partyNameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess}
+	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess, RoleAccountAdmin}
 	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	maxPlatformFlow = 32
 	// instanceIDRE leaves room for "ligo/" in the 63 bytes of application_name
@@ -358,7 +358,10 @@ func (c *checker) roleBinding(i int, b RoleBinding) {
 	if !slices.Contains(knownRoles, b.Role) {
 		c.failf(16, "authorization binding %q: unknown role %q", who, b.Role)
 	}
-	if len(b.Scopes) == 0 {
+	switch {
+	case b.Role == RoleAccountAdmin && len(b.Scopes) > 0:
+		c.failf(16, "authorization binding %q: account_admin is global and takes no scopes", who)
+	case b.Role != RoleAccountAdmin && len(b.Scopes) == 0:
 		c.failf(16, "authorization binding %q: scopes is required", who)
 	}
 	c.patterns(16, "authorization binding "+who, b.Scopes)

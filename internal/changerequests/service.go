@@ -512,11 +512,14 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 	}
 	payload, err := res.Revalidate(ctx, r)
 	if err != nil {
-		detail := err.Error()
+		detail, slug := err.Error(), "validation-failed"
 		if e := (*Error)(nil); errors.As(err, &e) {
 			detail = e.Detail
+			if e.Slug == "account-not-registered" { // the same answer as when filing (.specs/ligo-tenancy.md §7.2)
+				slug = e.Slug
+			}
 		}
-		return nil, s.fail(ctx, r, c.ID(), detail, refuse(422, "validation-failed", "%s", detail))
+		return nil, s.fail(ctx, r, c.ID(), detail, refuse(422, slug, "%s", detail))
 	}
 	if r.Operation != "DELETE" {
 		if h, err := Hash(payload); err != nil || h != r.PayloadSHA256 {

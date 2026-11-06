@@ -119,14 +119,21 @@ func TestAccountOf(t *testing.T) {
 		"cloud/acme":             "acme",
 		"cloud/acme/app/app01":   "acme",
 		"cloud/globex/data/db02": "globex",
+		// outside the grammar, but in an account's place: no such account can
+		// be registered, so the registry refuses it instead of it going unmanaged
+		"cloud/a-b/app/x": "a-b",
+		"cloud/ACME":      "ACME",
 	} {
 		if got, ok := a.AccountOf(scope); !ok || got != want {
 			t.Errorf("%s: got %q %v", scope, got, ok)
 		}
 	}
-	for _, scope := range []string{"dc/corp-prod", "cloud", "cloud/a-b/app/x"} {
+	for _, scope := range []string{"dc/corp-prod", "cloud", "cloudy/acme"} {
 		if got, ok := a.AccountOf(scope); ok {
 			t.Errorf("%s: account %q", scope, got)
 		}
+	}
+	if got, ok := (*Accounts)(nil).AccountOf("cloud/acme"); ok {
+		t.Errorf("no accounts configured: account %q", got)
 	}
 }

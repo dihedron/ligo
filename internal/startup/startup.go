@@ -19,6 +19,7 @@ import (
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
@@ -344,22 +345,72 @@ type drift struct {
 	old, scope string
 }
 
+// accountDrift is a source or target whose account column differs from what
+// its scope gives under the configuration.
+type accountDrift struct {
+	drift
+	typ, table string
+}
+
+// accountOf compares the stored account of a resource with its scope's. A new
+// account must be registered: a server that cannot start cannot register it,
+// so the message says how to get there.
+func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, scope, stored string, fatal, drifted *[]string, out *[]accountDrift) error {
+	a := c.Config.Governance.Accounts
+	want, _ := a.AccountOf(scope)
+	if want == stored {
+		return nil
+	}
+	if _, err := accounts.Require(ctx, c.DB, a, scope); err != nil {
+		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
+			*fatal = append(*fatal, fmt.Sprintf("%s %s: account %q of scope %s is not registered: restore the configuration, register it, and start again",
+				strings.ToLower(typ), d.name, want, scope))
+			return nil
+		}
+		return err
+	}
+	d.old, d.scope = stored, want
+	*out = append(*out, accountDrift{drift: d, typ: typ, table: table})
+	*drifted = append(*drifted, fmt.Sprintf("%s %s: account %q to %q", strings.ToLower(typ), d.name, stored, want))
+	return nil
+}
+
+// reaccount sets the account of one source or target: a pending request needs
+// no failing, as its approval checks the registry again.
+func (c *Checks) reaccount(ctx context.Context, d accountDrift) error {
+	return pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "UPDATE "+d.table+" SET account = nullif($2, '') WHERE id = $1", d.id, d.scope); err != nil {
+			return err
+		}
+		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: d.typ, ResourceID: &d.id, ResourceName: d.name, Action: d.typ + "_RESCOPED", Actor: actor,
+			Snapshot: snapshot(map[string]string{"column": "account", "old": d.old, "new": d.scope})})
+		if err == nil {
+			c.Logger.Warn("re-scoped", "resource_type", d.typ, "name", d.name, "old_account", d.old, "new_account", d.scope)
+		}
+		return err
+	})
+}
+
 // scopes is rule 17: sources, targets and bindings whose scopes drifted
 // fail startup, unless --accept-scope-changes re-scopes them.
 func (c *Checks) scopes(ctx context.Context) error {
 	var fatal, drifted []string
 	var sources, targets []drift
-	rows, err := c.DB.Query(ctx, "SELECT id, name, scope, trust_domain, svid_regex FROM sources WHERE state <> 'RETIRED' ORDER BY name")
+	var reaccounted []accountDrift
+	rows, err := c.DB.Query(ctx, "SELECT id, name, scope, trust_domain, svid_regex, coalesce(account, '') FROM sources WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type source struct {
 		drift
-		td, regex string
+		td, regex, account string
 	}
 	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (source, error) {
 		var s source
-		return s, r.Scan(&s.id, &s.name, &s.old, &s.td, &s.regex)
+		return s, r.Scan(&s.id, &s.name, &s.old, &s.td, &s.regex, &s.account)
 	})
 	if err != nil {
 		return err
@@ -376,18 +427,23 @@ func (c *Checks) scopes(ctx context.Context) error {
 			sources = append(sources, s.drift)
 			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.scope))
 		}
+		if ok && err == nil {
+			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.scope, s.account, &fatal, &drifted, &reaccounted); err != nil {
+				return err
+			}
+		}
 	}
-	rows, err = c.DB.Query(ctx, "SELECT id, name, scope, platform_scope, platform FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err = c.DB.Query(ctx, "SELECT id, name, scope, platform_scope, platform, coalesce(account, '') FROM targets WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type target struct {
 		drift
-		scope, platform string
+		scope, platform, account string
 	}
 	tgts, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
 		var t target
-		return t, r.Scan(&t.id, &t.name, &t.scope, &t.old, &t.platform)
+		return t, r.Scan(&t.id, &t.name, &t.scope, &t.old, &t.platform, &t.account)
 	})
 	if err != nil {
 		return err
@@ -404,6 +460,9 @@ func (c *Checks) scopes(ctx context.Context) error {
 			t.drift.scope = p.Scope
 			targets = append(targets, t.drift)
 			drifted = append(drifted, fmt.Sprintf("target %s: platform scope %s to %s", t.name, t.old, p.Scope))
+		}
+		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.scope, t.account, &fatal, &drifted, &reaccounted); err != nil {
+			return err
 		}
 	}
 	var stale int
@@ -432,6 +491,11 @@ func (c *Checks) scopes(ctx context.Context) error {
 	for _, t := range targets {
 		if err := c.rescope(ctx, "TARGET", t, "UPDATE targets SET platform_scope = $2 WHERE id = $1",
 			"target_id = $1", "platform_scope", "payload->>'target' = $2"); err != nil {
+			return err
+		}
+	}
+	for _, d := range reaccounted {
+		if err := c.reaccount(ctx, d); err != nil {
 			return err
 		}
 	}

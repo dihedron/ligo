@@ -76,11 +76,12 @@ type Platform struct {
 type Rules struct {
 	Platforms    map[string]Platform
 	NamePrefixes []governance.NamePrefix
+	Accounts     *governance.Accounts // nil: no accounts
 }
 
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes}
+	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Accounts: cfg.Governance.Accounts}
 	for _, pp := range cfg.PlatformProviders {
 		for _, p := range pp.Platforms {
 			var pc struct {

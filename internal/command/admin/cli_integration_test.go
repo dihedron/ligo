@@ -130,6 +130,7 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	az, err := authz.New([]config.RoleBinding{
 		{LDAPGroupDN: "cn=olga", Role: config.RoleOperator, Scopes: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: "cn=dora", Role: config.RoleApprover, Scopes: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: "cn=reg", Role: config.RoleAccountAdmin},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -302,5 +303,38 @@ visibility: {mode: PRIVATE}
 	_ = json.Unmarshal(out.Bytes(), &b)
 	if client.Lookup(b, "status.phase") != "DELETING" {
 		t.Errorf("after the revocation: %s", out.String())
+	}
+}
+
+func TestCLIAccounts(t *testing.T) {
+	srv, owner := server(t)
+	name := "cli" + uuid.NewV7().String()[24:]
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from accounts where name = $1", name) })
+	var out bytes.Buffer
+	reg, olga := as(t, srv, "reg", &out), as(t, srv, "olga", &out)
+	if err := (&AccountRegister{Base: olga, Args: accountName{Name: name}}).Execute(nil); err == nil || !strings.Contains(err.Error(), "account_admin") {
+		t.Errorf("an operator registers: %v", err)
+	}
+	if err := (&AccountRegister{Base: reg, DisplayName: "CLI", Args: accountName{Name: name}}).Execute(nil); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := (&AccountGet{Base: reg, Args: accountName{Name: name}}).Execute(nil); err != nil || !strings.Contains(out.String(), `"displayName":"CLI"`) && !strings.Contains(out.String(), `"displayName": "CLI"`) {
+		t.Errorf("get: %v %s", err, out.String())
+	}
+	out.Reset()
+	if err := (&AccountList{Base: reg, Page: Page{PageSize: 200}}).Execute(nil); err != nil || !strings.Contains(out.String(), name) {
+		t.Errorf("list: %v %s", err, out.String())
+	}
+	retireInput = strings.NewReader("wrong\n")
+	if err := (&AccountRetire{Base: reg, Args: accountName{Name: name}}).Execute(nil); err == nil || !strings.Contains(err.Error(), "not confirmed") {
+		t.Errorf("unconfirmed: %v", err)
+	}
+	retireInput = strings.NewReader(name + "\n")
+	if err := (&AccountRetire{Base: reg, Args: accountName{Name: name}}).Execute(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&AccountRetire{Base: reg, Yes: true, Args: accountName{Name: name}}).Execute(nil); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Errorf("twice: %v", err)
 	}
 }

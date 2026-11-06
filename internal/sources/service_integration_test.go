@@ -12,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -304,4 +305,71 @@ func insertBinding(t *testing.T, o *pgxpool.Pool, source uuid.UUID) uuid.UUID {
 		_, _ = o.Exec(ctx, "delete from targets where id = $1", target)
 	})
 	return binding
+}
+
+// TN-4 and TN-5: a source needs its account registered when filed and when
+// approved, and the column follows.
+func TestAccountRequired(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	x := uuid.NewV7().String()[24:]
+	account := "t" + x
+	static, err := governance.NewStaticExtractor("cloud/" + account + "/app/p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Rules.Extractors["cloud.internal"] = static
+	s.Rules.Accounts = &governance.Accounts{Scope: "cloud/{account}"}
+	cfg := example(t)
+	cfg.Authorization.Approval.RequiredScopes = append(cfg.Authorization.Approval.RequiredScopes, "cloud/*")
+	s.Requests.Policy = cfg.Policy() // or the requests would apply at once
+	src := source()
+	src.Metadata.Name = account + "-app-first"
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = owner.Exec(ctx, "delete from change_requests where resource_type = 'SOURCE' and resource_name like $1", account+"%")
+		_, _ = owner.Exec(ctx, "delete from sources where name like $1", account+"%")
+		_, _ = owner.Exec(ctx, "delete from accounts where name = $1", account)
+	})
+	operator := caller("alice", config.RoleOperator, "cloud/*")
+	approver := caller("bob", config.RoleApprover, "cloud/*")
+
+	if _, err := s.Create(ctx, operator, body(t, src, nil)); slug(err) != "account-not-registered" {
+		t.Fatalf("TN-4: %v", err)
+	}
+	if _, err := owner.Exec(ctx, "insert into accounts (name, registered_by) values ($1, 't')", account); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Create(ctx, operator, body(t, src, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, approver, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := owner.QueryRow(ctx, "select account from sources where name = $1", src.Metadata.Name).Scan(&stored); err != nil || stored != account {
+		t.Errorf("account %q (%v)", stored, err)
+	}
+
+	// filed while registered, approved after the account is retired
+	later := source()
+	later.Metadata.Name = account + "-app-later"
+	r, err = s.Create(ctx, operator, body(t, later, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, "update sources set state = 'RETIRED' where name = $1", src.Metadata.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, "update accounts set status = 'RETIRED', retired_by = 't', retired_at = now() where name = $1", account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, approver, r.ID, r.PayloadSHA256, "", "ok"); slug(err) != "account-not-registered" {
+		t.Errorf("TN-5: %v", err)
+	}
+	var n int
+	if err := owner.QueryRow(ctx, "select count(*) from sources where name = $1", later.Metadata.Name).Scan(&n); err != nil || n != 0 {
+		t.Errorf("TN-5: %d sources (%v)", n, err)
+	}
 }

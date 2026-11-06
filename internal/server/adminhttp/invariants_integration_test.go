@@ -182,6 +182,11 @@ func TestINV11Routes(t *testing.T) {
 	act("PUT /v1/admin/maintenance", "SYSTEM_MAINTENANCE_ENABLED", admin, "/v1/admin/maintenance", map[string]any{"enabled": true, "reason": "INV-11"})
 	act("PUT /v1/admin/maintenance", "SYSTEM_MAINTENANCE_DISABLED", admin, "/v1/admin/maintenance", map[string]any{"enabled": false})
 
+	account := "inv" + x
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from accounts where name = $1", account) })
+	act("POST /v1/admin/accounts", "SYSTEM_ACCOUNT_REGISTERED", admin, "/v1/admin/accounts", map[string]any{"name": account})
+	act("POST /v1/admin/accounts/{name}/retire", "SYSTEM_ACCOUNT_RETIRED", admin, "/v1/admin/accounts/"+account+"/retire", nil)
+
 	var routes []string
 	for _, p := range (&Server{}).routes().patterns {
 		if method, _, _ := strings.Cut(p, " "); method != "GET" {

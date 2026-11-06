@@ -94,6 +94,7 @@ func (s *Server) routes() *router {
 	s.platformRoutes(mux)
 	s.catalogRoutes(mux)
 	s.governanceRoutes(mux)
+	s.accountRoutes(mux)
 	return mux
 }
 

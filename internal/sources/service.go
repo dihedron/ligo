@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/store"
@@ -60,6 +61,9 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 	}
 	if !c.Grants.ActsFor(scope, "") {
 		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), scope)
+	}
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
+		return nil, err
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
 		return nil, refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", src.Metadata.Name)
@@ -150,7 +154,11 @@ func (s *Service) Inline(ctx context.Context, body []byte) (*changerequests.Requ
 		return nil, nil, nil, invalid("expectedRevision is only for updates")
 	}
 	src := req.Source
-	if _, err := s.Rules.validate(&src, nil); err != nil {
+	scope, err := s.Rules.validate(&src, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
 		return nil, nil, nil, err
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
@@ -221,8 +229,14 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 		}
 		cur = &st.Source
 	}
-	if _, err := s.Rules.validate(&src, cur); err != nil {
+	scope, err := s.Rules.validate(&src, cur)
+	if err != nil {
 		return nil, err
+	}
+	if cur == nil { // TN-5: an existing source cannot be on a retired account
+		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
+			return nil, err
+		}
 	}
 	return json.Marshal(src)
 }
@@ -235,7 +249,11 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	}
 	if r.Operation == "CREATE" {
 		id := uuid.NewV7()
-		if err := insert(ctx, tx, id, &src, r.RequestedBy); err != nil {
+		account, err := accounts.Require(ctx, tx, s.Rules.Accounts, src.Metadata.Scope)
+		if err != nil {
+			return nil, err
+		}
+		if err := insert(ctx, tx, id, &src, account, r.RequestedBy); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(ctx, "UPDATE change_requests SET resource_id = $2 WHERE id = $1", r.ID, id); err != nil {
@@ -364,17 +382,17 @@ func jsonb(v any, empty string) string {
 	return string(data)
 }
 
-func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, actor string) error {
+func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, account, actor string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO sources (id, name, scope, trust_domain, svid_regex, sample_spiffe_ids, display_name,
-		description, labels, external_refs, contacts, visibility, visible_to, state, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13::jsonb, 'ACTIVE', $14, $14)`,
+		description, labels, external_refs, contacts, visibility, visible_to, account, state, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13::jsonb, $15, 'ACTIVE', $14, $14)`,
 		id, s.Metadata.Name, s.Metadata.Scope, s.Identity.TrustDomain, s.Identity.SVIDRegex, jsonb(s.Identity.SampleSPIFFEIDs, "[]"),
 		null(s.DisplayName), null(s.Description), jsonb(s.Labels, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"),
-		s.Visibility.Mode, jsonb(s.Visibility.VisibleTo, "[]"), actor)
+		s.Visibility.Mode, jsonb(s.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_sources_name" {
 		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", s.Metadata.Name)
 	}
-	return err
+	return accounts.Refused(err)
 }
 
 func update(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, actor string) error {

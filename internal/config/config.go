@@ -197,6 +197,7 @@ const (
 	RoleBreakGlass        = "break_glass"
 	RoleTrustedAutomation = "trusted_automation"
 	RoleFullAccess        = "admin.full_access"
+	RoleAccountAdmin      = "account_admin"
 )
 
 // RoleBinding grants a role on scope patterns to an LDAP group or a SPIFFE

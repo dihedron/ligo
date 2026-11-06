@@ -79,15 +79,27 @@ func ExpandTemplate(template string, values map[string]string) string {
 }
 
 // AccountOf returns the account of an account-managed scope: one that matches
-// Scope or lies below it.
+// Scope or lies below it, on its literal segments. The value is not checked
+// against the grammar, so that "cloud/a-b" reads as an account no registry
+// holds and is refused, not as a scope that needs no account.
 func (a *Accounts) AccountOf(scope string) (string, bool) {
-	n := strings.Count(a.Scope, "/") + 1
-	segments := strings.Split(scope, "/")
-	if len(segments) < n {
+	if a == nil {
 		return "", false
 	}
-	values, ok := MatchScope(a.Scope, strings.Join(segments[:n], "/"))
-	return values[account], ok
+	ts, ss := strings.Split(a.Scope, "/"), strings.Split(scope, "/")
+	if len(ss) < len(ts) {
+		return "", false
+	}
+	var value string
+	for i, t := range ts {
+		switch {
+		case isPlaceholder(t):
+			value = ss[i]
+		case t != ss[i]:
+			return "", false
+		}
+	}
+	return value, true
 }
 
 // SampleScope is the account root for an example account, to check what
