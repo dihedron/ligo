@@ -62,19 +62,12 @@ vm_wait() {
 	cloud_init_wait "$1" lxd exec "$1" --
 }
 
-# cloud_init_wait NAME EXEC...: waits for cloud-init, running it through EXEC.
-# `status --wait` has failed with nothing on stderr on instances whose
-# cloud-init then ended done (hooks, lb), cause unknown: so it shows the
-# output, and only a failure that lasts a minute counts.
+# cloud_init_wait NAME EXEC...: waits for cloud-init, running it through EXEC,
+# and says why it failed. Exit 137 is the OOM killer: the status command itself
+# needs about 30 MiB, while the instance boots within its limits.memory.
 cloud_init_wait() {
-	local name="$1" out rc i
+	local name="$1" out rc=0
 	shift
-	for i in $(seq 1 12); do
-		out="$("$@" cloud-init status --wait 2>&1)" && return 0
-		rc=$?
-		out="$(sed 's/^\.*//' <<<"$out")"
-		warn "$name: cloud-init status --wait exited $rc (attempt $i): $out"
-		sleep 5
-	done
-	die "$name: cloud-init failed, exit $rc: $out (lab.sh logs $name)"
+	out="$("$@" cloud-init status --wait 2>&1)" || rc=$?
+	((rc == 0)) || die "$name: cloud-init status --wait exited $rc: $(sed 's/^\.*//' <<<"$out") (lab.sh logs $name)"
 }

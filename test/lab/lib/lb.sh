@@ -43,7 +43,7 @@ lb_up() {
 	section "Load balancer (HAProxy)"
 	inner_container lb "$LAB_LB_MEMORY"
 	if ! inner_exec lb test -x /usr/sbin/haproxy; then
-		inner_exec lb sh -c 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq haproxy socat </dev/null >/dev/null 2>&1' ||
+		inner_exec lb sh -c 'apt-get update -qq </dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq haproxy socat </dev/null >/dev/null' ||
 			die "lb: cannot install haproxy"
 		info "lb: $(inner_exec lb haproxy -v | head -1)"
 	fi

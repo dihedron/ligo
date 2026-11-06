@@ -259,7 +259,7 @@ ligo_vm_up() {
 	inner_start "$host"
 	inner_wait "$host"
 	inner_exec "$host" sh -c 'id ligo >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ligo'
-	inner_exec "$host" sh -c 'command -v jq >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null'
+	inner_exec "$host" sh -c 'command -v jq >/dev/null || { apt-get update -qq </dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null; }'
 	if ! inner_exec "$host" test -x /usr/bin/lxd-agent-plugin; then
 		inner_push "$(spire_release spire)" "$host" /root/spire.tar.gz 0644
 		inner_push "$(lxd_spiffe_package lxd-agent-plugin)" "$host" /root/lxd-agent-plugin.deb 0644

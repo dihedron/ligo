@@ -43,7 +43,8 @@ ldap_up() {
 			echo 'slapd shared/organization string ligo lab' | debconf-set-selections
 			echo 'slapd slapd/password1 password $admin' | debconf-set-selections
 			echo 'slapd slapd/password2 password $admin' | debconf-set-selections
-			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq slapd ldap-utils </dev/null >/dev/null 2>&1"
+			apt-get update -qq </dev/null
+			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq slapd ldap-utils </dev/null >/dev/null"
 		info "ldap: slapd installed"
 	fi
 	inner_exec ldap mkdir -p /etc/ldap/tls
