@@ -253,6 +253,9 @@ func TestHealth(t *testing.T) {
 	if err != nil || d.GetPlatformProvider().GetClientOutputSchemaJson() == "" {
 		t.Errorf("%v %v", d, err)
 	}
+	if got := d.GetPlatformProvider().GetNamespaceField(); got != "schema" {
+		t.Errorf("namespace_field %q", got)
+	}
 	for _, m := range d.GetPlatformProvider().GetAcceptedIdentityModes() {
 		if m == pluginv1.IdentityMode_IDENTITY_MODE_SVID {
 			t.Error("accepts SVID: §10")

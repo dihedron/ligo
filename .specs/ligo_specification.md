@@ -2550,6 +2550,7 @@ message IdentityProviderCapabilities {
 message PlatformProviderCapabilities {
   repeated IdentityMode accepted_identity_modes = 1;
   string client_output_schema_json = 2;   // JSON Schema 2020-12 of finalized_client_spec_json
+  string namespace_field = 3;             // the top-level definition field holding a target's namespace; empty: no namespaces
 }
 
 message SecretStoreCapabilities {

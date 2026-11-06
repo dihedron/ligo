@@ -346,3 +346,32 @@ func TestAccountAdminBinding(t *testing.T) {
 		t.Errorf("a viewer without scopes: %v", err)
 	}
 }
+
+func TestNamespaceTemplate(t *testing.T) {
+	const accounts = `governance:
+  accounts:
+    scope: "cloud/{account}"
+    source_scope: "cloud/{account}/app/{project}"
+    target_scope: "cloud/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "ou=accounts,dc=corp,dc=internal"
+      roles:
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+`
+	load := func(template string, withAccounts bool) error {
+		r := []string{`        target_scopes: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_scopes: ["dc/corp-prod/*"]`}
+		if withAccounts {
+			r = append(r, "governance:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_scopes: ["cloud/*"]`)
+		}
+		return Validate(parse(t, strings.NewReplacer(r...).Replace(example(t))), Options{LookupEnv: lookupEnv})
+	}
+	if err := load("{account}_{tenancy}", true); err != nil {
+		t.Errorf("accepted form: %v", err)
+	}
+	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "governance.accounts") {
+		t.Errorf("without accounts: %v", err)
+	}
+	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {
+		t.Errorf("no separator: %v", err)
+	}
+}

@@ -1459,6 +1459,7 @@ type PlatformProviderCapabilities struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	AcceptedIdentityModes  []IdentityMode         `protobuf:"varint,1,rep,packed,name=accepted_identity_modes,json=acceptedIdentityModes,proto3,enum=ligo.plugin.v1.IdentityMode" json:"accepted_identity_modes,omitempty"`
 	ClientOutputSchemaJson string                 `protobuf:"bytes,2,opt,name=client_output_schema_json,json=clientOutputSchemaJson,proto3" json:"client_output_schema_json,omitempty"` // JSON Schema 2020-12 of finalized_client_spec_json
+	NamespaceField         string                 `protobuf:"bytes,3,opt,name=namespace_field,json=namespaceField,proto3" json:"namespace_field,omitempty"`                             // the top-level definition field holding a target's namespace; empty: no namespaces
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -1503,6 +1504,13 @@ func (x *PlatformProviderCapabilities) GetAcceptedIdentityModes() []IdentityMode
 func (x *PlatformProviderCapabilities) GetClientOutputSchemaJson() string {
 	if x != nil {
 		return x.ClientOutputSchemaJson
+	}
+	return ""
+}
+
+func (x *PlatformProviderCapabilities) GetNamespaceField() string {
+	if x != nil {
+		return x.NamespaceField
 	}
 	return ""
 }
@@ -3581,10 +3589,11 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\fsecret_store\x18\b \x01(\v2'.ligo.plugin.v1.SecretStoreCapabilitiesH\x00R\vsecretStoreB\x0e\n" +
 	"\fcapabilities\"r\n" +
 	"\x1cIdentityProviderCapabilities\x12R\n" +
-	"\x16produced_identity_mode\x18\x01 \x01(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\x14producedIdentityMode\"\xaf\x01\n" +
+	"\x16produced_identity_mode\x18\x01 \x01(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\x14producedIdentityMode\"\xd8\x01\n" +
 	"\x1cPlatformProviderCapabilities\x12T\n" +
 	"\x17accepted_identity_modes\x18\x01 \x03(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\x15acceptedIdentityModes\x129\n" +
-	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\"\xb7\x01\n" +
+	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\x12'\n" +
+	"\x0fnamespace_field\x18\x03 \x01(\tR\x0enamespaceField\"\xb7\x01\n" +
 	"\x17SecretStoreCapabilities\x12a\n" +
 	"\x19secret_storage_strategies\x18\x01 \x03(\v2%.ligo.plugin.v1.SecretStorageStrategyR\x17secretStorageStrategies\x129\n" +
 	"\x19client_output_schema_json\x18\x02 \x01(\tR\x16clientOutputSchemaJson\"\xb3\x01\n" +

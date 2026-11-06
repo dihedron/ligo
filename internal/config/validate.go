@@ -463,11 +463,23 @@ func (c *checker) governance(cfg *Config) {
 func (c *checker) accounts(cfg *Config) {
 	a := cfg.Governance.Accounts
 	if a == nil {
+		for _, p := range allPlatforms(cfg) {
+			if p.NamespaceTemplate != "" {
+				c.failf(16, "platform %q: namespace_template needs governance.accounts", p.Name)
+			}
+		}
 		return
 	}
 	if err := a.Validate(); err != nil {
 		c.failf(16, "governance.accounts: %v", err)
 		return
+	}
+	for _, p := range allPlatforms(cfg) {
+		if p.NamespaceTemplate != "" {
+			if err := a.CheckNamespaceTemplate(p.NamespaceTemplate); err != nil {
+				c.failf(16, "platform %q: %v", p.Name, err)
+			}
+		}
 	}
 	for i, r := range a.LDAPGroups.Roles {
 		if !slices.Contains(accountRoles, r.Role) {

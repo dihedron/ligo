@@ -337,6 +337,50 @@ func (c *Checks) names(ctx context.Context) error {
 	return nil
 }
 
+// Namespaces refuses a namespace_template on a platform whose plugin holds no
+// namespace, and an existing target outside its namespace (.specs/ligo-tenancy.md
+// §5, TN-16). It needs the plugins, as Platforms does.
+func (c *Checks) Namespaces(ctx context.Context, declared func(platformType string) string) error {
+	var fatal []string
+	for _, pp := range c.Config.PlatformProviders {
+		for _, p := range pp.Platforms {
+			if p.NamespaceTemplate != "" && declared(pp.Type) == "" {
+				fatal = append(fatal, fmt.Sprintf("platform %s: plugin %s declares no namespace_field", p.Name, pp.Type))
+			}
+		}
+	}
+	rows, err := c.DB.Query(ctx, "SELECT name, platform, scope, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	if err != nil {
+		return err
+	}
+	type target struct {
+		name, platform, scope string
+		definition            []byte
+	}
+	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
+		var t target
+		return t, r.Scan(&t.name, &t.platform, &t.scope, &t.definition)
+	})
+	if err != nil {
+		return err
+	}
+	for _, t := range all {
+		p, typ := c.platform(t.platform)
+		if p == nil || p.NamespaceTemplate == "" {
+			continue
+		}
+		if field := declared(typ); field != "" {
+			if err := targets.CheckNamespace(c.Config.Governance.Accounts, p.NamespaceTemplate, field, t.scope, t.definition); err != nil {
+				fatal = append(fatal, fmt.Sprintf("target %s: %v", t.name, err))
+			}
+		}
+	}
+	if len(fatal) > 0 {
+		return fmt.Errorf("startup: namespaces: correct or retire these: %s", strings.Join(fatal, "; "))
+	}
+	return nil
+}
+
 // drift is a resource whose stored scope no longer matches the
 // configuration.
 type drift struct {
@@ -428,6 +472,9 @@ func (c *Checks) scopes(ctx context.Context) error {
 			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.scope))
 		}
 		if ok && err == nil {
+			if a := c.Config.Governance.Accounts; !a.SourceConforms(s.scope) {
+				fatal = append(fatal, fmt.Sprintf("source %s: scope %s does not conform to %s", s.name, s.scope, a.SourceScope))
+			}
 			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.scope, s.account, &fatal, &drifted, &reaccounted); err != nil {
 				return err
 			}
@@ -460,6 +507,9 @@ func (c *Checks) scopes(ctx context.Context) error {
 			t.drift.scope = p.Scope
 			targets = append(targets, t.drift)
 			drifted = append(drifted, fmt.Sprintf("target %s: platform scope %s to %s", t.name, t.old, p.Scope))
+		}
+		if a := c.Config.Governance.Accounts; !a.TargetConforms(t.scope) {
+			fatal = append(fatal, fmt.Sprintf("target %s: scope %s does not conform to %s", t.name, t.scope, a.TargetScope))
 		}
 		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.scope, t.account, &fatal, &drifted, &reaccounted); err != nil {
 			return err

@@ -130,6 +130,7 @@ func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 			AcceptedIdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC,
 				pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR},
 			ClientOutputSchemaJson: outputSchema,
+			NamespaceField:         "schema",
 		}},
 	}, nil
 }

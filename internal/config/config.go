@@ -361,6 +361,7 @@ type Platform struct {
 	Zone                      string        `yaml:"zone"`
 	Scope                     string        `yaml:"scope"`
 	TargetScopes              []string      `yaml:"target_scopes"`
+	NamespaceTemplate         string        `yaml:"namespace_template"`
 	DisplayName               string        `yaml:"display_name"`
 	Description               string        `yaml:"description"`
 	Contacts                  []Contact     `yaml:"contacts"`

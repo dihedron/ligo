@@ -8,6 +8,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 )
 
 const (
@@ -167,6 +168,29 @@ func TestVisibility(t *testing.T) {
 			t.Errorf("%+v: %v", tc.v, err)
 		} else if err == nil && v.Mode == "" {
 			t.Errorf("%+v: mode not defaulted", tc.v)
+		}
+	}
+}
+
+// Requirement 2: a source of an account lies in one of its projects.
+func TestScopeForm(t *testing.T) {
+	r := rules(t)
+	r.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}", TargetScope: "cloud/{account}/data/{tenancy}"}
+	r.NamePrefixes = nil
+	for scope, want := range map[string]string{
+		"cloud/acme/app/p1":   "",
+		"cloud/acme/data/db1": "account-scope-mismatch",
+		"cloud/acme":          "account-scope-mismatch",
+		"cloud/a-b/app/p1":    "account-scope-mismatch",
+	} {
+		x, err := governance.NewStaticExtractor(scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Extractors["cloud.internal"] = x
+		s := source()
+		if _, err := r.validate(&s, nil); slug(err) != want {
+			t.Errorf("%s: %v", scope, err)
 		}
 	}
 }

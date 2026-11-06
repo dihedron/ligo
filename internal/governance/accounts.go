@@ -102,6 +102,74 @@ func (a *Accounts) AccountOf(scope string) (string, bool) {
 	return value, true
 }
 
+// conforms reports whether scope has the form of template, when it is
+// account-managed at all.
+func (a *Accounts) conforms(template, scope string) bool {
+	if _, managed := a.AccountOf(scope); !managed {
+		return true
+	}
+	_, ok := MatchScope(template, scope)
+	return ok
+}
+
+// SourceConforms reports whether a source may have scope: outside accounts,
+// or in the form of SourceScope.
+func (a *Accounts) SourceConforms(scope string) bool {
+	return a == nil || a.conforms(a.SourceScope, scope)
+}
+
+// TargetConforms reports whether a target may have scope: outside accounts,
+// or in the form of TargetScope.
+func (a *Accounts) TargetConforms(scope string) bool {
+	return a == nil || a.conforms(a.TargetScope, scope)
+}
+
+// NamespaceOf expands template with the values of a target's scope; false if
+// the scope does not have the form of TargetScope.
+func (a *Accounts) NamespaceOf(template, scope string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	values, ok := MatchScope(a.TargetScope, scope)
+	if !ok {
+		return "", false
+	}
+	return ExpandTemplate(template, values), true
+}
+
+// namespacePlaceholderRE finds the placeholders of a namespace template.
+var namespacePlaceholderRE = regexp.MustCompile(`\{[^{}]*\}`)
+
+// CheckNamespaceTemplate refuses a template that two tenancies could share: it
+// must use each placeholder of TargetScope once, and what separates two of
+// them must hold a character that values cannot.
+func (a *Accounts) CheckNamespaceTemplate(template string) error {
+	var want []string
+	for _, s := range strings.Split(a.TargetScope, "/") {
+		if isPlaceholder(s) {
+			want = append(want, s)
+		}
+	}
+	locations := namespacePlaceholderRE.FindAllStringIndex(template, -1)
+	seen := map[string]bool{}
+	for i, l := range locations {
+		name := template[l[0]:l[1]]
+		if !slices.Contains(want, name) || seen[name] {
+			return fmt.Errorf("namespace template %q: %s must be a placeholder of %q, used once", template, name, a.TargetScope)
+		}
+		seen[name] = true
+		if i > 0 && !strings.ContainsFunc(template[locations[i-1][1]:l[0]], outsideValues) {
+			return fmt.Errorf("namespace template %q: the placeholders must be separated by a character values cannot hold", template)
+		}
+	}
+	if len(seen) != len(want) {
+		return fmt.Errorf("namespace template %q must use every one of %v", template, want)
+	}
+	return nil
+}
+
+func outsideValues(r rune) bool { return (r < 'a' || r > 'z') && (r < '0' || r > '9') }
+
 // SampleScope is the account root for an example account, to check what
 // patterns cover: only "*"-ended patterns above the root can cover it.
 func (a *Accounts) SampleScope() string {

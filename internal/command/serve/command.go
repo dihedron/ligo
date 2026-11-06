@@ -213,6 +213,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := checks.Platforms(ctx, targets.Plugins(plugins)); err != nil {
 		return err
 	}
+	if err := checks.Namespaces(ctx, plugins.NamespaceField); err != nil {
+		return err
+	}
 	engine := &workflows.Engine{DB: pools.App, Plugins: workflows.Manager(plugins), Sealer: sealer,
 		Backoff: workflows.Backoff{Attempts: p.Retry.MaxAttempts, Initial: p.Retry.InitialBackoff, Max: p.Retry.MaxBackoff}}
 	health(ctx, log, cfg, engine.Plugins)
@@ -401,6 +404,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 	if err != nil {
 		return nil, err
 	}
+	targetRules.NamespaceField = plugins.NamespaceField
 	requests := &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: cfg.Authorization.Approval.ChangeRequestTTL,
 		Resources: map[string]changerequests.Resource{}, BreakGlassRules: cfg.BreakGlass}
 	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: requests}

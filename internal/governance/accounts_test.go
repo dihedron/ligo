@@ -137,3 +137,113 @@ func TestAccountOf(t *testing.T) {
 		t.Errorf("no accounts configured: account %q", got)
 	}
 }
+
+func TestConforms(t *testing.T) {
+	a := accounts()
+	for _, c := range []struct {
+		scope          string
+		source, target bool
+	}{
+		{"dc/corp-prod/ledger", true, true}, // not account-managed
+		{"cloud/acme/app/app01", true, false},
+		{"cloud/acme/data/db01", false, true},
+		{"cloud/acme", false, false},
+		{"cloud/acme/other/x", false, false},
+		{"cloud/acme/app/app01/deeper", false, false},
+		{"cloud/a-b/app/app01", false, false},
+		{"cloud/acme/app/App01", false, false},
+	} {
+		if got := a.SourceConforms(c.scope); got != c.source {
+			t.Errorf("source %s: %v", c.scope, got)
+		}
+		if got := a.TargetConforms(c.scope); got != c.target {
+			t.Errorf("target %s: %v", c.scope, got)
+		}
+	}
+	var none *Accounts
+	if !none.SourceConforms("cloud/a-b") || !none.TargetConforms("cloud/a-b") {
+		t.Error("no accounts configured: every scope conforms")
+	}
+}
+
+func TestNamespaceOf(t *testing.T) {
+	a := accounts()
+	if got, ok := a.NamespaceOf("{account}_{tenancy}", "cloud/acme/data/db01"); !ok || got != "acme_db01" {
+		t.Errorf("got %q %v", got, ok)
+	}
+	for _, scope := range []string{"cloud/acme/app/db01", "dc/corp-prod/ledger", "cloud/a-b/data/c"} {
+		if got, ok := a.NamespaceOf("{account}_{tenancy}", scope); ok {
+			t.Errorf("%s: %q", scope, got)
+		}
+	}
+}
+
+func TestCheckNamespaceTemplate(t *testing.T) {
+	a := accounts()
+	for _, ok := range []string{"{account}_{tenancy}", "{tenancy}_{account}", "t_{account}_{tenancy}", "{account}__{tenancy}", "{account}_x_{tenancy}"} {
+		if err := a.CheckNamespaceTemplate(ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		"",
+		"fixed",
+		"{account}",               // two tenancies of an account would share it
+		"{tenancy}",               // two accounts would share it
+		"{account}{tenancy}",      // ab + c, a + bc
+		"{account}x{tenancy}",     // a separator the values can hold
+		"{account}_{project}",     // not of a target's scope
+		"{account}_{tenancy}_{x}", // unknown
+		"{account}_{account}",     // twice, and no tenancy
+		"{account}_{tenancy}_{tenancy}",
+	} {
+		if err := a.CheckNamespaceTemplate(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// What matches a template expands back to the scope, with values in the
+// grammar, and AccountOf agrees.
+func FuzzMatchScope(f *testing.F) {
+	for _, s := range []string{"cloud/acme/data/db01", "cloud/acme", "cloud/a-b/data/c", "", "/", "cloud//data/x", "cloud/{account}/data/x", "cloud/ACME/data/x"} {
+		f.Add(s)
+	}
+	a := accounts()
+	f.Fuzz(func(t *testing.T, scope string) {
+		values, ok := MatchScope(a.TargetScope, scope)
+		account, managed := a.AccountOf(scope)
+		if !ok {
+			return
+		}
+		for k, v := range values {
+			if !ValidAccountValue(v) {
+				t.Fatalf("%s: %s = %q is outside the grammar", scope, k, v)
+			}
+		}
+		if got := ExpandTemplate(a.TargetScope, values); got != scope {
+			t.Fatalf("%s expands back to %s", scope, got)
+		}
+		if !managed || account != values["{account}"] {
+			t.Fatalf("%s: AccountOf %q %v", scope, account, managed)
+		}
+		if !a.TargetConforms(scope) {
+			t.Fatalf("%s matches but does not conform", scope)
+		}
+	})
+}
+
+// Two tenancies never share a namespace: the reason values have no mapping.
+func FuzzNamespaceInjective(f *testing.F) {
+	f.Add("a", "b", "a", "b")
+	f.Add("ab", "c", "a", "bc")
+	f.Add("a-b", "c", "a", "b-c")
+	a := accounts()
+	f.Fuzz(func(t *testing.T, a1, t1, a2, t2 string) {
+		n1, ok1 := a.NamespaceOf("{account}_{tenancy}", "cloud/"+a1+"/data/"+t1)
+		n2, ok2 := a.NamespaceOf("{account}_{tenancy}", "cloud/"+a2+"/data/"+t2)
+		if ok1 && ok2 && n1 == n2 && (a1 != a2 || t1 != t2) {
+			t.Fatalf("%s/%s and %s/%s share %s", a1, t1, a2, t2, n1)
+		}
+	})
+}

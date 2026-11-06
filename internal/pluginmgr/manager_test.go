@@ -570,3 +570,15 @@ func TestCallSpan(t *testing.T) {
 	}
 	t.Error("no client span for the Health RPC")
 }
+
+func TestNamespaceField(t *testing.T) {
+	m := &Manager{procs: []*process{
+		{spec: Spec{Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Type: "pg.v1"}, described: &pluginv1.DescribeResponse{
+			Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{NamespaceField: "schema"}}}},
+		{spec: Spec{Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Type: "oracle.v1"}, described: &pluginv1.DescribeResponse{
+			Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{}}}},
+	}}
+	if m.NamespaceField("pg.v1") != "schema" || m.NamespaceField("oracle.v1") != "" || m.NamespaceField("none.v1") != "" {
+		t.Error("wrong namespace field")
+	}
+}

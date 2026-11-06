@@ -302,6 +302,7 @@
 | `platform_providers.platforms.zone` | Its zone. Wiring must stay within one zone. | |
 | `platform_providers.platforms.scope` | Its owner scope: the team that runs it. A scope path. | |
 | `platform_providers.platforms.target_scopes` | Scope patterns that may own targets here. By default its scope and below. | |
+| `platform_providers.platforms.namespace_template` | What a target's namespace must be, from the placeholders of `governance.accounts.target_scope`, such as `{account}_{tenancy}`. Needs a plugin that declares a namespace field. | |
 | `platform_providers.platforms.display_name` | Its name, for readers. | |
 | `platform_providers.platforms.description` | What it is, for readers. | |
 | `platform_providers.platforms.contacts` | Who to ask. | |

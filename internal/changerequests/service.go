@@ -350,6 +350,10 @@ func (s *Service) System(ctx context.Context, r *Request) error {
 	return s.file(ctx, filed{res, r})
 }
 
+// sameAtApproval are the refusals an approval answers as filing does
+// (.specs/ligo-tenancy.md §5, §7.2); all others read validation-failed (§7.2.3).
+var sameAtApproval = []string{"account-not-registered", "account-scope-mismatch", "namespace-mismatch", "namespace-scope-mismatch"}
+
 // Maintenance refuses a change while maintenance mode is on: the shared
 // lock makes the check race-free, as turning maintenance on waits for the
 // transactions that passed it (§6.2.2, §10.3). It is the first statement
@@ -515,7 +519,7 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 		detail, slug := err.Error(), "validation-failed"
 		if e := (*Error)(nil); errors.As(err, &e) {
 			detail = e.Detail
-			if e.Slug == "account-not-registered" { // the same answer as when filing (.specs/ligo-tenancy.md §7.2)
+			if slices.Contains(sameAtApproval, e.Slug) {
 				slug = e.Slug
 			}
 		}

@@ -319,7 +319,7 @@ func TestAccountRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Rules.Extractors["cloud.internal"] = static
-	s.Rules.Accounts = &governance.Accounts{Scope: "cloud/{account}"}
+	s.Rules.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}"}
 	cfg := example(t)
 	cfg.Authorization.Approval.RequiredScopes = append(cfg.Authorization.Approval.RequiredScopes, "cloud/*")
 	s.Requests.Policy = cfg.Policy() // or the requests would apply at once

@@ -98,6 +98,17 @@ func invalid(format string, args ...any) *changerequests.Error {
 // (§7.2.3 steps 1 to 7, §3.7) on s, a new source if cur is nil, else an
 // update of cur, and normalizes s. It returns the source's scope.
 func (r *Rules) validate(s *Source, cur *Source) (string, error) {
+	scope, err := r.validateIdentity(s, cur)
+	if err != nil {
+		return "", err
+	}
+	if !r.Accounts.SourceConforms(scope) {
+		return "", refuse(422, "account-scope-mismatch", "the regex's scope %s does not have the form %s", scope, r.Accounts.SourceScope)
+	}
+	return scope, nil
+}
+
+func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
 	if s.Kind != "" && s.Kind != "Source" {
 		return "", invalid("kind %q is not Source", s.Kind)
 	}

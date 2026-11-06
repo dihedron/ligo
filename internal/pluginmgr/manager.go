@@ -309,6 +309,17 @@ func (m *Manager) Strategies(storeType string) []string {
 	return out
 }
 
+// NamespaceField is the definition field that holds a target's namespace on
+// platforms of platformType, or "" if it has none (.specs/ligo-tenancy.md §5).
+func (m *Manager) NamespaceField(platformType string) string {
+	for _, p := range m.procs {
+		if p.spec.Kind == pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER && p.spec.Type == platformType {
+			return p.described.GetPlatformProvider().GetNamespaceField()
+		}
+	}
+	return ""
+}
+
 // ExactSubject reports whether a store's strategy binds one exact SPIFFE ID
 // (OI-1, .specs/ligo-vault-plugin.md §4).
 func (m *Manager) ExactSubject(storeType, strategy string) bool {

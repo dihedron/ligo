@@ -501,7 +501,7 @@ func TestAccountDrift(t *testing.T) {
 	c.Extractors[td] = static
 	src := v.source(t, "acs-"+x, scope, td)
 	tgt := v.target(t, "act-"+x, "oracle-prod", scope, "dc/corp-prod")
-	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}"}
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
 	stored := func(table string, id uuid.UUID) string {
 		t.Helper()
 		var a string
@@ -549,5 +549,67 @@ func TestAccountDrift(t *testing.T) {
 	}
 	if a := stored("sources", src); a != "" {
 		t.Errorf("account %q", a)
+	}
+}
+
+// Existing resources that do not fit the structure stop startup: no
+// re-scoping can fix them.
+func TestScopeForm(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	c := v.checks(t)
+	td := account + ".internal"
+	scope := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Extractors[td] = static
+	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
+	v.source(t, "fs-"+x, scope, td)
+	v.target(t, "ft-"+x, "oracle-prod", scope, "dc/corp-prod")
+	c.AcceptScopeChanges = true
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}/app/{project}", TargetScope: "dc/corp-prod/{account}/data/{tenancy}"}
+	err = c.scopes(ctx)
+	if err == nil || !strings.Contains(err.Error(), "source fs-"+x+": scope "+scope+" does not conform") ||
+		!strings.Contains(err.Error(), "target ft-"+x+": scope "+scope+" does not conform") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// TN-16, and a platform whose plugin cannot hold a namespace.
+func TestNamespaces(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	c := v.checks(t)
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	declared := func(string) string { return "schema" }
+	id := v.target(t, "nt-"+x, "oracle-prod", "dc/corp-prod/"+account, "dc/corp-prod")
+	v.exec(t, `update targets set definition = '{"schema":"other"}' where id = $1`, id)
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("no template: %v", err)
+	}
+	var pl *config.Platform
+	for i := range c.Config.PlatformProviders {
+		for j := range c.Config.PlatformProviders[i].Platforms {
+			if p := &c.Config.PlatformProviders[i].Platforms[j]; p.Name == "oracle-prod" {
+				pl = p
+			}
+		}
+	}
+	pl.NamespaceTemplate = "{account}_ok"
+	if err := c.Namespaces(ctx, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "oracle-prod") || !strings.Contains(err.Error(), "namespace_field") {
+		t.Errorf("no capability: %v", err)
+	}
+	if err := c.Namespaces(ctx, declared); err == nil || !strings.Contains(err.Error(), "nt-"+x) || !strings.Contains(err.Error(), account+"_ok") {
+		t.Errorf("TN-16: %v", err)
+	}
+	v.exec(t, `update targets set definition = jsonb_build_object('schema', $2::text) where id = $1`, id, account+"_ok")
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("matching: %v", err)
 	}
 }
