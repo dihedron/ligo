@@ -19,7 +19,7 @@
 9. **Fuzzy Testing and Benchmarking:** Propose fuzzy testing and benchmarking when reasonable.
 10. **Lab Testing:** Whenever applicable, propose to set up a lab environment to cover complex integration scenarios; don't shy away from proposing more coverage scenarios, including lengthy stress tests and chaos monkey to check for correctness under random conditions (e.g. race conditions, malfunctions), whenever reasonable.
 11. **Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. 
-12. **Sane Commits:** run `go test ./... before every commit and check that everything is still sane.
+12. **Sane Commits:** run `go test ./...` before every commit and check that everything is still sane.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers; propose additional libraries where applicable.
