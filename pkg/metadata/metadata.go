@@ -1,12 +1,16 @@
 package metadata
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path"
 	"runtime/debug"
+
+	"github.com/joho/godotenv"
 )
 
 // NOTE: these variables are populated at compile time by using the -ldflags
@@ -127,4 +131,15 @@ func PrintFull(writer io.Writer) {
 	_, _ = fmt.Fprintf(writer, "  - Git Tree State            : %s\n", GitTreeState)
 	_, _ = fmt.Fprintf(writer, "  - Build Commit              : %s\n", GitCommit)
 	_, _ = fmt.Fprintf(writer, "  - Variable Name (.env)      : %s\n", DotEnvVarName)
+}
+
+// LoadDotEnv loads a .env file. A parse error from godotenv quotes the file
+// from the bad line on, secrets included, so it never leaves this function.
+func LoadDotEnv(filename string) error {
+	err := godotenv.Load(filename)
+	var pathErr *fs.PathError
+	if err == nil || errors.As(err, &pathErr) {
+		return err
+	}
+	return errors.New("the file is malformed (details withheld: they may quote secrets)")
 }

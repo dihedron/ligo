@@ -8,7 +8,6 @@ import (
 
 	"github.com/dihedron/ligo/pkg/metadata"
 	flags "github.com/jessevdk/go-flags"
-	"github.com/joho/godotenv"
 )
 
 // Version is the command that prints information about the application
@@ -26,7 +25,7 @@ func (cmd *Version) Execute(args []string) error {
 	if cmd.Verbose {
 		metadata.PrintFull(os.Stdout)
 		if cmd.DotEnv != nil {
-			if err := godotenv.Load(*cmd.DotEnv); err != nil {
+			if err := metadata.LoadDotEnv(*cmd.DotEnv); err != nil {
 				slog.Error("error loading .env file", "error", err)
 			} else {
 				slog.Info("successfully loaded .env file", "path", *cmd.DotEnv)

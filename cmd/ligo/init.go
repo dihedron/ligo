@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/dihedron/ligo/pkg/metadata"
-	"github.com/joho/godotenv"
 )
 
 var (
@@ -32,7 +31,7 @@ func init() {
 	dotenv, dotenvSet := os.LookupEnv(metadata.DotEnvVarName)
 	var dotenvErr error
 	if dotenvSet {
-		dotenvErr = godotenv.Load(dotenv)
+		dotenvErr = metadata.LoadDotEnv(dotenv)
 	}
 
 	// get log elevel from environment variable where, given

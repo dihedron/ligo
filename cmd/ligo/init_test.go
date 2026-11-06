@@ -92,3 +92,39 @@ func TestDotEnvLogging(t *testing.T) {
 		})
 	}
 }
+
+// TestMalformedDotEnvIsNotQuoted: godotenv's parse error quotes the file from
+// the bad line on, and later lines may hold secrets.
+func TestMalformedDotEnvIsNotQuoted(t *testing.T) {
+	bin := built(t)
+	const canary, badLine = "canary-value", "bad line here"
+	bad := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(bad, []byte(badLine+"\nLIGO_PG_APP_DSN="+canary+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  []string
+	}{
+		{"init, no level", []string{"version"}, []string{"LIGO_DOTENV=" + bad}},
+		{"init, level error", []string{"version"}, []string{"LIGO_DOTENV=" + bad, "LIGO_LOG_LEVEL=error"}},
+		{"version -v, no level", []string{"version", "-v", "--dotenv", bad}, nil},
+		{"version -v, level error", []string{"version", "-v", "--dotenv", bad}, []string{"LIGO_LOG_LEVEL=error"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.args...)
+			cmd.Env = append([]string{"HOME=" + t.TempDir()}, tc.env...)
+			out, _ := cmd.CombinedOutput()
+			if strings.Contains(string(out), canary) || strings.Contains(string(out), badLine) {
+				t.Errorf("the file is quoted: %s", out)
+			}
+		})
+	}
+	// the failure itself is still reported
+	cmd := exec.Command(bin, "version")
+	cmd.Env = []string{"HOME=" + t.TempDir(), "LIGO_DOTENV=" + bad}
+	if out, _ := cmd.CombinedOutput(); !strings.Contains(string(out), "malformed") {
+		t.Errorf("no report of the failure: %s", out)
+	}
+}
