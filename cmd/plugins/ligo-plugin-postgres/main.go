@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -45,15 +46,11 @@ var (
 	uuidRE      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["host","port","database","grantable_roles","allowed_endpoints","bootstrap_credential"],
-"properties":{"host":{"type":"string"},"port":{"type":"integer"},"database":{"type":"string"},
-"grantable_roles":{"type":"array","items":{"type":"string"}},"allowed_endpoints":{"type":"array","items":{"type":"string"}},
-"ca_file":{"type":"string"},"directory_group":{"type":"string"},"bootstrap_credential":{"type":"object"}}}`
+//go:embed schemas/config.json
+var configSchema string
 
-const outputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["endpoint","database"],
-"properties":{"endpoint":{"type":"string","x-ligo-endpoint":true},"database":{"type":"string"},"user":{"type":"string"}}}`
+//go:embed schemas/output.json
+var outputSchema string
 
 // config is an instance's checked config_json.
 type config struct {

@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,16 +42,11 @@ var (
 	mountRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$`)
 )
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["address","allowed_endpoints","auth_mount","role","workload_jwt_audience"],
-"properties":{"address":{"type":"string"},"allowed_endpoints":{"type":"array","items":{"type":"string"}},"auth_mount":{"type":"string"},
-"role":{"type":"string"},"workload_jwt_audience":{"type":"string"},"kv_mount":{"type":"string"},"namespace":{"type":"string"},
-"database_mount":{"type":"string"},"db_connection":{"type":"string"},"ca_file":{"type":"string"}}}`
+//go:embed schemas/config.json
+var configSchema string
 
-const outputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["address","policy","authMount","role"],
-"properties":{"address":{"type":"string","x-ligo-endpoint":true},"secretPath":{"type":"string"},"credsPath":{"type":"string"},"policy":{"type":"string"},
-"authMount":{"type":"string"},"role":{"type":"string"}}}`
+//go:embed schemas/output.json
+var outputSchema string
 
 // config is an instance's checked config_json.
 type config struct {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -57,14 +58,11 @@ type plugin struct {
 	instances map[string]*instance
 }
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
-"required":["data_address","control_address","server_id","mode","ca_file","allowed_endpoints"],
-"properties":{"data_address":{"type":"string"},"control_address":{"type":"string"},"server_id":{"type":"string"},
-"mode":{"enum":["svid","password"]},"ca_file":{"type":"string"},"allowed_endpoints":{"type":"array","items":{"type":"string"}}}}`
+//go:embed schemas/config.json
+var configSchema string
 
-const outputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["endpoint","serverId","mode"],
-"properties":{"endpoint":{"type":"string","x-ligo-endpoint":true},"serverId":{"type":"string"},"mode":{"enum":["svid","password"]},"user":{"type":"string"}}}`
+//go:embed schemas/output.json
+var outputSchema string
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 1,

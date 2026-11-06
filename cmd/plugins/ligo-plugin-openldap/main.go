@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,10 +35,8 @@ const (
 // principalRE is the grammar of the one request value in a DN (§5.8 rule 3).
 var principalRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,19}$`)
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["url","service_ou_dn","allowed_endpoints","bootstrap_credential"],
-"properties":{"url":{"type":"string"},"service_ou_dn":{"type":"string"},"allowed_endpoints":{"type":"array","items":{"type":"string"}},
-"ca_file":{"type":"string"},"bootstrap_credential":{"type":"object"}}}`
+//go:embed schemas/config.json
+var configSchema string
 
 // config is an instance's checked config_json.
 type config struct {

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "url",
+    "service_ou_dn",
+    "allowed_endpoints",
+    "bootstrap_credential"
+  ],
+  "properties": {
+    "url": {
+      "type": "string"
+    },
+    "service_ou_dn": {
+      "type": "string"
+    },
+    "allowed_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ca_file": {
+      "type": "string"
+    },
+    "bootstrap_credential": {
+      "type": "object"
+    }
+  }
+}

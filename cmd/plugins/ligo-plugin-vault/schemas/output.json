@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "address",
+    "policy",
+    "authMount",
+    "role"
+  ],
+  "properties": {
+    "address": {
+      "type": "string",
+      "x-ligo-endpoint": true
+    },
+    "secretPath": {
+      "type": "string"
+    },
+    "credsPath": {
+      "type": "string"
+    },
+    "policy": {
+      "type": "string"
+    },
+    "authMount": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    }
+  }
+}
