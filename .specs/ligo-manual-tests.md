@@ -10,7 +10,7 @@ Everything runs on one lab, from the repository's root, on a build that holds ev
 2. `test/lab/lab.sh reset`, then `deploy`, `serve install`, `echo install`.
 3. Break-glass scenarios only (B-*): `serve install` grants `livia` the role `break_glass` on `dc/corp-prod/*` and sets a break-glass policy (default TTL 1h, maximum 4h, at most 3 open changes).
 
-Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, `dave` approver, `livia` break-glass, all on `dc/corp-prod/*`. CLI principals: `ligo-ops` (olga, operator) and `ligo-approver` (dora, approver). Web UI: <https://10.252.0.20:9443/ui/login>; use one private window per user so that the sessions stay apart.
+Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, `dave` approver, `livia` break-glass, all on `dc/corp-prod/*`. CLI principals: `ligo-ops` (olga, operator) and `ligo-approver` (dora, approver). Web UI: <https://10.252.0.20:9443/ui/login>, or <https://10.252.0.20:9445/ui/login> with the `lb` scenario (`external_origin`); use one private window per user so that the sessions stay apart.
 
 ## Scenarios
 
@@ -64,8 +64,8 @@ Also seen on 2026-11-01/02: an unratified break-glass CREATE reverted by the swe
 | R-3 | F-10, F-11: a short justification and a TTL of `1m` together: both fields marked, the pair never mentioned; a wrong password marks the password field | passed 2026-11-01 |
 | R-4 | F-12, B-3 attempt 4: an emergency UPDATE of `echo-bg-svid` goes through, a second gives `break-glass-open` | passed 2026-11-01 |
 | R-5 | F-9: after a manual revert of a binding with an inline source, the source's retirement names the reverter | passed 2026-11-01 |
-| R-6 | F-13: switching the operation shows only its fields; the button says "Create/Update/Revoke the binding now" | open |
-| R-7 | F-14: Revert sits in its own card and needs a reason; the `REVERTED` line shows it in quotes; `ligo cr revert` needs `-m` | open |
+| R-6 | F-13: switching the operation shows only its fields; the button says "Create/Update/Revoke the binding now" | passed 2026-11-06 |
+| R-7 | F-14: Revert sits in its own card and needs a reason; the `REVERTED` line shows it in quotes; `ligo cr revert` needs `-m` | passed 2026-11-06 (the `REVERTED` line is on the `BREAK_GLASS` request, not on its `SYSTEM_REVERT`) |
 | R-8 | F-15: with OpenBao sealed, restarting ligo audits no CONFIG_LOADED, and the restarts slow down | passed 2026-11-02 (0 entries in 90s; restarts 5s, 7s, 11s, 18s apart; one entry once unsealed) |
 
 ### E-1, E-2: the echo guide
