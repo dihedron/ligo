@@ -122,7 +122,7 @@ inner_wait() {
 		inner_exec "$1" true >/dev/null 2>&1 && break
 		sleep 2
 	done
-	inner_exec "$1" cloud-init status --wait >/dev/null || die "$1: cloud-init failed (lab.sh logs $1)"
+	cloud_init_wait "$1" inner_exec "$1"
 }
 
 # lxd_vm_up creates the lab VM and initializes its inner LXD.

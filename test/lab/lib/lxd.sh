@@ -59,5 +59,22 @@ vm_wait() {
 		sleep 2
 	done
 	lxd exec "$1" -- true >/dev/null 2>&1 || die "$1: the LXD agent does not answer"
-	lxd exec "$1" -- cloud-init status --wait >/dev/null || die "$1: cloud-init failed (lab.sh logs $1)"
+	cloud_init_wait "$1" lxd exec "$1" --
+}
+
+# cloud_init_wait NAME EXEC...: waits for cloud-init, running it through EXEC.
+# `status --wait` has failed with nothing on stderr on instances whose
+# cloud-init then ended done (hooks, lb), cause unknown: so it shows the
+# output, and only a failure that lasts a minute counts.
+cloud_init_wait() {
+	local name="$1" out rc i
+	shift
+	for i in $(seq 1 12); do
+		out="$("$@" cloud-init status --wait 2>&1)" && return 0
+		rc=$?
+		out="$(sed 's/^\.*//' <<<"$out")"
+		warn "$name: cloud-init status --wait exited $rc (attempt $i): $out"
+		sleep 5
+	done
+	die "$name: cloud-init failed, exit $rc: $out (lab.sh logs $name)"
 }
