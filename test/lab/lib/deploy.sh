@@ -42,6 +42,9 @@ env_ligo() {
 		"LIGO_TEST_TARGET_ADMIN_PASS=$(password target-admin)" \
 		"LIGO_TEST_PLUGIN_DIR=$LIGO_PLUGINS"
 	local name
+	for name in amy alan anne pat gus gail ivan; do
+		printf 'LIGO_TEST_LDAP_%s_PASS=%s\n' "$(tr '[:lower:]' '[:upper:]' <<<"$name")" "$(ldap_password "$name")"
+	done
 	for name in "${LAB_PLUGINS[@]}"; do
 		[[ -f "$LAB_STATE_DIR/plugins/$name" ]] &&
 			echo "LIGO_TEST_$(tr '[:lower:]-' '[:upper:]_' <<<"${name#ligo-plugin-}")_SHA256=$(sha256sum "$LAB_STATE_DIR/plugins/$name" | cut -d' ' -f1)"

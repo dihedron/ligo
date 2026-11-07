@@ -18,6 +18,8 @@ Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It sta
 | Target owners | Publish targets and access levels; approve bindings to them |
 | Platform team | Own `server.yaml` and platforms; confirm targets; can revoke any binding on their platform |
 | Additional parties | Such as Information Security: approve the flows the interconnection policy names |
+| Account administrators | Register and retire accounts (`account_admin`); they see no resources and decide nothing |
+| Account operators and approvers | Everything above, inside their own account, through their directory groups |
 | On call | Break-glass, incidents, this guide |
 
 ## A binding's phases

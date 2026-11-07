@@ -324,3 +324,19 @@ func FuzzGroupRulesMatch(f *testing.F) {
 		}
 	})
 }
+
+// TestAccountSourceExtractor: the path_regex the documentation gives for
+// accounts is one that startup accepts, and it yields the scope of a project.
+func TestAccountSourceExtractor(t *testing.T) {
+	e, err := NewPathTemplateExtractor(`^/acct/([a-z0-9]+)/project/([a-z0-9]+)/`, `cloud/${1}/app/${2}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.SourceScope(`^spiffe://prod\.internal/acct/acme/project/app01/sa/x$`, "prod.internal")
+	if err != nil || got != "cloud/acme/app/app01" {
+		t.Errorf("%q, %v", got, err)
+	}
+	if _, err := NewPathTemplateExtractor(`^/acct/([a-z][a-z0-9]*)/project/([a-z0-9]+)/`, `cloud/${1}/app/${2}`); err == nil {
+		t.Error("a group the extractor cannot reason about is accepted")
+	}
+}

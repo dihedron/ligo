@@ -77,7 +77,10 @@ commands:
                             test-webhook (with webhook and ligo2) the webhooks,
                             which stops the receiver and the replicas
                             test-faults stops the secrets backend and PostgreSQL
-                            under bindings being applied
+                            under bindings being applied; test-accounts (with
+                            ligo2 and webhook) resets the lab, installs ligo with
+                            governance.accounts and runs the accounts' e2e; reset
+                            and install again before any other suite
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]

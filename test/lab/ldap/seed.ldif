@@ -204,3 +204,119 @@ dn: cn=infosec-approvers,ou=groups,dc=ligo,dc=lab
 objectClass: groupOfNames
 cn: infosec-approvers
 member: uid=marco,ou=users,dc=ligo,dc=lab
+
+# --- Accounts (.specs/ligo-tenancy.md §8): lab.sh serve test-accounts ------------
+
+dn: uid=amy,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: amy
+cn: Amy Acme
+sn: Acme
+userPassword: {{PASSWORD:amy}}
+
+dn: uid=alan,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: alan
+cn: Alan Acme
+sn: Acme
+userPassword: {{PASSWORD:alan}}
+
+dn: uid=anne,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: anne
+cn: Anne Acme
+sn: Acme
+userPassword: {{PASSWORD:anne}}
+
+dn: uid=pat,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: pat
+cn: Pat Project
+sn: Project
+userPassword: {{PASSWORD:pat}}
+
+dn: uid=gus,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: gus
+cn: Gus Globex
+sn: Globex
+userPassword: {{PASSWORD:gus}}
+
+dn: uid=gail,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: gail
+cn: Gail Globex
+sn: Globex
+userPassword: {{PASSWORD:gail}}
+
+dn: uid=ivan,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: ivan
+cn: Ivan Initech
+sn: Initech
+userPassword: {{PASSWORD:ivan}}
+
+dn: ou=accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: accounts
+
+dn: ou=acme,ou=accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: acme
+
+dn: cn=operators,ou=acme,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: operators
+member: uid=amy,ou=users,dc=ligo,dc=lab
+
+dn: cn=approvers,ou=acme,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: approvers
+member: uid=alan,ou=users,dc=ligo,dc=lab
+member: uid=anne,ou=users,dc=ligo,dc=lab
+
+dn: ou=app01,ou=acme,ou=accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: app01
+
+dn: cn=approvers,ou=app01,ou=acme,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: approvers
+member: uid=pat,ou=users,dc=ligo,dc=lab
+
+dn: ou=globex,ou=accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: globex
+
+dn: cn=operators,ou=globex,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: operators
+member: uid=gus,ou=users,dc=ligo,dc=lab
+
+dn: cn=approvers,ou=globex,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: approvers
+member: uid=gail,ou=users,dc=ligo,dc=lab
+
+# not registered until TN-15 registers it
+dn: ou=initech,ou=accounts,dc=ligo,dc=lab
+objectClass: organizationalUnit
+ou: initech
+
+dn: cn=approvers,ou=initech,ou=accounts,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: approvers
+member: uid=ivan,ou=users,dc=ligo,dc=lab
+
+# the web UI's account administrator
+dn: uid=kim,ou=users,dc=ligo,dc=lab
+objectClass: inetOrgPerson
+uid: kim
+cn: Kim Accounts
+sn: Accounts
+userPassword: {{PASSWORD:kim}}
+
+dn: cn=ligo-account-admins,ou=groups,dc=ligo,dc=lab
+objectClass: groupOfNames
+cn: ligo-account-admins
+member: uid=kim,ou=users,dc=ligo,dc=lab

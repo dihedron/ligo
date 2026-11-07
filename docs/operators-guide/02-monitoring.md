@@ -64,6 +64,8 @@ No metric carries a scope label, as scopes are unbounded. Per-scope views come f
 
 Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">`. Receivers should check it, refuse timestamps older than 5 minutes, and deduplicate on `eventId`. A failure never delays the change it announces. Page on these at least: `BREAK_GLASS_USED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`.
 
+With accounts, send `BINDING_TARGET_DECIDED_BY_PLATFORM` to each account's own team, by giving its webhook the account's scope. It tells a target's account that a platform approver decided for it. The account can revoke the binding alone.
+
 ## The audit log
 
 Every state-changing action, propagation and workflow outcome is audited, in a hash chain the application can only append to. Forward it to your SIEM. Verify it with `ligo audit verify`, and read it with `ligo audit list`.

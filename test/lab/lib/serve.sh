@@ -7,6 +7,7 @@
 LIGO1_E2E=/home/ligo/e2e
 LIGO_E2E_SECRETS=/home/ligo/e2e-secrets # outside LIGO1_E2E, which serve_admins empties
 SERVE_DB=ligo_serve
+LAB_ACCOUNTS="" # non-empty: server.yaml with governance.accounts (serve_test_accounts)
 
 # cmd_serve [--on HOST|all] ACTION: start, stop, reload, status and logs act
 # on HOST or on every ligo host (all, the default); install and test always
@@ -27,6 +28,7 @@ cmd_serve() {
 	test-otel) serve_test_otel ;;
 	test-webhook) serve_test_webhook ;;
 	test-faults) serve_test_faults ;;
+	test-accounts) serve_test_accounts ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -38,7 +40,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook or test-faults" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults or test-accounts" ;;
 	esac
 }
 
@@ -265,6 +267,68 @@ serve_env() {
 # serve_unit: the unit the package ships, for the binary where the lab puts it.
 serve_unit() { sed 's|^ExecStart=/usr/bin/ligo |ExecStart=/usr/local/bin/ligo |' "$REPO_DIR/packaging/ligo.service"; }
 
+# With LAB_ACCOUNTS, prod.lab's sources belong to accounts, so that a workload
+# can read its credential from the store (.specs/ligo-tenancy.md §9.4), and the
+# root is tenants/ because cloud/fin-01, of the topologies, breaks the account
+# grammar. The two forms exclude each other, as a trust domain has one extractor.
+serve_prod_scope() {
+	if [[ -n "$LAB_ACCOUNTS" ]]; then
+		echo "- { trust_domain: prod.lab, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', scope_template: 'tenants/\${1}/app/\${2}' }"
+	else
+		echo '- { trust_domain: prod.lab, mode: static, scope: "dc/corp-prod" }'
+	fi
+}
+
+serve_accounts_config() {
+	[[ -n "$LAB_ACCOUNTS" ]] || return 0
+	local base="ou=accounts,$LDAP_BASE"
+	cat <<YAML
+  accounts:
+    scope: "tenants/{account}"
+    source_scope: "tenants/{account}/app/{project}"
+    target_scope: "tenants/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "$base"
+      roles:
+        - { group_dn: "cn=operators,ou={account},$base", role: operator, scope: "tenants/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},$base", role: approver, scope: "tenants/{account}/*" }
+        - { group_dn: "cn=approvers,ou={project},ou={account},$base", role: approver, scope: "tenants/{account}/app/{project}" }
+YAML
+}
+
+serve_accounts_platform() {
+	[[ -n "$LAB_ACCOUNTS" ]] || return 0
+	local aud="$1" bao="$2"
+	cat <<YAML
+      - name: pg-shared
+        zone: prod
+        scope: "platform/shared"
+        target_scopes: ["tenants/*"]
+        namespace_template: "{account}_{tenancy}"
+        display_name: "Lab PostgreSQL shared by the accounts"
+        allowed_source_trust_domains: [prod.lab]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
+        identity_provider: { type: target-local.v1, instance: local-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }
+        config:
+          host: pg.ligo.lab
+          port: 5432
+          database: ledger
+          grantable_role_templates: ["{namespace}_read", "{namespace}_write"]
+          ca_file: /etc/ligo-lab/ca.crt
+          allowed_endpoints: ["pg.ligo.lab:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "$bao"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "$aud"
+            kv_path: kv/data/ligo/bootstrap/postgres
+YAML
+}
+
 # serve_config HOST: server.yaml for HOST, with the deployed plugins' hashes.
 # serve_observability: traces to the collector, with the otel scenario.
 serve_observability() {
@@ -337,6 +401,9 @@ authorization:
     - { spiffe_id: "spiffe://prod.lab/ops/pia", role: approver, scopes: ["cloud/fin-01/payments"] }
     - { spiffe_id: "spiffe://prod.lab/ops/hana", role: operator, scopes: ["cloud/fin-01/hr", "cloud/fin-01/ledger"] }
     - { spiffe_id: "spiffe://prod.lab/ops/sean", role: approver, scopes: ["sec/infosec"] }
+    # the accounts' e2e: the shared platform's approver (.specs/ligo-tenancy.md §9.3)
+    - { spiffe_id: "spiffe://prod.lab/ops/peter", role: approver, scopes: ["platform/shared"] }
+    - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,$LDAP_BASE", role: account_admin }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     # the web UI's echo guide: carol files, dave approves (.specs/ligo-echo-target.md)
@@ -344,12 +411,13 @@ authorization:
     - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, scopes: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, scopes: ["dc/corp-prod/*"] } # livia
   approval:
-    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/payments"]
-    require_distinct_approvers_across_scopes: false
+    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/payments"$([[ -n "$LAB_ACCOUNTS" ]] && echo ', "tenants/*", "platform/*"')]
+    require_distinct_approvers_across_scopes: $([[ -n "$LAB_ACCOUNTS" ]] && echo true || echo false)
     change_request_ttl: 72h
 governance:
+$(serve_accounts_config)
   source_scopes:
-    - { trust_domain: prod.lab, mode: static, scope: "dc/corp-prod" }
+    $(serve_prod_scope)
     - { trust_domain: test.lab, mode: path_template, path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/', scope_template: 'cloud/\${1}/\${2}' }
   interconnects:
     default_cross_scope: deny
@@ -358,6 +426,7 @@ governance:
       - { name: cloud-within-account, from: ["cloud/fin-01/*"], to: ["cloud/fin-01/*"], action: allow }
       - { name: cloud-to-dc, from: ["cloud/fin-01/*"], to: ["dc/corp-prod/*"], action: allow, additional_approvals: [ { name: security, scope: "sec/infosec" } ] }
       - { name: dc-to-cloud, from: ["dc/corp-prod"], to: ["cloud/fin-01/*"], action: allow }
+      - { name: accounts, from: ["tenants/*"], to: ["tenants/*"], action: allow }
 break_glass:
   min_justification_length: 20
   policies:
@@ -523,6 +592,7 @@ platform_providers:
             role: ligo-plugin-postgres
             jwt_audience: "$aud"
             kv_path: kv/data/ligo/bootstrap/postgres
+$(serve_accounts_platform "$aud" "$bao")
   - type: echo.v1
     binary: ligo-plugin-echo
     sha256: "$te"
@@ -568,8 +638,10 @@ YAML
 # max_token_ttl.
 serve_admins() {
 	local who dir="/root/e2e" f
-	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean
-		[workload]="ns/e2e/sa/w$E2E_SUFFIX" [stranger]="ns/e2e/sa/v$E2E_SUFFIX" [dcload]="ns/topo/sa/w$E2E_SUFFIX")
+	local load="ns/e2e/sa/w$E2E_SUFFIX"
+	[[ -z "$LAB_ACCOUNTS" ]] || load="acct/acme/project/app01/sa/w$E2E_SUFFIX"
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean [peter]=ops/peter
+		[workload]="$load" [stranger]="ns/e2e/sa/v$E2E_SUFFIX" [dcload]="ns/topo/sa/w$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
 	for who in "${!ids[@]}"; do
 		inner_exec spire-prod mkdir -m 0700 "$dir/$who"
@@ -696,14 +768,45 @@ serve_test_topologies() {
 	info "e2e of the four topologies passed"
 }
 
-# serve_scan_secrets: INV-03 and OL-14: the passwords the e2e read from the
+# serve_test_accounts: accounts on a shared PostgreSQL (.specs/ligo-tenancy.md
+# §11, TN-7, 10, 12, 15, 18). It needs its own server.yaml and leaves accounts
+# in the database, so it starts from the baseline, and the suites that follow
+# need lab.sh reset and serve install.
+serve_test_accounts() {
+	[[ "$(ligo_hosts | xargs)" == "ligo1 ligo2" ]] || die "serve test-accounts needs ligo2: lab.sh up --scenario ha"
+	inner_exists hooks || die "serve test-accounts needs the receiver: lab.sh up --scenario webhook"
+	LAB_ACCOUNTS=yes
+	lab_reset
+	ldap_seed # a baseline older than the accounts' entries lacks them
+	serve_install
+	deploy_tests
+	section "e2e of accounts"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	inner_exec hooks truncate -s 0 "$HOOKS_LOG"
+	serve_e2e '^TestServeAccounts$' ligo1 ligo2 || die "TestServeAccounts failed"
+	hooks_drained
+	local event=BINDING_TARGET_DECIDED_BY_PLATFORM got hook
+	for hook in oncall dba elsewhere; do
+		got="$(inner_exec hooks cat "$HOOKS_LOG" | jq -s --arg h "$hook" --arg e "$event" '[.[] | select(.hook == $h) | .body | fromjson | select(.event == $e)] | length')"
+		case "$hook" in
+		elsewhere) [[ "$got" == 0 ]] || die "TN-12: the source's account received $got $event" ;;
+		*) [[ "$got" == 1 ]] || die "TN-12: $hook received $got $event, want 1" ;;
+		esac
+	done
+	info "TN-12: $event reached the target's account, not the source's"
+	serve_scan_secrets 2
+	info "e2e of accounts passed; lab.sh reset and serve install before any other suite"
+}
+
+# serve_scan_secrets [MIN]: INV-03 and OL-14: the at least MIN passwords the e2e read from the
 # store are nowhere in ligo_serve, DBOS's checkpoints included, or in the
 # journal of ligo and its plugins on any replica. Only counts are printed.
 serve_scan_secrets() {
 	local dir host found
 	dir="$(umask 077 && mktemp -d)"
 	inner_exec ligo1 cat "$LIGO_E2E_SECRETS" >"$dir/secrets"
-	(($(wc -l <"$dir/secrets") >= 3)) || { rm -rf "$dir"; die "INV-03: the e2e recorded no passwords"; }
+	(($(wc -l <"$dir/secrets") >= ${1:-3})) || { rm -rf "$dir"; die "INV-03: the e2e recorded no passwords"; }
 	lxd exec lxd -- lxc exec pg -- sudo -u postgres pg_dump -d "$SERVE_DB" >"$dir/haystack" ||
 		{ rm -rf "$dir"; die "INV-03: cannot dump $SERVE_DB"; }
 	for host in $(ligo_hosts); do

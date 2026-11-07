@@ -51,9 +51,11 @@ governance:
   source_scopes:
     - trust_domain: cloud.internal
       mode: path_template
-      path_regex: '^/acct/([a-z][a-z0-9]*)/project/([a-z][a-z0-9]*)/'
+      path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/'
       scope_template: 'cloud/${1}/app/${2}'
 ```
+
+A `path_regex` group must be one character class repeated with `+`, so it cannot state the account grammar exactly: `1abc` passes the regex, and is then refused as a scope no account can have.
 
 Sources and targets sit on separate branches, `app` and `data`, because a project and a tenancy with the same name would otherwise be one scope, with the same people deciding for both sides of their binding.
 

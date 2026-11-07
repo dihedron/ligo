@@ -22,6 +22,7 @@ release_suite() {
 	release_step "$dir" "$b-serve-test-otel" serve test-otel
 	release_step "$dir" "$b-serve-test-webhook" serve test-webhook
 	release_step "$dir" "$b-serve-test-faults" serve test-faults
+	release_step "$dir" "$b-serve-test-accounts" serve test-accounts # resets the lab first
 }
 
 # release_versions: what env.json does not record of the lab's components.

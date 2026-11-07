@@ -33,6 +33,34 @@ ligo target revoke-bindings <target> --source-scope 'cloud/*' --comment "..."   
 
 One owner is enough to revoke: the source's, the target's or the platform's. No other can veto it. The API stops serving it at once; the workflow then removes the store's objects, the role and any account, in that order.
 
+## Managing accounts
+
+Use the **Accounts** page of the web UI, or the CLI, as an `account_admin`:
+
+```bash
+ligo account register acme --display-name "Acme Corp"
+ligo account list
+ligo account get acme      # with its counts of sources, targets and bindings
+ligo account retire acme   # asks you to type the name
+```
+
+To add a tenant:
+
+1. Register the account. It applies at once, and is audited.
+2. In the directory, create its unit and groups under the configured `search_base`. Roles follow within moments, on every replica, and existing sessions pick them up at their next check.
+3. For each tenancy on a shared platform, have the platform team create the schema and its roles.
+4. In SPIRE, register the account's workloads under its path.
+
+An unregistered account gets no roles, even if its groups exist, and its sources and targets are refused with `422 account-not-registered`.
+
+To retire one, first retire its sources and targets; otherwise `409 account-in-use`. **Retiring cannot be undone, and the name can never be registered again**, because audit entries and SPIFFE paths refer to it. Its groups stop granting roles at once.
+
+### Who decides for an account
+
+Inside one account, two of its approvers decide: one for the `SOURCE` side, another for `TARGET`, when `require_distinct_approvers_across_scopes` is on. An account with one approver cannot approve its own bindings. Across accounts, each account decides its side.
+
+An approver of the platform's scope may also decide a binding's `TARGET` side, for a tenant nobody can reach. Use it sparingly: the target's account no longer consents, although it is told and can revoke alone. It never replaces the source's consent. The audit entry carries `decidedAs: PLATFORM`.
+
 ## Rolling restart, and maintenance
 
 Any change to `server.yaml` other than certificate files needs a rolling restart. `systemctl reload ligo` reloads certificate files only. `ligo` drains active requests for up to 15 s on `SIGTERM`.

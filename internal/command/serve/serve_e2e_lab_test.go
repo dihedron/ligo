@@ -92,7 +92,7 @@ func newAdmin(t *testing.T, who string) *admin {
 	a := &admin{t: t, base: e2eEnv(t, "LIGO_E2E_ADMIN")}
 	var cfg *tls.Config
 	switch who {
-	case "olivia", "livia":
+	case "olivia", "livia", "amy", "alan", "anne", "pat", "gus", "gail", "ivan":
 		a.user, a.pass = who, e2eEnv(t, "LIGO_TEST_LDAP_"+strings.ToUpper(who)+"_PASS")
 		cfg = ligoTLS(t, "")
 	default:
