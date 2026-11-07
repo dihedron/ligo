@@ -49,7 +49,7 @@ func TestAudited(t *testing.T) {
 	t.Cleanup(owner.Close)
 	x := uuid.NewV7().String()[24:]
 	events := []string{"CR_AWAITING_APPROVAL", "BINDING_REVOKED", "PROPAGATION_FAILED", "SOURCE_DEPRECATED", "CR_INTERCONNECT_DENIED",
-		"SYSTEM_MAINTENANCE_ENABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_EXPIRING"}
+		"SYSTEM_MAINTENANCE_ENABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_EXPIRING", "BINDING_TARGET_DECIDED_BY_PLATFORM"}
 	hooks := map[string]string{"all-" + x: "", "dc-" + x: "dc/corp-prod/*", "cloud-" + x: "cloud/*"}
 	var webhooks []config.Webhook
 	for name, scope := range hooks {
@@ -159,6 +159,9 @@ func TestAudited(t *testing.T) {
 			"SYSTEM_EXECUTOR_RECOVERED", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
 		{"expiry warning", audit.Entry{ResourceType: "BINDING", ResourceID: &bnd, ResourceName: "b-" + x, Action: "BINDING_EXPIRY_WARNED", Actor: "system:expiry"},
 			"BINDING_EXPIRING", map[string]int{"all": 1, "dc": 1, "cloud": 1}},
+		{"a platform approver decided: the target's scope alone (TN-12)", audit.Entry{ResourceType: "BINDING", ResourceName: "new-" + x, ChangeRequestID: &create,
+			Action: "BINDING_TARGET_DECIDED_BY_PLATFORM", Actor: "dora", Snapshot: snap(map[string]string{"side": "TARGET", "decidedAs": "PLATFORM"})},
+			"BINDING_TARGET_DECIDED_BY_PLATFORM", map[string]int{"all": 1, "dc": 1, "cloud": 0}},
 		{"no event", audit.Entry{Action: "CONFIG_LOADED", Actor: "system:startup"}, "CONFIG_LOADED", map[string]int{"all": 0, "dc": 0, "cloud": 0}},
 	} {
 		if err := pgx.BeginFunc(ctx, pools.App, func(tx pgx.Tx) error { _, err := audit.Append(ctx, tx, tc.entry); return err }); err != nil {

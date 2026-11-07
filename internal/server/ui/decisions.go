@@ -76,7 +76,7 @@ func (s *Server) breakGlassControls(r *http.Request, cr *changerequests.Request,
 		}
 	}
 	d.CanRevert = open && cr.Operation != "DELETE" && (cr.RequestedBy == c.ID() ||
-		slices.ContainsFunc(cr.Sides, func(sd changerequests.Side) bool { return c.Grants.CanApprove(sd.Scope) }))
+		slices.ContainsFunc(cr.Sides, func(sd changerequests.Side) bool { return c.Decides(cr, sd) }))
 }
 
 // decide is POST /ui/change-requests/{id}/{approve,decline,withdraw,ratify,revert}: the

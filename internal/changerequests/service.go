@@ -544,7 +544,13 @@ func (s *Service) Approve(ctx context.Context, c Caller, id uuid.UUID, payloadSH
 		var entries []audit.Entry
 		for _, sd := range r.Sides {
 			if sd.DecidedBy == c.ID() && sd.Decision == Approved {
-				entries = append(entries, s.sideApproved(r, sd, c.ID()))
+				e := s.sideApproved(r, sd, c.ID())
+				if c.ByPlatform(r, sd) {
+					e = markPlatform(e)
+					entries = append(entries, e, PlatformDecision(r, sd, Approved, c.ID()))
+					continue
+				}
+				entries = append(entries, e)
 			}
 		}
 		if Complete(r.Consent, r.Sides) {
@@ -601,7 +607,13 @@ func (s *Service) Decline(ctx context.Context, c Caller, id uuid.UUID, side, com
 		var entries []audit.Entry
 		for _, sd := range r.Sides {
 			if sd.DecidedBy == c.ID() && sd.Decision == Declined {
-				entries = append(entries, entry(r, "CR_SIDE_DECLINED", c.ID(), c.ID(), map[string]any{"side": sd.Name, "scope": sd.Scope}))
+				e := entry(r, "CR_SIDE_DECLINED", c.ID(), c.ID(), map[string]any{"side": sd.Name, "scope": sd.Scope})
+				if c.ByPlatform(r, sd) {
+					e = markPlatform(e)
+					entries = append(entries, e, PlatformDecision(r, sd, Declined, c.ID()))
+					continue
+				}
+				entries = append(entries, e)
 			}
 		}
 		if Rejected(r.Consent, r.Sides) {
@@ -801,6 +813,21 @@ func (s *Service) sideApproved(r *Request, sd Side, actor string) audit.Entry {
 		}
 	}
 	return entry(r, "CR_SIDE_APPROVED", actor, sd.DecidedBy, snap)
+}
+
+// PlatformDecision is the entry that announces a TARGET side decided through
+// ByPlatform, for the webhook to the target's account (§9.3).
+func PlatformDecision(r *Request, s Side, decision, actor string) audit.Entry {
+	return entry(r, "BINDING_TARGET_DECIDED_BY_PLATFORM", actor, actor, map[string]any{"side": s.Name, "scope": s.Scope, "decision": decision, "decidedAs": DecidedAsPlatform})
+}
+
+// markPlatform adds decidedAs to a side's entry, whose snapshot is an object.
+func markPlatform(e audit.Entry) audit.Entry {
+	var snap map[string]any
+	_ = json.Unmarshal(e.Snapshot, &snap) // written just now, by entry
+	snap["decidedAs"] = DecidedAsPlatform
+	e.Snapshot, _ = json.Marshal(snap)
+	return e
 }
 
 func entry(r *Request, action, actor, approver string, snapshot map[string]any) audit.Entry {

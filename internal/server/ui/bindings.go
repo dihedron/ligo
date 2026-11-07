@@ -98,7 +98,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 // c may ratify or revert, as an approver of a side or the requester.
 func (s *Server) openBreakGlass(ctx context.Context, c changerequests.Caller) ([]OpenBreakGlass, error) {
 	rows, err := s.DB.Query(ctx, `SELECT r.id, r.resource_name, r.requested_by, r.requested_at + make_interval(secs => r.break_glass_ttl_seconds) AS expires,
-		array_agg(s.scope)
+		r.resource_type, r.operation, coalesce(r.platform_scope, ''), array_agg(s.side), array_agg(s.scope), array_agg(s.basis::text)
 		FROM change_requests r JOIN change_request_sides s ON s.change_request_id = r.id
 		WHERE r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.id IN (SELECT r.id FROM change_requests r
 			JOIN change_request_sides s ON s.change_request_id = r.id WHERE `+changerequests.OpenBreakGlass+`)
@@ -112,12 +112,16 @@ func (s *Server) openBreakGlass(ctx context.Context, c changerequests.Caller) ([
 		var o OpenBreakGlass
 		var by string
 		var expires time.Time
-		var scopes []string
-		if err := rows.Scan(&o.ID, &o.Name, &by, &expires, &scopes); err != nil {
+		var cr changerequests.Request
+		var sides, scopes, bases []string
+		if err := rows.Scan(&o.ID, &o.Name, &by, &expires, &cr.ResourceType, &cr.Operation, &cr.PlatformScope, &sides, &scopes, &bases); err != nil {
 			return nil, err
 		}
+		for i := range sides {
+			cr.Sides = append(cr.Sides, changerequests.Side{Name: sides[i], Scope: scopes[i], Basis: bases[i]})
+		}
 		o.ExpiresIn = time.Until(expires).Round(time.Minute).String()
-		o.CanAct = by == c.ID() || slices.ContainsFunc(scopes, c.Grants.CanApprove)
+		o.CanAct = by == c.ID() || slices.ContainsFunc(cr.Sides, func(sd changerequests.Side) bool { return c.Decides(&cr, sd) })
 		out = append(out, o)
 	}
 	return out, rows.Err()

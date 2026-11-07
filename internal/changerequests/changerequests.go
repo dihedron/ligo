@@ -92,6 +92,23 @@ func (c Caller) ID() string {
 	return c.Principal.Name
 }
 
+// ByPlatform reports whether c qualifies for side s of r only as an approver of
+// the binding's platform (.specs/ligo-tenancy.md §9.3): never for a side other
+// than TARGET, so a source's consent is never removed, and for a delete only to
+// ratify a break-glass side.
+func (c Caller) ByPlatform(r *Request, s Side) bool {
+	return s.Name == "TARGET" && r.ResourceType == "BINDING" && r.PlatformScope != "" && (r.Operation != "DELETE" || s.Basis == BasisBreakGlass) &&
+		!c.Grants.CanApprove(s.Scope) && c.Grants.CanApprove(r.PlatformScope)
+}
+
+// Decides reports whether c is an approver for side s of r.
+func (c Caller) Decides(r *Request, s Side) bool {
+	return c.Grants.CanApprove(s.Scope) || c.ByPlatform(r, s)
+}
+
+// DecidedAsPlatform is the audit value of a decision made through ByPlatform.
+const DecidedAsPlatform = "PLATFORM"
+
 // Request is a change request (change_requests, §4.2) with its sides.
 type Request struct {
 	ID           uuid.UUID
@@ -291,7 +308,7 @@ func RatifiableSides(r *Request, c Caller, side string) ([]string, error) {
 	}
 	var eligible []string
 	for _, s := range r.Sides {
-		if s.Basis == BasisBreakGlass && s.RatifiedBy == "" && c.Grants.CanApprove(s.Scope) {
+		if s.Basis == BasisBreakGlass && s.RatifiedBy == "" && c.Decides(r, s) {
 			eligible = append(eligible, s.Name)
 		}
 	}
@@ -355,7 +372,7 @@ func SelectSides(r *Request, c Caller, p *governance.Policy, approve bool, side 
 			continue
 		}
 		operator := !p.ApprovalRequired(s.Scope) && !strings.HasPrefix(s.Name, "PARTY:") && c.Grants.Operator(s.Scope)
-		if c.Grants.CanApprove(s.Scope) || operator {
+		if c.Decides(r, s) || operator {
 			eligible = append(eligible, s.Name)
 		}
 	}

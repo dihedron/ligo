@@ -109,7 +109,7 @@ func (s *Service) RevertNow(ctx context.Context, c changerequests.Caller, id uui
 		return nil, e
 	}
 	r, err := s.Requests.Read(ctx, id)
-	if err == nil && c.ID() != r.RequestedBy && !slices.ContainsFunc(r.Sides, func(sd changerequests.Side) bool { return c.Grants.CanApprove(sd.Scope) }) {
+	if err == nil && c.ID() != r.RequestedBy && !slices.ContainsFunc(r.Sides, func(sd changerequests.Side) bool { return c.Decides(r, sd) }) {
 		err = pgx.ErrNoRows // the requester holds break_glass only, which sees nothing
 	}
 	if errors.Is(err, pgx.ErrNoRows) {

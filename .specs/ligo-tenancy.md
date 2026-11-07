@@ -220,8 +220,9 @@ Both of the existing rules apply: the requester never decides, and `require_dist
 
 An approver of a binding's **platform scope** also qualifies for its `TARGET` side, for create, raising a level and changing parameters, and for ratifying a `BREAK_GLASS` `TARGET` side.
 
-- The check moves from `CanApprove(side.Scope)` to one function taking the request and the side, called from all four sites: `changerequests.go:294` and `:358`, `ui/decisions.go:79`, and `ui/bindings.go:120`, and from the `--awaiting-me` query (`service.go:680`). The `TARGET` side's `scope` stays the target's, and no new side or basis is added, so the database triggers of ADR-13 rule 9 hold as they are.
-- The audit entry and the side show who decided, and the entry adds `decidedAs: PLATFORM`.
+- The check moves from `CanApprove(side.Scope)` to one function taking the request and the side, `Caller.Decides`, called from `RatifiableSides`, `SelectSides` (so also from the `--awaiting-me` query), `RevertNow` and the web UI's `CanRevert` and `CanAct`. The `TARGET` side's `scope` stays the target's, and no new side or basis is added, so the database triggers of ADR-13 rule 9 hold as they are.
+- The audit entry and the side show who decided, and the entry adds `decidedAs: PLATFORM`. An approver who also holds the target's own scope decides as that, without the mark. A decline and a ratification are marked and announced like an approval.
+- A delete is not covered, except to ratify a `BREAK_GLASS` side: a platform approver who revokes has a `PLATFORM` side of their own.
 - It never applies to `SOURCE`, `OWNER`, `PARTY:` or any other side.
 - `AUTO` is not extended: a platform operator filing a binding gets no automatic `TARGET` side.
 

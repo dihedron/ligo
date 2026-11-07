@@ -244,14 +244,21 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 		var entries []audit.Entry
 		var scopes []string
 		for _, n := range names {
-			snap, _ := json.Marshal(map[string]any{"side": n, "fullyRatified": left == 0})
-			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: r.ResourceID, ResourceName: r.ResourceName,
-				ChangeRequestID: &id, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
+			detail := map[string]any{"side": n, "fullyRatified": left == 0}
 			for _, sd := range r.Sides {
-				if sd.Name == n {
+				if sd.Name != n {
+					continue
+				}
+				if c.ByPlatform(r, sd) { // never the inline source's side too: no scope added
+					detail["decidedAs"] = changerequests.DecidedAsPlatform
+					entries = append(entries, changerequests.PlatformDecision(r, sd, "RATIFIED", c.ID()))
+				} else {
 					scopes = append(scopes, sd.Scope)
 				}
 			}
+			snap, _ := json.Marshal(detail)
+			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: r.ResourceID, ResourceName: r.ResourceName,
+				ChangeRequestID: &id, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
 		}
 		if r.DependsOn != nil { // the inline source's change, ratified with the side of its scope
 			var source string
