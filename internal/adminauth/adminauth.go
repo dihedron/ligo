@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -45,7 +46,9 @@ type LDAP struct {
 	BindPassword string         // from service_bind_password_env
 	RootCAs      *x509.CertPool // from ca_cert_file; SetRootCAs replaces it while serving
 	Groups       []string       // the ldap_group_dn of the authorization bindings
-	Timeout      time.Duration  // per connection and request; default 10s
+	// GroupSearchBase is ldap_groups.search_base; empty: no groups derive roles.
+	GroupSearchBase string
+	Timeout         time.Duration // per connection and request; default 10s
 
 	mu   sync.RWMutex                                 // guards RootCAs
 	dial func(ctx context.Context) (directory, error) // tests
@@ -128,17 +131,52 @@ func (l *LDAP) principal(ctx context.Context, username string, verify func(direc
 			p.Groups = append(p.Groups, g)
 		}
 	}
+	if p.AccountGroups, err = l.accountGroups(conn, userDN); err != nil {
+		return authz.Principal{}, err
+	}
+	for _, g := range p.AccountGroups {
+		if !slices.ContainsFunc(p.Groups, func(have string) bool { return strings.EqualFold(have, g) }) {
+			p.Groups = append(p.Groups, g)
+		}
+	}
 	return p, nil
+}
+
+// accountGroups finds, in one search, the groups under GroupSearchBase that
+// userDN is a direct member of: nested_groups does not apply to them. They are
+// sorted, as a session keeps its token only while its grants compare equal.
+func (l *LDAP) accountGroups(conn directory, userDN string) ([]string, error) {
+	if l.GroupSearchBase == "" {
+		return nil, nil
+	}
+	res, err := conn.Search(ldap.NewSearchRequest(l.GroupSearchBase, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, l.seconds(), false,
+		fmt.Sprintf(l.membershipFilter(), ldap.EscapeFilter(userDN)), []string{"dn"}, nil))
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultNoSuchObject) {
+		return nil, nil // a search base the directory does not have
+	}
+	if err != nil {
+		return nil, fmt.Errorf("adminauth: groups under %s: %w", l.GroupSearchBase, err)
+	}
+	var out []string
+	for _, e := range res.Entries {
+		out = append(out, e.DN)
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
+}
+
+func (l *LDAP) membershipFilter() string {
+	if l.Config.GroupMembershipFilter != "" {
+		return l.Config.GroupMembershipFilter
+	}
+	return "(member=%s)"
 }
 
 // member reports whether userDN is in group. With nested_groups, the walk
 // goes up from the user: each level is one search, under the group's
 // parent, for the groups whose members include the previous level.
 func (l *LDAP) member(conn directory, group, userDN string) (bool, error) {
-	filter := l.Config.GroupMembershipFilter
-	if filter == "" {
-		filter = "(member=%s)"
-	}
+	filter := l.membershipFilter()
 	res, err := conn.Search(ldap.NewSearchRequest(group, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, l.seconds(), false,
 		fmt.Sprintf(filter, ldap.EscapeFilter(userDN)), []string{"dn"}, nil))
 	if ldap.IsErrorWithCode(err, ldap.LDAPResultNoSuchObject) {

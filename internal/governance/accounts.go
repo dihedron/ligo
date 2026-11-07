@@ -327,3 +327,87 @@ func templatesOverlap(a, b string) bool {
 	}
 	return true
 }
+
+// GroupRole is what a directory group gives: Role on Scope, while Account is
+// registered and ACTIVE.
+type GroupRole struct {
+	Account, Role, Scope string
+}
+
+// GroupRules are the compiled rules of ldap_groups.
+type GroupRules struct {
+	rules []groupRule
+}
+
+type groupRule struct {
+	dn          *ldap.DN
+	role, scope string
+}
+
+// Compile parses the rules, which have passed Validate.
+func (g *AccountGroups) Compile() (*GroupRules, error) {
+	out := &GroupRules{}
+	for _, r := range g.Roles {
+		dn, err := ldap.ParseDN(r.GroupDN)
+		if err != nil {
+			return nil, fmt.Errorf("ldap_groups: group_dn %q: %w", r.GroupDN, err)
+		}
+		out.rules = append(out.rules, groupRule{dn: dn, role: r.Role, scope: r.Scope})
+	}
+	return out, nil
+}
+
+// Match returns what the group groupDN gives. The DN is parsed, never matched
+// as text, and compared RDN by RDN (.specs/ligo-tenancy.md §8): one that does
+// not fit a rule exactly gives nothing.
+func (r *GroupRules) Match(groupDN string) []GroupRole {
+	if r == nil {
+		return nil
+	}
+	dn, err := ldap.ParseDN(groupDN)
+	if err != nil {
+		return nil
+	}
+	var out []GroupRole
+	for _, rule := range r.rules {
+		if values, ok := rule.match(dn); ok {
+			out = append(out, GroupRole{Account: values[account], Role: rule.role, Scope: ExpandTemplate(rule.scope, values)})
+		}
+	}
+	return out
+}
+
+func (rule *groupRule) match(dn *ldap.DN) (map[string]string, bool) {
+	if len(dn.RDNs) != len(rule.dn.RDNs) {
+		return nil, false
+	}
+	values := map[string]string{}
+	for i, want := range rule.dn.RDNs {
+		got := dn.RDNs[i]
+		if len(got.Attributes) != 1 || foldASCII(got.Attributes[0].Type) != foldASCII(want.Attributes[0].Type) {
+			return nil, false
+		}
+		value := foldASCII(got.Attributes[0].Value)
+		switch w := want.Attributes[0].Value; {
+		case isPlaceholder(w):
+			if !ValidAccountValue(value) {
+				return nil, false
+			}
+			values[w] = value
+		case value != foldASCII(w):
+			return nil, false
+		}
+	}
+	return values, true
+}
+
+// foldASCII lower-cases A to Z alone: Unicode folding would read the Kelvin
+// sign as k, so a look-alike name would stand for another account.
+func foldASCII(s string) string {
+	return strings.Map(func(c rune) rune {
+		if c >= 'A' && c <= 'Z' {
+			return c + 'a' - 'A'
+		}
+		return c
+	}, s)
+}

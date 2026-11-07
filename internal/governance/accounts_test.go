@@ -247,3 +247,80 @@ func FuzzNamespaceInjective(f *testing.F) {
 		}
 	})
 }
+
+// groupRules are the rules of the spec's example (.specs/ligo-tenancy.md §4).
+func groupRules(t testing.TB) *GroupRules {
+	t.Helper()
+	const base = ",ou=accounts,dc=corp,dc=internal"
+	r, err := (&AccountGroups{SearchBase: "ou=accounts,dc=corp,dc=internal", Roles: []AccountRole{
+		{GroupDN: "cn=operators,ou={account}" + base, Role: "operator", Scope: "cloud/{account}/*"},
+		{GroupDN: "cn=approvers,ou={account}" + base, Role: "approver", Scope: "cloud/{account}/*"},
+		{GroupDN: "cn=approvers,ou={project},ou={account}" + base, Role: "approver", Scope: "cloud/{account}/app/{project}"},
+		{GroupDN: "cn=breakglass,ou={account}" + base, Role: "break_glass", Scope: "cloud/{account}/*"},
+	}}).Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// TestGroupRulesMatch: TN-7, TN-9 and TN-18, RDN by RDN and never as text.
+func TestGroupRulesMatch(t *testing.T) {
+	r := groupRules(t)
+	const base = ",ou=accounts,dc=corp,dc=internal"
+	for dn, want := range map[string]string{
+		"cn=approvers,ou=acme" + base:                          "acme approver cloud/acme/*",
+		"cn=operators,ou=acme" + base:                          "acme operator cloud/acme/*",
+		"cn=approvers,ou=app01,ou=acme" + base:                 "acme approver cloud/acme/app/app01",
+		"CN=Approvers,OU=ACME,OU=Accounts,DC=corp,DC=INTERNAL": "acme approver cloud/acme/*",
+		`cn=approvers,ou=acme\,ou=globex` + base:               "", // one value holding a comma
+		"cn=x,cn=approvers,ou=acme" + base:                     "", // an extra RDN that no rule has
+		"ou=acme" + base:                                       "", // a missing RDN
+		"cn=viewers,ou=acme" + base:                            "", // no such rule
+		"cn=approvers,ou=a-b" + base:                           "", // outside the grammar
+		"cn=approvers,ou=acme+cn=x" + base:                     "", // a multi-valued RDN
+		"cn=approvers,cn=acme" + base:                          "", // another attribute
+		"cn=approvers,ou=acme,ou=other,dc=corp":                "", // another base
+		"cn=approvers,ou=\u212Aacme" + base:                    "", // the Kelvin sign folds to k in Unicode
+		"cn=brea\u212Aglass,ou=acme" + base:                    "",
+		"cn=breakglass,ou=acme" + base:                         "acme break_glass cloud/acme/*",
+		"not a dn":                                             "",
+		"":                                                     "",
+	} {
+		var got []string
+		for _, m := range r.Match(dn) {
+			got = append(got, m.Account+" "+m.Role+" "+m.Scope)
+		}
+		if strings.Join(got, ";") != want {
+			t.Errorf("%q: %v, want %q", dn, got, want)
+		}
+	}
+	if got := r.Match("cn=approvers,ou=\u212Aacme" + base); len(got) != 0 {
+		t.Errorf("the Kelvin sign read as an account: %v", got)
+	}
+	var none *GroupRules
+	if got := none.Match("cn=approvers,ou=acme" + base); got != nil {
+		t.Errorf("no rules: %v", got)
+	}
+}
+
+// FuzzGroupRulesMatch: whatever the directory holds, a match names a valid
+// account and a scope of that account alone (TN-9).
+func FuzzGroupRulesMatch(f *testing.F) {
+	const base = ",ou=accounts,dc=corp,dc=internal"
+	for _, s := range []string{"cn=approvers,ou=acme" + base, `cn=approvers,ou=acme\,ou=globex` + base, "cn=approvers,ou=ACME" + base,
+		"cn=approvers,ou=app01,ou=acme" + base, "cn=approvers,ou=\u212A" + base, "#04", "ou=#6162" + base, "cn=approvers,ou=#6163" + base} {
+		f.Add(s)
+	}
+	r := groupRules(f)
+	f.Fuzz(func(t *testing.T, dn string) {
+		for _, m := range r.Match(dn) {
+			if !ValidAccountValue(m.Account) || !strings.HasPrefix(m.Scope, "cloud/"+m.Account+"/") {
+				t.Errorf("%q: %+v", dn, m)
+			}
+			if strings.ContainsAny(m.Scope, "{}") {
+				t.Errorf("%q: a placeholder left in %q", dn, m.Scope)
+			}
+		}
+	})
+}

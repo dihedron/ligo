@@ -481,3 +481,39 @@ func TestReads(t *testing.T) {
 		t.Errorf("unknown: %v", err)
 	}
 }
+
+// TestRegistry: TN-8 and TN-15 on one database: a change reaches a running
+// registry by notification, well before its periodic reload.
+func TestRegistry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	v := setup(t)
+	db, name := v.app, "reg"+v.x
+	r := NewRegistry(db, time.Hour)
+	if err := r.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r.Active(name) {
+		t.Fatal("active before registering")
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); r.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	waitFor := func(want bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if r.Active(name) == want {
+				return
+			}
+		}
+		t.Fatalf("Active(%s) never became %v", name, want)
+	}
+	if _, err := Register(ctx, db, registrar, name, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(true)
+	if _, err := Retire(ctx, db, registrar, name); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(false)
+}

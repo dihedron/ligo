@@ -22,6 +22,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
@@ -251,6 +252,20 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("serve: resolution cache: %w", err)
 	}
 
+	// the accounts behind the roles that directory groups derive
+	var registry *accounts.Registry
+	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+		rules, err := a.LDAPGroups.Compile()
+		if err != nil {
+			return err
+		}
+		registry = accounts.NewRegistry(pools.App, rc.FullReloadInterval)
+		if err := registry.Load(ctx); err != nil {
+			return fmt.Errorf("serve: account registry: %w", err)
+		}
+		s.Authz.UseAccounts(rules, registry.Active)
+	}
+
 	// 8. the background loops, the cache's LISTEN subscriber with them
 	loops, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -261,6 +276,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			log.Error("resolution cache", "error", err)
 		}
 	})
+	if registry != nil {
+		run(registry.Run)
+	}
 	rotation := map[string]time.Duration{}
 	for _, pp := range cfg.PlatformProviders {
 		for _, pl := range pp.Platforms {
@@ -615,5 +633,9 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 			groups = append(groups, b.LDAPGroupDN)
 		}
 	}
-	return &adminauth.LDAP{Config: c, BindPassword: password, RootCAs: roots, Groups: groups}, nil
+	l := &adminauth.LDAP{Config: c, BindPassword: password, RootCAs: roots, Groups: groups}
+	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+		l.GroupSearchBase = a.LDAPGroups.SearchBase
+	}
+	return l, nil
 }

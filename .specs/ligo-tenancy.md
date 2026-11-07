@@ -179,8 +179,10 @@ Platforms (plugin wiring, bootstrap credentials, privilege bounds), the intercon
 **Decision.** One rule for all accounts, from §4 `ldap_groups`:
 
 1. At login and at each session recheck (`Lookup`), one subtree search under `search_base` finds the user's groups, with the existing `group_membership_filter`.
-2. Each DN is parsed with `ldap.ParseDN`, never matched as text, and compared with each `group_dn`, RDN by RDN, ignoring case. It MUST have the same number of RDNs as the rule. A placeholder must be one whole attribute value and, lower-cased, match `^[a-z][a-z0-9]*$`. A DN that does not fit is ignored.
+2. Each DN is parsed with `ldap.ParseDN`, never matched as text, and compared with each `group_dn`, RDN by RDN, ignoring the case of A to Z alone: Unicode folding would read the Kelvin sign as `k`, so a look-alike name would stand for another account. It MUST have the same number of RDNs as the rule. A placeholder must be one whole attribute value and, lower-cased, match `^[a-z][a-z0-9]*$`. A DN that does not fit is ignored.
 3. A match gives the rule's role on the rule's scope, **only if the account is registered and `ACTIVE`**. Projects are not registered: the group's existence under the account's OU is enough.
+
+The DNs are sorted, as a session keeps its token only while its grants compare equal. A failed search fails the login or the recheck: it never reads as no groups, except a `search_base` the directory does not have, which grants nothing.
 
 **Depth.** The positions of the account and the project are configuration, fixed by the rules' `group_dn`, and hold for the whole organisation. A directory with the account at depth 5 and the project at depth 7 writes its rules that way, and no code changes. Every RDN of a rule that is not a placeholder is a literal, so OUs between them must have the same name everywhere. Startup checks that `{account}` is at the same depth in every rule and `{project}` at the same depth in every rule that has one.
 

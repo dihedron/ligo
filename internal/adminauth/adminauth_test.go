@@ -26,6 +26,8 @@ type fakeDirectory struct {
 	passwords map[string]string              // DN: password
 	searches  int
 	down      bool
+	// noSubtree and subtreeFails answer a search under ou=accounts.
+	noSubtree, subtreeFails bool
 }
 
 func (f *fakeDirectory) Bind(dn, password string) error {
@@ -41,6 +43,12 @@ func (f *fakeDirectory) Bind(dn, password string) error {
 func (f *fakeDirectory) Search(r *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	f.searches++
 	base := strings.ToLower(r.BaseDN)
+	if strings.HasPrefix(base, "ou=accounts,") && f.noSubtree {
+		return nil, ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("no such object"))
+	}
+	if strings.HasPrefix(base, "ou=accounts,") && f.subtreeFails {
+		return nil, ldap.NewError(ldap.LDAPResultSizeLimitExceeded, errors.New("size limit"))
+	}
 	if _, ok := f.entries[base]; !ok && r.Scope == ldap.ScopeBaseObject {
 		return nil, ldap.NewError(ldap.LDAPResultNoSuchObject, errors.New("no such object"))
 	}
@@ -231,5 +239,50 @@ func TestSVID(t *testing.T) {
 		if _, err := SVID(cs, []string{"prod.lab"}); !errors.Is(err, ErrInvalidCredentials) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// TestAccountGroups: one subtree search finds a user's direct groups under the
+// search base (.specs/ligo-tenancy.md §8), sorted so that an unchanged set keeps
+// a session's token, whatever order the directory answers in.
+func TestAccountGroups(t *testing.T) {
+	ctx := context.Background()
+	const (
+		base  = "ou=accounts,dc=ligo,dc=lab"
+		acme  = "cn=approvers,ou=acme," + base
+		beta  = "cn=approvers,ou=beta," + base
+		other = "cn=approvers,ou=gamma," + base
+	)
+	d := directoryOf()
+	d.entries[base] = map[string][]string{}
+	d.entries[acme] = map[string][]string{"member": {olivia}}
+	d.entries[beta] = map[string][]string{"member": {olivia}}
+	d.entries[other] = map[string][]string{"member": {"uid=someone,dc=ligo,dc=lab"}}
+	l := authenticator(d, true, ops) // nested_groups does not apply to these
+	l.GroupSearchBase = base
+	before := d.searches
+	p, err := l.Lookup(ctx, "olivia")
+	if err != nil || !slices.Equal(p.AccountGroups, []string{acme, beta}) {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if !slices.Contains(p.Groups, acme) || !slices.Contains(p.Groups, ops) { // the audit's actor groups
+		t.Errorf("groups %v", p.Groups)
+	}
+	if d.searches-before != 3 { // the user, the static group, the subtree
+		t.Errorf("%d searches", d.searches-before)
+	}
+	delete(d.entries, base) // a search base the directory does not have grants nothing
+	for dn := range d.entries {
+		if strings.HasSuffix(dn, ","+base) {
+			delete(d.entries, dn)
+		}
+	}
+	d.noSubtree = true
+	if p, err := l.Lookup(ctx, "olivia"); err != nil || len(p.AccountGroups) != 0 {
+		t.Errorf("no base: %+v %v", p, err)
+	}
+	d.noSubtree, d.subtreeFails = false, true
+	if _, err := l.Lookup(ctx, "olivia"); err == nil || errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a failed search must not read as no groups: %v", err)
 	}
 }
