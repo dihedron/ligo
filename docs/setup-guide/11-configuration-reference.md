@@ -346,7 +346,8 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `host` | The server's name, verified against its certificate. | Required |
 | `port` | Its port. | 1 to 65535 |
 | `database` | The one database of this platform. | An identifier |
-| `grantable_roles` | The privilege bounds. | One or more identifiers |
+| `grantable_roles` | The privilege bounds. | Identifiers; this or `grantable_role_templates` is required |
+| `grantable_role_templates` | Bounds per target: `{namespace}` stands for its schema. | Each holds `{namespace}` once |
 | `allowed_endpoints` | Where outputs may point. | Must contain `host:port` |
 | `bootstrap_credential` | The admin role's credential: `source: vault`, `address`, `auth_mount`, `role`, `jwt_audience`, `kv_path`. | `kv_path` only |
 | `ca_file` | Roots for the server and that Vault. | System roots |

@@ -408,12 +408,20 @@ func (p *Platform) AllowedEndpoints() []string {
 // read others here when a plugin type declares them
 func (p *Platform) PrivilegeBounds() map[string]any {
 	var b struct {
-		GrantableRoles []string `yaml:"grantable_roles"`
+		GrantableRoles     []string `yaml:"grantable_roles"`
+		GrantableTemplates []string `yaml:"grantable_role_templates"`
 	}
-	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || b.GrantableRoles == nil {
+	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || (b.GrantableRoles == nil && b.GrantableTemplates == nil) {
 		return nil
 	}
-	return map[string]any{"grantableRoles": b.GrantableRoles}
+	bounds := map[string]any{}
+	if b.GrantableRoles != nil {
+		bounds["grantableRoles"] = b.GrantableRoles
+	}
+	if b.GrantableTemplates != nil {
+		bounds["grantableRoleTemplates"] = b.GrantableTemplates
+	}
+	return bounds
 }
 
 // hostKeys decodes the keys ligo reads from a plugin's config node.

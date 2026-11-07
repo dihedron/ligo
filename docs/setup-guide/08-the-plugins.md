@@ -76,7 +76,7 @@ platform_providers:
             kv_path: kv/data/ligo/bootstrap/postgres
 ```
 
-`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. Two platforms on one plugin share its SVID: set `allow_shared_svid: true` on both selectors.
+`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. On a platform with a `namespace_template`, use `grantable_role_templates: ["{namespace}_read", "{namespace}_write"]` instead, so that a target can only offer the roles of its own schema; `{namespace}` stands for the schema, and the admin role needs `ADMIN OPTION` on each role when the schema is created. `grantable_roles` beside it are shared across tenants, and startup warns of them. Startup also warns of templates on a platform with no `namespace_template`: an operator then picks the schema, and so any tenant's role. Two platforms on one plugin share its SVID: set `allow_shared_svid: true` on both selectors.
 
 `bootstrap_credential.jwt_audience` must be listed in the same instance's `svid_selector.jwt_audience`.
 

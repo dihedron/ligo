@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	dto "github.com/prometheus/client_model/go"
+	"go.yaml.in/yaml/v3"
 )
 
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
@@ -601,6 +602,22 @@ func TestNamespaces(t *testing.T) {
 			}
 		}
 	}
+	// templates with no namespace_template: an operator picks the schema, and
+	// so any tenant's role
+	bounds := pl.Config
+	if err := yaml.Unmarshal([]byte(`{grantable_role_templates: ["{namespace}_read"]}`), &pl.Config); err != nil {
+		t.Fatal(err)
+	}
+	var unbound bytes.Buffer
+	logger := c.Logger
+	c.Logger = slog.New(slog.NewTextHandler(&unbound, nil))
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("templates alone: %v", err)
+	}
+	if !strings.Contains(unbound.String(), "no namespace_template") || !strings.Contains(unbound.String(), "oracle-prod") {
+		t.Errorf("no warning of unbound templates: %s", unbound.String())
+	}
+	pl.Config, c.Logger = bounds, logger
 	pl.NamespaceTemplate = "{account}_ok"
 	if err := c.Namespaces(ctx, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "oracle-prod") || !strings.Contains(err.Error(), "namespace_field") {
 		t.Errorf("no capability: %v", err)
@@ -609,7 +626,12 @@ func TestNamespaces(t *testing.T) {
 		t.Errorf("TN-16: %v", err)
 	}
 	v.exec(t, `update targets set definition = jsonb_build_object('schema', $2::text) where id = $1`, id, account+"_ok")
+	var logged bytes.Buffer
+	c.Logger = slog.New(slog.NewTextHandler(&logged, nil))
 	if err := c.Namespaces(ctx, declared); err != nil {
 		t.Errorf("matching: %v", err)
+	}
+	if !strings.Contains(logged.String(), "shared across tenants") || !strings.Contains(logged.String(), "oracle-prod") {
+		t.Errorf("no warning of shared roles: %s", logged.String())
 	}
 }

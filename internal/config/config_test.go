@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // example returns examples/server.yaml (the §8.1 reference) with its
@@ -373,5 +375,25 @@ func TestNamespaceTemplate(t *testing.T) {
 	}
 	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {
 		t.Errorf("no separator: %v", err)
+	}
+}
+
+// TestPrivilegeBounds: a tenant's roles are bounds too, so changing them is
+// audited and shown like grantable_roles (.specs/ligo-tenancy.md §6).
+func TestPrivilegeBounds(t *testing.T) {
+	var p Platform
+	if err := yaml.Unmarshal([]byte(`config: {grantable_role_templates: ["{namespace}_read"]}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	b := p.PrivilegeBounds()
+	if _, ok := b["grantableRoles"]; ok || !slices.Equal(b["grantableRoleTemplates"].([]string), []string{"{namespace}_read"}) {
+		t.Errorf("bounds %v", b)
+	}
+	var none Platform
+	if err := yaml.Unmarshal([]byte(`config: {host: h}`), &none); err != nil {
+		t.Fatal(err)
+	}
+	if b := none.PrivilegeBounds(); b != nil {
+		t.Errorf("no bounds: %v", b)
 	}
 }

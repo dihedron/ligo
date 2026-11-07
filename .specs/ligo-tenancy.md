@@ -119,8 +119,9 @@ config:
 The bound of a level is the union of `grantable_roles` and the templates expanded with the definition's schema. The plugin already receives the definition in `ValidateTarget` and `ValidateBinding`, so **no proto change** is needed. It is checked in those two calls and again in `EnsureTarget`.
 
 - The platform team creates the roles with the schema, and gives the admin role `ADMIN OPTION` on them. That is part of the external tenancy procedure.
-- `GetUISchemas` cannot list per-namespace options before the schema is known: `roles` takes the template's expansions once the schema is entered.
+- `GetUISchemas` cannot list per-namespace options before the schema is known, so it offers each template as an option, placeholder included. The web form sends a chosen option as the role of the schema submitted with it, replacing `{namespace}`, and on an edit form shows an option selected when the level holds its expansion. A template must hold `{namespace}` exactly once, otherwise it would be a shared role.
 - With `namespace_template` set and a non-empty `grantable_roles`, startup logs a warning: those roles are shared across tenants.
+- With `grantable_role_templates` and no `namespace_template`, startup logs a warning: an operator picks the schema, and so any tenant's role, stopped only by the platform owner's approval. It is not refused, as a single-tenant platform can use templates legitimately.
 - Other plugins with roles on shared systems follow the same rule when they gain namespaces.
 
 ## 7. Accounts
@@ -257,6 +258,7 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 |---|---|---|---|---|
 | TN-1 | Template `{account}_{tenancy}` | Scope `cloud/acme/data/db01`, schema `globex_db02` | `422 namespace-mismatch`, also at approval | I |
 | TN-2 | A role of another namespace | A level grants `globex_db02_read` on `acme_db01` | Refused by `ValidateTarget` | U, L |
+| TN-2a | A template with no `{namespace}`, or a second placeholder | `ConfigureInstances` | `INVALID_CONFIG` naming `grantable_role_templates` | U |
 | TN-3 | Values `a-b`, `c` and `a`, `b-c` | Registering; expanding | Refused by the grammar | U |
 | TN-4 | No such account | Register a source or publish a target | `422 account-not-registered` | I |
 | TN-5 | A retired account | A pending request is approved | Refused at re-validation | I |

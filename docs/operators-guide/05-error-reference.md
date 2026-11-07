@@ -74,7 +74,7 @@ A binding's `status.message` gives the code. A retryable error is retried within
 | `BOOTSTRAP_CREDENTIAL_UNAVAILABLE` | `postgres.v1`, `openldap.v1` | yes | The credential cannot be read from Vault | Check Vault, the role, the policy |
 | `BOOTSTRAP_CREDENTIAL_REJECTED` | `postgres.v1`, `openldap.v1` | yes | The backend refused it, perhaps mid-rotation | Check the password in KV |
 | `INVALID_SPEC` | `postgres.v1` | no | The requested spec is not valid | Report it |
-| `PRIVILEGE_OUT_OF_BOUNDS` | `postgres.v1` | no | `grantable_roles` was tightened | Change the access level, or the bound |
+| `PRIVILEGE_OUT_OF_BOUNDS` | `postgres.v1` | no | `grantable_roles` or `grantable_role_templates` was tightened | Change the access level, or the bound |
 | `TARGET_UNAVAILABLE` | `postgres.v1` | yes | The database cannot be reached, or is going away | Check it |
 | `TARGET_BUSY` | `postgres.v1` | yes | A concurrent change | It clears by itself |
 | `ROLE_NOT_FOUND` | `postgres.v1` | no | A granted group role does not exist | Create it on the database |

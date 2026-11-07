@@ -347,6 +347,13 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 			if p.NamespaceTemplate != "" && declared(pp.Type) == "" {
 				fatal = append(fatal, fmt.Sprintf("platform %s: plugin %s declares no namespace_field", p.Name, pp.Type))
 			}
+			bounds := p.PrivilegeBounds()
+			if shared, _ := bounds["grantableRoles"].([]string); p.NamespaceTemplate != "" && len(shared) > 0 {
+				c.Logger.Warn("grantable_roles on a namespaced platform are shared across tenants", "platform", p.Name, "roles", shared)
+			}
+			if templates, _ := bounds["grantableRoleTemplates"].([]string); p.NamespaceTemplate == "" && len(templates) > 0 {
+				c.Logger.Warn("grantable_role_templates with no namespace_template: a target's schema, and so its roles, are the operator's choice", "platform", p.Name)
+			}
 		}
 	}
 	rows, err := c.DB.Query(ctx, "SELECT name, platform, scope, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")

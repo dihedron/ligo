@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/targets"
 )
 
 // TestUISchemaRules: INV-12 when rendering a plugin's form, and the values
@@ -53,5 +55,70 @@ func TestUISchemaRules(t *testing.T) {
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if _, err := s.values(r, form, "def."); err == nil {
 		t.Error("a number field accepted text")
+	}
+}
+
+// TestRoleTemplateOptions: an option holding {namespace} is sent as the role of
+// the schema submitted with it (.specs/ligo-tenancy.md §6); on an edit form it
+// shows selected, and follows the schema if that changes.
+func TestRoleTemplateOptions(t *testing.T) {
+	form := &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "roles", FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_MULTISELECT,
+		Options: []*pluginv1.UIFieldOption{{Value: "{namespace}_read"}, {Value: "{namespace}_write"}, {Value: "SHARED"}}}}}
+	submitted := map[string]any{"roles": []string{"{namespace}_read", "SHARED"}}
+	expandNamespace(submitted, "acme_db01")
+	if fmt.Sprint(submitted["roles"]) != "[acme_db01_read SHARED]" {
+		t.Errorf("expanded %v", submitted["roles"])
+	}
+	grants := map[string]any{"roles": []any{"acme_db01_read", "SHARED"}} // as stored
+	selectTemplates(form, grants, "acme_db01")
+	s := &Server{Logger: slog.New(slog.DiscardHandler)}
+	options := s.fields(form, "g.", grants)[0].Options
+	if !options[0].Selected || options[1].Selected || !options[2].Selected {
+		t.Errorf("selected %+v", options)
+	}
+	other := map[string]any{"roles": []any{"globex_db02_read"}}
+	selectTemplates(form, other, "acme_db01")
+	if options := s.fields(form, "g.", other)[0].Options; options[0].Selected {
+		t.Errorf("another tenant's role selected %+v", options)
+	}
+	unset := map[string]any{"roles": []string{"{namespace}_read"}}
+	expandNamespace(unset, "")
+	if fmt.Sprint(unset["roles"]) != "[{namespace}_read]" {
+		t.Errorf("no schema: %v, the plugin must refuse the placeholder", unset["roles"])
+	}
+}
+
+// namespacedPlugin offers one template and holds the namespace in schema.
+type namespacedPlugin struct{ Plugins }
+
+func (namespacedPlugin) UISchemas(context.Context, string) (*pluginv1.GetUISchemasResponse, error) {
+	return &pluginv1.GetUISchemasResponse{
+		TargetDefinition: &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "schema", FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_TEXT}}},
+		AccessLevelGrants: &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{{JsonKey: "roles", FieldType: pluginv1.UIFieldType_UI_FIELD_TYPE_MULTISELECT,
+			Options: []*pluginv1.UIFieldOption{{Value: "{namespace}_read"}}}}},
+	}, nil
+}
+
+// TestTargetFormExpandsNamespace: the form's submission and its edit form.
+func TestTargetFormExpandsNamespace(t *testing.T) {
+	s := &Server{Logger: slog.New(slog.DiscardHandler), Plugins: namespacedPlugin{}, Targets: &targets.Service{Rules: &targets.Rules{
+		Platforms:      map[string]targets.Platform{"pg": {Name: "pg", Type: "postgres.v1"}},
+		NamespaceField: func(string) string { return "schema" }}}}
+	r := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{"name": {"db01"}, "platform": {"pg"}, "def.schema": {"acme_db01"},
+		"level.0.name": {"read"}, "level.0.grant.roles": {"{namespace}_read"}}.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	got, err := s.targetOf(r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.AccessLevels[0].Grants) != `{"roles":["acme_db01_read"]}` {
+		t.Errorf("grants %s", got.AccessLevels[0].Grants)
+	}
+	pf, err := s.platformFields(context.Background(), "pg", got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := pf.Levels[0].Grants[0].Options[0]; o.Value != "{namespace}_read" || !o.Selected {
+		t.Errorf("edit form %+v", o)
 	}
 }

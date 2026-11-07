@@ -6,7 +6,6 @@
     "host",
     "port",
     "database",
-    "grantable_roles",
     "allowed_endpoints",
     "bootstrap_credential"
   ],
@@ -21,6 +20,12 @@
       "type": "string"
     },
     "grantable_roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "grantable_role_templates": {
       "type": "array",
       "items": {
         "type": "string"
