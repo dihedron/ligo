@@ -169,7 +169,9 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	az, err := authz.New([]config.RoleBinding{{LDAPGroupDN: viewers, Role: config.RoleViewer, Scopes: []string{"*"}},
 		{LDAPGroupDN: operators, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
 		{LDAPGroupDN: approvers, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
-		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}}})
+		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: accountAdmins, Role: config.RoleAccountAdmin},
+		{LDAPGroupDN: "cn=ligo-full,ou=groups,dc=ligo,dc=lab", Role: config.RoleFullAccess, Scopes: []string{"*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

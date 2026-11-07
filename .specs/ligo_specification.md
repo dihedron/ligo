@@ -3451,7 +3451,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 - The header ends with a user menu: a head-silhouette button that opens a dropdown (a `<details>` element, closed by `app.js` on an outside click or Escape) with the username, the full name (the directory's `displayName`, else `cn`, read at sign-in and stored in `admin_sessions.display_name`), the user's roles with their scopes, the appearance switch and "Sign out". Further per-user preferences go into this menu.
 
 **HTMX Navigation & Response Semantics (Normative):**
-- Full-page navigations triggered by mutating HTMX actions (`POST /ui/login`, `POST /ui/logout`, and `POST`, `PUT` and `DELETE` on `/ui/sources…`, `/ui/targets…` and `/ui/bindings…`) MUST respond with HTTP `200 OK` and an `HX-Redirect: <target-path>` header (never HTTP `301`/`302`/`303`, which cause inconsistent browser method repetition on `PUT`/`DELETE` or partial swap of full pages).
+- Full-page navigations triggered by mutating HTMX actions (`POST /ui/login`, `POST /ui/logout`, and `POST`, `PUT` and `DELETE` on `/ui/sources…`, `/ui/targets…`, `/ui/bindings…` and `/ui/accounts…`) MUST respond with HTTP `200 OK` and an `HX-Redirect: <target-path>` header (never HTTP `301`/`302`/`303`, which cause inconsistent browser method repetition on `PUT`/`DELETE` or partial swap of full pages).
 - Inline partial mutations (`retry`, `rotate`, `approve`, `decline`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
 - Validation or conflict errors on `/ui/*` endpoints respond with `422 Unprocessable Entity` or `409 Conflict` and an HTML error alert fragment swapped into the form's error target container.
 - When an approval returns `409 binding-busy`, the alert MUST state that the binding is currently being provisioned or reconciled, that the change request is still `PENDING`, and that approving again once the operation completes will apply it.
@@ -3480,6 +3480,8 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `POST` · `PUT` | `/ui/targets` · `/ui/targets/{name}` | Submit a target change request; `200 OK` with `HX-Redirect`. |
 | `POST` | `/ui/targets/{name}/{deprecate,reactivate,retire}`, `/ui/targets/{name}/access-levels/{level}/{deprecate,reactivate,retire}` | State changes. |
 | `POST` | `/ui/targets/{name}/bindings/revoke` | Bulk revocation by source or source scope (containment), with confirmation. |
+| `GET` | `/ui/accounts` · `/ui/accounts/{name}` | Accounts the user may read (`account_admin`, or a role on the account), paged; detail with the counts of sources, targets and bindings. Linked in the menu only when `governance.accounts` is configured. |
+| `POST` | `/ui/accounts` · `/ui/accounts/{name}/retire` | Register or retire an account (`account_admin`; retiring with confirmation); `200 OK` with `HX-Redirect: /ui/accounts/{name}`. |
 | `GET` | `/ui/platforms` · `/ui/platforms/{name}/fields` | Platforms (read-only) and their forms. |
 | `GET` | `/ui/platforms/fields?platform={name}` | The same forms, for the target form's platform select, which cannot put its value in the path. |
 | `GET` | `/ui/bindings` | Dashboard: filterable table (source, target, level, phase, expiry), phase badges, pending-change-request and propagation indicators. |

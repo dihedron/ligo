@@ -96,6 +96,13 @@ func TestINV11Routes(t *testing.T) {
 		g.csrf = m[1]
 	}
 
+	// accounts
+	withAccounts(v)
+	k := accountAdmin(t, v)
+	account := accountName()
+	act(k, "POST /ui/accounts", "SYSTEM_ACCOUNT_REGISTERED", "/ui/accounts", url.Values{"name": {account}})
+	act(k, "POST /ui/accounts/{name}/retire", "SYSTEM_ACCOUNT_RETIRED", "/ui/accounts/"+account+"/retire", url.Values{})
+
 	// sources
 	src := url.Values{"name": {source}, "trustDomain": {"prod.internal"}, "svidRegex": {`^spiffe://prod\.internal/ns/inv/sa/` + x + `$`}, "visibility": {"PRIVATE"}}
 	filed(act(b, "POST /ui/sources", "CR_CREATED", "/ui/sources", src))

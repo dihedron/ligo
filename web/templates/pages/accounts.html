@@ -1,0 +1,18 @@
+{{define "content"}}{{with .Content}}<h1>Accounts</h1>
+{{if .CanChange}}<form class="card" hx-post="/ui/accounts" hx-status:409="target:#account-errors swap:innerHTML" hx-status:422="target:#account-errors swap:innerHTML" {{hxnonce}}>
+  <h2>Register an account</h2>
+  <div id="account-errors" class="errors"></div>
+  <div class="grid">
+    <div class="field"><label for="a-name">Name</label><input id="a-name" name="name" required maxlength="30" pattern="[a-z][a-z0-9]*" title="Lower case letters and digits, starting with a letter"></div>
+    <div class="field"><label for="a-display">Display name</label><input id="a-display" name="displayName" maxlength="128"></div>
+  </div>
+  <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>Register</button></div>
+</form>{{end}}
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Status</th><th>Registered</th></tr></thead>
+  <tbody>{{range .Accounts}}<tr><td><a href="/ui/accounts/{{.Name}}">{{.Name}}</a>{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</td>
+    <td><span class="{{badge .Status}}">{{.Status}}</span></td><td>{{when .RegisteredAt}} by {{.RegisteredBy}}</td></tr>
+  {{else}}<tr><td colspan="3" class="muted">No accounts.</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Next}}<p><a href="/ui/accounts?after={{.}}">Next page</a></p>{{end}}
+{{end}}{{end}}

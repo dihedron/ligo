@@ -42,6 +42,9 @@ func (s *Server) readable(w http.ResponseWriter, r *http.Request) bool {
 		if breakGlassMember(gs) {
 			detail += " For an emergency change, use Break glass in the menu."
 		}
+		if gs.AccountAdmin() && s.showsAccounts(gs) {
+			detail += " To manage accounts, use Accounts in the menu."
+		}
 		s.fail(w, r, &changerequests.Error{Status: http.StatusForbidden, Slug: "forbidden", Detail: detail})
 		return false
 	}
