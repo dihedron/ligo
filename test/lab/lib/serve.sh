@@ -29,6 +29,7 @@ cmd_serve() {
 	test-webhook) serve_test_webhook ;;
 	test-faults) serve_test_faults ;;
 	test-accounts) serve_test_accounts ;;
+	test-accounts-chaos) serve_test_accounts_chaos ;;
 	start | stop | reload | status | logs)
 		for host in $hosts; do
 			case "$1" in
@@ -40,7 +41,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults or test-accounts" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -403,6 +404,7 @@ authorization:
     - { spiffe_id: "spiffe://prod.lab/ops/sean", role: approver, scopes: ["sec/infosec"] }
     # the accounts' e2e: the shared platform's approver (.specs/ligo-tenancy.md §9.3)
     - { spiffe_id: "spiffe://prod.lab/ops/peter", role: approver, scopes: ["platform/shared"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/rita", role: approver, scopes: ["tenants/*"] }   # test-accounts-chaos
     - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,$LDAP_BASE", role: account_admin }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
@@ -640,7 +642,7 @@ serve_admins() {
 	local who dir="/root/e2e" f
 	local load="ns/e2e/sa/w$E2E_SUFFIX"
 	[[ -z "$LAB_ACCOUNTS" ]] || load="acct/acme/project/app01/sa/w$E2E_SUFFIX"
-	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean [peter]=ops/peter
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean [peter]=ops/peter [rita]=ops/rita
 		[workload]="$load" [stranger]="ns/e2e/sa/v$E2E_SUFFIX" [dcload]="ns/topo/sa/w$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
 	for who in "${!ids[@]}"; do
@@ -768,21 +770,138 @@ serve_test_topologies() {
 	info "e2e of the four topologies passed"
 }
 
-# serve_test_accounts: accounts on a shared PostgreSQL (.specs/ligo-tenancy.md
-# §11, TN-7, 10, 12, 15, 18). It needs its own server.yaml and leaves accounts
-# in the database, so it starts from the baseline, and the suites that follow
-# need lab.sh reset and serve install.
-serve_test_accounts() {
-	[[ "$(ligo_hosts | xargs)" == "ligo1 ligo2" ]] || die "serve test-accounts needs ligo2: lab.sh up --scenario ha"
-	inner_exists hooks || die "serve test-accounts needs the receiver: lab.sh up --scenario webhook"
+# serve_accounts_install: the baseline, with server.yaml for accounts.
+serve_accounts_install() {
+	[[ "$(ligo_hosts | xargs)" == "ligo1 ligo2" ]] || die "the accounts' suites need ligo2: lab.sh up --scenario ha"
+	inner_exists hooks || die "the accounts' suites need the receiver: lab.sh up --scenario webhook"
 	LAB_ACCOUNTS=yes
 	lab_reset
 	ldap_seed # a baseline older than the accounts' entries lacks them
 	serve_install
 	deploy_tests
-	section "e2e of accounts"
 	E2E_SUFFIX="$(openssl rand -hex 4)"
 	serve_admins
+}
+
+# serve_chaos_directory: a unit per account of the scale test, and sue in all
+# their approvers' groups.
+serve_chaos_directory() {
+	local base="ou=accounts,$LDAP_BASE" hash i name
+	hash="$(inner_exec ldap slappasswd -h '{SSHA}' -s "$(ldap_password sue)")"
+	{
+		printf 'dn: uid=sue,ou=users,%s\nobjectClass: inetOrgPerson\nuid: sue\ncn: Sue Everywhere\nsn: Everywhere\nuserPassword: %s\n\n' "$LDAP_BASE" "$hash"
+		for ((i = 0; i < 300; i++)); do
+			printf -v name 'scale%03d' "$i"
+			printf 'dn: ou=%s,%s\nobjectClass: organizationalUnit\nou: %s\n\n' "$name" "$base" "$name"
+			printf 'dn: cn=approvers,ou=%s,%s\nobjectClass: groupOfNames\ncn: approvers\nmember: uid=sue,ou=users,%s\n\n' "$name" "$base" "$LDAP_BASE"
+		done
+	} | inner_exec ldap sh -c 'ldapadd -c -Q -Y EXTERNAL -H ldapi:/// >/dev/null 2>&1' || true
+}
+
+# serve_chaos_kills: kills a random replica every few seconds until stopped; each
+# comes back through its unit.
+serve_chaos_kills() {
+	local host
+	while :; do
+		sleep $((15 + RANDOM % 16)) # a replica takes 15 to 25s to come back
+		host="ligo$((1 + RANDOM % 2))"
+		inner_exec "$host" systemctl kill -s KILL ligo 2>/dev/null || true
+		info "killed ligo on $host"
+	done
+}
+
+# serve_chaos_settle: records how fast the directory answers, and the lab VM's
+# load, until three quick answers in a row: restarts load this one machine.
+serve_chaos_settle() {
+	local i start ms quick=0
+	for i in $(seq 1 60); do
+		start="$(date +%s%N)"
+		ldapsearch_as ligo-admin-auth -b "ou=users,$LDAP_BASE" "(uid=ivan)" dn >/dev/null 2>&1 || true
+		ms=$((($(date +%s%N) - start) / 1000000))
+		info "directory ${ms}ms, load $(lxd exec lxd -- cut -d' ' -f1 /proc/loadavg)"
+		if ((ms < 2000)); then quick=$((quick + 1)); else quick=0; fi
+		((quick >= 3)) && return 0
+		sleep 5
+	done
+	die "the directory stayed slow"
+}
+
+# serve_chaos_marker NAME: a file the running test waits for.
+serve_chaos_marker() { inner_exec ligo1 sh -c "touch $LIGO1_E2E/$1 && chown ligo:ligo $LIGO1_E2E/$1"; }
+
+# serve_test_accounts_chaos: the accounts at scale, racing under killed replicas,
+# with PostgreSQL restarted under the registries' listeners, and with the
+# directory down. Not part of release-run. Leaves the lab as test-accounts does.
+serve_test_accounts_chaos() {
+	serve_accounts_install
+	serve_chaos_directory
+
+	section "Hundreds of accounts"
+	serve_e2e '^TestAccountsChaosScale$' ligo1 ligo2 || die "TestAccountsChaosScale failed"
+
+	section "Retiring races approving, with replicas killed"
+	local killer rc=0 host
+	serve_chaos_kills &
+	killer=$!
+	serve_e2e '^TestAccountsChaosRace$' ligo1 ligo2 || rc=1
+	kill "$killer" 2>/dev/null || true
+	wait "$killer" 2>/dev/null || true
+	for host in ligo1 ligo2; do
+		inner_exec "$host" systemctl reset-failed ligo 2>/dev/null || true
+		inner_exec "$host" systemctl start ligo
+		serve_wait "$host"
+	done
+	((rc == 0)) || die "TestAccountsChaosRace failed"
+	serve_chaos_settle
+	local bad
+	bad="$(serve_sql "select count(*) from sources s join accounts a on a.name = s.account where a.status = 'RETIRED' and s.state <> 'RETIRED'")"
+	[[ "$bad" == 0 ]] || die "$bad sources on retired accounts"
+	[[ "$(cli ligo-approver -o json audit verify | jq -r .valid)" == true ]] || die "audit verify"
+	info "no source on a retired account; the audit chain verifies"
+
+	section "PostgreSQL restarted under the listeners"
+	local v before=()
+	v="$(pg_version)"
+	serve_e2e '^TestAccountsChaosBeforeRestart$' ligo1 ligo2 || die "TestAccountsChaosBeforeRestart failed"
+	for host in ligo1 ligo2; do before+=("$(inner_exec "$host" systemctl show -p NRestarts --value ligo)"); done
+	inner_exec pg systemctl stop "postgresql@$v-main"
+	sleep 10
+	inner_exec pg systemctl start "postgresql@$v-main"
+	serve_e2e '^TestAccountsChaosAfterRestart$' ligo1 ligo2 || die "TestAccountsChaosAfterRestart failed"
+	local i=0
+	for host in ligo1 ligo2; do
+		[[ "$(inner_exec "$host" systemctl show -p NRestarts --value ligo)" == "${before[$i]}" ]] || die "ligo on $host restarted during the outage"
+		i=$((i + 1))
+	done
+
+	section "The directory down"
+	local pid
+	serve_e2e '^TestAccountsChaosDirectory$' ligo1 ligo2 &
+	pid=$!
+	for _ in $(seq 1 300); do
+		inner_exec ligo1 test -e "$LIGO1_E2E/session-ready" && break
+		sleep 0.2
+	done
+	serve_sql "update admin_sessions set authz_checked_at = now() - interval '1 day' where username = 'alan'" >/dev/null
+	inner_exec ldap systemctl stop slapd
+	serve_chaos_marker directory-down
+	for _ in $(seq 1 300); do
+		inner_exec ligo1 test -e "$LIGO1_E2E/session-checked" && break
+		sleep 0.2
+	done
+	inner_exec ldap systemctl start slapd
+	serve_chaos_marker directory-up
+	wait "$pid" || die "TestAccountsChaosDirectory failed"
+	info "the accounts' chaos passed; lab.sh reset and serve install before any other suite"
+}
+
+# serve_test_accounts: accounts on a shared PostgreSQL (.specs/ligo-tenancy.md
+# §11, TN-7, 10, 12, 15, 18). It needs its own server.yaml and leaves accounts
+# in the database, so it starts from the baseline, and the suites that follow
+# need lab.sh reset and serve install.
+serve_test_accounts() {
+	serve_accounts_install
+	section "e2e of accounts"
 	inner_exec hooks truncate -s 0 "$HOOKS_LOG"
 	serve_e2e '^TestServeAccounts$' ligo1 ligo2 || die "TestServeAccounts failed"
 	hooks_drained

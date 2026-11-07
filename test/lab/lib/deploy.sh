@@ -42,7 +42,7 @@ env_ligo() {
 		"LIGO_TEST_TARGET_ADMIN_PASS=$(password target-admin)" \
 		"LIGO_TEST_PLUGIN_DIR=$LIGO_PLUGINS"
 	local name
-	for name in amy alan anne pat gus gail ivan; do
+	for name in amy alan anne pat gus gail ivan sue; do
 		printf 'LIGO_TEST_LDAP_%s_PASS=%s\n' "$(tr '[:lower:]' '[:upper:]' <<<"$name")" "$(ldap_password "$name")"
 	done
 	for name in "${LAB_PLUGINS[@]}"; do

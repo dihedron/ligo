@@ -292,3 +292,5 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 6. The platform approver on `TARGET`, with the audit field and webhook event.
 7. The **Accounts** web page.
 8. Lab: scenario with two accounts (`acme`, `globex`), OUs in `ldap/seed.ldif`, a shared PostgreSQL with both tenancies, and TN-7, 10, 12, 15, 18; on OpenBao then Vault. Operator's Guide and Setup Guide, with the constraint of §9.4.
+
+**Under load and faults** (AGENTS rule 10): `lab.sh serve test-accounts-chaos`, not part of `release-run`: 300 accounts, with a person in one and a person in all, and a limit of 2s at p95; for 5 minutes, approving a source races retiring its account on either replica while replicas are killed, after which no source that is not retired may sit on a retired account and the audit chain must verify; PostgreSQL restarted under the registries' listeners, with a retirement then reaching both replicas; the directory stopped, with a session due for its check refused and not ended, Basic credentials refused, SVIDs working, and the same session working again once it is back.
