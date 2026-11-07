@@ -517,3 +517,48 @@ func TestRegistry(t *testing.T) {
 	}
 	waitFor(false)
 }
+
+// TestRegistrySparesThePool: the listener must not take a connection from the
+// pool it reads from. On a host with few CPUs, pgx's default pool is 4, which
+// the leader's lock loops nearly fill: found on the lab, where every admin
+// request then hung.
+func TestRegistrySparesThePool(t *testing.T) {
+	v := setup(t)
+	cfg, err := pgxpool.ParseConfig(dsn(t, "APP"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	r := NewRegistry(db, time.Hour)
+	if err := r.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	loops, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); r.Run(loops) }()
+	t.Cleanup(func() { stop(); <-done })
+
+	name := "s" + v.x
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from accounts where name = $1", name) })
+	if _, err := Register(ctx, v.app, registrar, name, ""); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); !r.Active(name); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the registration did not reach the registry: its listener holds the only connection")
+		}
+	}
+	query, cancelQuery := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelQuery()
+	var one int
+	if err := db.QueryRow(query, "select 1").Scan(&one); err != nil {
+		t.Errorf("the pool is unavailable beside the listener: %v", err)
+	}
+}

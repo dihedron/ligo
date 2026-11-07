@@ -77,11 +77,12 @@ func (r *Registry) Run(ctx context.Context) {
 
 // listen loads after LISTEN, so that nothing is missed while not listening.
 func (r *Registry) listen(ctx context.Context) error {
-	conn, err := r.db.Acquire(ctx)
+	// its own connection: held for good, one from the pool would starve requests
+	conn, err := pgx.ConnectConfig(ctx, r.db.Config().ConnConfig)
 	if err != nil {
 		return err
 	}
-	defer conn.Release()
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func (r *Registry) listen(ctx context.Context) error {
 			return err
 		}
 		wait, cancel := context.WithTimeout(ctx, r.interval)
-		_, err := conn.Conn().WaitForNotification(wait)
+		_, err := conn.WaitForNotification(wait)
 		expired := wait.Err() != nil
 		cancel()
 		if err != nil && !expired {
