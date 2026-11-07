@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -55,19 +56,13 @@ func (p *Propagator) Run(ctx context.Context) {
 // bindings keep their rows. It returns how many it started.
 func (p *Propagator) Propagate(ctx context.Context) (int, error) {
 	db := p.Service.DB
-	conn, err := db.Acquire(ctx)
-	if err != nil {
+	release, locked, err := store.TryLock(ctx, db, "ligo_propagator")
+	if err != nil || !locked {
 		return 0, err
 	}
-	defer conn.Release()
-	var locked, maintenance bool
+	defer release()
+	var maintenance bool
 	var running int
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext('ligo_propagator'))").Scan(&locked); err != nil || !locked {
-		return 0, err
-	}
-	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_propagator'))")
-	}()
 	if err := db.QueryRow(ctx, `SELECT (SELECT maintenance_mode FROM system_settings),
 		(SELECT count(*) FROM bindings WHERE phase = 'PROVISIONING' AND updated_by = $1)`, actorPropagator).Scan(&maintenance, &running); err != nil {
 		return 0, err

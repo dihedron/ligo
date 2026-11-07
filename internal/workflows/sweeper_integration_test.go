@@ -16,6 +16,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func (v *env) sweep(t *testing.T) {
@@ -300,5 +301,30 @@ func TestRetryInMaintenance(t *testing.T) {
 	}
 	if r := v.row(t, id); r.phase != "FAILED" {
 		t.Errorf("binding %+v", r)
+	}
+}
+
+// TestPassesSpareThePool: a pass does not hold a connection while asking the
+// pool for another: passes overlapping on a small pool would wait for each
+// other for good, and every request behind them.
+func TestPassesSpareThePool(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
+	cfg := v.engine.DB.Config()
+	cfg.MaxConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	engine := *v.engine
+	engine.DB = db
+	small := &engine
+	if _, err := (&Sweeper{Engine: small}).Sweep(ctx); err != nil {
+		t.Errorf("sweep: %v", err)
+	}
+	if _, err := (&Reconciler{Engine: small, MaxConcurrent: 1}).Reconcile(ctx); err != nil {
+		t.Errorf("reconcile: %v", err)
 	}
 }

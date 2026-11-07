@@ -354,3 +354,47 @@ func insertBinding(t *testing.T, o *pgxpool.Pool) (uuid.UUID, string) {
 	})
 	return binding, wf
 }
+
+// singleConn is a pool of one connection: anything that holds it while asking
+// for another waits until ctx ends.
+func singleConn(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(dsn(t, "APP"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	db, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	return db
+}
+
+// TestTryLock: the lock leaves the pool free, excludes another holder and ends
+// with its release.
+func TestTryLock(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := singleConn(t)
+	name := "ligo_test_" + uuid.NewV7().String()
+	release, locked, err := TryLock(ctx, db, name)
+	if err != nil || !locked {
+		t.Fatalf("first: %t, %v", locked, err)
+	}
+	var one int
+	if err := db.QueryRow(ctx, "select 1").Scan(&one); err != nil {
+		t.Errorf("the pool beside the lock: %v", err)
+	}
+	if _, again, err := TryLock(ctx, db, name); err != nil || again {
+		t.Errorf("second holder: %t, %v", again, err)
+	}
+	release()
+	release, locked, err = TryLock(ctx, db, name)
+	if err != nil || !locked {
+		t.Fatalf("after the release: %t, %v", locked, err)
+	}
+	release()
+}

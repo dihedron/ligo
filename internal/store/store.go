@@ -273,3 +273,26 @@ func CloseRequest(ctx context.Context, tx pgx.Tx, crID uuid.UUID, status, actor,
 	}
 	return nil
 }
+
+// TryLock takes the session advisory lock name of a singleton's pass, on a
+// connection of its own: a pass holding a connection of db while asking db for
+// another would wait for good if passes filled the pool. release ends the lock
+// with the connection; it is nil unless locked.
+// shortcut: it dials once per pass, with TLS, every few seconds per loop; give
+// the locks a small pool of their own if that ever shows on the database.
+func TryLock(ctx context.Context, db *pgxpool.Pool, name string) (release func(), locked bool, err error) {
+	conn, err := pgx.ConnectConfig(ctx, db.Config().ConnConfig)
+	if err != nil {
+		return nil, false, fmt.Errorf("store: lock %s: %w", name, err)
+	}
+	release = func() { _ = conn.Close(context.WithoutCancel(ctx)) }
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext($1))", name).Scan(&locked); err != nil {
+		release()
+		return nil, false, fmt.Errorf("store: lock %s: %w", name, err)
+	}
+	if !locked {
+		release()
+		return nil, false, nil
+	}
+	return release, true, nil
+}

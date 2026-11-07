@@ -13,6 +13,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -55,19 +56,13 @@ func (r *Reconciler) Run(ctx context.Context) {
 // started.
 func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 	db := r.Engine.DB
-	conn, err := db.Acquire(ctx)
-	if err != nil {
+	release, locked, err := store.TryLock(ctx, db, "ligo_reconciler")
+	if err != nil || !locked {
 		return 0, err
 	}
-	defer conn.Release()
-	var locked, maintenance bool
+	defer release()
+	var maintenance bool
 	var running int
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext('ligo_reconciler'))").Scan(&locked); err != nil || !locked {
-		return 0, err
-	}
-	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_reconciler'))")
-	}()
 	if err := db.QueryRow(ctx, `SELECT (SELECT maintenance_mode FROM system_settings),
 		(SELECT count(*) FROM bindings WHERE phase = 'PROVISIONING' AND operation = 'REAPPLY')`).Scan(&maintenance, &running); err != nil {
 		return 0, err
