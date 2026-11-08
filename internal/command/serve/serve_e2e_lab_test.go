@@ -199,7 +199,7 @@ func TestServeE2EApply(t *testing.T) {
 
 	// AC-14: the real plugin refuses a role outside its grantable_roles
 	if code, b := olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": "dba-" + target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
+		"metadata":     map[string]string{"name": "dba-" + target, "platform": "pg-ledger", "jurisdiction": "dc/corp-prod/ledger"},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
 		"accessLevels": []any{map[string]any{"name": "admin", "grants": map[string][]string{"roles": {"DBA"}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
@@ -209,7 +209,7 @@ func TestServeE2EApply(t *testing.T) {
 	}
 
 	code, filed = olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": target, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
+		"metadata":     map[string]string{"name": target, "platform": "pg-ledger", "jurisdiction": "dc/corp-prod/ledger"},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": {"LEDGER_RO_ROLE"}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",

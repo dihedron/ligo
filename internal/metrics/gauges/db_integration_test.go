@@ -94,7 +94,7 @@ func TestDB(t *testing.T) {
 	}
 	before := max(value("ligo_sources", map[string]string{"state": "ACTIVE"}), 0)
 	name := "metrics-" + uuid.NewV7().String()[24:]
-	if _, err := owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', '^spiffe://prod\.internal/m$', 'PUBLIC', 't', 't')`, uuid.NewV7(), name); err != nil {
 		t.Fatal(err)
 	}

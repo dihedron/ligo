@@ -195,7 +195,7 @@ func (cmd *Rotate) Execute([]string) error { return cmd.run("rotate") }
 
 // Source: ligo source test|deprecate|reactivate.
 type Source struct {
-	Test       SourceTest       `command:"test" description:"Test a regex: Appendix A, scope, sample IDs, overlaps, and narrowing of an existing source (nothing is stored)."`
+	Test       SourceTest       `command:"test" description:"Test a regex: Appendix A, jurisdiction, sample IDs, overlaps, and narrowing of an existing source (nothing is stored)."`
 	Deprecate  SourceDeprecate  `command:"deprecate" description:"Deprecate a source (no new bindings)."`
 	Reactivate SourceReactivate `command:"reactivate" description:"Reactivate a deprecated source."`
 }
@@ -251,7 +251,7 @@ type Target struct {
 	Deprecate  TargetDeprecate  `command:"deprecate" description:"Deprecate a target (no new bindings)."`
 	Reactivate TargetReactivate `command:"reactivate" description:"Reactivate a deprecated target."`
 	Level      TargetLevel      `command:"level" description:"Deprecate, reactivate or retire an access level."`
-	Revoke     TargetRevoke     `command:"revoke-bindings" description:"Revoke every binding of a source or source scope on this target (containment)."`
+	Revoke     TargetRevoke     `command:"revoke-bindings" description:"Revoke every binding of a source or source jurisdiction on this target (containment)."`
 }
 
 type TargetLevel struct {
@@ -274,23 +274,23 @@ func (cmd *TargetLevel) Execute([]string) error {
 
 type TargetRevoke struct {
 	Base
-	Source      string  `long:"source" description:"Revoke the bindings of this source."`
-	SourceScope string  `long:"source-scope" description:"Revoke the bindings of every source in this scope pattern."`
-	Comment     string  `short:"m" long:"comment" required:"true" description:"Reason (recorded on every change request)."`
-	ApprovalRef string  `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference."`
-	Args        NameArg `positional-args:"yes" required:"yes"`
+	Source             string  `long:"source" description:"Revoke the bindings of this source."`
+	SourceJurisdiction string  `long:"source-jurisdiction" description:"Revoke the bindings of every source in this jurisdiction pattern."`
+	Comment            string  `short:"m" long:"comment" required:"true" description:"Reason (recorded on every change request)."`
+	ApprovalRef        string  `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference."`
+	Args               NameArg `positional-args:"yes" required:"yes"`
 }
 
 func (cmd *TargetRevoke) Execute([]string) error {
-	if (cmd.Source == "") == (cmd.SourceScope == "") {
-		return errors.New("revoke-bindings: either --source or --source-scope")
+	if (cmd.Source == "") == (cmd.SourceJurisdiction == "") {
+		return errors.New("revoke-bindings: either --source or --source-jurisdiction")
 	}
 	return cmd.changed("revoked", func(ctx context.Context, c *client.Client) ([]filed, error) {
 		var v struct {
 			ChangeRequests []map[string]any `json:"changeRequests"`
 			Errors         []any            `json:"errors"`
 		}
-		body := map[string]any{"source": cmd.Source, "sourceScope": cmd.SourceScope, "comment": cmd.Comment, "approvalReference": cmd.ApprovalRef}
+		body := map[string]any{"source": cmd.Source, "sourceJurisdiction": cmd.SourceJurisdiction, "comment": cmd.Comment, "approvalReference": cmd.ApprovalRef}
 		if err := c.Do(ctx, "POST", path("targets", cmd.Args.Name, "bindings", "revoke"), nil, body, &v); err != nil {
 			return nil, err
 		}
@@ -524,7 +524,7 @@ func (cmd *GovernanceCheck) Execute([]string) error {
 			}
 			items = append(items, v)
 		}
-		return map[string]any{"items": items}, []client.Column{col("TYPE", "resourceType"), col("NAME", "name"), col("SCOPES", "scopes"),
+		return map[string]any{"items": items}, []client.Column{col("TYPE", "resourceType"), col("NAME", "name"), col("JURISDICTIONS", "jurisdictions"),
 			col("PREFIX OK", "namePrefix.valid"), col("CONSENT", "consent"), col("INTERCONNECT", "interconnect"), col("SIDES", "sides")}, nil
 	})
 }

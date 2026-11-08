@@ -41,8 +41,8 @@ The toolchain of `lxd-spiffe`:
 
 ## Content
 
-The outlines fix the scope, not the wording.
+The outlines fix the jurisdiction, not the wording.
 
 - **Setup Guide**: introduction and known limits; prerequisites; getting and verifying a release; PostgreSQL; SPIRE; Vault or OpenBao; configuring and starting `ligo`; each plugin; a first binding; upgrades and removal; configuration reference.
-- **Architecture and Design**: context and goals; components and trust boundaries; resources and scopes; the pipeline; governance and consent; durability and sealing; workload resolution; the threat model; validation; design decisions and alternatives.
+- **Architecture and Design**: context and goals; components and trust boundaries; resources and jurisdictions; the pipeline; governance and consent; durability and sealing; workload resolution; the threat model; validation; design decisions and alternatives.
 - **Operator's Guide**: operating model; monitoring; routine procedures; incident procedures; error reference; troubleshooting.

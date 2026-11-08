@@ -16,8 +16,8 @@ CREATE TYPE side_decision      AS ENUM ('APPROVED','DECLINED');
 CREATE TYPE change_request_status AS ENUM
     ('PENDING','APPLIED','REJECTED','WITHDRAWN','EXPIRED','FAILED_TO_APPLY');
 
--- Scope paths (§3.9) are checked with this pattern wherever they are stored.
-CREATE DOMAIN scope_path AS VARCHAR(128)
+-- Jurisdiction paths (§3.9) are checked with this pattern wherever they are stored.
+CREATE DOMAIN jurisdiction_path AS VARCHAR(128)
     CHECK (VALUE ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(/[a-z0-9]([a-z0-9-]*[a-z0-9])?){0,7}$');
 -- Names of sources, targets and bindings (§3.8).
 CREATE DOMAIN resource_name AS VARCHAR(63)
@@ -51,8 +51,8 @@ CREATE TABLE accounts (
 CREATE TABLE sources (
     id                 UUID PRIMARY KEY,                    -- UUIDv7
     name               resource_name NOT NULL,
-    scope              scope_path NOT NULL,                 -- derived from the regex (§3.9); immutable
-    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the scope; NULL outside account-managed scopes
+    jurisdiction              jurisdiction_path NOT NULL,                 -- derived from the regex (§3.9); immutable
+    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the jurisdiction; NULL outside account-managed jurisdictions
     trust_domain       VARCHAR(255) NOT NULL,               -- immutable
     svid_regex         TEXT NOT NULL CHECK (length(svid_regex) <= 512),   -- may only be narrowed (§3.10)
     sample_spiffe_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of SPIFFE IDs the regex must match
@@ -62,7 +62,7 @@ CREATE TABLE sources (
     external_refs      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- e.g. {"cmdb": "APP-0042", "environment": "prod"}
     contacts           JSONB NOT NULL DEFAULT '[]'::jsonb,
     visibility         visibility NOT NULL DEFAULT 'PRIVATE',
-    visible_to         JSONB NOT NULL DEFAULT '[]'::jsonb,  -- scope patterns, for LISTED
+    visible_to         JSONB NOT NULL DEFAULT '[]'::jsonb,  -- jurisdiction patterns, for LISTED
     state              lifecycle_state NOT NULL DEFAULT 'ACTIVE',
     revision           BIGINT NOT NULL DEFAULT 1 CHECK (revision >= 1),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -80,7 +80,7 @@ CREATE TABLE sources (
     )
 );
 CREATE UNIQUE INDEX uq_sources_name ON sources (name) WHERE state <> 'RETIRED';
-CREATE INDEX idx_sources_scope ON sources (scope, name);
+CREATE INDEX idx_sources_jurisdiction ON sources (jurisdiction, name);
 
 -- ---------------------------------------------------------------------------
 -- Targets (ADR-15): one specific resource on a platform, with its access
@@ -93,9 +93,9 @@ CREATE TABLE targets (
     platform           VARCHAR(128) NOT NULL,               -- configured platform (§8.1); immutable
     platform_type      VARCHAR(128) NOT NULL,               -- plugin type of the platform; immutable
     realm               VARCHAR(63)  NOT NULL,               -- the platform's realm; immutable
-    scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
-    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the scope; NULL outside account-managed scopes
-    platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
+    jurisdiction              jurisdiction_path NOT NULL,                 -- owner jurisdiction; immutable (transfer only)
+    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the jurisdiction; NULL outside account-managed jurisdictions
+    platform_jurisdiction     jurisdiction_path NOT NULL,                 -- the platform's owner jurisdiction; immutable (transfer only)
     definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
     display_name       VARCHAR(128),
     description        TEXT CHECK (length(description) <= 4096),
@@ -103,7 +103,7 @@ CREATE TABLE targets (
     documentation_url  VARCHAR(512),
     contacts           JSONB NOT NULL DEFAULT '[]'::jsonb,
     visibility         visibility NOT NULL DEFAULT 'PRIVATE',
-    visible_to         JSONB NOT NULL DEFAULT '[]'::jsonb,  -- scope patterns, for LISTED
+    visible_to         JSONB NOT NULL DEFAULT '[]'::jsonb,  -- jurisdiction patterns, for LISTED
     state              lifecycle_state NOT NULL DEFAULT 'ACTIVE',
     revision           BIGINT NOT NULL DEFAULT 1 CHECK (revision >= 1),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -115,7 +115,7 @@ CREATE TABLE targets (
     )
 );
 CREATE UNIQUE INDEX uq_targets_name ON targets (name) WHERE state <> 'RETIRED';
-CREATE INDEX idx_targets_scope ON targets (scope, name);
+CREATE INDEX idx_targets_jurisdiction ON targets (jurisdiction, name);
 CREATE INDEX idx_targets_platform ON targets (platform, name);
 
 -- Access levels offered by a target. Grants may be narrowed in place; adding
@@ -150,9 +150,9 @@ CREATE TABLE target_network_flows (
 -- Sources and targets: immutable identity and ownership columns (INV-08, INV-21).
 CREATE FUNCTION sources_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.scope <> OLD.scope OR NEW.account IS DISTINCT FROM OLD.account)
-     AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
-    RAISE EXCEPTION 'source scope modified outside the re-scoping procedure';
+  IF (NEW.jurisdiction <> OLD.jurisdiction OR NEW.account IS DISTINCT FROM OLD.account)
+     AND coalesce(current_setting('ligo.transfer', true), '') <> 'on' THEN
+    RAISE EXCEPTION 'source jurisdiction modified outside the transfer procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.trust_domain <> OLD.trust_domain OR NEW.name <> OLD.name
      OR (OLD.state = 'RETIRED' AND NEW.state <> 'RETIRED') THEN
@@ -165,9 +165,9 @@ CREATE TRIGGER trg_sources_immutable BEFORE UPDATE ON sources
 
 CREATE FUNCTION targets_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.scope <> OLD.scope OR NEW.platform_scope <> OLD.platform_scope OR NEW.account IS DISTINCT FROM OLD.account)
-     AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
-    RAISE EXCEPTION 'target scope modified outside the re-scoping procedure';
+  IF (NEW.jurisdiction <> OLD.jurisdiction OR NEW.platform_jurisdiction <> OLD.platform_jurisdiction OR NEW.account IS DISTINCT FROM OLD.account)
+     AND coalesce(current_setting('ligo.transfer', true), '') <> 'on' THEN
+    RAISE EXCEPTION 'target jurisdiction modified outside the transfer procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.platform <> OLD.platform
      OR NEW.platform_type <> OLD.platform_type OR NEW.realm <> OLD.realm
@@ -250,9 +250,9 @@ CREATE TABLE bindings (
     secret_store_instance       VARCHAR(128) NOT NULL,
     secret_storage_strategy       VARCHAR(64)  NOT NULL,          -- §5.6; from the platform's wiring at creation; immutable
     derived_principal_name      VARCHAR(20) NOT NULL UNIQUE,    -- Appendix B, with the platform's principal_prefix at creation; immutable
-    source_scope                scope_path NOT NULL,            -- copied from the source; immutable (re-scoping only)
-    target_scope                scope_path NOT NULL,            -- copied from the target
-    platform_scope              scope_path NOT NULL,            -- copied from the target's platform
+    source_jurisdiction                jurisdiction_path NOT NULL,            -- copied from the source; immutable (transfer only)
+    target_jurisdiction                jurisdiction_path NOT NULL,            -- copied from the target
+    platform_jurisdiction              jurisdiction_path NOT NULL,            -- copied from the target's platform
     parameters                  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- per-binding parameters, validated by ValidateBinding
     purpose                     TEXT CHECK (length(purpose) <= 1024),
     labels                      JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -316,19 +316,19 @@ CREATE INDEX idx_bindings_phase           ON bindings (phase, last_transition_at
 CREATE INDEX idx_bindings_platform        ON bindings (platform_type, platform);
 CREATE INDEX idx_bindings_target          ON bindings (target_id, access_level);
 CREATE INDEX idx_bindings_realm            ON bindings (realm);
-CREATE INDEX idx_bindings_source_scope    ON bindings (source_scope, name);
-CREATE INDEX idx_bindings_target_scope    ON bindings (target_scope, name);
+CREATE INDEX idx_bindings_source_jurisdiction    ON bindings (source_jurisdiction, name);
+CREATE INDEX idx_bindings_target_jurisdiction    ON bindings (target_jurisdiction, name);
 CREATE INDEX idx_bindings_break_glass     ON bindings (break_glass_expires_at) WHERE break_glass_cr_id IS NOT NULL;
 CREATE INDEX idx_bindings_expiry          ON bindings (expires_at) WHERE expires_at IS NOT NULL;
 
--- Immutability of identity/wiring/scope columns (INV-08). Scopes change only through the
--- startup re-scoping procedure (§8.2 rule 17), which sets ligo.rescope = 'on' for its transaction.
+-- Immutability of identity/wiring/jurisdiction columns (INV-08). Jurisdictions change only through the
+-- startup transfer procedure (§8.2 rule 17), which sets ligo.transfer = 'on' for its transaction.
 CREATE FUNCTION bindings_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.source_scope <> OLD.source_scope OR NEW.target_scope <> OLD.target_scope
-      OR NEW.platform_scope <> OLD.platform_scope)
-     AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
-    RAISE EXCEPTION 'binding scope modified outside the re-scoping procedure';
+  IF (NEW.source_jurisdiction <> OLD.source_jurisdiction OR NEW.target_jurisdiction <> OLD.target_jurisdiction
+      OR NEW.platform_jurisdiction <> OLD.platform_jurisdiction)
+     AND coalesce(current_setting('ligo.transfer', true), '') <> 'on' THEN
+    RAISE EXCEPTION 'binding jurisdiction modified outside the transfer procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.realm <> OLD.realm
      OR NEW.source_id <> OLD.source_id OR NEW.target_id <> OLD.target_id
@@ -423,10 +423,10 @@ CREATE INDEX idx_propagation_due ON binding_propagation_queue (priority, enqueue
 
 -- ---------------------------------------------------------------------------
 -- Change requests (ADR-09, ADR-13, ADR-15): every change to a source, target
--- or binding. Scope columns by resource type:
---   SOURCE  -> owner_scope (the source's scope)
---   TARGET  -> owner_scope (the target's scope), platform_scope
---   BINDING -> source_scope, target_scope, platform_scope
+-- or binding. Jurisdiction columns by resource type:
+--   SOURCE  -> owner_jurisdiction (the source's jurisdiction)
+--   TARGET  -> owner_jurisdiction (the target's jurisdiction), platform_jurisdiction
+--   BINDING -> source_jurisdiction, target_jurisdiction, platform_jurisdiction
 -- ---------------------------------------------------------------------------
 CREATE TABLE change_requests (
     id                 UUID PRIMARY KEY,                    -- UUIDv7
@@ -437,11 +437,11 @@ CREATE TABLE change_requests (
     kind               change_request_kind NOT NULL,        -- STANDARD, BREAK_GLASS (ADR-12), SYSTEM_REVERT, SYSTEM_EXPIRY; immutable
     consent            consent_rule NOT NULL,               -- ALL: every side must approve; ANY: one side suffices (ADR-13, ADR-15); immutable
     realm               VARCHAR(63),                         -- TARGET and BINDING: the platform's realm
-    owner_scope        scope_path,                          -- SOURCE, TARGET
-    source_scope       scope_path,                          -- BINDING
-    target_scope       scope_path,                          -- BINDING
-    platform_scope     scope_path,                          -- TARGET, BINDING
-    interconnect_rule  VARCHAR(64),                         -- BINDING with consent ALL across scopes: matched rule, or 'default' (ADR-14)
+    owner_jurisdiction        jurisdiction_path,                          -- SOURCE, TARGET
+    source_jurisdiction       jurisdiction_path,                          -- BINDING
+    target_jurisdiction       jurisdiction_path,                          -- BINDING
+    platform_jurisdiction     jurisdiction_path,                          -- TARGET, BINDING
+    interconnect_rule  VARCHAR(64),                         -- BINDING with consent ALL across jurisdictions: matched rule, or 'default' (ADR-14)
     policy_sha256      CHAR(64) NOT NULL,                   -- governance policy in force at creation (§8.2)
     distinct_approvers_required BOOLEAN NOT NULL,           -- ADR-13 rule 7; immutable
     expected_revision  BIGINT,                              -- REQUIRED for UPDATE/DELETE
@@ -466,17 +466,17 @@ CREATE TABLE change_requests (
     expires_at         TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_cr_id_requester_kind UNIQUE (id, requested_by, kind),  -- target of the sides' composite foreign key
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
-    CONSTRAINT chk_cr_scope_columns CHECK (
-        (resource_type = 'SOURCE'  AND owner_scope IS NOT NULL AND source_scope IS NULL AND target_scope IS NULL
-                                   AND platform_scope IS NULL AND realm IS NULL)
-     OR (resource_type = 'TARGET'  AND owner_scope IS NOT NULL AND platform_scope IS NOT NULL AND realm IS NOT NULL
-                                   AND source_scope IS NULL AND target_scope IS NULL)
-     OR (resource_type = 'BINDING' AND owner_scope IS NULL AND source_scope IS NOT NULL AND target_scope IS NOT NULL
-                                   AND platform_scope IS NOT NULL AND realm IS NOT NULL)
+    CONSTRAINT chk_cr_jurisdiction_columns CHECK (
+        (resource_type = 'SOURCE'  AND owner_jurisdiction IS NOT NULL AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL
+                                   AND platform_jurisdiction IS NULL AND realm IS NULL)
+     OR (resource_type = 'TARGET'  AND owner_jurisdiction IS NOT NULL AND platform_jurisdiction IS NOT NULL AND realm IS NOT NULL
+                                   AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL)
+     OR (resource_type = 'BINDING' AND owner_jurisdiction IS NULL AND source_jurisdiction IS NOT NULL AND target_jurisdiction IS NOT NULL
+                                   AND platform_jurisdiction IS NOT NULL AND realm IS NOT NULL)
     ),
     CONSTRAINT chk_interconnect_rule CHECK (
         interconnect_rule IS NULL
-        OR (resource_type = 'BINDING' AND consent = 'ALL' AND source_scope <> target_scope)
+        OR (resource_type = 'BINDING' AND consent = 'ALL' AND source_jurisdiction <> target_jurisdiction)
     ),
     CONSTRAINT chk_system_kinds CHECK (
         (kind NOT IN ('SYSTEM_REVERT', 'SYSTEM_EXPIRY') OR consent = 'ANY')
@@ -508,15 +508,15 @@ CREATE TABLE change_requests (
 -- ---------------------------------------------------------------------------
 -- One row per side whose consent a change request needs (ADR-13, ADR-15):
 --   SOURCE resources:  OWNER
---   TARGET resources:  OWNER, plus PLATFORM for material changes when the scopes differ
---   BINDING, consent ALL: TARGET, SOURCE (if its scope differs), PARTY:<name> (ADR-14)
+--   TARGET resources:  OWNER, plus PLATFORM for material changes when the jurisdictions differ
+--   BINDING, consent ALL: TARGET, SOURCE (if its jurisdiction differs), PARTY:<name> (ADR-14)
 --   BINDING, consent ANY: the sides the requester acts for among SOURCE, TARGET, PLATFORM
 -- The four-eyes rules of ADR-09, ADR-11 and ADR-12 are enforced here per side.
 -- ---------------------------------------------------------------------------
 CREATE TABLE change_request_sides (
     change_request_id  UUID NOT NULL,
     side               VARCHAR(40) NOT NULL,                -- 'OWNER' | 'SOURCE' | 'TARGET' | 'PLATFORM' | 'PARTY:<name>'
-    scope              scope_path NOT NULL,                 -- whose consent this side represents
+    jurisdiction              jurisdiction_path NOT NULL,                 -- whose consent this side represents
     approval_required  BOOLEAN NOT NULL,                    -- a person (or a delegation, or break-glass) must decide it
     basis              approval_basis NOT NULL,             -- how the side is decided; fixed at creation
     requested_by       VARCHAR(255) NOT NULL,               -- copy of change_requests.requested_by (composite FK)
@@ -574,10 +574,10 @@ BEGIN
   IF NEW.resource_type <> OLD.resource_type OR NEW.resource_name <> OLD.resource_name
      OR NEW.kind <> OLD.kind OR NEW.consent <> OLD.consent OR NEW.operation <> OLD.operation
      OR NEW.realm IS DISTINCT FROM OLD.realm
-     OR NEW.owner_scope IS DISTINCT FROM OLD.owner_scope
-     OR NEW.source_scope IS DISTINCT FROM OLD.source_scope
-     OR NEW.target_scope IS DISTINCT FROM OLD.target_scope
-     OR NEW.platform_scope IS DISTINCT FROM OLD.platform_scope
+     OR NEW.owner_jurisdiction IS DISTINCT FROM OLD.owner_jurisdiction
+     OR NEW.source_jurisdiction IS DISTINCT FROM OLD.source_jurisdiction
+     OR NEW.target_jurisdiction IS DISTINCT FROM OLD.target_jurisdiction
+     OR NEW.platform_jurisdiction IS DISTINCT FROM OLD.platform_jurisdiction
      OR NEW.interconnect_rule IS DISTINCT FROM OLD.interconnect_rule
      OR NEW.policy_sha256 <> OLD.policy_sha256
      OR NEW.distinct_approvers_required <> OLD.distinct_approvers_required
@@ -598,7 +598,7 @@ CREATE TRIGGER trg_change_requests_immutable BEFORE UPDATE ON change_requests
 
 CREATE FUNCTION change_request_sides_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NEW.change_request_id <> OLD.change_request_id OR NEW.side <> OLD.side OR NEW.scope <> OLD.scope
+  IF NEW.change_request_id <> OLD.change_request_id OR NEW.side <> OLD.side OR NEW.jurisdiction <> OLD.jurisdiction
      OR NEW.approval_required <> OLD.approval_required OR NEW.basis <> OLD.basis
      OR NEW.requested_by <> OLD.requested_by OR NEW.cr_kind <> OLD.cr_kind
      OR (OLD.decision IS NOT NULL AND (NEW.decision IS DISTINCT FROM OLD.decision
@@ -618,7 +618,7 @@ CREATE TRIGGER trg_change_request_sides_immutable BEFORE UPDATE ON change_reques
 CREATE FUNCTION change_request_check(p_id UUID) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
   cr change_requests%ROWTYPE;
-  n_all int; n_approved int; n_declined int; n_scopes int;
+  n_all int; n_approved int; n_declined int; n_jurisdictions int;
   n_owner int; n_target int; n_source int; n_platform int; n_party int; n_bad int;
   n_human int; n_human_distinct int; n_ratified int; n_ratified_distinct int; n_delegated int;
 BEGIN
@@ -627,45 +627,45 @@ BEGIN
   SELECT count(*),
          count(*) FILTER (WHERE decision = 'APPROVED'),
          count(*) FILTER (WHERE decision = 'DECLINED'),
-         count(DISTINCT scope),
+         count(DISTINCT jurisdiction),
          count(*) FILTER (WHERE side = 'OWNER'),
          count(*) FILTER (WHERE side = 'TARGET'),
          count(*) FILTER (WHERE side = 'SOURCE'),
          count(*) FILTER (WHERE side = 'PLATFORM'),
          count(*) FILTER (WHERE side LIKE 'PARTY:%'),
-         count(*) FILTER (WHERE (side = 'OWNER'    AND scope IS DISTINCT FROM cr.owner_scope)
-                             OR (side = 'SOURCE'   AND scope IS DISTINCT FROM cr.source_scope)
-                             OR (side = 'TARGET'   AND scope IS DISTINCT FROM cr.target_scope)
-                             OR (side = 'PLATFORM' AND scope IS DISTINCT FROM cr.platform_scope)),
+         count(*) FILTER (WHERE (side = 'OWNER'    AND jurisdiction IS DISTINCT FROM cr.owner_jurisdiction)
+                             OR (side = 'SOURCE'   AND jurisdiction IS DISTINCT FROM cr.source_jurisdiction)
+                             OR (side = 'TARGET'   AND jurisdiction IS DISTINCT FROM cr.target_jurisdiction)
+                             OR (side = 'PLATFORM' AND jurisdiction IS DISTINCT FROM cr.platform_jurisdiction)),
          count(decided_by) FILTER (WHERE basis = 'HUMAN' AND decision = 'APPROVED'),
          count(DISTINCT decided_by) FILTER (WHERE basis = 'HUMAN' AND decision = 'APPROVED'),
          count(ratified_by),
          count(DISTINCT ratified_by),
          count(*) FILTER (WHERE basis = 'DELEGATED')
-    INTO n_all, n_approved, n_declined, n_scopes, n_owner, n_target, n_source, n_platform, n_party, n_bad,
+    INTO n_all, n_approved, n_declined, n_jurisdictions, n_owner, n_target, n_source, n_platform, n_party, n_bad,
          n_human, n_human_distinct, n_ratified, n_ratified_distinct, n_delegated
     FROM change_request_sides WHERE change_request_id = p_id;
 
   -- Structure (ADR-13, ADR-15)
-  IF n_all = 0 OR n_bad > 0 OR n_scopes <> n_all THEN
-    RAISE EXCEPTION 'change request %: missing sides, side scope mismatch, or two sides with one scope', p_id;
+  IF n_all = 0 OR n_bad > 0 OR n_jurisdictions <> n_all THEN
+    RAISE EXCEPTION 'change request %: missing sides, side jurisdiction mismatch, or two sides with one jurisdiction', p_id;
   END IF;
   IF cr.resource_type = 'SOURCE' AND (n_owner <> 1 OR n_all <> 1) THEN
     RAISE EXCEPTION 'change request %: a source change has exactly one OWNER side', p_id;
   END IF;
   IF cr.resource_type = 'TARGET'
      AND (n_owner <> 1 OR n_target + n_source + n_party > 0 OR cr.consent <> 'ALL'
-          OR (n_platform = 1 AND cr.platform_scope = cr.owner_scope)) THEN
-    RAISE EXCEPTION 'change request %: a target change has OWNER and optionally PLATFORM (different scope), consent ALL', p_id;
+          OR (n_platform = 1 AND cr.platform_jurisdiction = cr.owner_jurisdiction)) THEN
+    RAISE EXCEPTION 'change request %: a target change has OWNER and optionally PLATFORM (different jurisdiction), consent ALL', p_id;
   END IF;
   IF cr.resource_type = 'BINDING' AND n_owner > 0 THEN
     RAISE EXCEPTION 'change request %: a binding change has no OWNER side', p_id;
   END IF;
   IF cr.resource_type = 'BINDING' AND cr.consent = 'ALL' AND cr.kind IN ('STANDARD', 'BREAK_GLASS')
      AND (n_target <> 1 OR n_platform > 0
-          OR n_source <> (CASE WHEN cr.source_scope <> cr.target_scope THEN 1 ELSE 0 END)
-          OR (n_party > 0 AND cr.source_scope = cr.target_scope)) THEN
-    RAISE EXCEPTION 'change request %: a granting binding change needs TARGET, and SOURCE exactly when the scopes differ', p_id;
+          OR n_source <> (CASE WHEN cr.source_jurisdiction <> cr.target_jurisdiction THEN 1 ELSE 0 END)
+          OR (n_party > 0 AND cr.source_jurisdiction = cr.target_jurisdiction)) THEN
+    RAISE EXCEPTION 'change request %: a granting binding change needs TARGET, and SOURCE exactly when the jurisdictions differ', p_id;
   END IF;
   IF cr.resource_type = 'BINDING' AND cr.consent = 'ANY' AND n_party > 0 THEN
     RAISE EXCEPTION 'change request %: a revoking binding change has no additional parties', p_id;
@@ -712,7 +712,7 @@ ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
 CREATE INDEX idx_cr_status_realm ON change_requests (status, realm, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
 CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
-CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
+CREATE INDEX idx_cr_sides_pending ON change_request_sides (jurisdiction) WHERE decision IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- Admin UI sessions (server-side; cookie carries an opaque random token)
@@ -721,7 +721,7 @@ CREATE TABLE admin_sessions (
     token_sha256       CHAR(64) PRIMARY KEY,
     username           VARCHAR(255) NOT NULL,
     display_name       VARCHAR(255),            -- the directory's displayName or cn, shown in the UI's user menu
-    roles              JSONB NOT NULL,          -- [{"role":"operator","scopes":["dc/corp-prod"]}, ...]
+    roles              JSONB NOT NULL,          -- [{"role":"operator","jurisdictions":["dc/corp-prod"]}, ...]
     csrf_token         CHAR(64) NOT NULL,       -- 32 random bytes, hex
     client_ip          INET,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -60,11 +60,11 @@ const drain = 15 * time.Second
 
 // Serve runs the daemon (§8.4 ServeCommand).
 type Serve struct {
-	ConfigFile            string `short:"c" long:"config" env:"LIGO_CONFIG" default:"/etc/ligo/server.yaml" description:"Path to server.yaml configuration file."`
-	InsecureDev           bool   `long:"insecure-dev" description:"Allow local-kek secret sealer for local development ONLY."`
-	AllowOrphanedBindings bool   `long:"allow-orphaned-bindings" description:"Allow startup even if existing DB bindings reference removed provider instances."`
-	MaintenanceMode       bool   `long:"maintenance" env:"LIGO_MAINTENANCE_MODE" description:"Turn maintenance mode ON at startup (stored in the database, applies to all replicas; turn it off with 'ligo maintenance off')."`
-	AcceptScopeChanges    bool   `long:"accept-scope-changes" description:"Re-scope sources, targets and bindings whose stored scopes no longer match the configuration (§8.2 rule 17; audited, pending change requests fail)."`
+	ConfigFile                string `short:"c" long:"config" env:"LIGO_CONFIG" default:"/etc/ligo/server.yaml" description:"Path to server.yaml configuration file."`
+	InsecureDev               bool   `long:"insecure-dev" description:"Allow local-kek secret sealer for local development ONLY."`
+	AllowOrphanedBindings     bool   `long:"allow-orphaned-bindings" description:"Allow startup even if existing DB bindings reference removed provider instances."`
+	MaintenanceMode           bool   `long:"maintenance" env:"LIGO_MAINTENANCE_MODE" description:"Turn maintenance mode ON at startup (stored in the database, applies to all replicas; turn it off with 'ligo maintenance off')."`
+	AcceptJurisdictionChanges bool   `long:"accept-jurisdiction-changes" description:"Re-jurisdiction sources, targets and bindings whose stored jurisdictions no longer match the configuration (§8.2 rule 17; audited, pending change requests fail)."`
 
 	insecureDB bool // the tests' database container has no TLS; never set by a flag
 	level      slog.Level
@@ -185,7 +185,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, ThemeSHA256: look.Hashes(), Extractors: srcRules.Extractors,
-		AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptScopeChanges: cmd.AcceptScopeChanges, Logger: log}
+		AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptJurisdictionChanges: cmd.AcceptJurisdictionChanges, Logger: log}
 	if err := checks.Run(ctx); err != nil {
 		return err
 	}

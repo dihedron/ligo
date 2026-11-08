@@ -22,12 +22,12 @@ server:
     listen_address: "127.0.0.1:0"
 authorization:
   bindings:
-    - { spiffe_id: "spiffe://prod.internal/ops/vera", role: viewer, scopes: ["*"] }
+    - { spiffe_id: "spiffe://prod.internal/ops/vera", role: viewer, jurisdictions: ["*"] }
   approval:
     change_request_ttl: 72h
 governance:
-  source_scopes: []
-  interconnects: { default_cross_scope: deny }
+  source_jurisdictions: []
+  interconnects: { default_cross_jurisdiction: deny }
 storage:
   postgres: { app_dsn_env: LIGO_TEST_PG_APP_DSN, reader_dsn_env: LIGO_TEST_PG_READER_DSN, dbos_dsn_env: LIGO_TEST_PG_DBOS_DSN }
 reconciliation: { enabled: true, interval: 1h }

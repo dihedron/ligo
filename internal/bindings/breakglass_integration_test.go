@@ -20,12 +20,12 @@ var livia = caller("livia", role(config.RoleBreakGlass, "dc/corp-prod/*"))
 
 const justification = "payments outage, the ledger read path is needed now"
 
-// ledgerSource adds a source in dc/corp-prod/ledger, the scope of the
-// ledger target: a same-scope binding has one side.
+// ledgerSource adds a source in dc/corp-prod/ledger, the jurisdiction of the
+// ledger target: a same-jurisdiction binding has one side.
 func ledgerSource(t *testing.T, o *pgxpool.Pool, w *world, n string) string {
 	t.Helper()
 	name := "ledger-src-" + n + "-" + w.suffix
-	if _, err := o.Exec(context.Background(), `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := o.Exec(context.Background(), `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod/ledger', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), name,
 		`^spiffe://prod\.internal/ns/ledger/sa/`+n+`-`+w.suffix+`$`); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func breakGlassOf(t *testing.T, o *pgxpool.Pool, name string) (cr *uuid.UUID, op
 	return cr, open
 }
 
-// TestAC31: a break-glass CREATE in an approval-required scope is applied
+// TestAC31: a break-glass CREATE in an approval-required jurisdiction is applied
 // at once, its side BREAK_GLASS, the binding open for its TTL, and
 // BREAK_GLASS_USED audited (ADR-12).
 func TestAC31(t *testing.T) {
@@ -105,8 +105,8 @@ func TestBreakGlassRefusals(t *testing.T) {
 		})
 	}
 	// AC-36: the database refuses a BREAK_GLASS request by a SPIFFE principal
-	if _, err := o.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm, source_scope,
-		target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
+	if _, err := o.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm, source_jurisdiction,
+		target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
 		break_glass_justification, break_glass_ttl_seconds, requested_by, expires_at)
 		values ($1, 'BINDING', $2, 'CREATE', 'BREAK_GLASS', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
 		true, '{}', repeat('b', 64), 'INC0012345', $3, 3600, 'spiffe://prod.internal/x', now() + interval '1 day')`,
@@ -131,7 +131,7 @@ func TestBreakGlassRefusals(t *testing.T) {
 	// max_open: the policy of dc/corp-prod/* allows one more open change
 	var open int
 	if err := o.QueryRow(ctx, `select count(distinct r.id) from change_requests r join change_request_sides s on s.change_request_id = r.id
-		where s.scope like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
+		where s.jurisdiction like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
 		t.Fatal(err)
 	}
 	s.Requests.Policy.BreakGlassPolicyFor("dc/corp-prod/ledger").MaxOpen = open + 1
@@ -254,7 +254,7 @@ func TestAC35(t *testing.T) {
 
 // TestBreakGlassInlineSource: a break-glass CREATE registers its inline
 // source in the same transaction, both requests BREAK_GLASS, the binding's
-// depending on the source's; ratifying the side of the source's scope
+// depending on the source's; ratifying the side of the source's jurisdiction
 // ratifies the source's change too. A refused binding stores neither
 // (ADR-12, §7.2.3 "Break-glass operations").
 func TestBreakGlassInlineSource(t *testing.T) {
@@ -416,7 +416,7 @@ func TestBreakGlassConcurrent(t *testing.T) {
 	ctx := context.Background()
 	var open int
 	if err := o.QueryRow(ctx, `select count(distinct r.id) from change_requests r join change_request_sides s on s.change_request_id = r.id
-		where s.scope like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
+		where s.jurisdiction like 'dc/corp-prod/%' and `+changerequests.OpenBreakGlass).Scan(&open); err != nil {
 		t.Fatal(err)
 	}
 	s.Requests.Policy.BreakGlassPolicyFor("dc/corp-prod/ledger").MaxOpen = open + 1

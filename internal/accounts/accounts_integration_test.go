@@ -27,7 +27,7 @@ import (
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
 var insecure = os.Getenv("CI") != ""
 
-var structure = &governance.Accounts{Scope: "cloud/{account}"}
+var structure = &governance.Accounts{Jurisdiction: "cloud/{account}"}
 
 func dsn(t *testing.T, role string) string {
 	t.Helper()
@@ -38,8 +38,8 @@ func dsn(t *testing.T, role string) string {
 	return v
 }
 
-func caller(name, role string, scopes ...string) changerequests.Caller {
-	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Scopes: scopes}}}
+func caller(name, role string, jurisdictions ...string) changerequests.Caller {
+	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Jurisdictions: jurisdictions}}}
 }
 
 var registrar = caller("reg", config.RoleAccountAdmin)
@@ -95,7 +95,7 @@ func setup(t *testing.T) *env {
 // triggers refuse here, they refuse for every code path.
 func (v *env) source(ctx context.Context, q store.Querier, account string) (uuid.UUID, error) {
 	id := uuid.NewV7()
-	_, err := q.Exec(ctx, `insert into sources (id, name, scope, account, trust_domain, svid_regex, created_by, updated_by)
+	_, err := q.Exec(ctx, `insert into sources (id, name, jurisdiction, account, trust_domain, svid_regex, created_by, updated_by)
 		values ($1, $2, $3, $4, 'cloud.internal', '^spiffe://cloud\.internal/x$', 't', 't')`,
 		id, "src-"+id.String()[24:], "cloud/"+account+"/app/p1", account)
 	return id, err
@@ -234,10 +234,10 @@ func TestRequire(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
-		accounts    *governance.Accounts
-		scope, want string
-		slug        string
-		description string
+		accounts           *governance.Accounts
+		jurisdiction, want string
+		slug               string
+		description        string
 	}{
 		{nil, "cloud/" + v.x + "none/app/p", "", "", "no accounts configured"},
 		{structure, "dc/corp-prod/ledger", "", "", "not account-managed"},
@@ -248,7 +248,7 @@ func TestRequire(t *testing.T) {
 		{structure, "cloud/a-b/app/p", "", "account-not-registered", "TN-3: outside the grammar, not unmanaged"},
 		{structure, "cloud/ACME/app/p", "", "account-not-registered", "upper case"},
 	} {
-		got, err := Require(ctx, v.app, c.accounts, c.scope)
+		got, err := Require(ctx, v.app, c.accounts, c.jurisdiction)
 		if got != c.want || slug(err) != c.slug {
 			t.Errorf("%s: %q, %v", c.description, got, err)
 		}
@@ -277,7 +277,7 @@ func TestTriggers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := v.app.Exec(ctx, "update sources set account = null where id = $1", id); err == nil {
-		t.Error("the account of a source changed outside the re-scoping procedure")
+		t.Error("the account of a source changed outside the transfer procedure")
 	}
 	if _, err := v.app.Exec(ctx, "update accounts set status = 'RETIRED', retired_by = 'x', retired_at = now() where name = $1", v.x); code(err) != codeInUse {
 		t.Errorf("retired with a source: %v", err)
@@ -301,7 +301,7 @@ func TestTriggers(t *testing.T) {
 			t.Errorf("allowed: %s", sql)
 		}
 	}
-	// a re-scoping cannot move a resource onto a retired account either
+	// a transfer cannot move a resource onto a retired account either
 	if _, err := Register(ctx, v.app, registrar, v.x+"b", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -310,14 +310,14 @@ func TestTriggers(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = pgx.BeginFunc(ctx, v.app, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+		if _, err := tx.Exec(ctx, "SET LOCAL ligo.transfer = 'on'"); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, "update sources set account = $2 where id = $1", moved, v.x)
 		return err
 	})
 	if code(err) != codeRetired {
-		t.Errorf("re-scoped onto a retired account: %v", err)
+		t.Errorf("transferred onto a retired account: %v", err)
 	}
 }
 

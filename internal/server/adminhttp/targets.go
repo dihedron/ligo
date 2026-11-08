@@ -76,7 +76,7 @@ func (s *Server) listTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	list, more, err := s.Targets.List(r.Context(), c, targets.Filter{Q: q.Get("q"), Platform: q.Get("platform"),
-		PlatformType: q.Get("platformType"), Scope: q.Get("scope"), Label: q.Get("label"), State: q.Get("state"),
+		PlatformType: q.Get("platformType"), Jurisdiction: q.Get("jurisdiction"), Label: q.Get("label"), State: q.Get("state"),
 		After: cursor.AfterName, Limit: size})
 	if err != nil {
 		s.fail(w, r, err)
@@ -108,20 +108,20 @@ func (s *Server) getTarget(w http.ResponseWriter, r *http.Request) {
 	}{v, entries})
 }
 
-// revokeOn files the bulk revocation of a source's, or a source scope's,
+// revokeOn files the bulk revocation of a source's, or a source jurisdiction's,
 // bindings on a target (containment): 202 with the requests filed, and the
 // bindings that could not be revoked with their problem.
 func (s *Server) revokeOn(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Source            string `json:"source"`
-		SourceScope       string `json:"sourceScope"`
-		Comment           string `json:"comment"`
-		ApprovalReference string `json:"approvalReference"`
+		Source             string `json:"source"`
+		SourceJurisdiction string `json:"sourceJurisdiction"`
+		Comment            string `json:"comment"`
+		ApprovalReference  string `json:"approvalReference"`
 	}
 	err := decode(r, &b)
 	var out []bindings.Revocation
 	if err == nil {
-		out, err = s.Bindings.RevokeOn(r.Context(), caller(r), r.PathValue("name"), b.Source, b.SourceScope, b.Comment, b.ApprovalReference)
+		out, err = s.Bindings.RevokeOn(r.Context(), caller(r), r.PathValue("name"), b.Source, b.SourceJurisdiction, b.Comment, b.ApprovalReference)
 	}
 	if err != nil {
 		s.fail(w, r, err)

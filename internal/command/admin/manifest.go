@@ -150,8 +150,8 @@ func (b *Base) report(what string, answers []filed) error {
 				if sd["decision"] != nil {
 					continue
 				}
-				_, _ = fmt.Fprintf(out, "  awaiting side %v (scope %v): ligo cr approve %v --sha256 %v --side %v -m \"<comment>\"\n",
-					sd["side"], sd["scope"], cr["id"], cr["payloadSha256"], sd["side"])
+				_, _ = fmt.Fprintf(out, "  awaiting side %v (jurisdiction %v): ligo cr approve %v --sha256 %v --side %v -m \"<comment>\"\n",
+					sd["side"], sd["jurisdiction"], cr["id"], cr["payloadSha256"], sd["side"])
 			}
 		}
 	}

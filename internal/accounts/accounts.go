@@ -1,4 +1,4 @@
-// Package accounts is the registry of tenants: an account-managed scope
+// Package accounts is the registry of tenants: an account-managed jurisdiction
 // (governance.Accounts) is usable only while its account is registered and
 // ACTIVE (.specs/ligo-tenancy.md §7).
 package accounts
@@ -138,7 +138,7 @@ func sees(c changerequests.Caller, cfg *governance.Accounts, name string) bool {
 	if cfg == nil {
 		return false
 	}
-	return c.Grants.InScopes(governance.ExpandTemplate(cfg.Scope, map[string]string{"{account}": name}) + "/*")
+	return c.Grants.InJurisdictions(governance.ExpandTemplate(cfg.Jurisdiction, map[string]string{"{account}": name}) + "/*")
 }
 
 // Get returns an account the caller may read, with its counts (404
@@ -188,12 +188,12 @@ func List(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *g
 	}
 }
 
-// Require returns the account of scope, which is "" outside account-managed
-// scopes; an account-managed scope whose account is not registered and ACTIVE
+// Require returns the account of jurisdiction, which is "" outside account-managed
+// jurisdictions; an account-managed jurisdiction whose account is not registered and ACTIVE
 // is refused. A segment outside the account grammar is refused too: no such
 // account can exist.
-func Require(ctx context.Context, q store.Querier, cfg *governance.Accounts, scope string) (string, error) {
-	name, managed := cfg.AccountOf(scope)
+func Require(ctx context.Context, q store.Querier, cfg *governance.Accounts, jurisdiction string) (string, error) {
+	name, managed := cfg.AccountOf(jurisdiction)
 	if !managed {
 		return "", nil
 	}
@@ -203,7 +203,7 @@ func Require(ctx context.Context, q store.Querier, cfg *governance.Accounts, sco
 		return "", err
 	}
 	if !active {
-		return "", refuse(422, "account-not-registered", "account %q of scope %s is not registered, or is retired", name, scope)
+		return "", refuse(422, "account-not-registered", "account %q of jurisdiction %s is not registered, or is retired", name, jurisdiction)
 	}
 	return name, nil
 }

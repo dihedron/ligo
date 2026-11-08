@@ -100,13 +100,13 @@ func TestDelivery(t *testing.T) {
 	t.Setenv("LIGO_TEST_HOOK_SECRET", "s3cret")
 	hooks := []config.Webhook{
 		{Name: oncall, URL: srv.URL, CACertFile: ca, HMACSecretEnv: "LIGO_TEST_HOOK_SECRET", Events: []string{"BREAK_GLASS_USED", "CR_AWAITING_APPROVAL"}},
-		{Name: dba, URL: srv.URL, CACertFile: ca, HMACSecretEnv: "LIGO_TEST_HOOK_SECRET", Events: []string{"CR_AWAITING_APPROVAL"}, Scopes: []string{"dc/corp-prod/*"}},
+		{Name: dba, URL: srv.URL, CACertFile: ca, HMACSecretEnv: "LIGO_TEST_HOOK_SECRET", Events: []string{"CR_AWAITING_APPROVAL"}, Jurisdictions: []string{"dc/corp-prod/*"}},
 	}
 	outbox := &Outbox{Webhooks: hooks}
 	err = pgx.BeginFunc(ctx, pools.App, func(tx pgx.Tx) error {
 		for _, e := range []Event{
-			{Name: "BREAK_GLASS_USED", Scopes: []string{"dc/corp-prod"}, Payload: map[string]any{"actor": "livia", "realm": "prod"}},
-			{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"cloud/fin-01/payments"}, Payload: map[string]any{"side": "SOURCE"}},
+			{Name: "BREAK_GLASS_USED", Jurisdictions: []string{"dc/corp-prod"}, Payload: map[string]any{"actor": "livia", "realm": "prod"}},
+			{Name: "CR_AWAITING_APPROVAL", Jurisdictions: []string{"cloud/fin-01/payments"}, Payload: map[string]any{"side": "SOURCE"}},
 			{Name: "SYSTEM_MAINTENANCE_ENABLED"}, // nobody subscribes
 		} {
 			if err := outbox.Enqueue(ctx, tx, e); err != nil {
@@ -120,7 +120,7 @@ func TestDelivery(t *testing.T) {
 	}
 	var rows int
 	if err := owner.QueryRow(ctx, "select count(*) from notification_outbox where webhook in ($1, $2)", oncall, dba).Scan(&rows); err != nil || rows != 2 {
-		t.Fatalf("outbox rows %d (%v), want 2: the dba webhook filters cloud scopes", rows, err)
+		t.Fatalf("outbox rows %d (%v), want 2: the dba webhook filters cloud jurisdictions", rows, err)
 	}
 	d, err := NewDispatcher(pools.App, hooks, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -176,7 +176,7 @@ func TestDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := pgx.BeginFunc(ctx, pools.App, func(tx pgx.Tx) error {
-		return outbox.Enqueue(ctx, tx, Event{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"dc/corp-prod/ledger"}})
+		return outbox.Enqueue(ctx, tx, Event{Name: "CR_AWAITING_APPROVAL", Jurisdictions: []string{"dc/corp-prod/ledger"}})
 	}); err != nil {
 		t.Fatal(err)
 	}

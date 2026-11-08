@@ -86,21 +86,21 @@ func TestServeWebhookMaintenance(t *testing.T) {
 
 // hookEvent is one recorded request with its payload decoded.
 type hookEvent struct {
-	Hook, Verdict string
-	raw           string
-	Event         string `json:"event"`
-	EventID       string `json:"eventId"`
-	OccurredAt    string `json:"occurredAt"`
-	Actor         string `json:"actor"`
-	Realm         string `json:"realm"`
-	SideScope     string `json:"sideScope"`
-	SourceScope   string `json:"sourceScope"`
-	TargetScope   string `json:"targetScope"`
-	PlatformScope string `json:"platformScope"`
-	Justification string `json:"justification"`
-	Incident      string `json:"incidentReference"`
-	ExpiresAt     string `json:"expiresAt"`
-	Resource      struct {
+	Hook, Verdict        string
+	raw                  string
+	Event                string `json:"event"`
+	EventID              string `json:"eventId"`
+	OccurredAt           string `json:"occurredAt"`
+	Actor                string `json:"actor"`
+	Realm                string `json:"realm"`
+	SideJurisdiction     string `json:"sideJurisdiction"`
+	SourceJurisdiction   string `json:"sourceJurisdiction"`
+	TargetJurisdiction   string `json:"targetJurisdiction"`
+	PlatformJurisdiction string `json:"platformJurisdiction"`
+	Justification        string `json:"justification"`
+	Incident             string `json:"incidentReference"`
+	ExpiresAt            string `json:"expiresAt"`
+	Resource             struct {
 		Type     string `json:"type"`
 		Name     string `json:"name"`
 		Source   string `json:"source"`
@@ -111,7 +111,7 @@ type hookEvent struct {
 
 // TestServeWebhookFile reads what the receiver recorded: every request valid
 // and every eventId once (§7.5); the fields of a BREAK_GLASS_USED (AC-31);
-// scope filters; no secret anywhere.
+// jurisdiction filters; no secret anywhere.
 func TestServeWebhookFile(t *testing.T) {
 	x := e2eEnv(t, "LIGO_E2E_SUFFIX")
 	data, err := os.ReadFile(filepath.Join(e2eEnv(t, "LIGO_E2E_DIR"), "hooks.jsonl")) //nolint:gosec // written by lab.sh
@@ -166,7 +166,7 @@ func TestServeWebhookFile(t *testing.T) {
 	}
 	u := used[0]
 	if u.Actor != "livia" || u.Justification == "" || u.Incident != "INC0012345" || u.Realm != "prod" ||
-		u.SourceScope != "dc/corp-prod" || u.TargetScope != "dc/corp-prod/ledger" || u.PlatformScope != "dc/corp-prod" ||
+		u.SourceJurisdiction != "dc/corp-prod" || u.TargetJurisdiction != "dc/corp-prod/ledger" || u.PlatformJurisdiction != "dc/corp-prod" ||
 		u.Resource.Type != "BINDING" || u.Resource.Source == "" || u.Resource.Target == "" || u.Resource.Platform != "pg-ledger" {
 		t.Errorf("BREAK_GLASS_USED: %s", u.raw)
 	}
@@ -175,11 +175,11 @@ func TestServeWebhookFile(t *testing.T) {
 		t.Errorf("BREAK_GLASS_USED expiresAt, 1h after: %s", u.raw)
 	}
 	if got := find("dba", "BREAK_GLASS_USED", "hook-bg-"+x); len(got) != 1 {
-		t.Errorf("BREAK_GLASS_USED at dba, whose filter matches its target scope: %d", len(got))
+		t.Errorf("BREAK_GLASS_USED at dba, whose filter matches its target jurisdiction: %d", len(got))
 	}
 
 	// BINDING_REVOKED (AC-70): dora decided for dc/corp-prod, so the ledger's
-	// scope hears of it; a break-glass revert, which every side decided, has
+	// jurisdiction hears of it; a break-glass revert, which every side decided, has
 	// nobody to tell
 	for _, hook := range []string{"oncall", "dba"} {
 		if got := find(hook, "BINDING_REVOKED", "hook-rv-"+x); len(got) != 1 {
@@ -190,22 +190,22 @@ func TestServeWebhookFile(t *testing.T) {
 		t.Errorf("a break-glass revert announced as BINDING_REVOKED: %s", got[0].raw)
 	}
 
-	// CR_AWAITING_APPROVAL, one per side: dba only of its own scope
+	// CR_AWAITING_APPROVAL, one per side: dba only of its own jurisdiction
 	binding := "hook-rv-" + x
-	var scopes []string
+	var jurisdictions []string
 	for _, e := range find("oncall", "CR_AWAITING_APPROVAL", binding) {
-		scopes = append(scopes, e.SideScope)
+		jurisdictions = append(jurisdictions, e.SideJurisdiction)
 	}
-	if !slices.Contains(scopes, "dc/corp-prod/ledger") || !slices.Contains(scopes, "dc/corp-prod") {
-		t.Errorf("CR_AWAITING_APPROVAL at oncall: sides %v", scopes)
+	if !slices.Contains(jurisdictions, "dc/corp-prod/ledger") || !slices.Contains(jurisdictions, "dc/corp-prod") {
+		t.Errorf("CR_AWAITING_APPROVAL at oncall: sides %v", jurisdictions)
 	}
 	dba := find("dba", "CR_AWAITING_APPROVAL", binding)
 	if len(dba) == 0 {
 		t.Error("CR_AWAITING_APPROVAL at dba: none")
 	}
 	for _, e := range dba {
-		if e.SideScope != "dc/corp-prod/ledger" {
-			t.Errorf("dba received another scope's side: %s", e.raw)
+		if e.SideJurisdiction != "dc/corp-prod/ledger" {
+			t.Errorf("dba received another jurisdiction's side: %s", e.raw)
 		}
 	}
 

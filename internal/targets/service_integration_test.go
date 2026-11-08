@@ -32,8 +32,8 @@ func dsn(t *testing.T, role string) string {
 	return v
 }
 
-func caller(name, role string, scopes ...string) changerequests.Caller {
-	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Scopes: scopes}}}
+func caller(name, role string, jurisdictions ...string) changerequests.Caller {
+	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Jurisdictions: jurisdictions}}}
 }
 
 var (
@@ -96,7 +96,7 @@ func unique(t *testing.T, owner *pgxpool.Pool, tg *Target) {
 }
 
 // TestAC63: a target needs its owner's and its platform's consent, from two
-// different people; a missing resource and a scope outside target_scopes
+// different people; a missing resource and a jurisdiction outside target_jurisdictions
 // are refused.
 func TestAC63(t *testing.T) {
 	s, owner := setup(t)
@@ -104,14 +104,14 @@ func TestAC63(t *testing.T) {
 	tg := ledger()
 	unique(t, owner, &tg)
 	if _, err := s.Create(ctx, eve, body(t, tg)); slug(err) != "forbidden" {
-		t.Errorf("operator of another scope: %v", err)
+		t.Errorf("operator of another jurisdiction: %v", err)
 	}
 	r, err := s.Create(ctx, alice, body(t, tg))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r.Status != "PENDING" || len(r.Sides) != 2 || r.Sides[0].Name != "OWNER" || r.Sides[1].Name != "PLATFORM" ||
-		r.Sides[0].Scope != "dc/corp-prod/ledger" || r.Sides[1].Scope != "dc/corp-prod" || r.Realm != "prod" || r.PlatformScope != "dc/corp-prod" {
+		r.Sides[0].Jurisdiction != "dc/corp-prod/ledger" || r.Sides[1].Jurisdiction != "dc/corp-prod" || r.Realm != "prod" || r.PlatformJurisdiction != "dc/corp-prod" {
 		t.Fatalf("request %+v", r)
 	}
 	if _, err := s.Requests.Approve(ctx, marco, r.ID, r.PayloadSHA256, "OWNER", "ok"); err != nil {
@@ -143,10 +143,10 @@ func TestAC63(t *testing.T) {
 		t.Errorf("missing resource: %v", err)
 	}
 	outside := ledger()
-	outside.Metadata.Scope = "cloud/fin-01/payments"
+	outside.Metadata.Jurisdiction = "cloud/fin-01/payments"
 	unique(t, owner, &outside)
 	if _, err := s.Create(ctx, alice, body(t, outside)); slug(err) != "validation-failed" {
-		t.Errorf("scope outside target_scopes: %v", err)
+		t.Errorf("jurisdiction outside target_jurisdictions: %v", err)
 	}
 }
 
@@ -203,13 +203,13 @@ func bindingAt(t *testing.T, o *pgxpool.Pool, target uuid.UUID, level string) uu
 	suffix := binding.String()[24:]
 	regex := `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + suffix + `$`
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+		if _, err := tx.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
 			values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, source, "s-"+suffix, regex); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-			source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+			source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 			source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 			values ($1, $2, $3, $4, $5, 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
 			'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $6, 1, 1, 'cloud.internal', $7, '{}', 't', 't')`,
@@ -347,12 +347,12 @@ func TestTargetStates(t *testing.T) {
 	}
 }
 
-// TN-4 and TN-5 for targets: the account is that of the target's scope.
+// TN-4 and TN-5 for targets: the account is that of the target's jurisdiction.
 func TestAccountRequired(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
-	s.Rules.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	s.Rules.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	const account = "ledger"
 	tg := ledger()
 	tg.Metadata.Name = "acct-" + x
@@ -407,7 +407,7 @@ func TestNamespaceAtApproval(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
-	s.Rules.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	s.Rules.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	s.Rules.NamespaceField = func(string) string { return "schema" }
 	p := s.Rules.Platforms["oracle-prod"]
 	p.NamespaceTemplate = "{account}_ok"

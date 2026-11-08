@@ -60,13 +60,13 @@ func TestMain(m *testing.M) {
 // binding between them at read, created in a transaction that is never
 // committed.
 type fixture struct {
-	tx             pgx.Tx
-	source, target uuid.UUID
-	binding        uuid.UUID
-	sourceScope    string
-	targetScope    string
-	platformScope  string
-	sourceRegex    string
+	tx                   pgx.Tx
+	source, target       uuid.UUID
+	binding              uuid.UUID
+	sourceJurisdiction   string
+	targetJurisdiction   string
+	platformJurisdiction string
+	sourceRegex          string
 }
 
 // newFixture begins a transaction as role ("APP" or "MIGRATOR"), creates
@@ -85,13 +85,13 @@ func newFixture(t *testing.T, role string) *fixture {
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
 	f := &fixture{
 		tx: tx, source: uuid.NewV7(), target: uuid.NewV7(), binding: uuid.NewV7(),
-		sourceScope: "cloud/fin-01/payments", targetScope: "dc/corp-prod/ledger", platformScope: "dc/corp-prod",
+		sourceJurisdiction: "cloud/fin-01/payments", targetJurisdiction: "dc/corp-prod/ledger", platformJurisdiction: "dc/corp-prod",
 		sourceRegex: `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/ledger-[0-9]+$`,
 	}
-	f.must(t, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
-		values ($1, 'fin-01-payments-ledger', $2, 'cloud.internal', $3, 'alice', 'alice')`, f.source, f.sourceScope, f.sourceRegex)
-	f.must(t, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
-		values ($1, 'ledger-schema', 'oracle-prod', 'oracle.v1', 'prod', $2, $3, '{}', 'dora', 'dora')`, f.target, f.targetScope, f.platformScope)
+	f.must(t, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
+		values ($1, 'fin-01-payments-ledger', $2, 'cloud.internal', $3, 'alice', 'alice')`, f.source, f.sourceJurisdiction, f.sourceRegex)
+	f.must(t, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
+		values ($1, 'ledger-schema', 'oracle-prod', 'oracle.v1', 'prod', $2, $3, '{}', 'dora', 'dora')`, f.target, f.targetJurisdiction, f.platformJurisdiction)
 	for _, level := range []string{"read", "write"} {
 		f.must(t, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, $2, '{}', '[]')`, f.target, level)
 	}
@@ -108,23 +108,23 @@ func (f *fixture) insertBinding(t *testing.T, id uuid.UUID, name string, source,
 func (f *fixture) bindingSQL() string {
 	return `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+		source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 		source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 		values ($1, $2, $3, $4, $5, 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
 		$6, $7, $8, $9, 1, 1, 'cloud.internal', $10, '{}', 'alice', 'alice')`
 }
 
 func (f *fixture) bindingArgs(id uuid.UUID, name string, source, target uuid.UUID, level string) []any {
-	return []any{id, name, source, target, level, f.sourceScope, f.targetScope, f.platformScope,
+	return []any{id, name, source, target, level, f.sourceJurisdiction, f.targetJurisdiction, f.platformJurisdiction,
 		"ligo:apply:" + id.String() + ":r1:a1", f.sourceRegex}
 }
 
 // cr describes a change request; zero fields get the defaults of a
-// standard binding CREATE across scopes.
+// standard binding CREATE across jurisdictions.
 type cr struct {
 	resourceType, operation, kind, consent string
 	status, requestedBy, approvalRef       string
-	ownerScope, targetScope                string // overrides
+	ownerJurisdiction, targetJurisdiction  string // overrides
 	distinct                               bool
 	justification                          string
 	ttl                                    int
@@ -148,17 +148,17 @@ func (f *fixture) insertCR(c cr) (uuid.UUID, error) {
 	var owner, source, target, platform, realm any
 	switch c.resourceType {
 	case "SOURCE":
-		owner = f.sourceScope
+		owner = f.sourceJurisdiction
 	case "TARGET":
-		owner, platform, realm = f.targetScope, f.platformScope, "prod"
+		owner, platform, realm = f.targetJurisdiction, f.platformJurisdiction, "prod"
 	default:
-		source, target, platform, realm = f.sourceScope, f.targetScope, f.platformScope, "prod"
+		source, target, platform, realm = f.sourceJurisdiction, f.targetJurisdiction, f.platformJurisdiction, "prod"
 	}
-	if c.ownerScope != "" {
-		owner = c.ownerScope
+	if c.ownerJurisdiction != "" {
+		owner = c.ownerJurisdiction
 	}
-	if c.targetScope != "" {
-		target = c.targetScope
+	if c.targetJurisdiction != "" {
+		target = c.targetJurisdiction
 	}
 	var ref, justification, ttl, decidedBy any
 	if c.approvalRef != "" {
@@ -175,7 +175,7 @@ func (f *fixture) insertCR(c cr) (uuid.UUID, error) {
 		expected = 1
 	}
 	_, err := f.tx.Exec(context.Background(), `insert into change_requests (id, resource_type, resource_name, operation, kind, consent,
-		realm, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required,
+		realm, owner_jurisdiction, source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required,
 		expected_revision, payload, payload_sha256, status, external_approval_ref, break_glass_justification,
 		break_glass_ttl_seconds, requested_by, decided_by, decided_at, expires_at)
 		values ($1, $2, 'fin-01-payments-ledger', $3, $4, $5, $6, $7, $8, $9, $10, repeat('a', 64), $11, $12, '{}', repeat('b', 64), $13,
@@ -187,11 +187,11 @@ func (f *fixture) insertCR(c cr) (uuid.UUID, error) {
 
 // side describes a side of a change request.
 type side struct {
-	name, scope, basis  string
-	required            bool
-	decision, decidedBy string
-	ratifiedBy          string
-	requestedBy, crKind string
+	name, jurisdiction, basis string
+	required                  bool
+	decision, decidedBy       string
+	ratifiedBy                string
+	requestedBy, crKind       string
 }
 
 func (f *fixture) insertSide(id uuid.UUID, s side) error {
@@ -208,11 +208,11 @@ func (f *fixture) insertSide(id uuid.UUID, s side) error {
 	if s.ratifiedBy != "" {
 		ratifiedBy = s.ratifiedBy
 	}
-	_, err := f.tx.Exec(context.Background(), `insert into change_request_sides (change_request_id, side, scope, approval_required, basis,
+	_, err := f.tx.Exec(context.Background(), `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis,
 		requested_by, cr_kind, decision, decided_by, decided_at, ratified_by, ratified_at)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::varchar, case when $9::varchar is null then null else now() end,
 		$10::varchar, case when $10::varchar is null then null else now() end)`,
-		id, s.name, s.scope, s.required, s.basis, s.requestedBy, s.crKind, decision, decidedBy, ratifiedBy)
+		id, s.name, s.jurisdiction, s.required, s.basis, s.requestedBy, s.crKind, decision, decidedBy, ratifiedBy)
 	return err
 }
 

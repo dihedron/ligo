@@ -128,8 +128,8 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		}}
 	requests.Resources["SOURCE"], requests.Resources["TARGET"], requests.Resources["BINDING"] = ss, ts, bs
 	az, err := authz.New([]config.RoleBinding{
-		{LDAPGroupDN: "cn=olga", Role: config.RoleOperator, Scopes: []string{"dc/corp-prod/*"}},
-		{LDAPGroupDN: "cn=dora", Role: config.RoleApprover, Scopes: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: "cn=olga", Role: config.RoleOperator, Jurisdictions: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: "cn=dora", Role: config.RoleApprover, Jurisdictions: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: "cn=reg", Role: config.RoleAccountAdmin},
 	})
 	if err != nil {
@@ -189,7 +189,7 @@ visibility: {mode: PRIVATE}
 ---
 apiVersion: ligo.dihedron.org/v1alpha1
 kind: Target
-metadata: {name: cli-ledger-%[1]s, platform: oracle-prod, scope: dc/corp-prod/ledger}
+metadata: {name: cli-ledger-%[1]s, platform: oracle-prod, jurisdiction: dc/corp-prod/ledger}
 definition: {schema: LEDGER_APP}
 accessLevels: [{name: read, grants: {roles: [LEDGER_RO_ROLE]}}]
 networkFlows: []
@@ -277,7 +277,7 @@ visibility: {mode: PRIVATE}
 	if err := (&GovernanceCheck{Base: olga, File: file}).Execute(nil); err != nil || !strings.Contains(out.String(), `"consent": "ALL"`) {
 		t.Errorf("governance check: %v\n%s", err, out.String())
 	}
-	if err := (&Apply{Base: olga, File: manifest(t, fmt.Sprintf("kind: Target\nmetadata: {name: cli-ledger-%s, platform: oracle-prod, scope: dc/corp-prod/ledger}\n"+
+	if err := (&Apply{Base: olga, File: manifest(t, fmt.Sprintf("kind: Target\nmetadata: {name: cli-ledger-%s, platform: oracle-prod, jurisdiction: dc/corp-prod/ledger}\n"+
 		"definition: {schema: LEDGER_APP}\naccessLevels: [{name: read, grants: {roles: [LEDGER_RO_ROLE]}}]\n", x))}).Execute(nil); err == nil ||
 		!strings.Contains(err.Error(), "exists at revision 1: add expectedRevision: 1") {
 		t.Errorf("an existing target: %v", err)

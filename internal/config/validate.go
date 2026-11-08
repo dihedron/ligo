@@ -40,7 +40,7 @@ var (
 )
 
 // accountRoles are the roles a group of an account may give: people's roles
-// on the account's scopes, never trusted_automation or a global one.
+// on the account's jurisdictions, never trusted_automation or a global one.
 var accountRoles = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass}
 
 // checker collects the failures of every rule, so that one run reports them
@@ -327,7 +327,7 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	}
 }
 
-// authorization checks rules 13 and 14 (bindings) and the scope patterns of
+// authorization checks rules 13 and 14 (bindings) and the jurisdiction patterns of
 // rule 16.
 func (c *checker) authorization(cfg *Config) {
 	platforms := map[string]bool{}
@@ -343,7 +343,7 @@ func (c *checker) authorization(cfg *Config) {
 			c.breakGlassBinding(b, cfg.BreakGlass.Policies)
 		}
 	}
-	c.patterns(16, "approval.required_scopes", cfg.Authorization.Approval.RequiredScopes)
+	c.patterns(16, "approval.required_jurisdictions", cfg.Authorization.Approval.RequiredJurisdictions)
 }
 
 // roleBinding checks the rules common to every authorization binding.
@@ -359,12 +359,12 @@ func (c *checker) roleBinding(i int, b RoleBinding) {
 		c.failf(16, "authorization binding %q: unknown role %q", who, b.Role)
 	}
 	switch {
-	case b.Role == RoleAccountAdmin && len(b.Scopes) > 0:
-		c.failf(16, "authorization binding %q: account_admin is global and takes no scopes", who)
-	case b.Role != RoleAccountAdmin && len(b.Scopes) == 0:
-		c.failf(16, "authorization binding %q: scopes is required", who)
+	case b.Role == RoleAccountAdmin && len(b.Jurisdictions) > 0:
+		c.failf(16, "authorization binding %q: account_admin is global and takes no jurisdictions", who)
+	case b.Role != RoleAccountAdmin && len(b.Jurisdictions) == 0:
+		c.failf(16, "authorization binding %q: jurisdictions is required", who)
 	}
-	c.patterns(16, "authorization binding "+who, b.Scopes)
+	c.patterns(16, "authorization binding "+who, b.Jurisdictions)
 	if b.Role != RoleTrustedAutomation && (len(b.Platforms) > 0 || b.ApprovalReferencePattern != "") {
 		c.failf(13, "authorization binding %q: platforms and approval_reference_pattern are only for trusted_automation", who)
 	}
@@ -392,9 +392,9 @@ func (c *checker) breakGlassBinding(b RoleBinding, policies []governance.BreakGl
 	if b.LDAPGroupDN == "" {
 		c.failf(14, "break_glass must be bound to an ldap_group_dn, never to a SPIFFE ID (%q)", who)
 	}
-	for _, s := range b.Scopes {
-		if !slices.ContainsFunc(policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Scopes, s) }) {
-			c.failf(14, "break_glass binding %q: scope pattern %q appears in no break_glass.policies entry", who, s)
+	for _, s := range b.Jurisdictions {
+		if !slices.ContainsFunc(policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Jurisdictions, s) }) {
+			c.failf(14, "break_glass binding %q: jurisdiction pattern %q appears in no break_glass.policies entry", who, s)
 		}
 	}
 }
@@ -415,7 +415,7 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 		if p.MaxOpen < 1 {
 			c.failf(14, "break_glass.policies[%d]: max_open must be at least 1", i)
 		}
-		c.patterns(16, fmt.Sprintf("break_glass.policies[%d]", i), p.Scopes)
+		c.patterns(16, fmt.Sprintf("break_glass.policies[%d]", i), p.Jurisdictions)
 	}
 	for _, w := range cfg.Notifications.Webhooks {
 		if u, err := url.Parse(w.URL); err != nil || u.Scheme != "https" || u.Host == "" {
@@ -424,7 +424,7 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 		if v, ok := opts.LookupEnv(w.HMACSecretEnv); w.HMACSecretEnv == "" || !ok || v == "" {
 			c.failf(14, "webhook %q: hmac_secret_env %q is not set", w.Name, w.HMACSecretEnv)
 		}
-		c.patterns(14, "webhook "+w.Name+" scopes", w.Scopes)
+		c.patterns(14, "webhook "+w.Name+" jurisdictions", w.Jurisdictions)
 	}
 }
 
@@ -432,19 +432,19 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 func (c *checker) governance(cfg *Config) {
 	sourceDomains := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {
-		if !governance.ValidScopePath(p.Scope) {
-			c.failf(16, "platform %q: scope %q must be a valid scope path", p.Name, p.Scope)
+		if !governance.ValidJurisdictionPath(p.Jurisdiction) {
+			c.failf(16, "platform %q: jurisdiction %q must be a valid jurisdiction path", p.Name, p.Jurisdiction)
 		}
-		c.patterns(16, platformPrefix+p.Name+" target_scopes", p.TargetScopes)
+		c.patterns(16, platformPrefix+p.Name+" target_jurisdictions", p.TargetJurisdictions)
 		for _, td := range p.AllowedSourceTrustDomains {
 			sourceDomains[td] = true
 		}
 	}
-	c.sourceScopes(cfg.Governance.SourceScopes, sourceDomains)
+	c.sourceJurisdictions(cfg.Governance.SourceJurisdictions, sourceDomains)
 	c.namePrefixes(cfg.Governance.NamePrefixes)
 	ic := cfg.Governance.Interconnects
-	if ic.DefaultCrossScope != "allow" && ic.DefaultCrossScope != "deny" {
-		c.failf(16, "interconnects.default_cross_scope must be allow or deny")
+	if ic.DefaultCrossJurisdiction != "allow" && ic.DefaultCrossJurisdiction != "deny" {
+		c.failf(16, "interconnects.default_cross_jurisdiction must be allow or deny")
 	}
 	names := map[string]bool{}
 	for _, r := range ic.Rules {
@@ -486,15 +486,15 @@ func (c *checker) accounts(cfg *Config) {
 			c.failf(16, "governance.accounts.ldap_groups.roles[%d]: role %q must be one of %v", i, r.Role, accountRoles)
 		}
 	}
-	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredScopes, func(p string) bool { return governance.ScopeMatches(p, a.SampleScope()) }) {
-		c.failf(16, "governance.accounts: approval.required_scopes must cover every account of %q", a.Scope)
+	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredJurisdictions, func(p string) bool { return governance.JurisdictionMatches(p, a.SampleJurisdiction()) }) {
+		c.failf(16, "governance.accounts: approval.required_jurisdictions must cover every account of %q", a.Jurisdiction)
 	}
 }
 
 // namePrefixes checks the patterns and resource kinds of name_prefixes.
 func (c *checker) namePrefixes(prefixes []governance.NamePrefix) {
 	for i, p := range prefixes {
-		c.patterns(16, fmt.Sprintf("governance.name_prefixes[%d]", i), p.Scopes)
+		c.patterns(16, fmt.Sprintf("governance.name_prefixes[%d]", i), p.Jurisdictions)
 		for _, k := range p.Resources {
 			if !slices.Contains(knownKinds, k) {
 				c.failf(16, "governance.name_prefixes[%d]: unknown resource %q", i, k)
@@ -503,25 +503,25 @@ func (c *checker) namePrefixes(prefixes []governance.NamePrefix) {
 	}
 }
 
-// sourceScopes checks that source_scopes has exactly one valid entry for
+// sourceJurisdictions checks that source_jurisdictions has exactly one valid entry for
 // each trust domain that platforms accept.
-func (c *checker) sourceScopes(entries []governance.SourceScope, sourceDomains map[string]bool) {
+func (c *checker) sourceJurisdictions(entries []governance.SourceJurisdiction, sourceDomains map[string]bool) {
 	seen := map[string]bool{}
 	for _, s := range entries {
 		if seen[s.TrustDomain] {
-			c.failf(16, "governance.source_scopes: trust domain %q has more than one entry", s.TrustDomain)
+			c.failf(16, "governance.source_jurisdictions: trust domain %q has more than one entry", s.TrustDomain)
 		}
 		seen[s.TrustDomain] = true
 		if !sourceDomains[s.TrustDomain] {
-			c.failf(16, "governance.source_scopes: trust domain %q is not accepted by any platform", s.TrustDomain)
+			c.failf(16, "governance.source_jurisdictions: trust domain %q is not accepted by any platform", s.TrustDomain)
 		}
 		if _, err := s.Extractor(); err != nil {
-			c.failf(16, "governance.source_scopes[%s]: %v", s.TrustDomain, err)
+			c.failf(16, "governance.source_jurisdictions[%s]: %v", s.TrustDomain, err)
 		}
 	}
 	for td := range sourceDomains {
 		if !seen[td] {
-			c.failf(16, "governance.source_scopes: no entry for trust domain %q", td)
+			c.failf(16, "governance.source_jurisdictions: no entry for trust domain %q", td)
 		}
 	}
 }
@@ -538,8 +538,8 @@ func (c *checker) interconnectRule(r governance.InterconnectRule) {
 	}
 	parties := map[string]bool{}
 	for _, a := range r.AdditionalApprovals {
-		if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !governance.ValidScopePath(a.Scope) {
-			c.failf(16, "interconnect rule %q: additional approval %q needs a unique name matching %s and a valid scope path", r.Name, a.Name, partyNameRE)
+		if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !governance.ValidJurisdictionPath(a.Jurisdiction) {
+			c.failf(16, "interconnect rule %q: additional approval %q needs a unique name matching %s and a valid jurisdiction path", r.Name, a.Name, partyNameRE)
 		}
 		parties[a.Name] = true
 	}
@@ -594,11 +594,11 @@ func (c *checker) declaredFlows(what string, declared []flows.Flow, config *yaml
 	}
 }
 
-// patterns checks that each entry is a valid scope pattern.
+// patterns checks that each entry is a valid jurisdiction pattern.
 func (c *checker) patterns(rule int, where string, patterns []string) {
 	for _, p := range patterns {
-		if !governance.ValidScopePattern(p) {
-			c.failf(rule, "%s: %q is not a valid scope pattern", where, p)
+		if !governance.ValidJurisdictionPattern(p) {
+			c.failf(rule, "%s: %q is not a valid jurisdiction pattern", where, p)
 		}
 	}
 }

@@ -33,7 +33,7 @@ type View struct {
 type ViewMetadata struct {
 	ID                     uuid.UUID  `json:"id"`
 	Name                   string     `json:"name"`
-	Scope                  string     `json:"scope"`
+	Jurisdiction           string     `json:"jurisdiction"`
 	State                  string     `json:"state"`
 	Revision               int64      `json:"revision"`
 	CreatedAt              time.Time  `json:"createdAt"`
@@ -51,7 +51,7 @@ func scanView(row pgx.Row) (*View, *stored, error) {
 	m := &v.Metadata
 	st := &stored{}
 	st.Kind = "Source"
-	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Scope, &st.Metadata.State, &st.Identity.TrustDomain,
+	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
 		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
 		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy,
 		&m.PendingChangeRequestID)
@@ -59,12 +59,12 @@ func scanView(row pgx.Row) (*View, *stored, error) {
 		st.Visibility.VisibleTo = nil
 	}
 	v.Source = st.Source
-	m.ID, m.Name, m.Scope, m.State, m.Revision = st.ID, st.Metadata.Name, st.Metadata.Scope, st.Metadata.State, st.Revision
+	m.ID, m.Name, m.Jurisdiction, m.State, m.Revision = st.ID, st.Metadata.Name, st.Metadata.Jurisdiction, st.Metadata.State, st.Revision
 	return v, st, err
 }
 
 func visible(c changerequests.Caller, st *stored) bool {
-	return c.Grants.Visible([]string{st.Metadata.Scope}, st.Visibility.Mode, st.Visibility.VisibleTo)
+	return c.Grants.Visible([]string{st.Metadata.Jurisdiction}, st.Visibility.Mode, st.Visibility.VisibleTo)
 }
 
 // Get returns the non-retired source called name, if the caller sees it
@@ -82,12 +82,12 @@ func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string)
 
 // countBindings sets the number of the source's bindings the caller sees.
 func (s *Service) countBindings(ctx context.Context, c changerequests.Caller, v *View) error {
-	rows, err := s.DB.Query(ctx, "SELECT ARRAY[source_scope, target_scope, platform_scope] FROM bindings WHERE source_id = $1", v.Metadata.ID)
+	rows, err := s.DB.Query(ctx, "SELECT ARRAY[source_jurisdiction, target_jurisdiction, platform_jurisdiction] FROM bindings WHERE source_id = $1", v.Metadata.ID)
 	if err != nil {
 		return err
 	}
-	scopes, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
-	for _, sc := range scopes {
+	jurisdictions, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
+	for _, sc := range jurisdictions {
 		if c.Grants.Sees(sc...) {
 			v.Status.Bindings++
 		}
@@ -97,13 +97,13 @@ func (s *Service) countBindings(ctx context.Context, c changerequests.Caller, v 
 
 // Filter selects sources (GET /v1/admin/sources).
 type Filter struct {
-	Scope       string // a scope pattern
-	TrustDomain string
-	State       string // default: every state but RETIRED
-	Label       string // key=value
-	Q           string // in the name or the display name
-	After       string
-	Limit       int
+	Jurisdiction string // a jurisdiction pattern
+	TrustDomain  string
+	State        string // default: every state but RETIRED
+	Label        string // key=value
+	Q            string // in the name or the display name
+	After        string
+	Limit        int
 }
 
 // List returns the sources the caller sees that f selects, by name, at
@@ -130,7 +130,7 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 			}
 			read++
 			after = st.Metadata.Name
-			if visible(c, st) && (f.Scope == "" || governance.ScopeMatches(f.Scope, st.Metadata.Scope)) {
+			if visible(c, st) && (f.Jurisdiction == "" || governance.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction)) {
 				batch = append(batch, v)
 			}
 		}
@@ -162,12 +162,12 @@ type TestRequest struct {
 
 // TestResult is what the regex tester finds; nothing is stored.
 type TestResult struct {
-	Valid     bool            `json:"valid"`
-	Error     string          `json:"error,omitempty"`
-	Scope     string          `json:"scope,omitempty"`
-	Matches   map[string]bool `json:"matches"`
-	Narrowing *TestNarrowing  `json:"narrowing,omitempty"`
-	Overlaps  []TestOverlap   `json:"overlaps"`
+	Valid        bool            `json:"valid"`
+	Error        string          `json:"error,omitempty"`
+	Jurisdiction string          `json:"jurisdiction,omitempty"`
+	Matches      map[string]bool `json:"matches"`
+	Narrowing    *TestNarrowing  `json:"narrowing,omitempty"`
+	Overlaps     []TestOverlap   `json:"overlaps"`
 }
 
 type TestNarrowing struct {
@@ -183,9 +183,9 @@ type TestOverlap struct {
 	Undecided bool   `json:"undecided,omitempty"`
 }
 
-// Test runs the regex tester (§7.2.3): Appendix A, the scope, which IDs
+// Test runs the regex tester (§7.2.3): Appendix A, the jurisdiction, which IDs
 // match, the narrowing of a current source, and the overlaps with the
-// other sources of the scope the caller sees (T-34).
+// other sources of the jurisdiction the caller sees (T-34).
 func (s *Service) Test(ctx context.Context, c changerequests.Caller, req TestRequest) (*TestResult, error) {
 	res := &TestResult{Matches: map[string]bool{}, Overlaps: []TestOverlap{}}
 	extractor, ok := s.Rules.Extractors[req.TrustDomain]
@@ -199,8 +199,8 @@ func (s *Service) Test(ctx context.Context, c changerequests.Caller, req TestReq
 		res.Error = err.Error()
 		return res, nil
 	}
-	if res.Scope, err = extractor.SourceScope(req.SVIDRegex, req.TrustDomain); err != nil {
-		res.Error = "the fixed beginning of the regex resolves to no scope (§3.9)"
+	if res.Jurisdiction, err = extractor.SourceJurisdiction(req.SVIDRegex, req.TrustDomain); err != nil {
+		res.Error = "the fixed beginning of the regex resolves to no jurisdiction (§3.9)"
 		return res, nil
 	}
 	res.Valid = true
@@ -222,8 +222,8 @@ func (s *Service) Test(ctx context.Context, c changerequests.Caller, req TestReq
 			}
 		}
 	}
-	rows, err := s.DB.Query(ctx, "SELECT "+columns+" FROM sources WHERE scope = $1 AND state <> 'RETIRED' AND name <> $2 ORDER BY name",
-		res.Scope, req.CurrentSource)
+	rows, err := s.DB.Query(ctx, "SELECT "+columns+" FROM sources WHERE jurisdiction = $1 AND state <> 'RETIRED' AND name <> $2 ORDER BY name",
+		res.Jurisdiction, req.CurrentSource)
 	if err != nil {
 		return nil, err
 	}

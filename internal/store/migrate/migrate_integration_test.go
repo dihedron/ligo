@@ -67,7 +67,7 @@ func TestSchema(t *testing.T) {
 				"system_settings", "notification_outbox"},
 			"view":    {"v_active_bindings", "v_active_binding_flows"},
 			"trigger": {"trg_sources_immutable", "trg_targets_immutable", "trg_bindings_immutable", "trg_change_requests_check", "trg_change_request_sides_check", "trg_audit_no_update"},
-			"type":    {"binding_phase", "approval_basis", "change_request_status", "scope_path", "resource_name"},
+			"type":    {"binding_phase", "approval_basis", "change_request_status", "jurisdiction_path", "resource_name"},
 		}[kind] {
 			var n int
 			if err := conn.QueryRow(ctx, query, name).Scan(&n); err != nil || n != 1 {

@@ -26,7 +26,7 @@ One line each way over TLS. The client sends a line of text; the server answers 
 - two server instances on `ligo1` as the user `echo`: `echo-svid.service` (data `:7101`, control `:7102`) and `echo-local.service` (data `:7201`, control `:7202`), and the SPIRE entries of the server (`unix:uid` of `echo`) and of `ligo-plugin-echo` (as the other plugins);
 - in ligo's configuration (`serve_config`) the platforms `echo-svid` (`svid.v1`, secret store `none.v1`) and `echo-local` (`target-local.v1`, secret store `vault-prod`, `vault-static`), both of `echo.v1`, owned by `dc/corp-prod`;
 - two attested users on `ligo1`, `echo-bound` and `echo-unbound`, whose SPIRE entries (children of the node alias, `unix:uid`) give them `spiffe://prod.lab/ns/echo/sa/bound` and `spiffe://prod.lab/ns/echo/sa/unbound`;
-- the targets `echo-svid-target` and `echo-local-target` (scope `dc/corp-prod/echo`, one access level `echo`), published and approved by `install` through the CLI as `ligo-ops` and `ligo-approver`;
+- the targets `echo-svid-target` and `echo-local-target` (jurisdiction `dc/corp-prod/echo`, one access level `echo`), published and approved by `install` through the CLI as `ligo-ops` and `ligo-approver`;
 - the manifests the guide applies, in `test/lab/echo/manifests/`: the source `echo-bound-src` (`^spiffe://prod\.lab/ns/echo/sa/bound$`) and one binding of it to each target;
 - `lab.sh echo smoke` runs the guide's CLI part for both targets, scripted, and retires the source at the end, so the guide starts clean;
 - `lab.sh echo client <user> <target> [args]` runs `echo-client` on `ligo1` as that user; `lab.sh cli <user> <ligo args…>` runs the `ligo` CLI on `ligo1` as that user (`ligo-ops`, `ligo-approver`), with stdin passed through for manifests.
@@ -67,7 +67,7 @@ test/lab/lab.sh cli ligo-ops get binding echo-bound-svid                        
 
 1. Open `https://10.252.0.20:9443/ui/login` and accept the certificate warning.
 2. Sign in as `carol` (password in `test/lab/.state/passwords/ldap-carol`).
-3. **Sources → Register a source**: name `echo-bound-src`, trust domain `prod.lab`, SVID regex `^spiffe://prod\.lab/ns/echo/sa/bound$`, sample `spiffe://prod.lab/ns/echo/sa/bound`. The tester shows the scope `dc/corp-prod` and the match. Submit: the page shows the pending change request.
+3. **Sources → Register a source**: name `echo-bound-src`, trust domain `prod.lab`, SVID regex `^spiffe://prod\.lab/ns/echo/sa/bound$`, sample `spiffe://prod.lab/ns/echo/sa/bound`. The tester shows the jurisdiction `dc/corp-prod` and the match. Submit: the page shows the pending change request.
 4. As `dave` (password in `test/lab/.state/passwords/ldap-dave`; a separate browser, or a normal window beside a private one, since private windows share their cookies): **Bindings** → "Awaiting my decision" → the source's request → **Approve**. The wizard offers approved sources only, so the source is approved before the binding is requested.
 5. As `carol`: **Catalog → `echo-svid-target` → Request access**: level `echo`, source `echo-bound-src`, Review (set the name to `echo-bound-svid`: the wizard proposes `echo-bound-src-echo-svid-target`; the governance outcome lists the sides), Submit. The page shows the binding's change request, `PENDING`.
 6. As `dave`: **Bindings** → "Awaiting my decision" → the binding's request → **Approve**, with "All my sides" if the selector offers it.

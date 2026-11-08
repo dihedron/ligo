@@ -51,7 +51,7 @@ An instance selects its SVID as §5.4 says, and reads its credential with it. Th
 | `description` | `ligo:binding_id=<uuid>` (§5.8 rule 2) |
 | `userPassword` | Set only through the Password Modify extended operation (RFC 3062), so the directory hashes it |
 
-- `<principal>` is `BindingContext.derived_principal_name`. It must match `^[a-z][a-z0-9_]{0,19}$` (`INVALID_PRINCIPAL`, terminal) and is the only request value in the DN (§5.8 rule 3). No LDAP filter is built from request values: entries are read by base-scope search on the DN, with the filter `(objectClass=*)`.
+- `<principal>` is `BindingContext.derived_principal_name`. It must match `^[a-z][a-z0-9_]{0,19}$` (`INVALID_PRINCIPAL`, terminal) and is the only request value in the DN (§5.8 rule 3). No LDAP filter is built from request values: entries are read by base-jurisdiction search on the DN, with the filter `(objectClass=*)`.
 - `inetOrgPerson` has no mandatory password, so an account created by a crashed call has no password and nobody can bind to it. `simpleSecurityObject` would require sending the password in the `Add`, and a directory without a hashing overlay would store it in clear.
 - The account is ours only if one `description` value equals the tag exactly. An untagged entry is foreign.
 

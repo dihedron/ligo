@@ -147,7 +147,7 @@ func ldapSource(t *testing.T, olga, dora *admin, name, workload string) {
 func ldapTarget(t *testing.T, olga, dora *admin, name, role string) {
 	t.Helper()
 	code, filed := olga.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": name, "platform": "pg-ledger-ldap", "scope": "dc/corp-prod/ledger"},
+		"metadata":     map[string]string{"name": name, "platform": "pg-ledger-ldap", "jurisdiction": "dc/corp-prod/ledger"},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": {role}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",

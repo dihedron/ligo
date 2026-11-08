@@ -2,7 +2,7 @@
 
 ## Either side proposes; each consents
 
-A principal holding `operator` on one of the scopes a change concerns may file it. Who must then consent depends on the change:
+A principal holding `operator` on one of the jurisdictions a change concerns may file it. Who must then consent depends on the change:
 
 | Change | Consent | Sides |
 | :--------------------------- | :--- | :---------------------------- |
@@ -10,9 +10,9 @@ A principal holding `operator` on one of the scopes a change concerns may file i
 | Publish a target; change its definition or flows; add or narrow a level | All | `OWNER`, `PLATFORM`; one if equal |
 | Change a target's metadata; deprecate a level or target | All | `OWNER` |
 | Create a binding, raise its level, change its parameters | All | `TARGET`, `SOURCE` if different, `PARTY:<name>` per additional party |
-| Revoke a binding, lower its level, bring its expiry forward | Any | One side per scope the requester acts for |
+| Revoke a binding, lower its level, bring its expiry forward | Any | One side per jurisdiction the requester acts for |
 
-**All** means any one side can veto. **Any** means no other scope can veto: removing privilege is unilateral, so a resource owner can always cut off a compromised client, and a platform owner can contain without the target owner.
+**All** means any one side can veto. **Any** means no other jurisdiction can veto: removing privilege is unilateral, so a resource owner can always cut off a compromised client, and a platform owner can contain without the target owner.
 
 ![The four topologies, and who consents.](topologies.pdf){width=75%}
 
@@ -20,7 +20,7 @@ A principal holding `operator` on one of the scopes a change concerns may file i
 
 Fixed at creation:
 
-1. The requester acts for the side, and its scope does not require approval: approved automatically (`AUTO`).
+1. The requester acts for the side, and its jurisdiction does not require approval: approved automatically (`AUTO`).
 2. The requester is a `trusted_automation` principal covering the side: approved by delegation (`DELEGATED`), with a reference to an upstream approval.
 3. Otherwise a person decides (`HUMAN`). An additional party's side is always decided by its approvers.
 
@@ -28,13 +28,13 @@ Fixed at creation:
 
 ## Interconnection policy
 
-Two owners agreeing is not always enough: test should not reach production, whoever agrees. Ordered allow and deny rules on pairs of scopes decide, with a default of deny, and can name additional parties, such as Information Security. A denied pair is refused at filing. The policy's hash is stored on every change request, and a change to it is audited and announced.
+Two owners agreeing is not always enough: test should not reach production, whoever agrees. Ordered allow and deny rules on pairs of jurisdictions decide, with a default of deny, and can name additional parties, such as Information Security. A denied pair is refused at filing. The policy's hash is stored on every change request, and a change to it is audited and announced.
 
 Bindings that a new policy would deny are not changed: they are logged, audited, announced and counted, for people to decide.
 
 ## Delegated approval
 
-Automation can be trusted to decide sides in its own scopes, so that a pipeline with its own review need not ask twice. It never speaks for the other side of a cross-scope binding. It takes a SPIFFE principal, enforced in the database, because a person's account cannot be told from automation.
+Automation can be trusted to decide sides in its own jurisdictions, so that a pipeline with its own review need not ask twice. It never speaks for the other side of a cross-jurisdiction binding. It takes a SPIFFE principal, enforced in the database, because a person's account cannot be told from automation.
 
 What SPIFFE can distinguish is the execution context, not the job: two playbooks run by one `python3` under one uid are the same to SPIRE. So run privileged automation on dedicated nodes, and authorize per playbook in the automation platform. `ligo` records the reference, but cannot verify that the approval it names exists.
 
@@ -48,4 +48,4 @@ The emergency path must be faster than the workaround, or people will use the wo
 
 ## Visibility
 
-Sources and targets are `PRIVATE` by default. A binding and its requests are visible only to those holding a role on its scopes. For everyone else they do not exist: `404`, so `409` conflicts do not reveal what exists. Name prefixes per scope stop owners squatting on each other's names.
+Sources and targets are `PRIVATE` by default. A binding and its requests are visible only to those holding a role on its jurisdictions. For everyone else they do not exist: `404`, so `409` conflicts do not reveal what exists. Name prefixes per jurisdiction stop owners squatting on each other's names.

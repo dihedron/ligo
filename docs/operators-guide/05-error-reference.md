@@ -9,23 +9,23 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | Slug | Status | Means | Do |
 | :------------------------------- | :-- | :------------------------------ | :----------------------------- |
 | `unauthenticated` | 401 | No valid SVID or credential | Check the socket, the SVID, or the LDAP user |
-| `forbidden` | 403 | The role does not cover this scope, or an SVID tried what takes a person | Check `authorization.bindings` |
+| `forbidden` | 403 | The role does not cover this jurisdiction, or an SVID tried what takes a person | Check `authorization.bindings` |
 | `rate-limited` | 429 | Too many requests or logins | Wait for `Retry-After`; raise the limit if it is real traffic |
-| `not-found` | 404 | Absent, or not visible to you: the two look the same on purpose | Check the name and your scopes |
+| `not-found` | 404 | Absent, or not visible to you: the two look the same on purpose | Check the name and your jurisdictions |
 | `validation-failed` | 422 | The request is not acceptable | Its `detail` names the field |
 | `immutable-field` | 422 | A field that cannot change after creation | File a new resource |
 | `sample-not-matched` | 422 | A sample SPIFFE ID does not match the regex | Fix either |
-| `scope-unresolvable` | 422 | The regex's fixed beginning identifies no single scope | Make its beginning fixed enough |
+| `jurisdiction-unresolvable` | 422 | The regex's fixed beginning identifies no single jurisdiction | Make its beginning fixed enough |
 | `source-not-exact` | 422 | The Vault store releases to one exact SPIFFE ID, and this regex matches more | Register one source per workload |
-| `account-not-registered` | 422 | The scope belongs to an account that is not registered, or is retired | Have an `account_admin` register it, or correct the scope |
+| `account-not-registered` | 422 | The jurisdiction belongs to an account that is not registered, or is retired | Have an `account_admin` register it, or correct the jurisdiction |
 | `account-exists` | 409 | The account exists, or once did: a retired name is never reused | Choose another name |
 | `account-in-use` | 409 | The account still has sources or targets that are not retired | Retire them first; the `detail` counts them |
-| `account-scope-mismatch` | 422 | The scope is an account's, but is not in the form of `source_scope` or `target_scope` | Use the form the `detail` names |
-| `namespace-mismatch` | 422 | The target's definition holds another namespace than its scope gives | Use the value the `detail` names |
-| `namespace-scope-mismatch` | 422 | A namespaced platform holds only tenancies, and this scope is not one | Choose a scope in the form of `target_scope`, or another platform |
+| `account-jurisdiction-mismatch` | 422 | The jurisdiction is an account's, but is not in the form of `source_jurisdiction` or `target_jurisdiction` | Use the form the `detail` names |
+| `namespace-mismatch` | 422 | The target's definition holds another namespace than its jurisdiction gives | Use the value the `detail` names |
+| `namespace-jurisdiction-mismatch` | 422 | A namespaced platform holds only tenancies, and this jurisdiction is not one | Choose a jurisdiction in the form of `target_jurisdiction`, or another platform |
 | `widening-not-allowed` | 422 | A source can only narrow, and this would add workloads, or the check was undecided | Register a new source |
 | `flow-destination-not-allowed` | 422 | A flow's destination is outside the platform's `allowed_endpoints` | Fix the flow, or ask the platform team |
-| `interconnect-denied` | 403 | The interconnection policy denies this pair of scopes | Ask whoever owns `governance.interconnects` |
+| `interconnect-denied` | 403 | The interconnection policy denies this pair of jurisdictions | Ask whoever owns `governance.interconnects` |
 | `four-eyes-violation` | 403 | The requester tried to decide their own request | Ask another approver |
 | `distinct-approver-required` | 403 | You already decided another side | Ask another approver |
 | `side-required` | 400 | You could decide several sides | Name one with `--side` |

@@ -52,13 +52,13 @@ func DerivedPrincipalName(id uuid.UUID, prefix string) (string, error) {
 	return prefix + strings.ToLower(principalEncoding.EncodeToString(sum[:]))[:16], nil
 }
 
-// CheckName checks a new resource's name against §3.8. ownerScope is the
-// source's scope for a source and a binding, the target's for a target.
-func CheckName(kind Kind, name, ownerScope string, prefixes []governance.NamePrefix) error {
+// CheckName checks a new resource's name against §3.8. ownerJurisdiction is the
+// source's jurisdiction for a source and a binding, the target's for a target.
+func CheckName(kind Kind, name, ownerJurisdiction string, prefixes []governance.NamePrefix) error {
 	if !ValidName(name) {
 		return fmt.Errorf("%w: %q must match %s", ErrInvalidName, name, nameRE)
 	}
-	prefix, err := ResolvePrefix(kind, ownerScope, prefixes)
+	prefix, err := ResolvePrefix(kind, ownerJurisdiction, prefixes)
 	if err != nil {
 		return err
 	}
@@ -69,22 +69,22 @@ func CheckName(kind Kind, name, ownerScope string, prefixes []governance.NamePre
 }
 
 // ResolvePrefix returns the prefix of the first entry matching kind and
-// scope, with {n} replaced by the n-th segment of scope, or "" if none
+// jurisdiction, with {n} replaced by the n-th segment of jurisdiction, or "" if none
 // matches.
-func ResolvePrefix(kind Kind, scope string, prefixes []governance.NamePrefix) (string, error) {
+func ResolvePrefix(kind Kind, jurisdiction string, prefixes []governance.NamePrefix) (string, error) {
 	for _, p := range prefixes {
 		if len(p.Resources) > 0 && !slices.Contains(p.Resources, string(kind)) {
 			continue
 		}
-		if !slices.ContainsFunc(p.Scopes, func(pattern string) bool { return governance.ScopeMatches(pattern, scope) }) {
+		if !slices.ContainsFunc(p.Jurisdictions, func(pattern string) bool { return governance.JurisdictionMatches(pattern, jurisdiction) }) {
 			continue
 		}
-		segments := strings.Split(scope, "/")
+		segments := strings.Split(jurisdiction, "/")
 		var missing error
 		prefix := placeholderRE.ReplaceAllStringFunc(p.Prefix, func(ph string) string {
 			n, _ := strconv.Atoi(ph[1 : len(ph)-1])
 			if n < 1 || n > len(segments) {
-				missing = fmt.Errorf("%w: name prefix %q needs segment %d of scope %q", ErrInvalidName, p.Prefix, n, scope)
+				missing = fmt.Errorf("%w: name prefix %q needs segment %d of jurisdiction %q", ErrInvalidName, p.Prefix, n, jurisdiction)
 				return ""
 			}
 			return segments[n-1]

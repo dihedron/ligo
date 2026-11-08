@@ -14,7 +14,7 @@ A release's evidence comes from one command that refuses a modified tree, destro
 | `serve test` | A real service: lifecycle, the workload API, the CLI, restarts, the plugins end to end, the four topologies; then a search for the passwords in the database and journals. |
 | `serve test-ha` | Maintenance across replicas, concurrent approvals applied once, a replica killed and one frozen mid-workflow. |
 | `serve test-otel` | Traces reach a collector across replicas, with no secrets or error text. |
-| `serve test-webhook` | Signed notifications, a receiver down, and scope filters. |
+| `serve test-webhook` | Signed notifications, a receiver down, and jurisdiction filters. |
 | `serve test-faults` | The secrets backend and PostgreSQL stopped under load. |
 | Browser tests | Forms, CSP, hostile data through every page. |
 

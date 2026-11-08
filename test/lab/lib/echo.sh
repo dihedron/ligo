@@ -105,7 +105,7 @@ echo_target() {
 	fi
 	cli ligo-ops apply -f - <<YAML >/dev/null || die "apply the target $name"
 kind: Target
-metadata: {name: $name, platform: $platform, scope: dc/corp-prod/echo}
+metadata: {name: $name, platform: $platform, jurisdiction: dc/corp-prod/echo}
 displayName: "Echo server that $what"
 description: "The lab's echo target (.specs/ligo-echo-target.md): it echoes a line with the client's identity."
 definition: {}

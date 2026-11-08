@@ -17,10 +17,10 @@ const (
 	ledger   = "dc/corp-prod/ledger"   // requires approval
 )
 
-var policy = &governance.Policy{RequiredScopes: []string{"dc/corp-prod/*"}}
+var policy = &governance.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*"}}
 
-func grant(role string, scopes ...string) authz.Grant {
-	return authz.Grant{Role: role, Scopes: scopes}
+func grant(role string, jurisdictions ...string) authz.Grant {
+	return authz.Grant{Role: role, Jurisdictions: jurisdictions}
 }
 
 func status(err error) string {
@@ -35,10 +35,10 @@ func status(err error) string {
 }
 
 // TestBuildSidesParty: a party's approvers always decide its side, even when
-// the requester acts for its scope and that scope requires no approval, which
+// the requester acts for its jurisdiction and that jurisdiction requires no approval, which
 // the database refuses as AUTO (ADR-13 rule 6).
 func TestBuildSidesParty(t *testing.T) {
-	sides, err := BuildSides([]Candidate{{Side: "PARTY:security", Scope: "sec/infosec"}},
+	sides, err := BuildSides([]Candidate{{Side: "PARTY:security", Jurisdiction: "sec/infosec"}},
 		Caller{Principal: authz.Principal{Name: "alice"}, Grants: authz.Grants{grant(config.RoleFullAccess, "*")}}, policy, "")
 	if err != nil || sides[0].Basis != BasisHuman || !sides[0].ApprovalRequired || sides[0].Decision != "" {
 		t.Errorf("%+v, %v", sides, err)
@@ -55,12 +55,12 @@ func TestBuildSides(t *testing.T) {
 	pinned := grant(config.RoleTrustedAutomation, "dc/corp-prod/*")
 	pinned.Platforms = []string{"oracle-prod"}
 	for name, tc := range map[string]struct {
-		caller authz.Principal
-		grants authz.Grants
-		scope  string
-		ref    string
-		basis  string
-		err    string
+		caller       authz.Principal
+		grants       authz.Grants
+		jurisdiction string
+		ref          string
+		basis        string
+		err          string
 	}{
 		"operator, self-service":       {alice, authz.Grants{grant(config.RoleOperator, "cloud/*")}, payments, "", BasisAuto, ""},
 		"operator, approval required":  {alice, authz.Grants{grant(config.RoleOperator, "dc/*")}, ledger, "", BasisHuman, ""},
@@ -72,7 +72,7 @@ func TestBuildSides(t *testing.T) {
 		"delegation needs a SPIFFE ID": {alice, authz.Grants{automation}, ledger, "CHG0012345", BasisHuman, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			sides, err := BuildSides([]Candidate{{Side: "OWNER", Scope: tc.scope, Platform: "pg-prod"}},
+			sides, err := BuildSides([]Candidate{{Side: "OWNER", Jurisdiction: tc.jurisdiction, Platform: "pg-prod"}},
 				Caller{Principal: tc.caller, Grants: tc.grants}, policy, tc.ref)
 			if status(err) != tc.err {
 				t.Fatalf("err = %v, want %q", err, tc.err)
@@ -122,9 +122,9 @@ func TestConsent(t *testing.T) {
 // TestSelectSides: the sides a caller decides (§7.2.3 "Deciding sides").
 func TestSelectSides(t *testing.T) {
 	r := &Request{RequestedBy: "alice", DistinctApprovers: true, Sides: []Side{
-		{Name: "SOURCE", Scope: payments, Basis: BasisHuman, ApprovalRequired: true},
-		{Name: "TARGET", Scope: ledger, Basis: BasisHuman, ApprovalRequired: true},
-		{Name: "PARTY:security", Scope: "sec/infosec", Basis: BasisHuman, ApprovalRequired: true},
+		{Name: "SOURCE", Jurisdiction: payments, Basis: BasisHuman, ApprovalRequired: true},
+		{Name: "TARGET", Jurisdiction: ledger, Basis: BasisHuman, ApprovalRequired: true},
+		{Name: "PARTY:security", Jurisdiction: "sec/infosec", Basis: BasisHuman, ApprovalRequired: true},
 	}}
 	marco := Caller{Principal: authz.Principal{Name: "marco"}, Grants: authz.Grants{grant(config.RoleApprover, "cloud/*", "dc/*")}}
 	olga := Caller{Principal: authz.Principal{Name: "olga"}, Grants: authz.Grants{grant(config.RoleOperator, "*")}}
@@ -215,14 +215,14 @@ func TestDecode(t *testing.T) {
 }
 
 // TestBreakGlassSides: a side that needs a decision becomes BREAK_GLASS and
-// needs the role on its scope; people only; at least one such side
+// needs the role on its jurisdiction; people only; at least one such side
 // (§7.2.3 "Sides at creation", ADR-12 rule 1).
 func TestBreakGlassSides(t *testing.T) {
 	livia := authz.Principal{Name: "livia"}
 	robot := authz.Principal{SPIFFEID: "spiffe://prod.internal/ci/robot"}
 	bg := grant(config.RoleBreakGlass, "dc/corp-prod/*")
 	op := grant(config.RoleOperator, "cloud/*")
-	both := []Candidate{{Side: "TARGET", Scope: ledger}, {Side: "SOURCE", Scope: payments}}
+	both := []Candidate{{Side: "TARGET", Jurisdiction: ledger}, {Side: "SOURCE", Jurisdiction: payments}}
 	for name, tc := range map[string]struct {
 		caller     authz.Principal
 		grants     authz.Grants
@@ -261,8 +261,8 @@ func TestBreakGlassNeedsADecision(t *testing.T) {
 	s := &Service{Policy: policy, Resources: map[string]Resource{"SOURCE": nil, "BINDING": nil}}
 	c := Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/*")}}
 	err := s.BreakGlass(context.Background(), c, "INC0012345",
-		Filing{&Request{ResourceType: "SOURCE"}, []Candidate{{Side: "OWNER", Scope: payments}}},
-		Filing{&Request{ResourceType: "BINDING"}, []Candidate{{Side: "TARGET", Scope: payments}}})
+		Filing{&Request{ResourceType: "SOURCE"}, []Candidate{{Side: "OWNER", Jurisdiction: payments}}},
+		Filing{&Request{ResourceType: "BINDING"}, []Candidate{{Side: "TARGET", Jurisdiction: payments}}})
 	if status(err) != "validation-failed" {
 		t.Errorf("err = %v", err)
 	}
@@ -272,9 +272,9 @@ func TestBreakGlassNeedsADecision(t *testing.T) {
 // requester, one side per person when distinct approvers are required.
 func TestRatifiableSides(t *testing.T) {
 	r := &Request{RequestedBy: "livia", DistinctApprovers: true, Sides: []Side{
-		{Name: "SOURCE", Scope: payments, Basis: BasisAuto},
-		{Name: "TARGET", Scope: ledger, Basis: BasisBreakGlass},
-		{Name: "PARTY:security", Scope: "sec/infosec", Basis: BasisBreakGlass},
+		{Name: "SOURCE", Jurisdiction: payments, Basis: BasisAuto},
+		{Name: "TARGET", Jurisdiction: ledger, Basis: BasisBreakGlass},
+		{Name: "PARTY:security", Jurisdiction: "sec/infosec", Basis: BasisBreakGlass},
 	}}
 	marco := Caller{Principal: authz.Principal{Name: "marco"}, Grants: authz.Grants{grant(config.RoleApprover, "dc/*", "sec/*")}}
 	livia := Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{grant(config.RoleApprover, "*")}}
@@ -325,25 +325,25 @@ func TestDiff(t *testing.T) {
 }
 
 // TestPlatformApprover: TN-11, TN-13 and TN-14 (.specs/ligo-tenancy.md §9.3): an
-// approver of a binding's platform scope qualifies for its TARGET side, and for
+// approver of a binding's platform jurisdiction qualifies for its TARGET side, and for
 // nothing else.
 func TestPlatformApprover(t *testing.T) {
 	const platform = "dc/corp-prod"
 	target := "cloud/globex/data/db01"
 	request := func(change func(*Request)) *Request {
-		r := &Request{ResourceType: "BINDING", Operation: "CREATE", PlatformScope: platform, RequestedBy: "alice", DistinctApprovers: true, Sides: []Side{
-			{Name: "SOURCE", Scope: "cloud/acme/app/app01", Basis: BasisHuman, ApprovalRequired: true},
-			{Name: "TARGET", Scope: target, Basis: BasisHuman, ApprovalRequired: true},
-			{Name: "PLATFORM", Scope: platform, Basis: BasisHuman, ApprovalRequired: true},
-			{Name: "PARTY:security", Scope: platform, Basis: BasisHuman, ApprovalRequired: true},
+		r := &Request{ResourceType: "BINDING", Operation: "CREATE", PlatformJurisdiction: platform, RequestedBy: "alice", DistinctApprovers: true, Sides: []Side{
+			{Name: "SOURCE", Jurisdiction: "cloud/acme/app/app01", Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "TARGET", Jurisdiction: target, Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "PLATFORM", Jurisdiction: platform, Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "PARTY:security", Jurisdiction: platform, Basis: BasisHuman, ApprovalRequired: true},
 		}}
 		if change != nil {
 			change(r)
 		}
 		return r
 	}
-	approver := func(name string, scopes ...string) Caller {
-		return Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{grant(config.RoleApprover, scopes...)}}
+	approver := func(name string, jurisdictions ...string) Caller {
+		return Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{grant(config.RoleApprover, jurisdictions...)}}
 	}
 	dora, acme := approver("dora", platform), approver("ada", "cloud/acme/*")
 	for name, tc := range map[string]struct {
@@ -353,13 +353,13 @@ func TestPlatformApprover(t *testing.T) {
 		want   []string
 		err    string
 	}{
-		"TARGET":                 {request(nil), dora, "TARGET", []string{"TARGET"}, ""},
-		"TN-13: SOURCE":          {request(nil), dora, "SOURCE", nil, "forbidden"},
-		"TN-14: the filer":       {request(func(r *Request) { r.RequestedBy = "dora" }), dora, "TARGET", nil, "four-eyes-violation"},
-		"TN-11: another account": {request(nil), acme, "TARGET", nil, "forbidden"},
-		"a delete":               {request(func(r *Request) { r.Operation = "DELETE" }), dora, "TARGET", nil, "forbidden"},
-		"not a binding":          {request(func(r *Request) { r.ResourceType = "TARGET" }), dora, "TARGET", nil, "forbidden"},
-		"no platform scope":      {request(func(r *Request) { r.PlatformScope = "" }), dora, "TARGET", nil, "forbidden"},
+		"TARGET":                   {request(nil), dora, "TARGET", []string{"TARGET"}, ""},
+		"TN-13: SOURCE":            {request(nil), dora, "SOURCE", nil, "forbidden"},
+		"TN-14: the filer":         {request(func(r *Request) { r.RequestedBy = "dora" }), dora, "TARGET", nil, "four-eyes-violation"},
+		"TN-11: another account":   {request(nil), acme, "TARGET", nil, "forbidden"},
+		"a delete":                 {request(func(r *Request) { r.Operation = "DELETE" }), dora, "TARGET", nil, "forbidden"},
+		"not a binding":            {request(func(r *Request) { r.ResourceType = "TARGET" }), dora, "TARGET", nil, "forbidden"},
+		"no platform jurisdiction": {request(func(r *Request) { r.PlatformJurisdiction = "" }), dora, "TARGET", nil, "forbidden"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := SelectSides(tc.r, tc.caller, policy, true, tc.side)
@@ -374,7 +374,7 @@ func TestPlatformApprover(t *testing.T) {
 	}
 	both := approver("bea", platform, "cloud/globex/*")
 	if both.ByPlatform(r, r.Sides[1]) || !both.Decides(r, r.Sides[1]) {
-		t.Error("an approver of the target's own scope decides as that, not as the platform")
+		t.Error("an approver of the target's own jurisdiction decides as that, not as the platform")
 	}
 	// a break-glass TARGET side is ratified, whatever the operation; SOURCE never
 	bg := request(func(r *Request) {

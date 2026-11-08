@@ -200,13 +200,13 @@ const (
 	RoleAccountAdmin      = "account_admin"
 )
 
-// RoleBinding grants a role on scope patterns to an LDAP group or a SPIFFE
+// RoleBinding grants a role on jurisdiction patterns to an LDAP group or a SPIFFE
 // ID.
 type RoleBinding struct {
 	LDAPGroupDN              string        `yaml:"ldap_group_dn"`
 	SPIFFEID                 string        `yaml:"spiffe_id"`
 	Role                     string        `yaml:"role"`
-	Scopes                   []string      `yaml:"scopes"`
+	Jurisdictions            []string      `yaml:"jurisdictions"`
 	Platforms                []string      `yaml:"platforms"`
 	ApprovalReferencePattern string        `yaml:"approval_reference_pattern"`
 	RateLimit                *APIRateLimit `yaml:"rate_limit"`
@@ -218,16 +218,16 @@ type APIRateLimit struct {
 }
 
 type Approval struct {
-	RequiredScopes                       []string      `yaml:"required_scopes"`
-	RequireDistinctApproversAcrossScopes *bool         `yaml:"require_distinct_approvers_across_scopes"`
-	ChangeRequestTTL                     time.Duration `yaml:"change_request_ttl"`
+	RequiredJurisdictions                       []string      `yaml:"required_jurisdictions"`
+	RequireDistinctApproversAcrossJurisdictions *bool         `yaml:"require_distinct_approvers_across_jurisdictions"`
+	ChangeRequestTTL                            time.Duration `yaml:"change_request_ttl"`
 }
 
 type Governance struct {
-	SourceScopes  []governance.SourceScope `yaml:"source_scopes"`
-	NamePrefixes  []governance.NamePrefix  `yaml:"name_prefixes"`
-	Interconnects governance.Interconnects `yaml:"interconnects"`
-	Accounts      *governance.Accounts     `yaml:"accounts"`
+	SourceJurisdictions []governance.SourceJurisdiction `yaml:"source_jurisdictions"`
+	NamePrefixes        []governance.NamePrefix         `yaml:"name_prefixes"`
+	Interconnects       governance.Interconnects        `yaml:"interconnects"`
+	Accounts            *governance.Accounts            `yaml:"accounts"`
 }
 
 type BindingsPolicy struct {
@@ -316,7 +316,7 @@ type Webhook struct {
 	CACertFile    string        `yaml:"ca_cert_file"`
 	HMACSecretEnv string        `yaml:"hmac_secret_env"`
 	Timeout       time.Duration `yaml:"timeout"`
-	Scopes        []string      `yaml:"scopes"`
+	Jurisdictions []string      `yaml:"jurisdictions"`
 	Events        []string      `yaml:"events"`
 }
 
@@ -359,8 +359,8 @@ type PlatformProvider struct {
 type Platform struct {
 	Name                      string        `yaml:"name"`
 	Realm                     string        `yaml:"realm"`
-	Scope                     string        `yaml:"scope"`
-	TargetScopes              []string      `yaml:"target_scopes"`
+	Jurisdiction              string        `yaml:"jurisdiction"`
+	TargetJurisdictions       []string      `yaml:"target_jurisdictions"`
 	NamespaceTemplate         string        `yaml:"namespace_template"`
 	DisplayName               string        `yaml:"display_name"`
 	Description               string        `yaml:"description"`
@@ -484,17 +484,17 @@ func (c *Config) applyDefaults() {
 	if c.Plugins.MaxConcurrentRPCsPerInstance == 0 {
 		c.Plugins.MaxConcurrentRPCsPerInstance = 4 // §5.3 rule 7
 	}
-	if c.Authorization.Approval.RequireDistinctApproversAcrossScopes == nil {
-		c.Authorization.Approval.RequireDistinctApproversAcrossScopes = new(bool)
-		*c.Authorization.Approval.RequireDistinctApproversAcrossScopes = true
+	if c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions == nil {
+		c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions = new(bool)
+		*c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions = true
 	}
-	if c.Governance.Interconnects.DefaultCrossScope == "" {
-		c.Governance.Interconnects.DefaultCrossScope = "deny"
+	if c.Governance.Interconnects.DefaultCrossJurisdiction == "" {
+		c.Governance.Interconnects.DefaultCrossJurisdiction = "deny"
 	}
 	for i := range c.PlatformProviders {
 		for j := range c.PlatformProviders[i].Platforms {
-			if p := &c.PlatformProviders[i].Platforms[j]; len(p.TargetScopes) == 0 && p.Scope != "" {
-				p.TargetScopes = []string{p.Scope + "/*"}
+			if p := &c.PlatformProviders[i].Platforms[j]; len(p.TargetJurisdictions) == 0 && p.Jurisdiction != "" {
+				p.TargetJurisdictions = []string{p.Jurisdiction + "/*"}
 			}
 		}
 	}
@@ -546,16 +546,16 @@ func (c *Config) applyDefaults() {
 // Policy returns the governance policy of the configuration (§8.2 rule 16).
 func (c *Config) Policy() *governance.Policy {
 	p := &governance.Policy{
-		RequiredScopes:           c.Authorization.Approval.RequiredScopes,
-		RequireDistinctApprovers: *c.Authorization.Approval.RequireDistinctApproversAcrossScopes,
-		SourceScopes:             c.Governance.SourceScopes,
+		RequiredJurisdictions:    c.Authorization.Approval.RequiredJurisdictions,
+		RequireDistinctApprovers: *c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions,
+		SourceJurisdictions:      c.Governance.SourceJurisdictions,
 		NamePrefixes:             c.Governance.NamePrefixes,
 		Interconnects:            c.Governance.Interconnects,
 		BreakGlassPolicies:       c.BreakGlass.Policies,
 	}
 	for _, tp := range c.PlatformProviders {
 		for _, pl := range tp.Platforms {
-			p.Platforms = append(p.Platforms, governance.PlatformScopes{Platform: pl.Name, Scope: pl.Scope, TargetScopes: pl.TargetScopes})
+			p.Platforms = append(p.Platforms, governance.PlatformJurisdictions{Platform: pl.Name, Jurisdiction: pl.Jurisdiction, TargetJurisdictions: pl.TargetJurisdictions})
 		}
 	}
 	return p

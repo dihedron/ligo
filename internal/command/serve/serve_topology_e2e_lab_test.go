@@ -26,11 +26,11 @@ func topologySource(t *testing.T, who, approver *admin, name, trustDomain, id st
 	return name
 }
 
-// topologyTarget publishes, as who, a public target on platform in scope.
-func topologyTarget(t *testing.T, who, approver *admin, name, platform, scope string) string {
+// topologyTarget publishes, as who, a public target on platform in jurisdiction.
+func topologyTarget(t *testing.T, who, approver *admin, name, platform, jurisdiction string) string {
 	t.Helper()
 	code, filed := who.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": name, "platform": platform, "scope": scope},
+		"metadata":     map[string]string{"name": name, "platform": platform, "jurisdiction": jurisdiction},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": {"LEDGER_RO_ROLE"}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
@@ -86,7 +86,7 @@ func sideNames(filed map[string]any) []string {
 
 // TestServeTopologies: the four topologies of ADR-13, each filed from one side
 // and approved by each owner, its workload served and then revoked; the workload
-// from a tenancy is in test.lab, whose scope comes from its SPIFFE path. The
+// from a tenancy is in test.lab, whose jurisdiction comes from its SPIFFE path. The
 // pair no rule allows is refused (ADR-14).
 func TestServeTopologies(t *testing.T) {
 	x := e2eEnv(t, "LIGO_E2E_SUFFIX")
@@ -95,7 +95,7 @@ func TestServeTopologies(t *testing.T) {
 
 	dc := topologySource(t, olga, dora, "topo-dc-"+x, "prod.lab", "spiffe://prod.lab/ns/topo/sa/w"+x)
 	cloud := topologySource(t, paula, pia, "topo-cloud-"+x, "test.lab", "spiffe://test.lab/acct/fin-01/tenant/payments/ns/topo/sa/w"+x)
-	if code, b := ada.do("GET", "/v1/admin/sources/"+cloud, nil); code != http.StatusOK || b["metadata"].(map[string]any)["scope"] != "cloud/fin-01/payments" {
+	if code, b := ada.do("GET", "/v1/admin/sources/"+cloud, nil); code != http.StatusOK || b["metadata"].(map[string]any)["jurisdiction"] != "cloud/fin-01/payments" {
 		t.Fatalf("the tenancy's source: %d %v", code, b)
 	}
 	ledger := topologyTarget(t, olga, dora, "topo-ledger-"+x, "pg-ledger", "dc/corp-prod/ledger")

@@ -36,7 +36,7 @@ func rules(t *testing.T) *Rules {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Platforms["cloud-pg"] = Platform{Name: "cloud-pg", Type: "postgres.v1", Realm: "prod", Scope: "cloud/fin-01/payments",
+	r.Platforms["cloud-pg"] = Platform{Name: "cloud-pg", Type: "postgres.v1", Realm: "prod", Jurisdiction: "cloud/fin-01/payments",
 		AllowedTrustDomains: []string{"cloud.internal", "prod.internal"}, IdentityProviderType: "target-local.v1",
 		IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod", SecretStorageStrategy: "vault-static"}
 	p := r.Platforms["oracle-prod"]
@@ -87,7 +87,7 @@ func (p *plugin) validate(_ context.Context, req *pluginv1.ValidateBindingReques
 
 func TestNewRules(t *testing.T) {
 	p := rules(t).Platforms["oracle-prod"]
-	if p.Type != "oracle.v1" || p.Realm != "prod" || p.Scope != "dc/corp-prod" || p.PrincipalPrefix != "svc_" ||
+	if p.Type != "oracle.v1" || p.Realm != "prod" || p.Jurisdiction != "dc/corp-prod" || p.PrincipalPrefix != "svc_" ||
 		p.IdentityProviderType != "openldap.v1" || p.IdentityProviderInstance != "ldap-prod" || p.SecretStoreType != "vault.v1" ||
 		p.SecretStoreInstance != "vault-prod" || p.SecretStorageStrategy != "vault-static" || !slices.Contains(p.AllowedTrustDomains, "cloud.internal") {
 		t.Errorf("platform %+v", p)
@@ -117,7 +117,7 @@ func TestExpiry(t *testing.T) {
 // (ADR-14 rule 5).
 func TestRecheck(t *testing.T) {
 	s := &Service{Rules: rules(t)}
-	r := &changerequests.Request{Consent: changerequests.ConsentAll, SourceScope: "cloud/fin-01/payments", TargetScope: "dc/corp-prod/ledger",
+	r := &changerequests.Request{Consent: changerequests.ConsentAll, SourceJurisdiction: "cloud/fin-01/payments", TargetJurisdiction: "dc/corp-prod/ledger",
 		Sides: []changerequests.Side{{Name: "SOURCE"}, {Name: "TARGET"}, {Name: "PARTY:security"}}}
 	policy := func(edit func(*governance.Policy)) *governance.Policy {
 		p := example(t).Policy()
@@ -135,7 +135,7 @@ func TestRecheck(t *testing.T) {
 		"unchanged":     {policy(func(*governance.Policy) {}), ""},
 		"party dropped": {policy(func(p *governance.Policy) { rule(p).AdditionalApprovals = nil }), ""},
 		"party added": {policy(func(p *governance.Policy) {
-			rule(p).AdditionalApprovals = append(rule(p).AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Scope: "sec/privacy"})
+			rule(p).AdditionalApprovals = append(rule(p).AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
 		}), "governance-policy-changed"},
 		"now denied": {policy(func(p *governance.Policy) { rule(p).Action = "deny" }), "governance-policy-changed"},
 	} {

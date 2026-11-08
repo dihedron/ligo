@@ -40,7 +40,7 @@ func enqueue(t *testing.T, o *pgxpool.Pool, name, regex string, priority int) uu
 func source(t *testing.T, o *pgxpool.Pool, w *world, n string) string {
 	t.Helper()
 	name := "dc-src-" + n + "-" + w.suffix
-	if _, err := o.Exec(context.Background(), `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := o.Exec(context.Background(), `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), name,
 		`^spiffe://prod\.internal/ns/payments/sa/`+n+`-`+w.suffix+`$`); err != nil {
 		t.Fatal(err)

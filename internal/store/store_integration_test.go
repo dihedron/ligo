@@ -284,18 +284,18 @@ func insertRequest(t *testing.T, o *pgxpool.Pool, sides ...string) uuid.UUID {
 	ctx := context.Background()
 	id := uuid.NewV7()
 	name := "test-" + id.String()[24:]
-	scopes := map[string]string{"SOURCE": "cloud/fin-01/payments", "TARGET": "dc/corp-prod/ledger"}
+	jurisdictions := map[string]string{"SOURCE": "cloud/fin-01/payments", "TARGET": "dc/corp-prod/ledger"}
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm,
-			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision, payload,
+			source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, expected_revision, payload,
 			payload_sha256, requested_by, expires_at)
 			values ($1, 'BINDING', $2, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger',
 			'dc/corp-prod', repeat('a', 64), true, 1, '{}', $3, 'alice', now() + interval '1 day')`, id, name, payloadSHA); err != nil {
 			return err
 		}
 		for _, s := range sides {
-			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
-				values ($1, $2, $3, true, 'HUMAN', 'alice', 'STANDARD')`, id, s, scopes[s]); err != nil {
+			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+				values ($1, $2, $3, true, 'HUMAN', 'alice', 'STANDARD')`, id, s, jurisdictions[s]); err != nil {
 				return err
 			}
 		}
@@ -323,14 +323,14 @@ func insertBinding(t *testing.T, o *pgxpool.Pool) (uuid.UUID, string) {
 			sql  string
 			args []any
 		}{
-			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+			{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
 				values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, []any{source, "s-" + suffix, regex}},
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + suffix}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+				source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
 				'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal', $6, '{}', 't', 't')`,

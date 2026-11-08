@@ -27,7 +27,7 @@
 ## What to decide first
 
 - **Realms and trust domains.** A realm is one trust domain with one SPIRE agent socket on the `ligo` host. Decide which domains are realms of their own, and which `ligo` only verifies through federation. A single realm is the simplest start.
-- **Governance scopes.** A scope is who decides: `dc/corp-prod`, `cloud/fin-01/payments`. Every source, target and platform has one owner scope. Decide how a trust domain's SPIFFE paths map to scopes: one fixed scope for a data centre, or a template over the path for tenancies.
-- **Accounts.** To host many tenants on shared platforms, decide the shape of their scopes and of their directory groups once, for all of them. See "Accounts" in the chapter on configuring `ligo`. Without `governance.accounts`, `ligo` has no accounts.
-- **Who approves.** Which scopes require an approver, and which LDAP groups or SPIFFE IDs hold the roles.
+- **Jurisdictions.** A jurisdiction is who decides: `dc/corp-prod`, `cloud/fin-01/payments`. Every source, target and platform has one owner jurisdiction. Decide how a trust domain's SPIFFE paths map to jurisdictions: one fixed jurisdiction for a data centre, or a template over the path for tenancies.
+- **Accounts.** To host many tenants on shared platforms, decide the shape of their jurisdictions and of their directory groups once, for all of them. See "Accounts" in the chapter on configuring `ligo`. Without `governance.accounts`, `ligo` has no accounts.
+- **Who approves.** Which jurisdictions require an approver, and which LDAP groups or SPIFFE IDs hold the roles.
 - **How many replicas.** Replicas share one database. Each needs a stable ID of its own.

@@ -63,17 +63,17 @@ func TestValidName(t *testing.T) {
 }
 
 var prefixes = []governance.NamePrefix{
-	{Scopes: []string{"cloud/*"}, Prefix: "{2}-{3}-"},
-	{Scopes: []string{"dc/corp-prod/*"}, Prefix: "prod-", Resources: []string{string(KindTarget)}},
+	{Jurisdictions: []string{"cloud/*"}, Prefix: "{2}-{3}-"},
+	{Jurisdictions: []string{"dc/corp-prod/*"}, Prefix: "prod-", Resources: []string{string(KindTarget)}},
 }
 
 // TestAC56 is acceptance scenario AC-56.
 func TestAC56(t *testing.T) {
 	for _, v := range []struct {
-		kind  Kind
-		name  string
-		scope string
-		ok    bool
+		kind         Kind
+		name         string
+		jurisdiction string
+		ok           bool
 	}{
 		{KindSource, "orders-workers", "cloud/fin-01/payments", false},
 		{KindSource, "fin-01-hr-orders", "cloud/fin-01/payments", false},
@@ -81,37 +81,37 @@ func TestAC56(t *testing.T) {
 		{KindBinding, "orders-db", "cloud/fin-01/payments", false},
 		{KindBinding, "fin-01-payments-orders-db", "cloud/fin-01/payments", true},
 	} {
-		checkName(t, v.kind, v.name, v.scope, v.ok)
+		checkName(t, v.kind, v.name, v.jurisdiction, v.ok)
 	}
 }
 
 func TestNamePrefixes(t *testing.T) {
 	for _, v := range []struct {
-		kind  Kind
-		name  string
-		scope string
-		ok    bool
+		kind         Kind
+		name         string
+		jurisdiction string
+		ok           bool
 	}{
 		{KindTarget, "prod-ledger", "dc/corp-prod/ledger", true},
 		{KindTarget, "ledger", "dc/corp-prod/ledger", false},
 		{KindTarget, "prod-", "dc/corp-prod/ledger", false}, // must be longer than the prefix
 		{KindSource, "ledger", "dc/corp-prod/ledger", true}, // the entry is for targets only
 		{KindSource, "anything", "k8s/team", true},          // no entry matches
-		{KindSource, "x-y", "cloud/fin-01", false},          // {3} beyond the scope's segments
+		{KindSource, "x-y", "cloud/fin-01", false},          // {3} beyond the jurisdiction's segments
 		{KindSource, "Bad", "k8s/team", false},
 	} {
-		checkName(t, v.kind, v.name, v.scope, v.ok)
+		checkName(t, v.kind, v.name, v.jurisdiction, v.ok)
 	}
 }
 
-func checkName(t *testing.T, kind Kind, name, scope string, ok bool) {
+func checkName(t *testing.T, kind Kind, name, jurisdiction string, ok bool) {
 	t.Helper()
-	err := CheckName(kind, name, scope, prefixes)
+	err := CheckName(kind, name, jurisdiction, prefixes)
 	if ok && err != nil {
-		t.Errorf("%s %q in %s: %v", kind, name, scope, err)
+		t.Errorf("%s %q in %s: %v", kind, name, jurisdiction, err)
 	}
 	if !ok && !errors.Is(err, ErrInvalidName) {
-		t.Errorf("%s %q in %s: got %v, want ErrInvalidName", kind, name, scope, err)
+		t.Errorf("%s %q in %s: got %v, want ErrInvalidName", kind, name, jurisdiction, err)
 	}
 }
 

@@ -21,7 +21,7 @@ The two listeners are separate so that they can be exposed differently, and so t
 | No. | Boundary | Crossed by | Protected by |
 | :-- | :---------------- | :----------------------- | :------------------------------ |
 | 1 | Workloads to `ligo` | SVIDs over the workload API | mTLS, or a JWT-SVID with an exact audience and bounded lifetime; bundle per trust domain |
-| 2 | Administrators to `ligo` | The admin API and UI | SVID mTLS, LDAP, sessions, RBAC by scope |
+| 2 | Administrators to `ligo` | The admin API and UI | SVID mTLS, LDAP, sessions, RBAC by jurisdiction |
 | 3 | `ligo` to plugins | gRPC | Root-owned binaries, SHA-256 before every spawn, fd-based exec, AutoMTLS, one process per type and realm |
 | 4 | Plugins to backends | SQL, LDAP, Vault | TLS verified, identifier grammars, privilege bounds, output validation |
 | 5 | `ligo` to PostgreSQL | SQL | `verify-full`, four roles, triggers and checks in the database |
@@ -37,9 +37,9 @@ A plugin holds powerful credentials for its backend, but `ligo` does not take it
 - Only an error's `code` and fixed `public_message` are persisted.
 - Identity is per process and realm: each instance must select exactly one SVID, in its realm's trust domain.
 
-## Realms and scopes
+## Realms and jurisdictions
 
-These are separate on purpose. A **realm** is technical: one trust domain, one SPIRE agent, one set of plugin processes. A **scope** is organisational: who decides. A flat data centre is a short scope; a cloud tenancy is a deeper one.
+These are separate on purpose. A **realm** is technical: one trust domain, one SPIRE agent, one set of plugin processes. A **jurisdiction** is organisational: who decides. A flat data centre is a short jurisdiction; a cloud tenancy is a deeper one.
 
 A realm is not a network zone. A network zone, such as a data centre segment or a cloud region, is where workloads run and what they can reach; one realm may serve workloads in several network zones, and one network zone may hold workloads of several realms.
 

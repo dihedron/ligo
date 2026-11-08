@@ -38,19 +38,19 @@ type View struct {
 	Auth   json.RawMessage `json:"auth"`
 	Spec   json.RawMessage `json:"spec"`
 
-	partyScopes []string
+	partyJurisdictions []string
 }
 
 type ViewMetadata struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	Realm         string    `json:"realm"`
-	SourceScope   string    `json:"sourceScope"`
-	TargetScope   string    `json:"targetScope"`
-	PlatformScope string    `json:"platformScope"`
-	PlatformType  string    `json:"platformType"`
-	Platform      string    `json:"platform"`
-	Wiring        struct {
+	ID                   uuid.UUID `json:"id"`
+	Name                 string    `json:"name"`
+	Realm                string    `json:"realm"`
+	SourceJurisdiction   string    `json:"sourceJurisdiction"`
+	TargetJurisdiction   string    `json:"targetJurisdiction"`
+	PlatformJurisdiction string    `json:"platformJurisdiction"`
+	PlatformType         string    `json:"platformType"`
+	Platform             string    `json:"platform"`
+	Wiring               struct {
 		IdentityProvider Instance `json:"identityProvider"`
 		SecretStore      Instance `json:"secretStore"`
 	} `json:"wiring"`
@@ -94,7 +94,7 @@ type ViewActive struct {
 	Since     time.Time `json:"since"`
 }
 
-const viewQuery = `SELECT b.id, b.name, b.realm, b.source_scope, b.target_scope, b.platform_scope, b.platform_type, b.platform,
+const viewQuery = `SELECT b.id, b.name, b.realm, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction, b.platform_type, b.platform,
 	b.identity_provider_type, b.identity_provider_instance, b.secret_store_type, b.secret_store_instance, b.revision, b.active_revision,
 	b.created_at, b.updated_at, b.created_by, b.updated_by, s.name, t.name, b.access_level, b.parameters, coalesce(b.purpose, ''),
 	b.labels, b.expires_at, b.phase, b.operation, b.attempt, b.workflow_id, b.current_step, b.status_message, b.last_transition_at,
@@ -103,7 +103,7 @@ const viewQuery = `SELECT b.id, b.name, b.realm, b.source_scope, b.target_scope,
 	b.break_glass_cr_id, coalesce(g.requested_by, ''), coalesce(g.external_approval_ref, ''), b.break_glass_expires_at,
 	b.source_revision, b.target_revision, b.source_trust_domain, b.source_svid_regex, b.requested_spec,
 	coalesce(b.active_source_svid_regex, ''), b.active_since, b.active_auth_config, b.active_spec,
-	coalesce((SELECT array_agg(DISTINCT sd.scope) FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
+	coalesce((SELECT array_agg(DISTINCT sd.jurisdiction) FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
 		WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}')
 	FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 	LEFT JOIN change_requests g ON g.id = b.break_glass_cr_id`
@@ -114,13 +114,13 @@ func scanView(row pgx.Row) (*View, error) {
 	var bg *uuid.UUID
 	var bgBy, bgRef, activeRegex string
 	var bgExpires, since *time.Time
-	err := row.Scan(&m.ID, &m.Name, &m.Realm, &m.SourceScope, &m.TargetScope, &m.PlatformScope, &m.PlatformType, &m.Platform,
+	err := row.Scan(&m.ID, &m.Name, &m.Realm, &m.SourceJurisdiction, &m.TargetJurisdiction, &m.PlatformJurisdiction, &m.PlatformType, &m.Platform,
 		&m.Wiring.IdentityProvider.Type, &m.Wiring.IdentityProvider.Instance, &m.Wiring.SecretStore.Type, &m.Wiring.SecretStore.Instance,
 		&m.Revision, &m.ActiveRevision, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy, &v.Source, &v.Target, &v.AccessLevel,
 		&v.Parameters, &v.Purpose, &v.Labels, &v.ExpiresAt, &st.Phase, &st.Operation, &st.Attempt, &st.WorkflowID, &st.CurrentStep,
 		&st.Message, &st.LastTransitionTime, &st.PendingChangeRequestID, &st.PropagationPending, &bg, &bgBy, &bgRef, &bgExpires,
 		&v.Requested.SourceRevision, &v.Requested.TargetRevision, &v.Requested.TrustDomain, &v.Requested.SVIDRegex, &v.Requested.Spec,
-		&activeRegex, &since, &v.Auth, &v.Spec, &v.partyScopes)
+		&activeRegex, &since, &v.Auth, &v.Spec, &v.partyJurisdictions)
 	if bg != nil && bgExpires != nil {
 		st.BreakGlass = &BreakGlassStatus{ChangeRequestID: *bg, RequestedBy: bgBy, IncidentReference: bgRef, ExpiresAt: *bgExpires}
 	}
@@ -130,11 +130,11 @@ func scanView(row pgx.Row) (*View, error) {
 	return v, err
 }
 
-// visibleTo: a role on any of the binding's scopes, or on the scope of one
+// visibleTo: a role on any of the binding's jurisdictions, or on the jurisdiction of one
 // of its additional parties (§7.2.4).
 func (v *View) visibleTo(c changerequests.Caller) bool {
 	m := v.Metadata
-	return c.Grants.Sees(append([]string{m.SourceScope, m.TargetScope, m.PlatformScope}, v.partyScopes...)...)
+	return c.Grants.Sees(append([]string{m.SourceJurisdiction, m.TargetJurisdiction, m.PlatformJurisdiction}, v.partyJurisdictions...)...)
 }
 
 // Get returns the binding called name if the caller sees it (404
@@ -150,7 +150,7 @@ func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string)
 // Filter selects bindings (GET /v1/admin/bindings).
 type Filter struct {
 	Source, Target, AccessLevel, Platform, PlatformType, Phase, TrustDomain, Realm string
-	Scope                                                                          string     // a pattern matched against the three scopes
+	Jurisdiction                                                                   string     // a pattern matched against the three jurisdictions
 	ExpiringBefore                                                                 *time.Time // expires_at before it
 	PropagationPending                                                             *bool
 	After                                                                          string
@@ -183,8 +183,8 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 			read++
 			after = v.Metadata.Name
 			m := v.Metadata
-			if !v.visibleTo(c) || f.Scope != "" && !governance.ScopeMatches(f.Scope, m.SourceScope) &&
-				!governance.ScopeMatches(f.Scope, m.TargetScope) && !governance.ScopeMatches(f.Scope, m.PlatformScope) {
+			if !v.visibleTo(c) || f.Jurisdiction != "" && !governance.JurisdictionMatches(f.Jurisdiction, m.SourceJurisdiction) &&
+				!governance.JurisdictionMatches(f.Jurisdiction, m.TargetJurisdiction) && !governance.JurisdictionMatches(f.Jurisdiction, m.PlatformJurisdiction) {
 				continue
 			}
 			if len(out) == f.Limit {

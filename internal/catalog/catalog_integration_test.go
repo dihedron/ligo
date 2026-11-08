@@ -32,8 +32,8 @@ func dsn(t *testing.T, role string) string {
 	return v
 }
 
-func caller(name, role string, scopes ...string) changerequests.Caller {
-	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Scopes: scopes}}}
+func caller(name, role string, jurisdictions ...string) changerequests.Caller {
+	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Jurisdictions: jurisdictions}}}
 }
 
 func example(t *testing.T) *config.Config {
@@ -89,20 +89,20 @@ func exec(t *testing.T, o *pgxpool.Pool, sql string, args ...any) {
 	}
 }
 
-func target(t *testing.T, o *pgxpool.Pool, name, scope, vis, to string) uuid.UUID {
+func target(t *testing.T, o *pgxpool.Pool, name, jurisdiction, vis, to string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	exec(t, o, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, visible_to, created_by, updated_by)
-		values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', $3, 'dc/corp-prod', '{}', $4, $5::jsonb, 't', 't')`, id, name, scope, vis, to)
+	exec(t, o, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, visible_to, created_by, updated_by)
+		values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', $3, 'dc/corp-prod', '{}', $4, $5::jsonb, 't', 't')`, id, name, jurisdiction, vis, to)
 	exec(t, o, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, id)
 	return id
 }
 
-func source(t *testing.T, o *pgxpool.Pool, name, scope, td, regex string) uuid.UUID {
+func source(t *testing.T, o *pgxpool.Pool, name, jurisdiction, td, regex string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	exec(t, o, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
-		values ($1, $2, $3, $4, $5, 't', 't')`, id, name, scope, td, regex)
+	exec(t, o, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
+		values ($1, $2, $3, $4, $5, 't', 't')`, id, name, jurisdiction, td, regex)
 	return id
 }
 
@@ -172,7 +172,7 @@ func TestAC72(t *testing.T) {
 }
 
 // TestAC59: a binding and its change requests are visible from any of its
-// three scopes and from its parties' scopes, and to nobody else.
+// three jurisdictions and from its parties' jurisdictions, and to nobody else.
 func TestAC59(t *testing.T) {
 	r, o, x := setup(t)
 	ctx := context.Background()
@@ -181,22 +181,22 @@ func TestAC59(t *testing.T) {
 	binding, name, cr := uuid.NewV7(), "fin-01-payments-b-"+x, uuid.NewV7()
 	exec(t, o, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+		source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 		source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 		values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static',
 		'bnd_' || left(md5($1::uuid::text), 16), 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal',
 		'^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/x$', '{}', 't', 't')`, binding, name, src, tgt, "ligo:apply:"+binding.String()+":r1:a1")
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
-			source_scope, target_scope, platform_scope, interconnect_rule, policy_sha256, distinct_approvers_required, payload, payload_sha256,
+			source_jurisdiction, target_jurisdiction, platform_jurisdiction, interconnect_rule, policy_sha256, distinct_approvers_required, payload, payload_sha256,
 			requested_by, expires_at) values ($1, 'BINDING', $2, $3, 'CREATE', 'STANDARD', 'ALL', 'prod', 'cloud/fin-01/payments',
 			'dc/corp-prod/ledger', 'dc/corp-prod', 'cloud-to-dc', repeat('a', 64), true, '{}', repeat('b', 64), 'carla', now() + interval '1 day')`,
 			cr, name, binding); err != nil {
 			return err
 		}
-		for _, sd := range []struct{ side, scope string }{{"TARGET", "dc/corp-prod/ledger"}, {"SOURCE", "cloud/fin-01/payments"}, {"PARTY:security", "sec/infosec"}} {
-			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
-				values ($1, $2, $3, true, 'HUMAN', 'carla', 'STANDARD')`, cr, sd.side, sd.scope); err != nil {
+		for _, sd := range []struct{ side, jurisdiction string }{{"TARGET", "dc/corp-prod/ledger"}, {"SOURCE", "cloud/fin-01/payments"}, {"PARTY:security", "sec/infosec"}} {
+			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+				values ($1, $2, $3, true, 'HUMAN', 'carla', 'STANDARD')`, cr, sd.side, sd.jurisdiction); err != nil {
 				return err
 			}
 		}

@@ -9,16 +9,16 @@ import (
 	"strings"
 )
 
-// ErrScopeUnresolvable means that the fixed beginning of a source regex does
-// not identify exactly one scope (422 scope-unresolvable).
-var ErrScopeUnresolvable = errors.New("scope-unresolvable")
+// ErrJurisdictionUnresolvable means that the fixed beginning of a source regex does
+// not identify exactly one jurisdiction (422 jurisdiction-unresolvable).
+var ErrJurisdictionUnresolvable = errors.New("jurisdiction-unresolvable")
 
-// Extractor derives the scope of the sources of one trust domain
-// (governance.source_scopes, §3.9).
+// Extractor derives the jurisdiction of the sources of one trust domain
+// (governance.source_jurisdictions, §3.9).
 type Extractor struct {
-	scope    string // static mode
-	re       *regexp.Regexp
-	template string
+	jurisdiction string // static mode
+	re           *regexp.Regexp
+	template     string
 }
 
 var (
@@ -27,15 +27,15 @@ var (
 )
 
 // NewStaticExtractor returns an extractor that assigns every source the
-// same scope.
-func NewStaticExtractor(scope string) (*Extractor, error) {
-	if !ValidScopePath(scope) {
-		return nil, fmt.Errorf("scope %q is not a valid scope path", scope)
+// same jurisdiction.
+func NewStaticExtractor(jurisdiction string) (*Extractor, error) {
+	if !ValidJurisdictionPath(jurisdiction) {
+		return nil, fmt.Errorf("jurisdiction %q is not a valid jurisdiction path", jurisdiction)
 	}
-	return &Extractor{scope: scope}, nil
+	return &Extractor{jurisdiction: jurisdiction}, nil
 }
 
-// NewPathTemplateExtractor validates path_regex and scope_template
+// NewPathTemplateExtractor validates path_regex and jurisdiction_template
 // (§3.9, §8.2 rule 16).
 func NewPathTemplateExtractor(pathRegex, template string) (*Extractor, error) {
 	ast, err := syntax.Parse(pathRegex, syntax.Perl)
@@ -91,14 +91,14 @@ func countGroups(parts []*syntax.Regexp) (int, error) {
 	return groups, nil
 }
 
-// checkTemplate checks scope_template against the groups of path_regex.
+// checkTemplate checks jurisdiction_template against the groups of path_regex.
 func checkTemplate(template string, groups int) error {
 	if !templateRE.MatchString(template) {
-		return errors.New("scope_template may contain only [a-z0-9/-] and ${1}..${9}")
+		return errors.New("jurisdiction_template may contain only [a-z0-9/-] and ${1}..${9}")
 	}
 	for _, m := range placeholderRE.FindAllStringSubmatch(template, -1) {
 		if n, _ := strconv.Atoi(m[1]); n > groups {
-			return fmt.Errorf("scope_template references ${%d} but path_regex has %d groups", n, groups)
+			return fmt.Errorf("jurisdiction_template references ${%d} but path_regex has %d groups", n, groups)
 		}
 	}
 	return nil
@@ -118,31 +118,31 @@ func checkGroup(p *syntax.Regexp) error {
 	return nil
 }
 
-// SourceScope derives the scope of an svidRegex that passed the Appendix A
+// SourceJurisdiction derives the jurisdiction of an svidRegex that passed the Appendix A
 // validator for trust domain td, from its fixed beginning only (§3.9).
-func (e *Extractor) SourceScope(svidRegex, td string) (string, error) {
+func (e *Extractor) SourceJurisdiction(svidRegex, td string) (string, error) {
 	if e.re == nil {
-		return e.scope, nil
+		return e.jurisdiction, nil
 	}
 	ast, err := syntax.Parse(svidRegex, syntax.Perl)
 	if err != nil || ast.Op != syntax.OpConcat || len(ast.Sub) < 3 || ast.Sub[1].Op != syntax.OpLiteral {
-		return "", ErrScopeUnresolvable
+		return "", ErrJurisdictionUnresolvable
 	}
 	literal := string(ast.Sub[1].Rune)
 	prefix := "spiffe://" + td
 	if !strings.HasPrefix(literal, prefix+"/") {
-		return "", ErrScopeUnresolvable
+		return "", ErrJurisdictionUnresolvable
 	}
 	m := e.re.FindStringSubmatch(literal[len(prefix):])
 	if m == nil {
-		return "", ErrScopeUnresolvable
+		return "", ErrJurisdictionUnresolvable
 	}
-	scope := placeholderRE.ReplaceAllStringFunc(e.template, func(ph string) string {
+	jurisdiction := placeholderRE.ReplaceAllStringFunc(e.template, func(ph string) string {
 		n, _ := strconv.Atoi(ph[2 : len(ph)-1])
 		return m[n]
 	})
-	if !ValidScopePath(scope) {
-		return "", ErrScopeUnresolvable
+	if !ValidJurisdictionPath(jurisdiction) {
+		return "", ErrJurisdictionUnresolvable
 	}
-	return scope, nil
+	return jurisdiction, nil
 }

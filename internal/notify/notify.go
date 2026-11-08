@@ -33,16 +33,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Event is something to announce: its name (§7.5 "Events"), the scopes a
-// webhook's scope filter is matched against, and the fields of its payload
+// Event is something to announce: its name (§7.5 "Events"), the jurisdictions a
+// webhook's jurisdiction filter is matched against, and the fields of its payload
 // beyond eventId, event and occurredAt. Payloads hold no secrets.
 type Event struct {
-	Name    string
-	Scopes  []string
-	Payload map[string]any
+	Name          string
+	Jurisdictions []string
+	Payload       map[string]any
 }
 
-// global reports whether name is delivered regardless of scope filters:
+// global reports whether name is delivered regardless of jurisdiction filters:
 // configuration and system events.
 func global(name string) bool {
 	return strings.HasPrefix(name, "CONFIG_") || strings.HasPrefix(name, "SYSTEM_")
@@ -54,16 +54,16 @@ type Outbox struct {
 }
 
 // wants reports whether w receives e: it subscribes to it and, unless the
-// event is global, a scope of the event matches its filter.
+// event is global, a jurisdiction of the event matches its filter.
 func wants(w config.Webhook, e Event) bool {
 	if !slices.Contains(w.Events, e.Name) {
 		return false
 	}
-	if global(e.Name) || len(w.Scopes) == 0 {
+	if global(e.Name) || len(w.Jurisdictions) == 0 {
 		return true
 	}
-	return slices.ContainsFunc(w.Scopes, func(p string) bool {
-		return slices.ContainsFunc(e.Scopes, func(s string) bool { return governance.ScopeMatches(p, s) })
+	return slices.ContainsFunc(w.Jurisdictions, func(p string) bool {
+		return slices.ContainsFunc(e.Jurisdictions, func(s string) bool { return governance.JurisdictionMatches(p, s) })
 	})
 }
 

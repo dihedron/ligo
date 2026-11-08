@@ -113,13 +113,13 @@ func TestAC32(t *testing.T) {
 	pending := uuid.NewV7()
 	err = pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
-			owner_scope, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256, requested_by, expires_at)
-			select $1, 'SOURCE', name, id, 'UPDATE', 'STANDARD', 'ALL', scope, repeat('a', 64), false, revision, '{}', repeat('b', 64),
+			owner_jurisdiction, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256, requested_by, expires_at)
+			select $1, 'SOURCE', name, id, 'UPDATE', 'STANDARD', 'ALL', jurisdiction, repeat('a', 64), false, revision, '{}', repeat('b', 64),
 			't', now() + interval '1 day' from sources where name = $2`, pending, src); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
-			select $1, 'OWNER', scope, true, 'HUMAN', 't', 'STANDARD' from sources where name = $2`, pending, src)
+		_, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+			select $1, 'OWNER', jurisdiction, true, 'HUMAN', 't', 'STANDARD' from sources where name = $2`, pending, src)
 		return err
 	})
 	if err != nil {
@@ -342,7 +342,7 @@ func TestRevertParty(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
 	s.Requests.Policy.BreakGlassPolicies = append(s.Requests.Policy.BreakGlassPolicies,
-		governance.BreakGlassPolicy{Scopes: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
+		governance.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
 	rescuer := caller("rita", role(config.RoleBreakGlass, "cloud/fin-01/*", "dc/corp-prod/*", "sec/infosec"))
 	name := "fin-01-payments-bp-" + w.suffix
 	bg, err := s.BreakGlass(ctx, rescuer, emergency("CREATE", `"binding":`+string(body(name, w.cloudSrc, w.ledger, "read"))+`,`, ""))

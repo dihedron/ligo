@@ -298,13 +298,13 @@ func (v *env) bindingNamed(t *testing.T, name string) uuid.UUID {
 			sql  string
 			args []any
 		}{
-			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 't', 't')`, []any{source, "s-" + x, regex}},
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 't', 't')`, []any{source, "s-" + x, regex}},
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 				values ($1, $2, 'pg', 'postgres.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + x}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+				source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'postgres.v1', 'pg', 'fake.v1', 'id-prod', 'vault.v1', 'vault-prod', 'vault-static',
 				'bnd_' || left(md5($1::uuid::text), 16), 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', $5, 1, 1, 'prod.internal', $6, '{"roles":[]}', 't', 't')`,

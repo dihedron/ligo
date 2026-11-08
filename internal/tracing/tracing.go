@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// name is the instrumentation scope of ligo's own spans.
+// name is the instrumentation jurisdiction of ligo's own spans.
 const name = "github.com/dihedron/ligo"
 
 // Tracer starts ligo's own spans (workflows and steps).

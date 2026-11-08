@@ -117,7 +117,7 @@ type SourceCheck struct {
 }
 
 // sourceTest is POST /ui/sources/test: the same tester and dry run as the
-// API (Appendix A, scope, samples, overlaps, narrowing with a witness).
+// API (Appendix A, jurisdiction, samples, overlaps, narrowing with a witness).
 func (s *Server) sourceTest(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
 		return

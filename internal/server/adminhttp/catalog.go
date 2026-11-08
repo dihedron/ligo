@@ -33,7 +33,7 @@ func (s *Server) catalogTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	list, err := s.Catalog.Targets(r.Context(), c, catalog.Query{Q: q.Get("q"), Platform: q.Get("platform"),
-		PlatformType: q.Get("platformType"), Scope: q.Get("scope"), Label: q.Get("label"), ForSource: q.Get("forSource"),
+		PlatformType: q.Get("platformType"), Jurisdiction: q.Get("jurisdiction"), Label: q.Get("label"), ForSource: q.Get("forSource"),
 		Deprecated: q.Get("state") == "DEPRECATED", AfterName: cursor.AfterName, Limit: size + 1})
 	if err != nil {
 		s.fail(w, r, err)

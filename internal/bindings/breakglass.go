@@ -128,7 +128,7 @@ func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller,
 	if err != nil {
 		return nil, err
 	}
-	if res.decision = p.Evaluate(res.sourceScope, res.targetScope); !res.decision.Allowed {
+	if res.decision = p.Evaluate(res.sourceJurisdiction, res.targetJurisdiction); !res.decision.Allowed {
 		return nil, s.denied(ctx, c, &b, cur, res)
 	}
 	if err := s.Rules.checkExpiry(b.ExpiresAt, time.Now()); err != nil {
@@ -161,22 +161,22 @@ func (s *Service) breakGlassDelete(ctx context.Context, c changerequests.Caller,
 	if *in.ExpectedRevision != cur.revision {
 		return nil, nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 	}
-	res := &resolved{platform: s.Rules.Platforms[cur.platform], sourceScope: cur.sourceScope, targetScope: cur.targetScope,
-		platformScope: cur.platformScope}
+	res := &resolved{platform: s.Rules.Platforms[cur.platform], sourceJurisdiction: cur.sourceJurisdiction, targetJurisdiction: cur.targetJurisdiction,
+		platformJurisdiction: cur.platformJurisdiction}
 	res.platform.Realm = cur.realm
 	sides := res.anySides(c, true)
 	if len(sides) == 0 {
-		return nil, nil, refuse(403, "forbidden", "%s holds no break_glass on %s, %s or %s", c.ID(), cur.sourceScope, cur.targetScope, cur.platformScope)
+		return nil, nil, refuse(403, "forbidden", "%s holds no break_glass on %s, %s or %s", c.ID(), cur.sourceJurisdiction, cur.targetJurisdiction, cur.platformJurisdiction)
 	}
 	return compose("DELETE", changerequests.ConsentAny, cur, &Binding{Name: cur.name}, res, &changerequests.Common{ExpectedRevision: in.ExpectedRevision}, sides)
 }
 
 // emergencyTarget reads a binding the caller sees, or on one of whose
-// scopes it holds break_glass (404 otherwise).
+// jurisdictions it holds break_glass (404 otherwise).
 func (s *Service) emergencyTarget(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := load(ctx, s.DB, "b.name = $1", name, false)
-	if err == nil && !c.Grants.Sees(cur.sourceScope, cur.targetScope, cur.platformScope) &&
-		!c.Grants.BreakGlass(cur.sourceScope) && !c.Grants.BreakGlass(cur.targetScope) && !c.Grants.BreakGlass(cur.platformScope) {
+	if err == nil && !c.Grants.Sees(cur.sourceJurisdiction, cur.targetJurisdiction, cur.platformJurisdiction) &&
+		!c.Grants.BreakGlass(cur.sourceJurisdiction) && !c.Grants.BreakGlass(cur.targetJurisdiction) && !c.Grants.BreakGlass(cur.platformJurisdiction) {
 		err = pgx.ErrNoRows
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -242,31 +242,31 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 			}
 		}
 		var entries []audit.Entry
-		var scopes []string
+		var jurisdictions []string
 		for _, n := range names {
 			detail := map[string]any{"side": n, "fullyRatified": left == 0}
 			for _, sd := range r.Sides {
 				if sd.Name != n {
 					continue
 				}
-				if c.ByPlatform(r, sd) { // never the inline source's side too: no scope added
+				if c.ByPlatform(r, sd) { // never the inline source's side too: no jurisdiction added
 					detail["decidedAs"] = changerequests.DecidedAsPlatform
 					entries = append(entries, changerequests.PlatformDecision(r, sd, "RATIFIED", c.ID()))
 				} else {
-					scopes = append(scopes, sd.Scope)
+					jurisdictions = append(jurisdictions, sd.Jurisdiction)
 				}
 			}
 			snap, _ := json.Marshal(detail)
 			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: r.ResourceID, ResourceName: r.ResourceName,
 				ChangeRequestID: &id, Action: "BREAK_GLASS_RATIFIED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
 		}
-		if r.DependsOn != nil { // the inline source's change, ratified with the side of its scope
+		if r.DependsOn != nil { // the inline source's change, ratified with the side of its jurisdiction
 			var source string
 			var sourceID *uuid.UUID
 			err := tx.QueryRow(ctx, `UPDATE change_request_sides s SET ratified_by = $3, ratified_at = now(), ratification_comment = $4
 				FROM change_requests r WHERE r.id = s.change_request_id AND s.change_request_id = $1 AND s.basis = 'BREAK_GLASS'
-				AND s.ratified_by IS NULL AND s.scope = ANY($2) RETURNING r.resource_name, r.resource_id`,
-				*r.DependsOn, scopes, c.ID(), comment).Scan(&source, &sourceID)
+				AND s.ratified_by IS NULL AND s.jurisdiction = ANY($2) RETURNING r.resource_name, r.resource_id`,
+				*r.DependsOn, jurisdictions, c.ID(), comment).Scan(&source, &sourceID)
 			if err == nil {
 				snap, _ := json.Marshal(map[string]any{"side": "OWNER", "fullyRatified": true})
 				entries = append(entries, audit.Entry{ResourceType: "SOURCE", ResourceID: sourceID, ResourceName: source,

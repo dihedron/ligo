@@ -2,7 +2,7 @@
 <div class="grid">
   <section class="card"><h2>Target</h2><dl class="fields">
     <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, realm {{.Metadata.Realm}})</dd>
-    <dt>Scope</dt><dd>{{.Metadata.Scope}} (platform {{.Metadata.PlatformScope}})</dd>
+    <dt>Jurisdiction</dt><dd>{{.Metadata.Jurisdiction}} (platform {{.Metadata.PlatformJurisdiction}})</dd>
     <dt>State</dt><dd><span class="{{badge .Metadata.State}}">{{.Metadata.State}}</span></dd>
     <dt>Revision</dt><dd>{{.Metadata.Revision}}</dd><dt>Visibility</dt><dd>{{.Visibility.Mode}}</dd>
     {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
@@ -47,13 +47,13 @@
 {{template "bindings-table" .Bindings}}
 {{with .Target}}{{if ne .Metadata.State "RETIRED"}}<section class="card">
   <h3>Revoke bindings</h3>
-  <p class="muted">Containment: revoke every binding of a source, or of a source scope, on this target. Each revocation is a change request with consent ANY.</p>
+  <p class="muted">Containment: revoke every binding of a source, or of a source jurisdiction, on this target. Each revocation is a change request with consent ANY.</p>
   <div id="revoke-errors" class="errors"></div>
   <form hx-post="/ui/targets/{{.Metadata.Name}}/bindings/revoke" hx-confirm="Revoke every matching binding of {{.Metadata.Name}}?"
     hx-status:409="target:#revoke-errors swap:innerHTML" hx-status:422="target:#revoke-errors swap:innerHTML" {{hxnonce}}>
     <div class="grid">
       <div class="field"><label for="rv-source">Source</label><input id="rv-source" name="source"></div>
-      <div class="field"><label for="rv-scope">or source scope pattern</label><input id="rv-scope" name="sourceScope"></div>
+      <div class="field"><label for="rv-jurisdiction">or source jurisdiction pattern</label><input id="rv-jurisdiction" name="sourceJurisdiction"></div>
     </div>
     <div class="field"><label for="rv-comment">Why (required)</label><textarea id="rv-comment" name="comment" required></textarea></div>
     <div class="actions"><button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Revoke</button></div>

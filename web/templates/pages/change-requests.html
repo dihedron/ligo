@@ -7,7 +7,7 @@
   <tbody>{{range .Requests}}<tr>
     <td><a href="/ui/change-requests/{{.ID}}">{{when .RequestedAt}}</a></td><td>{{if .Kind}}{{.Kind}}{{else}}STANDARD{{end}}</td>
     <td>{{.ResourceType}} {{.ResourceName}}</td><td>{{.Operation}}</td><td><span class="{{badge .Status}}">{{.Status}}</span></td><td>{{.RequestedBy}}</td>
-    <td>{{range .Sides}}<span class="{{badge .Decision}}" title="{{.Scope}}">{{.Name}}{{with .Decision}}: {{.}}{{end}}</span> {{end}}</td>
+    <td>{{range .Sides}}<span class="{{badge .Decision}}" title="{{.Jurisdiction}}">{{.Name}}{{with .Decision}}: {{.}}{{end}}</span> {{end}}</td>
   </tr>{{else}}<tr><td colspan="7" class="muted">No change requests.</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="/ui/change-requests?before={{.}}{{if $.Content.Awaiting}}&amp;awaiting=me{{end}}{{with $.Content.Status}}&amp;status={{.}}{{end}}">Next page</a></p>{{end}}

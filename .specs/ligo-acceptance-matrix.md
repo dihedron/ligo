@@ -26,7 +26,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 
 | ID | Verdict | Level | Tests | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| AC-01 | Covered | P | TestLabApply | `internal/workflows`. Self-service scope on the real plugins. |
+| AC-01 | Covered | P | TestLabApply | `internal/workflows`. Self-service jurisdiction on the real plugins. |
 | AC-02 | Covered | U | TestAC02 |  |
 | AC-03 | Covered | U | TestAC03, TestAppendixA5 |  |
 | AC-04 | Covered | I | TestAC04AC05 |  |
@@ -89,7 +89,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-54 | Covered | I+U | TestAC54, TestBuildSides |  |
 | AC-55 | Covered | I+U | TestAC55, TestBreakGlassSides, TestRatifiableSides, TestRevertParty |  |
 | AC-56 | Covered | U | TestAC56 |  |
-| AC-57 | Covered | I | TestScopes, TestINV08 |  |
+| AC-57 | Covered | I | TestJurisdictions, TestINV08 |  |
 | AC-58 | Covered | I | TestAC58, TestNamesAndInterconnects, TestDowngrade |  |
 | AC-59 | Covered | I | TestAC59 |  |
 | AC-60 | Covered | I | TestAC60 |  |
@@ -139,7 +139,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | INV-14 | Covered | I | TestINV14, TestStructure |  |
 | INV-15 | Covered | U | TestINV15 |  |
 | INV-16 | Covered | P | TestLabBreakGlass, TestRevertFailed |  |
-| INV-17 | Covered | U+I | TestINV17, TestAppendixD2Extraction, TestScopes, TestINV08 |  |
+| INV-17 | Covered | U+I | TestINV17, TestAppendixD2Extraction, TestJurisdictions, TestINV08 |  |
 | INV-18 | Covered | I | TestINV18, TestAC49 |  |
 | INV-19 | Covered | I | TestRecheck, TestAC52 |  |
 | INV-20 | Covered | I | TestINV20, TestConsent |  |

@@ -52,36 +52,36 @@ server:
 
 ## Who may do what
 
-Roles are granted on scope patterns. A pattern matches whole segments only, and `*` matches the scope and everything below it.
+Roles are granted on jurisdiction patterns. A pattern matches whole segments only, and `*` matches the jurisdiction and everything below it.
 
 | Role | May |
 | :---------- | :-------------------------------- |
 | `viewer` | Read |
-| `operator` | File changes for the scope |
-| `approver` | Decide the scope's sides |
+| `operator` | File changes for the jurisdiction |
+| `approver` | Decide the jurisdiction's sides |
 | `break_glass` | Apply emergency changes. People only, by `ldap_group_dn` |
 | `trusted_automation` | File changes approved by delegation. SPIFFE principals only, with a reference to an upstream approval |
 | `admin.full_access` | All of the above except deciding one's own requests, and maintenance and recovery |
-| `account_admin` | Register, retire and list accounts, and nothing else. Global: it takes no `scopes`. `admin.full_access` includes it |
+| `account_admin` | Register, retire and list accounts, and nothing else. Global: it takes no `jurisdictions`. `admin.full_access` includes it |
 
 ```yaml
 authorization:
   bindings:
-    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal", role: viewer, scopes: ["*"] }
-    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,dc=corp,dc=internal", role: operator, scopes: ["dc/corp-prod/*"] }
-    - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal", role: approver, scopes: ["dc/corp-prod/*"] }
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal", role: viewer, jurisdictions: ["*"] }
+    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,dc=corp,dc=internal", role: operator, jurisdictions: ["dc/corp-prod/*"] }
+    - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal", role: approver, jurisdictions: ["dc/corp-prod/*"] }
   approval:
-    required_scopes: ["dc/corp-prod/*"]
+    required_jurisdictions: ["dc/corp-prod/*"]
 governance:
-  source_scopes:
-    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
+  source_jurisdictions:
+    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
   interconnects:
-    default_cross_scope: deny
+    default_cross_jurisdiction: deny
     rules:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
 ```
 
-Each trust domain a platform accepts needs one `source_scopes` entry. Across scopes, `ligo` denies by default: add a rule for each flow you intend.
+Each trust domain a platform accepts needs one `source_jurisdictions` entry. Across jurisdictions, `ligo` denies by default: add a rule for each flow you intend.
 
 ## Accounts
 
@@ -92,28 +92,28 @@ authorization:
   bindings:
     - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,dc=corp,dc=internal", role: account_admin }
   approval:
-    required_scopes: ["cloud/*"]    # startup refuses accounts this does not cover
-    require_distinct_approvers_across_scopes: true
+    required_jurisdictions: ["cloud/*"]    # startup refuses accounts this does not cover
+    require_distinct_approvers_across_jurisdictions: true
 governance:
   accounts:
-    scope: "cloud/{account}"
-    source_scope: "cloud/{account}/app/{project}"
-    target_scope: "cloud/{account}/data/{tenancy}"
+    jurisdiction: "cloud/{account}"
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
     ldap_groups:
       search_base: "ou=accounts,dc=corp,dc=internal"
       roles:
-        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=corp,dc=internal", role: operator, scope: "cloud/{account}/*" }
-        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
-        - { group_dn: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/app/{project}" }
-  source_scopes:
-    - { trust_domain: cloud.internal, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', scope_template: 'cloud/${1}/app/${2}' }
+        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=corp,dc=internal", role: operator, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/app/{project}" }
+  source_jurisdictions:
+    - { trust_domain: cloud.internal, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', jurisdiction_template: 'cloud/${1}/app/${2}' }
   interconnects:
-    default_cross_scope: deny
+    default_cross_jurisdiction: deny
     rules:
       - { name: accounts, from: ["cloud/*"], to: ["cloud/*"], action: allow }
 ```
 
-Account, project and tenancy names are lower-case letters and digits, starting with a letter. A segment such as `fin-01` cannot be an account, and a scope using it under `scope` is refused, so keep existing scopes outside this root. The `path_regex` above also lets through a name starting with a digit, because each group must be one character class repeated with `+`; such a scope is refused as no account can have that name.
+Account, project and tenancy names are lower-case letters and digits, starting with a letter. A segment such as `fin-01` cannot be an account, and a jurisdiction using it under `jurisdiction` is refused, so keep existing jurisdictions outside this root. The `path_regex` above also lets through a name starting with a digit, because each group must be one character class repeated with `+`; such a jurisdiction is refused as no account can have that name.
 
 Three things outside `ligo` become part of its security:
 
@@ -156,7 +156,7 @@ At startup `ligo` checks the configuration, connects to SPIRE and the sealer, ve
 | :-------------------- | :---------------------------------- |
 | `--maintenance` | To start with changes refused, after a restore |
 | `--allow-orphaned-bindings` | When a binding refers to an instance you removed on purpose; audited |
-| `--accept-scope-changes` | When you changed a scope mapping on purpose, to re-scope the resources; audited |
+| `--accept-jurisdiction-changes` | When you changed a jurisdiction mapping on purpose, to transfer the resources; audited |
 | `--insecure-dev` | Local development only |
 
 ## The client

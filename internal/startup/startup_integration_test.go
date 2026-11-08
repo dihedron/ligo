@@ -110,35 +110,35 @@ func (v *env) exec(t *testing.T, sql string, args ...any) {
 	}
 }
 
-func (v *env) source(t *testing.T, name, scope, td string) uuid.UUID {
+func (v *env) source(t *testing.T, name, jurisdiction, td string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	v.exec(t, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, $3, $4, $5, 't', 't')`,
-		id, name, scope, td, `^spiffe://`+strings.ReplaceAll(td, ".", `\.`)+`/ns/`+v.x+`/sa/w$`)
+	v.exec(t, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, $3, $4, $5, 't', 't')`,
+		id, name, jurisdiction, td, `^spiffe://`+strings.ReplaceAll(td, ".", `\.`)+`/ns/`+v.x+`/sa/w$`)
 	return id
 }
 
-func (v *env) target(t *testing.T, name, platform, scope, platformScope string) uuid.UUID {
+func (v *env) target(t *testing.T, name, platform, jurisdiction, platformJurisdiction string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	v.exec(t, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
-		values ($1, $2, $3, 'oracle.v1', 'prod', $4, $5, '{}', 't', 't')`, id, name, platform, scope, platformScope)
+	v.exec(t, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
+		values ($1, $2, $3, 'oracle.v1', 'prod', $4, $5, '{}', 't', 't')`, id, name, platform, jurisdiction, platformJurisdiction)
 	v.exec(t, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, id)
 	return id
 }
 
 // binding inserts a binding on oracle-prod with the given store instance
-// and scopes.
-func (v *env) binding(t *testing.T, name string, src, tgt uuid.UUID, store string, scopes [3]string) uuid.UUID {
+// and jurisdictions.
+func (v *env) binding(t *testing.T, name string, src, tgt uuid.UUID, store string, jurisdictions [3]string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
 	v.exec(t, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision, source_trust_domain, source_svid_regex,
+		source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision, source_trust_domain, source_svid_regex,
 		requested_spec, created_by, updated_by)
 		values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', $5, 'vault-static',
 		'bnd_' || left(md5($1::uuid::text), 16), $6, $7, $8, $9, 1, 1, 'prod.internal', '^spiffe://prod\.internal/x$', '{}', 't', 't')`,
-		id, name, src, tgt, store, scopes[0], scopes[1], scopes[2], "ligo:apply:"+id.String()+":r1:a1")
+		id, name, src, tgt, store, jurisdictions[0], jurisdictions[1], jurisdictions[2], "ligo:apply:"+id.String()+":r1:a1")
 	return id
 }
 
@@ -155,12 +155,12 @@ func (v *env) request(t *testing.T, name, op string, id *uuid.UUID, source strin
 	}
 	err := pgx.BeginFunc(context.Background(), v.owner, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(context.Background(), `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
-		source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at,
+		source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at,
 		expected_revision) values ($1, 'BINDING', $2, $3, $4, 'STANDARD', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64), true,
 		$5, repeat('b', 64), 'carla', now() + interval '1 day', $6)`, cr, name, id, op, payload, revision); err != nil {
 			return err
 		}
-		_, err := tx.Exec(context.Background(), `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
+		_, err := tx.Exec(context.Background(), `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
 			values ($1, 'TARGET', 'dc/corp-prod', true, 'HUMAN', 'carla', 'STANDARD')`, cr)
 		return err
 	})
@@ -206,7 +206,7 @@ func TestConfigLoaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded := v.audited(t, before, "CONFIG_LOADED")
-	if len(loaded) != 1 || !strings.Contains(loaded[0], c.policy.SHA256()) || !strings.Contains(loaded[0], `"requiredScopes"`) ||
+	if len(loaded) != 1 || !strings.Contains(loaded[0], c.policy.SHA256()) || !strings.Contains(loaded[0], `"requiredJurisdictions"`) ||
 		!strings.Contains(loaded[0], `"themeSha256": {"logo": "`+strings.Repeat("d", 64)+`"}`) {
 		t.Fatalf("CONFIG_LOADED: %v", loaded)
 	}
@@ -215,14 +215,14 @@ func TestConfigLoaded(t *testing.T) {
 		t.Errorf("same policy reported as changed (%v)", err)
 	}
 
-	c.Config.Authorization.Approval.RequiredScopes = c.Config.Authorization.Approval.RequiredScopes[1:]
+	c.Config.Authorization.Approval.RequiredJurisdictions = c.Config.Authorization.Approval.RequiredJurisdictions[1:]
 	c.policy = c.Config.Policy()
 	if err := c.configLoaded(ctx); err != nil {
 		t.Fatal(err)
 	}
 	changed, weakened := v.audited(t, before, "CONFIG_GOVERNANCE_POLICY_CHANGED"), v.audited(t, before, "CONFIG_APPROVAL_POLICY_WEAKENED")
-	if len(changed) != 1 || !strings.Contains(changed[0], `"field": "requiredScopes"`) || len(weakened) != 1 ||
-		!strings.Contains(weakened[0], "removed from required_scopes") {
+	if len(changed) != 1 || !strings.Contains(changed[0], `"field": "requiredJurisdictions"`) || len(weakened) != 1 ||
+		!strings.Contains(weakened[0], "removed from required_jurisdictions") {
 		t.Errorf("changed %v, weakened %v", changed, weakened)
 	}
 	// the next start compares with the weaker policy: stricter again is a change, not a weakening
@@ -270,11 +270,11 @@ func TestOrphans(t *testing.T) {
 	}
 }
 
-// TestScopes: rule 17 refuses drifted scopes, re-scopes them with
-// --accept-scope-changes (sources, targets' platform scope, stale binding
+// TestJurisdictions: rule 17 refuses drifted jurisdictions, transfers them with
+// --accept-jurisdiction-changes (sources, targets' platform jurisdiction, stale binding
 // copies) and fails the pending requests concerned; an unresolvable
 // source is fatal even with the flag.
-func TestScopes(t *testing.T) {
+func TestJurisdictions(t *testing.T) {
 	v := setup(t)
 	ctx := context.Background()
 	x := v.x
@@ -295,52 +295,52 @@ func TestScopes(t *testing.T) {
 	update := v.request(t, "b-"+x, "UPDATE", &b, "src-"+x)
 	create := v.request(t, "new-"+x, "CREATE", nil, "src-"+x)
 
-	err = c.scopes(ctx)
+	err = c.jurisdictions(ctx)
 	if err == nil || !strings.Contains(err.Error(), "source src-"+x+": lab/st"+x+" to lab/st"+x+"/moved") ||
-		!strings.Contains(err.Error(), "target tgt-"+x+": platform scope dc/old"+x+" to dc/corp-prod") {
+		!strings.Contains(err.Error(), "target tgt-"+x+": platform jurisdiction dc/old"+x+" to dc/corp-prod") {
 		t.Fatalf("drift without the flag: %v", err)
 	}
 
-	c.AcceptScopeChanges = true
+	c.AcceptJurisdictionChanges = true
 	before := v.lastAudit(t)
-	if err := c.scopes(ctx); err != nil {
+	if err := c.jurisdictions(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var scopes, staleScopes []string
-	if err := v.owner.QueryRow(ctx, "select array[source_scope, target_scope, platform_scope]::text[] from bindings where id = $1", b).Scan(&scopes); err != nil ||
-		strings.Join(scopes, ",") != "lab/st"+x+"/moved,dc/corp-prod/st"+x+",dc/corp-prod" {
-		t.Errorf("binding scopes %v (%v)", scopes, err)
+	var jurisdictions, staleJurisdictions []string
+	if err := v.owner.QueryRow(ctx, "select array[source_jurisdiction, target_jurisdiction, platform_jurisdiction]::text[] from bindings where id = $1", b).Scan(&jurisdictions); err != nil ||
+		strings.Join(jurisdictions, ",") != "lab/st"+x+"/moved,dc/corp-prod/st"+x+",dc/corp-prod" {
+		t.Errorf("binding jurisdictions %v (%v)", jurisdictions, err)
 	}
-	if err := v.owner.QueryRow(ctx, "select array[source_scope, target_scope, platform_scope]::text[] from bindings where id = $1", stale).Scan(&staleScopes); err != nil ||
-		staleScopes[1] != "dc/corp-prod/st"+x {
-		t.Errorf("stale binding scopes %v (%v)", staleScopes, err)
+	if err := v.owner.QueryRow(ctx, "select array[source_jurisdiction, target_jurisdiction, platform_jurisdiction]::text[] from bindings where id = $1", stale).Scan(&staleJurisdictions); err != nil ||
+		staleJurisdictions[1] != "dc/corp-prod/st"+x {
+		t.Errorf("stale binding jurisdictions %v (%v)", staleJurisdictions, err)
 	}
 	for _, cr := range []uuid.UUID{update, create} {
 		var status, applyError string
 		if err := v.owner.QueryRow(ctx, "select status, coalesce(apply_error, '') from change_requests where id = $1", cr).Scan(&status, &applyError); err != nil ||
-			status != "FAILED_TO_APPLY" || applyError != "re-scoped" {
+			status != "FAILED_TO_APPLY" || applyError != "transferred" {
 			t.Errorf("request %s: %s %q (%v)", cr, status, applyError, err)
 		}
 	}
-	for action, n := range map[string]int{"SOURCE_RESCOPED": 1, "TARGET_RESCOPED": 1, "BINDING_RESCOPED": 3, "CR_APPLY_FAILED": 2} {
+	for action, n := range map[string]int{"SOURCE_TRANSFERRED": 1, "TARGET_TRANSFERRED": 1, "BINDING_TRANSFERRED": 3, "CR_APPLY_FAILED": 2} {
 		var count int
 		if err := v.owner.QueryRow(ctx, "select count(*) from audit_log where id > $1 and action = $2 and (resource_name like $3 or action = 'CR_APPLY_FAILED')",
 			before, action, "%"+x).Scan(&count); err != nil || count < n {
 			t.Errorf("%s: %d audited, want %d (%v)", action, count, n, err)
 		}
 	}
-	if err := c.scopes(ctx); err != nil {
+	if err := c.jurisdictions(ctx); err != nil {
 		t.Errorf("a second start still drifts: %v", err)
 	}
 
 	v.source(t, "lost-"+x, "lab/lost"+x, "lost"+x+".internal")
-	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source lost-"+x+": its regex resolves to no scope") {
+	if err := c.jurisdictions(ctx); err == nil || !strings.Contains(err.Error(), "source lost-"+x+": its regex resolves to no jurisdiction") {
 		t.Errorf("unresolvable source: %v", err)
 	}
 }
 
 // TestNamesAndInterconnects: a name prefix that no longer resolves for an
-// existing scope is fatal (rule 16); bindings the policy now denies are
+// existing jurisdiction is fatal (rule 16); bindings the policy now denies are
 // audited, never changed (rule 18).
 func TestNamesAndInterconnects(t *testing.T) {
 	v := setup(t)
@@ -351,9 +351,9 @@ func TestNamesAndInterconnects(t *testing.T) {
 	if err := c.names(ctx); err != nil && strings.Contains(err.Error(), x) {
 		t.Fatalf("names: %v", err)
 	}
-	c.Config.Governance.NamePrefixes = append([]governance.NamePrefix{{Scopes: []string{"dc/corp-prod/n" + x}, Prefix: "{5}-"}},
+	c.Config.Governance.NamePrefixes = append([]governance.NamePrefix{{Jurisdictions: []string{"dc/corp-prod/n" + x}, Prefix: "{5}-"}},
 		c.Config.Governance.NamePrefixes...)
-	if err := c.names(ctx); err == nil || !strings.Contains(err.Error(), "target scope dc/corp-prod/n"+x) {
+	if err := c.names(ctx); err == nil || !strings.Contains(err.Error(), "target jurisdiction dc/corp-prod/n"+x) {
 		t.Errorf("unresolvable prefix: %v", err)
 	}
 
@@ -390,9 +390,9 @@ func TestBreakGlassParties(t *testing.T) {
 	c := v.checks(t)
 	var logs bytes.Buffer
 	c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
-	c.policy.BreakGlassPolicies = []governance.BreakGlassPolicy{{Scopes: []string{"dc/*"}}}
+	c.policy.BreakGlassPolicies = []governance.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}}}
 	c.policy.Interconnects.Rules = []governance.InterconnectRule{{Name: "gap-" + v.x,
-		AdditionalApprovals: []governance.AdditionalApproval{{Name: "security", Scope: "sec/infosec"}}}}
+		AdditionalApprovals: []governance.AdditionalApproval{{Name: "security", Jurisdiction: "sec/infosec"}}}}
 	before := v.lastAudit(t)
 	if err := c.breakGlassParties(context.Background()); err != nil {
 		t.Fatal(err)
@@ -404,7 +404,7 @@ func TestBreakGlassParties(t *testing.T) {
 	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "sec/infosec") {
 		t.Errorf("logs: %s", logs.String())
 	}
-	c.policy.BreakGlassPolicies[0].Scopes = append(c.policy.BreakGlassPolicies[0].Scopes, "sec/*")
+	c.policy.BreakGlassPolicies[0].Jurisdictions = append(c.policy.BreakGlassPolicies[0].Jurisdictions, "sec/*")
 	before = v.lastAudit(t)
 	if err := c.breakGlassParties(context.Background()); err != nil {
 		t.Fatal(err)
@@ -494,15 +494,15 @@ func TestAccountDrift(t *testing.T) {
 	account := "st" + x
 	td := account + ".internal"
 	c := v.checks(t)
-	scope := "dc/corp-prod/" + account
-	static, err := governance.NewStaticExtractor(scope)
+	jurisdiction := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(jurisdiction)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Extractors[td] = static
-	src := v.source(t, "acs-"+x, scope, td)
-	tgt := v.target(t, "act-"+x, "oracle-prod", scope, "dc/corp-prod")
-	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	src := v.source(t, "acs-"+x, jurisdiction, td)
+	tgt := v.target(t, "act-"+x, "oracle-prod", jurisdiction, "dc/corp-prod")
+	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	stored := func(table string, id uuid.UUID) string {
 		t.Helper()
 		var a string
@@ -512,40 +512,40 @@ func TestAccountDrift(t *testing.T) {
 		return a
 	}
 
-	c.AcceptScopeChanges = true
-	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "`+account+`" of scope`) ||
-		!strings.Contains(err.Error(), "target act-"+x+`: account "`+account+`" of scope`) || !strings.Contains(err.Error(), "register it") {
+	c.AcceptJurisdictionChanges = true
+	if err := c.jurisdictions(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "`+account+`" of jurisdiction`) ||
+		!strings.Contains(err.Error(), "target act-"+x+`: account "`+account+`" of jurisdiction`) || !strings.Contains(err.Error(), "register it") {
 		t.Fatalf("an unregistered account, even with the flag: %v", err)
 	}
 	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
-	c.AcceptScopeChanges = false
-	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "" to "`+account+`"`) {
+	c.AcceptJurisdictionChanges = false
+	if err := c.jurisdictions(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "" to "`+account+`"`) {
 		t.Fatalf("drift without the flag: %v", err)
 	}
-	c.AcceptScopeChanges = true
+	c.AcceptJurisdictionChanges = true
 	before := v.lastAudit(t)
-	if err := c.scopes(ctx); err != nil {
+	if err := c.jurisdictions(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if a, b := stored("sources", src), stored("targets", tgt); a != account || b != account {
 		t.Errorf("accounts %q, %q", a, b)
 	}
 	var n int
-	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where id > $1 and action in ('SOURCE_RESCOPED', 'TARGET_RESCOPED')
+	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where id > $1 and action in ('SOURCE_TRANSFERRED', 'TARGET_TRANSFERRED')
 		and snapshot->>'column' = 'account' and snapshot->>'new' = $2`, before, account).Scan(&n); err != nil || n != 2 {
 		t.Errorf("audited %d (%v)", n, err)
 	}
-	c.AcceptScopeChanges = false
-	if err := c.scopes(ctx); err != nil {
+	c.AcceptJurisdictionChanges = false
+	if err := c.jurisdictions(ctx); err != nil {
 		t.Errorf("settled: %v", err)
 	}
 	// the structure removed: the resources are no longer account-managed
 	c.Config.Governance.Accounts = nil
-	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), `account "`+account+`" to ""`) {
+	if err := c.jurisdictions(ctx); err == nil || !strings.Contains(err.Error(), `account "`+account+`" to ""`) {
 		t.Fatalf("structure removed: %v", err)
 	}
-	c.AcceptScopeChanges = true
-	if err := c.scopes(ctx); err != nil {
+	c.AcceptJurisdictionChanges = true
+	if err := c.jurisdictions(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if a := stored("sources", src); a != "" {
@@ -554,28 +554,28 @@ func TestAccountDrift(t *testing.T) {
 }
 
 // Existing resources that do not fit the structure stop startup: no
-// re-scoping can fix them.
-func TestScopeForm(t *testing.T) {
+// transfer can fix them.
+func TestJurisdictionForm(t *testing.T) {
 	v := setup(t)
 	ctx := context.Background()
 	x := v.x
 	account := "st" + x
 	c := v.checks(t)
 	td := account + ".internal"
-	scope := "dc/corp-prod/" + account
-	static, err := governance.NewStaticExtractor(scope)
+	jurisdiction := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(jurisdiction)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Extractors[td] = static
 	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
-	v.source(t, "fs-"+x, scope, td)
-	v.target(t, "ft-"+x, "oracle-prod", scope, "dc/corp-prod")
-	c.AcceptScopeChanges = true
-	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}/app/{project}", TargetScope: "dc/corp-prod/{account}/data/{tenancy}"}
-	err = c.scopes(ctx)
-	if err == nil || !strings.Contains(err.Error(), "source fs-"+x+": scope "+scope+" does not conform") ||
-		!strings.Contains(err.Error(), "target ft-"+x+": scope "+scope+" does not conform") {
+	v.source(t, "fs-"+x, jurisdiction, td)
+	v.target(t, "ft-"+x, "oracle-prod", jurisdiction, "dc/corp-prod")
+	c.AcceptJurisdictionChanges = true
+	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}/app/{project}", TargetJurisdiction: "dc/corp-prod/{account}/data/{tenancy}"}
+	err = c.jurisdictions(ctx)
+	if err == nil || !strings.Contains(err.Error(), "source fs-"+x+": jurisdiction "+jurisdiction+" does not conform") ||
+		!strings.Contains(err.Error(), "target ft-"+x+": jurisdiction "+jurisdiction+" does not conform") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -587,7 +587,7 @@ func TestNamespaces(t *testing.T) {
 	x := v.x
 	account := "st" + x
 	c := v.checks(t)
-	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	declared := func(string) string { return "schema" }
 	id := v.target(t, "nt-"+x, "oracle-prod", "dc/corp-prod/"+account, "dc/corp-prod")
 	v.exec(t, `update targets set definition = '{"schema":"other"}' where id = $1`, id)

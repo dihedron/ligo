@@ -13,8 +13,8 @@
 </dl></section>{{end}}
 <h2>Sides</h2>
 <div class="table-wrap"><table>
-  <thead><tr><th>Side</th><th>Scope</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
-  <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Scope}}</td><td>{{.Basis}}</td>
+  <thead><tr><th>Side</th><th>Jurisdiction</th><th>Basis</th><th>Decision</th><th>By</th></tr></thead>
+  <tbody>{{range .Request.Sides}}<tr><td>{{.Name}}</td><td>{{.Jurisdiction}}</td><td>{{.Basis}}</td>
     <td>{{if .Decision}}<span class="{{badge .Decision}}">{{.Decision}}</span>{{else if eq $.Request.Status "PENDING"}}<span class="badge badge-warning">AWAITING</span>{{else}}<span class="badge">NOT NEEDED</span>{{end}}</td>
     <td>{{.DecidedBy}}{{with .DecidedAt}} at {{when .}}{{end}}{{with .RatifiedBy}}, ratified by {{.}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>

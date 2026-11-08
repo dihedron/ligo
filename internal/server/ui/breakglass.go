@@ -39,7 +39,7 @@ type BreakGlassForm struct {
 	Disabled                             bool   // maintenance mode
 }
 
-// breakGlassMember reports a break_glass grant on any scope: the form and
+// breakGlassMember reports a break_glass grant on any jurisdiction: the form and
 // its navigation entry are for those only.
 func breakGlassMember(gs authz.Grants) bool {
 	return slices.ContainsFunc(gs, func(g authz.Grant) bool { return g.Role == config.RoleBreakGlass })

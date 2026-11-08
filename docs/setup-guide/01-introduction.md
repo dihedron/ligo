@@ -2,7 +2,7 @@
 
 `ligo` is the SPIFFE binding lifecycle service. It keeps a catalog of **sources** (groups of client workloads, each defined by a SPIFFE ID regex in one trust domain) and **targets** (resources on a **platform**, such as a schema of a PostgreSQL database), and manages the **bindings** that say a source may use a target at one of its access levels.
 
-Every change is a **change request**, which each governance scope involved must approve. `ligo` then provisions an approved binding through a durable, three-stage pipeline of plugins, and attested workloads ask `ligo` which targets they may use and how to get their credentials.
+Every change is a **change request**, which each jurisdiction involved must approve. `ligo` then provisions an approved binding through a durable, three-stage pipeline of plugins, and attested workloads ask `ligo` which targets they may use and how to get their credentials.
 
 This guide takes you from nothing to a first working binding. *Architecture and Design* explains why `ligo` works as it does; the *Operator's Guide* covers running it.
 

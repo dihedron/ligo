@@ -3,7 +3,7 @@
   <h3>Regex</h3>
   <dl class="fields">
     <dt>Valid</dt><dd><span class="badge badge-success">yes</span></dd>
-    <dt>Scope</dt><dd>{{.Scope}}</dd>
+    <dt>Jurisdiction</dt><dd>{{.Jurisdiction}}</dd>
     {{range $id, $ok := .Matches}}<dt class="mono">{{$id}}</dt><dd>{{if $ok}}<span class="badge badge-success">matches</span>{{else}}<span class="badge badge-danger">does not match</span>{{end}}</dd>{{end}}
     {{with .Narrowing}}<dt>Change</dt><dd>{{if .Undecided}}cannot tell whether it narrows{{else if .Narrower}}<span class="badge badge-warning">narrows</span>{{with .Witness}} (no longer matches <span class="mono">{{.}}</span>){{end}}{{else}}does not narrow{{end}}
       {{with .DroppedSamples}}; samples dropped: {{range .}}<span class="mono">{{.}}</span> {{end}}{{end}}</dd>{{end}}

@@ -82,7 +82,7 @@ type Service struct {
 	TTL       time.Duration // change_request_ttl
 	Resources map[string]Resource
 	// BreakGlassRules are the request-level break-glass rules (ADR-12); the
-	// per-scope policies are the Policy's.
+	// per-jurisdiction policies are the Policy's.
 	BreakGlassRules config.BreakGlass
 }
 
@@ -222,9 +222,9 @@ func (s *Service) BreakGlass(ctx context.Context, c Caller, incident string, fil
 		if sd.Basis != BasisBreakGlass {
 			continue
 		}
-		p := s.Policy.BreakGlassPolicyFor(sd.Scope)
+		p := s.Policy.BreakGlassPolicyFor(sd.Jurisdiction)
 		if p == nil {
-			return refuse(403, "forbidden", "no break-glass policy covers %s", sd.Scope)
+			return refuse(403, "forbidden", "no break-glass policy covers %s", sd.Jurisdiction)
 		}
 		maxTTL, defaultTTL = min(maxTTL, p.MaxTTL), min(defaultTTL, p.DefaultTTL)
 	}
@@ -297,7 +297,7 @@ func (s *Service) checkOpen(ctx context.Context, tx pgx.Tx, items []filed) error
 	var policies []*governance.BreakGlassPolicy
 	for _, it := range items {
 		for _, sd := range it.r.Sides {
-			if p := s.Policy.BreakGlassPolicyFor(sd.Scope); sd.Basis == BasisBreakGlass && p != nil && !slices.Contains(policies, p) {
+			if p := s.Policy.BreakGlassPolicyFor(sd.Jurisdiction); sd.Basis == BasisBreakGlass && p != nil && !slices.Contains(policies, p) {
 				policies = append(policies, p)
 			}
 		}
@@ -305,18 +305,18 @@ func (s *Service) checkOpen(ctx context.Context, tx pgx.Tx, items []filed) error
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ligo_break_glass'))`); err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT r.id, s.scope FROM change_requests r
+	rows, err := tx.Query(ctx, `SELECT DISTINCT r.id, s.jurisdiction FROM change_requests r
 		JOIN change_request_sides s ON s.change_request_id = r.id WHERE `+OpenBreakGlass)
 	if err != nil {
 		return err
 	}
 	type open struct {
-		id    uuid.UUID
-		scope string
+		id           uuid.UUID
+		jurisdiction string
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (open, error) {
 		var o open
-		return o, row.Scan(&o.id, &o.scope)
+		return o, row.Scan(&o.id, &o.jurisdiction)
 	})
 	if err != nil {
 		return err
@@ -324,12 +324,12 @@ func (s *Service) checkOpen(ctx context.Context, tx pgx.Tx, items []filed) error
 	for _, p := range policies {
 		ids := map[uuid.UUID]bool{}
 		for _, o := range list {
-			if s.Policy.BreakGlassPolicyFor(o.scope) == p {
+			if s.Policy.BreakGlassPolicyFor(o.jurisdiction) == p {
 				ids[o.id] = true
 			}
 		}
 		if len(ids) >= p.MaxOpen {
-			return refuse(429, "break-glass-limit", "the break-glass policy of %v has %d open changes", p.Scopes, len(ids))
+			return refuse(429, "break-glass-limit", "the break-glass policy of %v has %d open changes", p.Jurisdictions, len(ids))
 		}
 	}
 	return nil
@@ -352,7 +352,7 @@ func (s *Service) System(ctx context.Context, r *Request) error {
 
 // sameAtApproval are the refusals an approval answers as filing does
 // (.specs/ligo-tenancy.md §5, §7.2); all others read validation-failed (§7.2.3).
-var sameAtApproval = []string{"account-not-registered", "account-scope-mismatch", "namespace-mismatch", "namespace-scope-mismatch"}
+var sameAtApproval = []string{"account-not-registered", "account-jurisdiction-mismatch", "namespace-mismatch", "namespace-jurisdiction-mismatch"}
 
 // Maintenance refuses a change while maintenance mode is on: the shared
 // lock makes the check race-free, as turning maintenance on waits for the
@@ -450,7 +450,7 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 			}
 			sides := make([]map[string]any, 0, len(r.Sides))
 			for _, sd := range r.Sides {
-				sides = append(sides, map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis})
+				sides = append(sides, map[string]any{"side": sd.Name, "jurisdiction": sd.Jurisdiction, "basis": sd.Basis})
 			}
 			entries = append(entries, entry(r, "CR_CREATED", r.RequestedBy, "", map[string]any{"consent": r.Consent, "sides": sides}))
 			decider := ""
@@ -461,7 +461,7 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 				}
 			}
 			// a dependent request waits for its source's (§7.2.4); it cannot be
-			// complete without it: its SOURCE side has the source's scope
+			// complete without it: its SOURCE side has the source's jurisdiction
 			if !Complete(r.Consent, r.Sides) || r.DependsOn != nil && !appliedIn(items, *r.DependsOn) {
 				continue
 			}
@@ -607,7 +607,7 @@ func (s *Service) Decline(ctx context.Context, c Caller, id uuid.UUID, side, com
 		var entries []audit.Entry
 		for _, sd := range r.Sides {
 			if sd.DecidedBy == c.ID() && sd.Decision == Declined {
-				e := entry(r, "CR_SIDE_DECLINED", c.ID(), c.ID(), map[string]any{"side": sd.Name, "scope": sd.Scope})
+				e := entry(r, "CR_SIDE_DECLINED", c.ID(), c.ID(), map[string]any{"side": sd.Name, "jurisdiction": sd.Jurisdiction})
 				if c.ByPlatform(r, sd) {
 					e = markPlatform(e)
 					entries = append(entries, e, PlatformDecision(r, sd, Declined, c.ID()))
@@ -649,10 +649,10 @@ func (s *Service) Withdraw(ctx context.Context, c Caller, id uuid.UUID, comment 
 }
 
 // Get reads a change request the caller can see (404 otherwise): every
-// scope of the request and of its sides counts (§7.2.4).
+// jurisdiction of the request and of its sides counts (§7.2.4).
 func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, error) {
 	r, err := read(ctx, s.DB, id)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !c.Grants.Sees(r.scopes()...)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !c.Grants.Sees(r.jurisdictions()...)) {
 		return nil, refuse(404, "not-found", "change request %s", id)
 	}
 	return r, err
@@ -662,7 +662,7 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 type Filter struct {
 	Status, ResourceType, ResourceName, Realm string
 	Kind                                      string // BREAK_GLASS for GET /v1/admin/break-glass
-	Scope                                     string // a pattern matched against every scope of the request
+	Jurisdiction                              string // a pattern matched against every jurisdiction of the request
 	AwaitingMe                                bool   // with a pending side the caller may decide
 	Before                                    *uuid.UUID
 	Limit                                     int
@@ -691,8 +691,8 @@ func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, boo
 			if err != nil {
 				return nil, false, err
 			}
-			if !c.Grants.Sees(r.scopes()...) || f.Scope != "" && !slices.ContainsFunc(r.scopes(), func(sc string) bool {
-				return governance.ScopeMatches(f.Scope, sc)
+			if !c.Grants.Sees(r.jurisdictions()...) || f.Jurisdiction != "" && !slices.ContainsFunc(r.jurisdictions(), func(sc string) bool {
+				return governance.JurisdictionMatches(f.Jurisdiction, sc)
 			}) {
 				continue
 			}
@@ -779,7 +779,7 @@ func (s *Service) apply(ctx context.Context, tx pgx.Tx, r *Request, res Resource
 // the resource may check more.
 func (s *Service) recheck(r *Request, res Resource) error {
 	for _, sd := range r.Sides {
-		if sd.Basis == BasisAuto && s.Policy.ApprovalRequired(sd.Scope) {
+		if sd.Basis == BasisAuto && s.Policy.ApprovalRequired(sd.Jurisdiction) {
 			return refuse(409, "governance-policy-changed", "side %s now needs an approver: file the change again", sd.Name)
 		}
 	}
@@ -805,7 +805,7 @@ func (s *Service) fail(ctx context.Context, r *Request, actor, reason string, re
 }
 
 func (s *Service) sideApproved(r *Request, sd Side, actor string) audit.Entry {
-	snap := map[string]any{"side": sd.Name, "scope": sd.Scope, "basis": sd.Basis}
+	snap := map[string]any{"side": sd.Name, "jurisdiction": sd.Jurisdiction, "basis": sd.Basis}
 	if sd.Basis == BasisDelegated {
 		snap["approvalReference"] = r.ApprovalReference
 		if r.AutomationContext != nil {
@@ -818,7 +818,7 @@ func (s *Service) sideApproved(r *Request, sd Side, actor string) audit.Entry {
 // PlatformDecision is the entry that announces a TARGET side decided through
 // ByPlatform, for the webhook to the target's account (§9.3).
 func PlatformDecision(r *Request, s Side, decision, actor string) audit.Entry {
-	return entry(r, "BINDING_TARGET_DECIDED_BY_PLATFORM", actor, actor, map[string]any{"side": s.Name, "scope": s.Scope, "decision": decision, "decidedAs": DecidedAsPlatform})
+	return entry(r, "BINDING_TARGET_DECIDED_BY_PLATFORM", actor, actor, map[string]any{"side": s.Name, "jurisdiction": s.Jurisdiction, "decision": decision, "decidedAs": DecidedAsPlatform})
 }
 
 // markPlatform adds decidedAs to a side's entry, whose snapshot is an object.
@@ -884,21 +884,21 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 		revert = r.RevertPayload
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
-		realm, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
+		realm, owner_jurisdiction, source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
 		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id)
 		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27)`,
-		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Realm), null(r.OwnerScope),
-		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
+		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Realm), null(r.OwnerJurisdiction),
+		null(r.SourceJurisdiction), null(r.TargetJurisdiction), null(r.PlatformJurisdiction), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
 		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
 		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
-		if _, err := tx.Exec(ctx, `INSERT INTO change_request_sides (change_request_id, side, scope, approval_required, basis,
+		if _, err := tx.Exec(ctx, `INSERT INTO change_request_sides (change_request_id, side, jurisdiction, approval_required, basis,
 			requested_by, cr_kind, decision, decided_by, decided_at, decision_comment)
 			VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8::varchar, CASE WHEN $8::varchar IS NULL THEN NULL ELSE now() END, $10)`,
-			r.ID, sd.Name, sd.Scope, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind(),
+			r.ID, sd.Name, sd.Jurisdiction, sd.ApprovalRequired, sd.Basis, r.RequestedBy, null(sd.Decision), null(sd.DecidedBy), r.kind(),
 			null(limit(sd.Comment))); err != nil {
 			return fmt.Errorf("changerequests: insert side %s: %w", sd.Name, err)
 		}
@@ -917,12 +917,12 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 	r := &Request{ID: id}
 	var ttl int64
 	err := q.QueryRow(ctx, `SELECT resource_type, resource_name, resource_id, operation, consent, coalesce(realm, ''),
-		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
+		coalesce(owner_jurisdiction, ''), coalesce(source_jurisdiction, ''), coalesce(target_jurisdiction, ''), coalesce(platform_jurisdiction, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
 		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id,
 		requested_at FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
-		&r.Consent, &r.Realm, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
+		&r.Consent, &r.Realm, &r.OwnerJurisdiction, &r.SourceJurisdiction, &r.TargetJurisdiction, &r.PlatformJurisdiction, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
 		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID, &r.RequestedAt)
 	if err != nil {
@@ -934,7 +934,7 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 }
 
 func loadSides(ctx context.Context, q store.Querier, id uuid.UUID) ([]Side, error) {
-	rows, err := q.Query(ctx, `SELECT side, scope, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, ''),
+	rows, err := q.Query(ctx, `SELECT side, jurisdiction, approval_required, basis, coalesce(decision::text, ''), coalesce(decided_by, ''),
 		decided_at, coalesce(decision_comment, ''), coalesce(ratified_by, ''), ratified_at, coalesce(ratification_comment, '')
 		FROM change_request_sides WHERE change_request_id = $1 ORDER BY side`, id)
 	if err != nil {
@@ -942,7 +942,7 @@ func loadSides(ctx context.Context, q store.Querier, id uuid.UUID) ([]Side, erro
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Side, error) {
 		var s Side
-		err := row.Scan(&s.Name, &s.Scope, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.DecidedAt, &s.Comment, &s.RatifiedBy,
+		err := row.Scan(&s.Name, &s.Jurisdiction, &s.ApprovalRequired, &s.Basis, &s.Decision, &s.DecidedBy, &s.DecidedAt, &s.Comment, &s.RatifiedBy,
 			&s.RatifiedAt, &s.RatificationNote)
 		return s, err
 	})

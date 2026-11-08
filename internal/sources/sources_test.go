@@ -63,7 +63,7 @@ func slug(err error) string {
 func TestValidate(t *testing.T) {
 	r := rules(t)
 	stored := source()
-	stored.Metadata.Scope, stored.Metadata.State = "cloud/fin-01/payments", "ACTIVE"
+	stored.Metadata.Jurisdiction, stored.Metadata.State = "cloud/fin-01/payments", "ACTIVE"
 	for name, tc := range map[string]struct {
 		edit   func(*Source)
 		update bool
@@ -74,15 +74,15 @@ func TestValidate(t *testing.T) {
 		"name prefix":          {func(s *Source) { s.Metadata.Name = "ledger-workers" }, false, "validation-failed"},
 		"unknown trust domain": {func(s *Source) { s.Identity.TrustDomain = "other.internal" }, false, "validation-failed"},
 		"regex (Appendix A)":   {func(s *Source) { s.Identity.SVIDRegex = `^spiffe://cloud\.internal/.*$` }, false, "validation-failed"},
-		"scope unresolvable": {func(s *Source) {
+		"jurisdiction unresolvable": {func(s *Source) {
 			s.Identity.SVIDRegex = `^spiffe://cloud\.internal/team/fin-01/sa/ledger-[0-9]+$`
 			s.Identity.SampleSPIFFEIDs = nil
-		}, false, "scope-unresolvable"},
+		}, false, "jurisdiction-unresolvable"},
 		"sample not matched (AC-60)": {func(s *Source) {
 			s.Identity.SampleSPIFFEIDs = []string{sample1, "spiffe://cloud.internal/acct/fin-01/tenant/payments/sa/other"}
 		}, false, "sample-not-matched"},
 		"sample of another domain": {func(s *Source) { s.Identity.SampleSPIFFEIDs = []string{"spiffe://prod.internal/x/y"} }, false, "sample-not-matched"},
-		"scope on create":          {func(s *Source) { s.Metadata.Scope = "cloud/fin-01/payments" }, false, "validation-failed"},
+		"jurisdiction on create":   {func(s *Source) { s.Metadata.Jurisdiction = "cloud/fin-01/payments" }, false, "validation-failed"},
 		"listed without visibleTo": {func(s *Source) { s.Visibility.Mode = "LISTED" }, false, "validation-failed"},
 		"display name too long":    {func(s *Source) { s.DisplayName = strings.Repeat("x", 129) }, false, "validation-failed"},
 		"narrowing": {func(s *Source) {
@@ -101,7 +101,7 @@ func TestValidate(t *testing.T) {
 			s := source()
 			var cur *Source
 			if tc.update {
-				s.Metadata.Scope, s.Metadata.State = stored.Metadata.Scope, "ACTIVE"
+				s.Metadata.Jurisdiction, s.Metadata.State = stored.Metadata.Jurisdiction, "ACTIVE"
 				cur = &stored
 			}
 			tc.edit(&s)
@@ -109,7 +109,7 @@ func TestValidate(t *testing.T) {
 			if slug(err) != tc.want {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
-			if err == nil && (s.Metadata.Scope != "cloud/fin-01/payments" || s.Metadata.State != "ACTIVE" || s.Visibility.Mode != "PRIVATE" || s.Kind != "Source") {
+			if err == nil && (s.Metadata.Jurisdiction != "cloud/fin-01/payments" || s.Metadata.State != "ACTIVE" || s.Visibility.Mode != "PRIVATE" || s.Kind != "Source") {
 				t.Errorf("not normalized: %+v", s)
 			}
 		})
@@ -120,7 +120,7 @@ func TestValidate(t *testing.T) {
 // (§3.10 rule 2).
 func TestWideningWitness(t *testing.T) {
 	stored := source()
-	stored.Metadata.Scope, stored.Metadata.State = "cloud/fin-01/payments", "ACTIVE"
+	stored.Metadata.Jurisdiction, stored.Metadata.State = "cloud/fin-01/payments", "ACTIVE"
 	s := stored
 	s.Identity.SVIDRegex = `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/[a-z]+-[0-9]+$`
 	_, err := rules(t).validate(&s, &stored)
@@ -149,7 +149,7 @@ func TestTransition(t *testing.T) {
 	}
 }
 
-// TestVisibility: LISTED needs scope patterns; visibleTo is only for
+// TestVisibility: LISTED needs jurisdiction patterns; visibleTo is only for
 // LISTED; the mode defaults to PRIVATE (§3.2).
 func TestVisibility(t *testing.T) {
 	for _, tc := range []struct {
@@ -173,24 +173,24 @@ func TestVisibility(t *testing.T) {
 }
 
 // Requirement 2: a source of an account lies in one of its projects.
-func TestScopeForm(t *testing.T) {
+func TestJurisdictionForm(t *testing.T) {
 	r := rules(t)
-	r.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}", TargetScope: "cloud/{account}/data/{tenancy}"}
+	r.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 	r.NamePrefixes = nil
-	for scope, want := range map[string]string{
+	for jurisdiction, want := range map[string]string{
 		"cloud/acme/app/p1":   "",
-		"cloud/acme/data/db1": "account-scope-mismatch",
-		"cloud/acme":          "account-scope-mismatch",
-		"cloud/a-b/app/p1":    "account-scope-mismatch",
+		"cloud/acme/data/db1": "account-jurisdiction-mismatch",
+		"cloud/acme":          "account-jurisdiction-mismatch",
+		"cloud/a-b/app/p1":    "account-jurisdiction-mismatch",
 	} {
-		x, err := governance.NewStaticExtractor(scope)
+		x, err := governance.NewStaticExtractor(jurisdiction)
 		if err != nil {
 			t.Fatal(err)
 		}
 		r.Extractors["cloud.internal"] = x
 		s := source()
 		if _, err := r.validate(&s, nil); slug(err) != want {
-			t.Errorf("%s: %v", scope, err)
+			t.Errorf("%s: %v", jurisdiction, err)
 		}
 	}
 }

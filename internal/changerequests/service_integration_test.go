@@ -91,12 +91,12 @@ var (
 	eve   = Caller{Principal: authz.Principal{Name: "eve"}, Grants: authz.Grants{grant(config.RoleViewer, "dc/*")}}
 )
 
-// newSource files a SOURCE CREATE in scope as alice.
-func newSource(t *testing.T, s *Service, owner *pgxpool.Pool, scope string) *Request {
+// newSource files a SOURCE CREATE in jurisdiction as alice.
+func newSource(t *testing.T, s *Service, owner *pgxpool.Pool, jurisdiction string) *Request {
 	t.Helper()
 	r := &Request{ResourceType: "SOURCE", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
-		Consent: ConsentAll, OwnerScope: scope, Payload: json.RawMessage(`{"kind":"Source","name":"x"}`)}
-	if err := s.Create(context.Background(), alice, r, []Candidate{{Side: "OWNER", Scope: scope}}, ""); err != nil {
+		Consent: ConsentAll, OwnerJurisdiction: jurisdiction, Payload: json.RawMessage(`{"kind":"Source","name":"x"}`)}
+	if err := s.Create(context.Background(), alice, r, []Candidate{{Side: "OWNER", Jurisdiction: jurisdiction}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -144,7 +144,7 @@ func TestAutoApplied(t *testing.T) {
 	}
 }
 
-// TestAC04AC05: in an approval-required scope the requester cannot approve,
+// TestAC04AC05: in an approval-required jurisdiction the requester cannot approve,
 // a stale hash leaves the request pending, and another approver applies it.
 func TestAC04AC05(t *testing.T) {
 	s, f, owner := setup(t)
@@ -245,9 +245,9 @@ func TestApproveFailures(t *testing.T) {
 func newBinding(t *testing.T, s *Service, owner *pgxpool.Pool) *Request {
 	t.Helper()
 	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
-		Consent: ConsentAll, Realm: "prod", SourceScope: payments, TargetScope: ledger, PlatformScope: "dc/corp-prod",
+		Consent: ConsentAll, Realm: "prod", SourceJurisdiction: payments, TargetJurisdiction: ledger, PlatformJurisdiction: "dc/corp-prod",
 		InterconnectRule: "cloud-to-dc", DistinctApprovers: false, Payload: json.RawMessage(`{"kind":"Binding"}`)}
-	err := s.Create(context.Background(), alice, r, []Candidate{{Side: "SOURCE", Scope: payments}, {Side: "TARGET", Scope: ledger}}, "")
+	err := s.Create(context.Background(), alice, r, []Candidate{{Side: "SOURCE", Jurisdiction: payments}, {Side: "TARGET", Jurisdiction: ledger}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestAC52(t *testing.T) {
 	s, f, owner := setup(t)
 	s.Resources["BINDING"] = f
 	r := newBinding(t, s, owner)
-	s.Policy = &governance.Policy{RequiredScopes: []string{"dc/corp-prod/*", "cloud/*"}} // tightened
+	s.Policy = &governance.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*", "cloud/*"}} // tightened
 	if _, err := s.Approve(context.Background(), bob, r.ID, r.PayloadSHA256, "", "ok"); status(err) != "governance-policy-changed" {
 		t.Fatalf("err = %v", err)
 	}
@@ -303,8 +303,8 @@ func TestBusy(t *testing.T) {
 		t.Errorf("status %s", st)
 	}
 	a := &Request{ResourceType: "SOURCE", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
-		Consent: ConsentAll, OwnerScope: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
-	err := s.Create(ctx, alice, a, []Candidate{{Side: "OWNER", Scope: payments}}, "") // complete at creation
+		Consent: ConsentAll, OwnerJurisdiction: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
+	err := s.Create(ctx, alice, a, []Candidate{{Side: "OWNER", Jurisdiction: payments}}, "") // complete at creation
 	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", a.ID) })
 	if status(err) != "binding-busy" {
 		t.Errorf("busy at creation: %v", err)
@@ -315,8 +315,8 @@ func TestBusy(t *testing.T) {
 	// AC-07a: nothing is left pending, so a retry once idle goes through
 	f.apply = nil
 	retry := &Request{ResourceType: "SOURCE", ResourceName: a.ResourceName, Operation: "CREATE",
-		Consent: ConsentAll, OwnerScope: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
-	err = s.Create(ctx, alice, retry, []Candidate{{Side: "OWNER", Scope: payments}}, "")
+		Consent: ConsentAll, OwnerJurisdiction: payments, Payload: json.RawMessage(`{"kind":"Source"}`)}
+	err = s.Create(ctx, alice, retry, []Candidate{{Side: "OWNER", Jurisdiction: payments}}, "")
 	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", retry.ID) })
 	if err != nil || retry.Status != "APPLIED" {
 		t.Errorf("retry: %s, %v", retry.Status, err)
@@ -328,14 +328,14 @@ func TestBusy(t *testing.T) {
 func TestPlatformDecision(t *testing.T) {
 	s, f, owner := setup(t)
 	s.Resources["BINDING"] = f
-	s.Policy = &governance.Policy{RequiredScopes: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
+	s.Policy = &governance.Policy{RequiredJurisdictions: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
 	ctx := context.Background()
 	const platform = "dc/corp-prod"
 	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE", Consent: ConsentAll, Realm: "prod",
-		SourceScope: "cloud/acme/app/app01", TargetScope: "cloud/globex/data/db01", PlatformScope: platform, DistinctApprovers: true,
+		SourceJurisdiction: "cloud/acme/app/app01", TargetJurisdiction: "cloud/globex/data/db01", PlatformJurisdiction: platform, DistinctApprovers: true,
 		Payload: json.RawMessage(`{"kind":"Binding"}`)}
 	filer := Caller{Principal: authz.Principal{Name: "carla"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/acme/*")}}
-	if err := s.Create(ctx, filer, r, []Candidate{{Side: "SOURCE", Scope: r.SourceScope}, {Side: "TARGET", Scope: r.TargetScope}}, ""); err != nil {
+	if err := s.Create(ctx, filer, r, []Candidate{{Side: "SOURCE", Jurisdiction: r.SourceJurisdiction}, {Side: "TARGET", Jurisdiction: r.TargetJurisdiction}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", r.ID) })

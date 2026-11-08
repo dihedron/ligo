@@ -11,7 +11,7 @@
   <div class="field"><label for="s-regex">SVID regex</label>
     <input id="s-regex" name="svidRegex" class="mono" value="{{.Source.Identity.SVIDRegex}}" required
       hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>
-    <span class="hint">Fully anchored, ^…$ (Appendix A). The tester below shows the scope, the samples it matches and the governance outcome.</span></div>
+    <span class="hint">Fully anchored, ^…$ (Appendix A). The tester below shows the jurisdiction, the samples it matches and the governance outcome.</span></div>
   <div class="field"><label for="s-samples">Sample SPIFFE IDs (one per line)</label>
     <textarea id="s-samples" name="samples" class="mono"
       hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>{{.Samples}}</textarea></div>
@@ -20,7 +20,7 @@
   <div class="field"><label for="s-desc">Description</label><textarea id="s-desc" name="description">{{.Source.Description}}</textarea></div>
   <div class="field"><label for="s-vis">Visibility</label><select id="s-vis" name="visibility">
     {{range $m := list "PRIVATE" "LISTED" "PUBLIC"}}<option{{if eq $m $.Content.Source.Visibility.Mode}} selected{{end}}>{{$m}}</option>{{end}}</select></div>
-  <div class="field"><label for="s-visto">Visible to scopes (one per line)</label><textarea id="s-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
+  <div class="field"><label for="s-visto">Visible to jurisdictions (one per line)</label><textarea id="s-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
   <div class="field"><label for="s-labels">Labels (key=value per line)</label><textarea id="s-labels" name="labels">{{.Labels}}</textarea></div>
   <div class="field"><label for="s-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="s-contacts" name="contacts">{{.Contacts}}</textarea></div>
   <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>{{if .Edit}}Submit the change{{else}}Submit the registration{{end}}</button>

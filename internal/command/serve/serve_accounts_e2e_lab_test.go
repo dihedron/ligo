@@ -17,9 +17,9 @@ import (
 
 // accountTarget files a public target of a tenancy on pg-shared, offering role
 // at the level read.
-func accountTarget(who *admin, name, scope, schema, role string) (int, map[string]any) {
+func accountTarget(who *admin, name, jurisdiction, schema, role string) (int, map[string]any) {
 	return who.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": name, "platform": "pg-shared", "scope": scope},
+		"metadata":     map[string]string{"name": name, "platform": "pg-shared", "jurisdiction": jurisdiction},
 		"definition":   map[string]string{"database": "ledger", "schema": schema},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": {role}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
@@ -117,7 +117,7 @@ func TestServeAccounts(t *testing.T) {
 	}
 	decide(t, otherFiled, map[string]*admin{"OWNER": alan})
 
-	// TN-1, TN-2: a target's schema and roles follow from its scope
+	// TN-1, TN-2: a target's schema and roles follow from its jurisdiction
 	if code, b := accountTarget(amy, "acme-wrong-"+x, "tenants/acme/data/db01", "globex_db02", "globex_db02_read"); code != http.StatusUnprocessableEntity ||
 		!strings.Contains(fmt.Sprint(b["type"]), "namespace-mismatch") {
 		t.Errorf("TN-1: %d %v", code, b)

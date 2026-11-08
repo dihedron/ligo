@@ -1,8 +1,8 @@
 // Package metrics declares ligo's Prometheus metrics, under the normative
 // names of §10.1, in one registry served on the metrics listener. Events
 // are counted where they happen, through the variables here; state is
-// read from the database at each scrape (package gauges). No metric carries a scope
-// label: the number of scopes is unbounded (§10.1).
+// read from the database at each scrape (package gauges). No metric carries a jurisdiction
+// label: the number of jurisdictions is unbounded (§10.1).
 package metrics
 
 import (

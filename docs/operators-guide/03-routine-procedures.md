@@ -28,7 +28,7 @@ Read the binding's message, fix the cause (*Error reference*), then `ligo retry 
 
 ```bash
 ligo delete binding <name> -r <revision>                 # one binding
-ligo target revoke-bindings <target> --source-scope 'cloud/*' --comment "..."   # containment
+ligo target revoke-bindings <target> --source-jurisdiction 'cloud/*' --comment "..."   # containment
 ```
 
 One owner is enough to revoke: the source's, the target's or the platform's. No other can veto it. The API stops serving it at once; the workflow then removes the store's objects, the role and any account, in that order.
@@ -57,9 +57,9 @@ To retire one, first retire its sources and targets; otherwise `409 account-in-u
 
 ### Who decides for an account
 
-Inside one account, two of its approvers decide: one for the `SOURCE` side, another for `TARGET`, when `require_distinct_approvers_across_scopes` is on. An account with one approver cannot approve its own bindings. Across accounts, each account decides its side.
+Inside one account, two of its approvers decide: one for the `SOURCE` side, another for `TARGET`, when `require_distinct_approvers_across_jurisdictions` is on. An account with one approver cannot approve its own bindings. Across accounts, each account decides its side.
 
-An approver of the platform's scope may also decide a binding's `TARGET` side, for a tenant nobody can reach. Use it sparingly: the target's account no longer consents, although it is told and can revoke alone. It never replaces the source's consent. The audit entry carries `decidedAs: PLATFORM`.
+An approver of the platform's jurisdiction may also decide a binding's `TARGET` side, for a tenant nobody can reach. Use it sparingly: the target's account no longer consents, although it is told and can revoke alone. It never replaces the source's consent. The audit entry carries `decidedAs: PLATFORM`.
 
 ## Rolling restart, and maintenance
 

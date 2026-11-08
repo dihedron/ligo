@@ -51,8 +51,8 @@ func accountName() string {
 }
 
 func withAccounts(v *sessionEnv) {
-	v.s.Config.Governance.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}",
-		TargetScope: "cloud/{account}/data/{tenancy}"}
+	v.s.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}",
+		TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 }
 
 // logBuffer takes a server's log lines while the test reads them.
@@ -116,7 +116,7 @@ func TestAccountsPage(t *testing.T) {
 
 	// in use: the trigger refuses, and the form shows why
 	src := uuid.NewV7()
-	if _, err := v.owner.Exec(context.Background(), `insert into sources (id, name, scope, account, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(context.Background(), `insert into sources (id, name, jurisdiction, account, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, $3, $4, 'prod.internal', $5, 'PRIVATE', 't', 't')`, src, "src-"+name, "cloud/"+name+"/app/p", name, `^spiffe://prod\.internal/ns/`+name+`/sa/x$`); err != nil {
 		t.Fatal(err)
 	}

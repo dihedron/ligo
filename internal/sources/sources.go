@@ -31,9 +31,9 @@ type Source struct {
 }
 
 type Metadata struct {
-	Name  string `json:"name"`
-	Scope string `json:"scope,omitempty"` // derived from the regex (§3.9)
-	State string `json:"state,omitempty"` // ACTIVE, DEPRECATED, RETIRED
+	Name         string `json:"name"`
+	Jurisdiction string `json:"jurisdiction,omitempty"` // derived from the regex (§3.9)
+	State        string `json:"state,omitempty"`        // ACTIVE, DEPRECATED, RETIRED
 }
 
 type Identity struct {
@@ -54,8 +54,8 @@ type Visibility struct {
 
 // Rules are the parts of the configuration that validate sources.
 type Rules struct {
-	// Extractors derive the scope of a regex in each trust domain that some
-	// platform accepts (§8.2 rule 15: each has a source_scopes entry).
+	// Extractors derive the jurisdiction of a regex in each trust domain that some
+	// platform accepts (§8.2 rule 15: each has a source_jurisdictions entry).
 	Extractors   map[string]*governance.Extractor
 	NamePrefixes []governance.NamePrefix
 	Regex        regexpolicy.Policy
@@ -73,13 +73,13 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 		}
 	}
 	r := &Rules{Extractors: map[string]*governance.Extractor{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Governance.Accounts}
-	for _, ss := range cfg.Governance.SourceScopes {
+	for _, ss := range cfg.Governance.SourceJurisdictions {
 		if !accepted[ss.TrustDomain] {
 			continue
 		}
 		e, err := ss.Extractor()
 		if err != nil {
-			return nil, fmt.Errorf("source_scopes %s: %w", ss.TrustDomain, err)
+			return nil, fmt.Errorf("source_jurisdictions %s: %w", ss.TrustDomain, err)
 		}
 		r.Extractors[ss.TrustDomain] = e
 	}
@@ -96,16 +96,16 @@ func invalid(format string, args ...any) *changerequests.Error {
 
 // validate runs the checks of the source pipeline that need no database
 // (§7.2.3 steps 1 to 7, §3.7) on s, a new source if cur is nil, else an
-// update of cur, and normalizes s. It returns the source's scope.
+// update of cur, and normalizes s. It returns the source's jurisdiction.
 func (r *Rules) validate(s *Source, cur *Source) (string, error) {
-	scope, err := r.validateIdentity(s, cur)
+	jurisdiction, err := r.validateIdentity(s, cur)
 	if err != nil {
 		return "", err
 	}
-	if !r.Accounts.SourceConforms(scope) {
-		return "", refuse(422, "account-scope-mismatch", "the regex's scope %s does not have the form %s", scope, r.Accounts.SourceScope)
+	if !r.Accounts.SourceConforms(jurisdiction) {
+		return "", refuse(422, "account-jurisdiction-mismatch", "the regex's jurisdiction %s does not have the form %s", jurisdiction, r.Accounts.SourceJurisdiction)
 	}
-	return scope, nil
+	return jurisdiction, nil
 }
 
 func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
@@ -117,8 +117,8 @@ func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
 		return "", invalid("metadata.name %q is not a valid name (§3.8)", s.Metadata.Name)
 	}
 	if cur == nil {
-		if s.Metadata.Scope != "" || s.Metadata.State != "" {
-			return "", invalid("metadata.scope and metadata.state are set by ligo")
+		if s.Metadata.Jurisdiction != "" || s.Metadata.State != "" {
+			return "", invalid("metadata.jurisdiction and metadata.state are set by ligo")
 		}
 		s.Metadata.State = "ACTIVE"
 	} else {
@@ -144,23 +144,23 @@ func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
 	if err != nil {
 		return "", invalid("identity.svidRegex: %v", err)
 	}
-	scope, err := extractor.SourceScope(s.Identity.SVIDRegex, td)
+	jurisdiction, err := extractor.SourceJurisdiction(s.Identity.SVIDRegex, td)
 	if err != nil {
-		return "", refuse(422, "scope-unresolvable", "the fixed beginning of identity.svidRegex resolves to no scope (§3.9)")
+		return "", refuse(422, "jurisdiction-unresolvable", "the fixed beginning of identity.svidRegex resolves to no jurisdiction (§3.9)")
 	}
 	if cur == nil {
-		if err := engine.CheckName(engine.KindSource, s.Metadata.Name, scope, r.NamePrefixes); err != nil {
+		if err := engine.CheckName(engine.KindSource, s.Metadata.Name, jurisdiction, r.NamePrefixes); err != nil {
 			return "", invalid("metadata.name: %v", err)
 		}
 	} else {
-		if s.Metadata.Scope != "" && s.Metadata.Scope != cur.Metadata.Scope || scope != cur.Metadata.Scope {
-			return "", refuse(422, "immutable-field", "the scope of the source cannot change (it is %s)", cur.Metadata.Scope)
+		if s.Metadata.Jurisdiction != "" && s.Metadata.Jurisdiction != cur.Metadata.Jurisdiction || jurisdiction != cur.Metadata.Jurisdiction {
+			return "", refuse(422, "immutable-field", "the jurisdiction of the source cannot change (it is %s)", cur.Metadata.Jurisdiction)
 		}
 		if err := r.narrows(cur.Identity.SVIDRegex, s.Identity.SVIDRegex); err != nil {
 			return "", err
 		}
 	}
-	s.Metadata.Scope = scope
+	s.Metadata.Jurisdiction = jurisdiction
 	if len(s.Identity.SampleSPIFFEIDs) > 20 {
 		return "", invalid("identity.sampleSpiffeIds: at most 20")
 	}
@@ -173,7 +173,7 @@ func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
 			return "", refuse(422, "sample-not-matched", "sample %q is not matched by identity.svidRegex in %s", sample, td)
 		}
 	}
-	return scope, r.validateMetadata(s)
+	return jurisdiction, r.validateMetadata(s)
 }
 
 // narrows checks that proposed matches a subset of what current matches
@@ -217,8 +217,8 @@ func (v *Visibility) Normalize() error {
 			return invalid("visibility.visibleTo is required with LISTED")
 		}
 		for _, p := range v.VisibleTo {
-			if !governance.ValidScopePattern(p) {
-				return invalid("visibility.visibleTo: %q is not a scope pattern", p)
+			if !governance.ValidJurisdictionPattern(p) {
+				return invalid("visibility.visibleTo: %q is not a jurisdiction pattern", p)
 			}
 		}
 	case "PRIVATE", "PUBLIC":

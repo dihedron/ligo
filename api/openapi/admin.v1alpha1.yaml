@@ -54,7 +54,7 @@ paths:
       operationId: listSources
       summary: The sources visible to the caller.
       parameters:
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - { name: trustDomain, in: query, schema: { type: string } }
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/label"
@@ -130,7 +130,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - $ref: "#/components/parameters/label"
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/pageSize"
@@ -190,7 +190,7 @@ paths:
               required: [comment]
               properties:
                 source: { type: string }
-                sourceScope: { type: string, description: "A scope pattern." }
+                sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
                 comment: { type: string }
                 approvalReference: { type: string }
       responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
@@ -221,7 +221,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - $ref: "#/components/parameters/label"
         - { name: state, in: query, description: "ACTIVE (default), or DEPRECATED to include deprecated targets.", schema: { type: string, enum: [ACTIVE, DEPRECATED] } }
         - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
@@ -277,7 +277,7 @@ paths:
         - { name: phase, in: query, schema: { type: string } }
         - { name: trustDomain, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
-        - { name: scope, in: query, description: "A scope pattern matched against any of the three scopes.", schema: { type: string } }
+        - { name: jurisdiction, in: query, description: "A jurisdiction pattern matched against any of the three jurisdictions.", schema: { type: string } }
         - { name: expiringBefore, in: query, schema: { type: string, format: date-time } }
         - { name: propagationPending, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
@@ -336,7 +336,7 @@ paths:
         - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
         - { name: resourceName, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string } }
+        - { name: jurisdiction, in: query, schema: { type: string } }
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
@@ -428,7 +428,7 @@ paths:
                 properties:
                   resourceType: { enum: [BINDING, SOURCE, TARGET] }
                   name: { type: string }
-                  scopes: { type: object, additionalProperties: { type: string } }
+                  jurisdictions: { type: object, additionalProperties: { type: string } }
                   namePrefix: { type: object, properties: { valid: { type: boolean }, detail: { type: string } } }
                   consent: { enum: [ALL, ANY] }
                   interconnect:
@@ -594,7 +594,7 @@ components:
     pageSize: { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
     pageToken: { name: pageToken, in: query, schema: { type: string } }
     q: { name: q, in: query, description: "Matched in names, display names and descriptions.", schema: { type: string } }
-    scope: { name: scope, in: query, description: "A scope pattern.", schema: { type: string } }
+    jurisdiction: { name: jurisdiction, in: query, description: "A jurisdiction pattern.", schema: { type: string } }
     state: { name: state, in: query, schema: { type: string, enum: [ACTIVE, DEPRECATED, RETIRED] } }
     label: { name: label, in: query, description: "key=value", schema: { type: string } }
     platform: { name: platform, in: query, schema: { type: string } }
@@ -638,7 +638,7 @@ components:
       type: object
       properties:
         side: { type: string, examples: [TARGET, SOURCE, OWNER, PLATFORM, "PARTY:security"] }
-        scope: { type: string }
+        jurisdiction: { type: string }
         basis: { enum: [AUTO, DELEGATED, HUMAN] }
         decision: { type: [string, "null"] }
         decidedBy: { type: string }

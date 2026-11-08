@@ -179,7 +179,7 @@ serve_cli() {
 	x="$(openssl rand -hex 4)" target="e2e-cli-ledger-$x" source="e2e-cli-src-$x" binding="e2e-cli-$x"
 	cli ligo-ops apply -f - <<YAML || die "apply the target"
 kind: Target
-metadata: {name: $target, platform: pg-ledger, scope: dc/corp-prod/ledger}
+metadata: {name: $target, platform: pg-ledger, jurisdiction: dc/corp-prod/ledger}
 definition: {database: ledger, schema: ledger}
 accessLevels: [{name: read, grants: {roles: [LEDGER_RO_ROLE]}}]
 networkFlows: [{name: ledger, purpose: DATA, protocol: TCP, destination: pg.ligo.lab, ports: [5432], tls: true, serverName: pg.ligo.lab}]
@@ -272,11 +272,11 @@ serve_unit() { sed 's|^ExecStart=/usr/bin/ligo |ExecStart=/usr/local/bin/ligo |'
 # can read its credential from the store (.specs/ligo-tenancy.md §9.4), and the
 # root is tenants/ because cloud/fin-01, of the topologies, breaks the account
 # grammar. The two forms exclude each other, as a trust domain has one extractor.
-serve_prod_scope() {
+serve_prod_jurisdiction() {
 	if [[ -n "$LAB_ACCOUNTS" ]]; then
-		echo "- { trust_domain: prod.lab, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', scope_template: 'tenants/\${1}/app/\${2}' }"
+		echo "- { trust_domain: prod.lab, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', jurisdiction_template: 'tenants/\${1}/app/\${2}' }"
 	else
-		echo '- { trust_domain: prod.lab, mode: static, scope: "dc/corp-prod" }'
+		echo '- { trust_domain: prod.lab, mode: static, jurisdiction: "dc/corp-prod" }'
 	fi
 }
 
@@ -285,15 +285,15 @@ serve_accounts_config() {
 	local base="ou=accounts,$LDAP_BASE"
 	cat <<YAML
   accounts:
-    scope: "tenants/{account}"
-    source_scope: "tenants/{account}/app/{project}"
-    target_scope: "tenants/{account}/data/{tenancy}"
+    jurisdiction: "tenants/{account}"
+    source_jurisdiction: "tenants/{account}/app/{project}"
+    target_jurisdiction: "tenants/{account}/data/{tenancy}"
     ldap_groups:
       search_base: "$base"
       roles:
-        - { group_dn: "cn=operators,ou={account},$base", role: operator, scope: "tenants/{account}/*" }
-        - { group_dn: "cn=approvers,ou={account},$base", role: approver, scope: "tenants/{account}/*" }
-        - { group_dn: "cn=approvers,ou={project},ou={account},$base", role: approver, scope: "tenants/{account}/app/{project}" }
+        - { group_dn: "cn=operators,ou={account},$base", role: operator, jurisdiction: "tenants/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},$base", role: approver, jurisdiction: "tenants/{account}/*" }
+        - { group_dn: "cn=approvers,ou={project},ou={account},$base", role: approver, jurisdiction: "tenants/{account}/app/{project}" }
 YAML
 }
 
@@ -303,8 +303,8 @@ serve_accounts_platform() {
 	cat <<YAML
       - name: pg-shared
         realm: prod
-        scope: "platform/shared"
-        target_scopes: ["tenants/*"]
+        jurisdiction: "platform/shared"
+        target_jurisdictions: ["tenants/*"]
         namespace_template: "{account}_{tenancy}"
         display_name: "Lab PostgreSQL shared by the accounts"
         allowed_source_trust_domains: [prod.lab]
@@ -392,47 +392,47 @@ admin_auth:
     group_membership_filter: "(member=%s)"
 authorization:
   bindings:
-    - { spiffe_id: "spiffe://prod.lab/ops/olga", role: operator, scopes: ["dc/corp-prod/*"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/dora", role: approver, scopes: ["dc/corp-prod/*"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/olga", role: operator, jurisdictions: ["dc/corp-prod/*"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/dora", role: approver, jurisdictions: ["dc/corp-prod/*"] }
     # the HA e2e: a second approver (AC-50), and an administrator for maintenance (AC-26)
-    - { spiffe_id: "spiffe://prod.lab/ops/sam", role: approver, scopes: ["dc/corp-prod/*"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/ada", role: admin.full_access, scopes: ["*"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/sam", role: approver, jurisdictions: ["dc/corp-prod/*"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/ada", role: admin.full_access, jurisdictions: ["*"] }
     # the topologies' e2e: two tenancies and an Information Security party (ADR-13, ADR-14)
-    - { spiffe_id: "spiffe://prod.lab/ops/paula", role: operator, scopes: ["cloud/fin-01/payments"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/pia", role: approver, scopes: ["cloud/fin-01/payments"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/hana", role: operator, scopes: ["cloud/fin-01/hr", "cloud/fin-01/ledger"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/sean", role: approver, scopes: ["sec/infosec"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/paula", role: operator, jurisdictions: ["cloud/fin-01/payments"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/pia", role: approver, jurisdictions: ["cloud/fin-01/payments"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/hana", role: operator, jurisdictions: ["cloud/fin-01/hr", "cloud/fin-01/ledger"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/sean", role: approver, jurisdictions: ["sec/infosec"] }
     # the accounts' e2e: the shared platform's approver (.specs/ligo-tenancy.md §9.3)
-    - { spiffe_id: "spiffe://prod.lab/ops/peter", role: approver, scopes: ["platform/shared"] }
-    - { spiffe_id: "spiffe://prod.lab/ops/rita", role: approver, scopes: ["tenants/*"] }   # test-accounts-chaos
+    - { spiffe_id: "spiffe://prod.lab/ops/peter", role: approver, jurisdictions: ["platform/shared"] }
+    - { spiffe_id: "spiffe://prod.lab/ops/rita", role: approver, jurisdictions: ["tenants/*"] }   # test-accounts-chaos
     - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,$LDAP_BASE", role: account_admin }
-    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
-    - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, scopes: ["*"] }
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, jurisdictions: ["*"] }
+    - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, jurisdictions: ["*"] }
     # the web UI's echo guide: carol files, dave approves (.specs/ligo-echo-target.md)
-    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,$LDAP_BASE", role: operator, scopes: ["dc/corp-prod/*"] }
-    - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, scopes: ["dc/corp-prod/*"] }
-    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, scopes: ["dc/corp-prod/*"] } # livia
+    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,$LDAP_BASE", role: operator, jurisdictions: ["dc/corp-prod/*"] }
+    - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, jurisdictions: ["dc/corp-prod/*"] }
+    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, jurisdictions: ["dc/corp-prod/*"] } # livia
   approval:
-    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/payments"$([[ -n "$LAB_ACCOUNTS" ]] && echo ', "tenants/*", "platform/*"')]
-    require_distinct_approvers_across_scopes: $([[ -n "$LAB_ACCOUNTS" ]] && echo true || echo false)
+    required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/payments"$([[ -n "$LAB_ACCOUNTS" ]] && echo ', "tenants/*", "platform/*"')]
+    require_distinct_approvers_across_jurisdictions: $([[ -n "$LAB_ACCOUNTS" ]] && echo true || echo false)
     change_request_ttl: 72h
 governance:
 $(serve_accounts_config)
-  source_scopes:
-    $(serve_prod_scope)
-    - { trust_domain: test.lab, mode: path_template, path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/', scope_template: 'cloud/\${1}/\${2}' }
+  source_jurisdictions:
+    $(serve_prod_jurisdiction)
+    - { trust_domain: test.lab, mode: path_template, path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/', jurisdiction_template: 'cloud/\${1}/\${2}' }
   interconnects:
-    default_cross_scope: deny
+    default_cross_jurisdiction: deny
     rules:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
       - { name: cloud-within-account, from: ["cloud/fin-01/*"], to: ["cloud/fin-01/*"], action: allow }
-      - { name: cloud-to-dc, from: ["cloud/fin-01/*"], to: ["dc/corp-prod/*"], action: allow, additional_approvals: [ { name: security, scope: "sec/infosec" } ] }
+      - { name: cloud-to-dc, from: ["cloud/fin-01/*"], to: ["dc/corp-prod/*"], action: allow, additional_approvals: [ { name: security, jurisdiction: "sec/infosec" } ] }
       - { name: dc-to-cloud, from: ["dc/corp-prod"], to: ["cloud/fin-01/*"], action: allow }
       - { name: accounts, from: ["tenants/*"], to: ["tenants/*"], action: allow }
 break_glass:
   min_justification_length: 20
   policies:
-    - { scopes: ["dc/corp-prod/*"], default_ttl: 1h, max_ttl: 4h, max_open: 3, warn_before: 15m }
+    - { jurisdictions: ["dc/corp-prod/*"], default_ttl: 1h, max_ttl: 4h, max_open: 3, warn_before: 15m }
 storage:
   postgres: { app_dsn_env: LIGO_APP_DSN, reader_dsn_env: LIGO_READER_DSN, dbos_dsn_env: LIGO_DBOS_DSN }
 secret_sealing:
@@ -498,7 +498,7 @@ platform_providers:
     platforms:
       - name: pg-ledger
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger"
         allowed_source_trust_domains: [prod.lab, test.lab]
         network_flows:
@@ -522,8 +522,8 @@ platform_providers:
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-cloud
         realm: prod
-        scope: "cloud/fin-01/ledger"
-        target_scopes: ["cloud/fin-01/*"]
+        jurisdiction: "cloud/fin-01/ledger"
+        target_jurisdictions: ["cloud/fin-01/*"]
         display_name: "Lab PostgreSQL ledger, owned by a tenancy"
         allowed_source_trust_domains: [prod.lab, test.lab]
         network_flows:
@@ -547,7 +547,7 @@ platform_providers:
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-dynamic
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger, credentials on demand"
         allowed_source_trust_domains: [prod.lab]
         network_flows:
@@ -571,7 +571,7 @@ platform_providers:
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-ldap
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger, accounts in the directory"
         allowed_source_trust_domains: [prod.lab]
         network_flows:
@@ -601,7 +601,7 @@ $(serve_accounts_platform "$aud" "$bao")
     platforms:   # the echo target (.specs/ligo-echo-target.md)
       - name: echo-svid
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Lab echo server, admits SVIDs"
         allowed_source_trust_domains: [prod.lab]
         identity_provider: { type: svid.v1, instance: svid-prod }
@@ -616,7 +616,7 @@ $(serve_accounts_platform "$aud" "$bao")
           allowed_endpoints: ["ligo1.ligo.lab:7101"]
       - name: echo-local
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Lab echo server, admits users with a password"
         allowed_source_trust_domains: [prod.lab]
         identity_provider: { type: target-local.v1, instance: local-prod }

@@ -23,7 +23,7 @@ type List struct {
 	Base
 	Page
 	Realm          string `long:"realm" description:"Filter by realm (targets, bindings)."`
-	Scope          string `long:"scope" description:"Filter by governance scope pattern (any scope of the resource)."`
+	Jurisdiction   string `long:"jurisdiction" description:"Filter by jurisdiction pattern (any jurisdiction of the resource)."`
 	Source         string `long:"source" description:"Bindings of this source."`
 	Target         string `long:"target" description:"Bindings of this target."`
 	Platform       string `long:"platform" description:"Filter by platform (targets, bindings)."`
@@ -38,7 +38,7 @@ type List struct {
 }
 
 func (cmd *List) Execute([]string) error {
-	q := cmd.query("realm", cmd.Realm, "scope", cmd.Scope, "source", cmd.Source, "target", cmd.Target, "platform", cmd.Platform,
+	q := cmd.query("realm", cmd.Realm, "jurisdiction", cmd.Jurisdiction, "source", cmd.Source, "target", cmd.Target, "platform", cmd.Platform,
 		"platformType", cmd.Type, "state", cmd.State, "phase", cmd.Phase, "trustDomain", cmd.TrustDomain, "expiringBefore", cmd.ExpiringBefore)
 	return cmd.get(path(cmd.Args.Kind), q, columns[strings.TrimSuffix(cmd.Args.Kind, "s")]...)
 }
@@ -116,16 +116,16 @@ type Catalog struct {
 type CatalogSearch struct {
 	Base
 	Page
-	Query     string   `short:"q" long:"query" description:"Text to match in name, display name, description and labels."`
-	Platform  string   `long:"platform" description:"Filter by platform."`
-	Type      string   `short:"t" long:"type" description:"Filter by platform type."`
-	Scope     string   `long:"scope" description:"Filter by target scope pattern."`
-	Label     []string `long:"label" description:"Filter by label key=value (repeatable)."`
-	ForSource string   `long:"for-source" description:"Only targets allowed for this source, marking those already bound."`
+	Query        string   `short:"q" long:"query" description:"Text to match in name, display name, description and labels."`
+	Platform     string   `long:"platform" description:"Filter by platform."`
+	Type         string   `short:"t" long:"type" description:"Filter by platform type."`
+	Jurisdiction string   `long:"jurisdiction" description:"Filter by target jurisdiction pattern."`
+	Label        []string `long:"label" description:"Filter by label key=value (repeatable)."`
+	ForSource    string   `long:"for-source" description:"Only targets allowed for this source, marking those already bound."`
 }
 
 func (cmd *CatalogSearch) Execute([]string) error {
-	q := cmd.query("q", cmd.Query, "platform", cmd.Platform, "platformType", cmd.Type, "scope", cmd.Scope, "forSource", cmd.ForSource)
+	q := cmd.query("q", cmd.Query, "platform", cmd.Platform, "platformType", cmd.Type, "jurisdiction", cmd.Jurisdiction, "forSource", cmd.ForSource)
 	for _, l := range cmd.Label {
 		q.Add("label", l) // shortcut: the server applies the first label only; filter the rest client-side when several are needed
 	}
@@ -226,7 +226,7 @@ func (cmd *ExecutorsList) Execute([]string) error {
 // Governance: ligo governance show|check.
 type Governance struct {
 	Show  GovernanceShow  `command:"show" description:"Show the governance policy in force and its SHA-256."`
-	Check GovernanceCheck `command:"check" description:"Evaluate a planned change: scopes, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
+	Check GovernanceCheck `command:"check" description:"Evaluate a planned change: jurisdictions, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
 }
 
 type GovernanceShow struct{ Base }
@@ -248,12 +248,12 @@ type ChangeRequest struct {
 type ChangeRequestList struct {
 	Base
 	Page
-	Status     string `long:"status" choice:"PENDING" choice:"APPLIED" choice:"REJECTED" choice:"WITHDRAWN" choice:"EXPIRED" choice:"FAILED_TO_APPLY" description:"Filter by status."`
-	Realm      string `long:"realm" description:"Filter by realm."`
-	Scope      string `long:"scope" description:"Filter by governance scope pattern (any scope of the request)."`
-	AwaitingMe bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
-	Kind       string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
-	Name       string `short:"n" long:"name" description:"Filter by resource name."`
+	Status       string `long:"status" choice:"PENDING" choice:"APPLIED" choice:"REJECTED" choice:"WITHDRAWN" choice:"EXPIRED" choice:"FAILED_TO_APPLY" description:"Filter by status."`
+	Realm        string `long:"realm" description:"Filter by realm."`
+	Jurisdiction string `long:"jurisdiction" description:"Filter by jurisdiction pattern (any jurisdiction of the request)."`
+	AwaitingMe   bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
+	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
+	Name         string `short:"n" long:"name" description:"Filter by resource name."`
 }
 
 func (cmd *ChangeRequestList) Execute([]string) error {
@@ -261,7 +261,7 @@ func (cmd *ChangeRequestList) Execute([]string) error {
 	if cmd.AwaitingMe {
 		awaiting = "true"
 	}
-	q := cmd.query("status", cmd.Status, "realm", cmd.Realm, "scope", cmd.Scope, "awaitingMe", awaiting,
+	q := cmd.query("status", cmd.Status, "realm", cmd.Realm, "jurisdiction", cmd.Jurisdiction, "awaitingMe", awaiting,
 		"resourceType", strings.ToUpper(cmd.Kind), "resourceName", cmd.Name)
 	return cmd.get(path("change-requests"), q, columns["request"]...)
 }

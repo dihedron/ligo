@@ -97,13 +97,13 @@ func (c Caller) ID() string {
 // than TARGET, so a source's consent is never removed, and for a delete only to
 // ratify a break-glass side.
 func (c Caller) ByPlatform(r *Request, s Side) bool {
-	return s.Name == "TARGET" && r.ResourceType == "BINDING" && r.PlatformScope != "" && (r.Operation != "DELETE" || s.Basis == BasisBreakGlass) &&
-		!c.Grants.CanApprove(s.Scope) && c.Grants.CanApprove(r.PlatformScope)
+	return s.Name == "TARGET" && r.ResourceType == "BINDING" && r.PlatformJurisdiction != "" && (r.Operation != "DELETE" || s.Basis == BasisBreakGlass) &&
+		!c.Grants.CanApprove(s.Jurisdiction) && c.Grants.CanApprove(r.PlatformJurisdiction)
 }
 
 // Decides reports whether c is an approver for side s of r.
 func (c Caller) Decides(r *Request, s Side) bool {
-	return c.Grants.CanApprove(s.Scope) || c.ByPlatform(r, s)
+	return c.Grants.CanApprove(s.Jurisdiction) || c.ByPlatform(r, s)
 }
 
 // DecidedAsPlatform is the audit value of a decision made through ByPlatform.
@@ -125,14 +125,14 @@ type Request struct {
 	// DependsOn is the inline source's request a binding CREATE needs.
 	DependsOn *uuid.UUID
 	// RevertsID is the break-glass change a SYSTEM_REVERT reverts.
-	RevertsID     *uuid.UUID
-	Consent       string
-	Realm         string // TARGET, BINDING
-	OwnerScope    string // SOURCE, TARGET
-	SourceScope   string // BINDING
-	TargetScope   string // BINDING
-	PlatformScope string // TARGET, BINDING
-	// InterconnectRule is the rule a cross-scope binding matched (ADR-14);
+	RevertsID            *uuid.UUID
+	Consent              string
+	Realm                string // TARGET, BINDING
+	OwnerJurisdiction    string // SOURCE, TARGET
+	SourceJurisdiction   string // BINDING
+	TargetJurisdiction   string // BINDING
+	PlatformJurisdiction string // TARGET, BINDING
+	// InterconnectRule is the rule a cross-jurisdiction binding matched (ADR-14);
 	// with one, DistinctApprovers is the rule's, else the policy's.
 	InterconnectRule  string
 	ExpectedRevision  *int64 // UPDATE, DELETE
@@ -149,16 +149,16 @@ type Request struct {
 	Sides             []Side
 }
 
-// scopes are every scope of the request and its sides, for visibility.
-func (r *Request) scopes() []string {
+// jurisdictions are every jurisdiction of the request and its sides, for visibility.
+func (r *Request) jurisdictions() []string {
 	var out []string
-	for _, s := range []string{r.OwnerScope, r.SourceScope, r.TargetScope, r.PlatformScope} {
+	for _, s := range []string{r.OwnerJurisdiction, r.SourceJurisdiction, r.TargetJurisdiction, r.PlatformJurisdiction} {
 		if s != "" {
 			out = append(out, s)
 		}
 	}
 	for _, s := range r.Sides {
-		out = append(out, s.Scope)
+		out = append(out, s.Jurisdiction)
 	}
 	return out
 }
@@ -166,7 +166,7 @@ func (r *Request) scopes() []string {
 // Side is a side of a change request (change_request_sides, §4.2).
 type Side struct {
 	Name             string // OWNER, SOURCE, TARGET, PLATFORM, PARTY:<name>
-	Scope            string
+	Jurisdiction     string
 	ApprovalRequired bool
 	Basis            string
 	Decision         string // "", APPROVED, DECLINED
@@ -181,14 +181,14 @@ type Side struct {
 // Candidate is a side a request needs, before its basis is known; Platform
 // is the platform of a target or binding, for delegation (ADR-11).
 type Candidate struct {
-	Side     string
-	Scope    string
-	Platform string
+	Side         string
+	Jurisdiction string
+	Platform     string
 }
 
 // BuildSides decides how each side is decided, once, at creation (§7.2.3
 // "Sides at creation", rules 2 and 3): AUTO when the caller acts for a side
-// whose scope does not require approval, DELEGATED when a trusted_automation
+// whose jurisdiction does not require approval, DELEGATED when a trusted_automation
 // SPIFFE principal covers it, HUMAN otherwise. A delegated side needs the
 // approval reference, matching the delegation's pattern if it has one.
 func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approvalReference string) ([]Side, error) {
@@ -222,10 +222,10 @@ func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side
 // side decides how cand is decided; g is the delegating grant of a
 // DELEGATED side.
 func side(cand Candidate, c Caller, p *governance.Policy) (s Side, g *authz.Grant) {
-	s = Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisHuman, ApprovalRequired: true}
-	if !strings.HasPrefix(cand.Side, "PARTY:") && c.Grants.ActsFor(cand.Scope, cand.Platform) && !p.ApprovalRequired(cand.Scope) {
+	s = Side{Name: cand.Side, Jurisdiction: cand.Jurisdiction, Basis: BasisHuman, ApprovalRequired: true}
+	if !strings.HasPrefix(cand.Side, "PARTY:") && c.Grants.ActsFor(cand.Jurisdiction, cand.Platform) && !p.ApprovalRequired(cand.Jurisdiction) {
 		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover // a party's approvers always decide (ADR-13 rule 6)
-	} else if g = c.Grants.Delegates(cand.Scope, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+	} else if g = c.Grants.Delegates(cand.Jurisdiction, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
 		s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
 	} else {
 		g = nil
@@ -278,17 +278,17 @@ func orNull(v json.RawMessage) json.RawMessage {
 // BreakGlassSides builds the sides of a break-glass change (§7.2.3): a side
 // the caller acts for that needs no approval is AUTO, every other side is
 // BREAK_GLASS, approved at once, and needs the break_glass role on its
-// scope.
+// jurisdiction.
 func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]Side, error) {
 	if c.Principal.SPIFFEID != "" {
 		return nil, refuse(403, "forbidden", "break-glass is for people only")
 	}
 	var sides []Side
 	for _, cand := range candidates {
-		s := Side{Name: cand.Side, Scope: cand.Scope, Basis: BasisAuto, Decision: Approved, DecidedBy: AutoApprover}
-		if !c.Grants.ActsFor(cand.Scope, cand.Platform) || p.ApprovalRequired(cand.Scope) {
-			if !c.Grants.BreakGlass(cand.Scope) {
-				return nil, refuse(403, "forbidden", "%s holds no break_glass on %s (side %s)", c.ID(), cand.Scope, cand.Side)
+		s := Side{Name: cand.Side, Jurisdiction: cand.Jurisdiction, Basis: BasisAuto, Decision: Approved, DecidedBy: AutoApprover}
+		if !c.Grants.ActsFor(cand.Jurisdiction, cand.Platform) || p.ApprovalRequired(cand.Jurisdiction) {
+			if !c.Grants.BreakGlass(cand.Jurisdiction) {
+				return nil, refuse(403, "forbidden", "%s holds no break_glass on %s (side %s)", c.ID(), cand.Jurisdiction, cand.Side)
 			}
 			s.Basis, s.ApprovalRequired, s.DecidedBy = BasisBreakGlass, true, BreakGlassApprover
 		}
@@ -298,7 +298,7 @@ func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]
 }
 
 // RatifiableSides selects the sides c ratifies, as for approval: BREAK_GLASS
-// sides not yet ratified whose scope c approves (§7.2.3 "Ratify").
+// sides not yet ratified whose jurisdiction c approves (§7.2.3 "Ratify").
 func RatifiableSides(r *Request, c Caller, side string) ([]string, error) {
 	if c.ID() == r.RequestedBy {
 		return nil, refuse(403, "four-eyes-violation", "the requester cannot ratify its own break-glass change")
@@ -371,7 +371,7 @@ func SelectSides(r *Request, c Caller, p *governance.Policy, approve bool, side 
 		if s.Basis != BasisHuman || s.Decision != "" {
 			continue
 		}
-		operator := !p.ApprovalRequired(s.Scope) && !strings.HasPrefix(s.Name, "PARTY:") && c.Grants.Operator(s.Scope)
+		operator := !p.ApprovalRequired(s.Jurisdiction) && !strings.HasPrefix(s.Name, "PARTY:") && c.Grants.Operator(s.Jurisdiction)
 		if c.Decides(r, s) || operator {
 			eligible = append(eligible, s.Name)
 		}

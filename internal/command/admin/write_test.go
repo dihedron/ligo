@@ -20,7 +20,7 @@ func manifest(t *testing.T, text string) string {
 }
 
 const pendingAnswer = `{"changeRequest":{"id":"c1","resourceType":"BINDING","resourceName":"b1","status":"PENDING","payloadSha256":"ff",
-	"sides":[{"side":"TARGET","scope":"dc/x/ledger","basis":"HUMAN","decision":null},{"side":"SOURCE","scope":"dc/x","basis":"AUTO","decision":"APPROVED"}]},"resource":null}`
+	"sides":[{"side":"TARGET","jurisdiction":"dc/x/ledger","basis":"HUMAN","decision":null},{"side":"SOURCE","jurisdiction":"dc/x","basis":"AUTO","decision":"APPROVED"}]},"resource":null}`
 
 // TestReadManifest: YAML documents and JSON arrays, sorted Source, Target,
 // Binding, without apiVersion, and without kind for bindings; errors name
@@ -97,7 +97,7 @@ accessLevel: read
 		t.Errorf("binding body: %s", b)
 	}
 	for _, want := range []string{"applied t1: change request c0 APPLIED", "revision 1", "applied b1: change request c1 PENDING",
-		`awaiting side TARGET (scope dc/x/ledger): ligo cr approve c1 --sha256 ff --side TARGET -m "<comment>"`} {
+		`awaiting side TARGET (jurisdiction dc/x/ledger): ligo cr approve c1 --sha256 ff --side TARGET -m "<comment>"`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
@@ -137,7 +137,7 @@ func TestWriteCommands(t *testing.T) {
 		"/v1/admin/sources/s1/retire":                     {applied},
 		"/v1/admin/bindings/b1/retry":                     {`{"binding":{"metadata":{"name":"b1"},"status":{"phase":"PROVISIONING"}}}`},
 		"/v1/admin/bindings/b1/rotate":                    {`{"binding":{"metadata":{"name":"b1"}}}`},
-		"/v1/admin/sources/test":                          {`{"scope":"dc/x"}`},
+		"/v1/admin/sources/test":                          {`{"jurisdiction":"dc/x"}`},
 		"/v1/admin/sources/s1/deprecate":                  {applied},
 		"/v1/admin/targets/t1/reactivate":                 {applied},
 		"/v1/admin/targets/t1/access-levels/write/retire": {applied},
@@ -239,7 +239,7 @@ func TestWriteCommands(t *testing.T) {
 		t.Errorf("recover confirmed: %v", err)
 	}
 	if err := (&TargetRevoke{Base: b, Comment: "x", Args: NameArg{"t1"}}).Execute(nil); err == nil {
-		t.Error("revoke-bindings without --source or --source-scope")
+		t.Error("revoke-bindings without --source or --source-jurisdiction")
 	}
 	if err := (&BreakGlassApply{Base: b, File: manifest(t, "{kind: Target, metadata: {name: t}}\n")}).Execute(nil); err == nil {
 		t.Error("break-glass apply of a target")

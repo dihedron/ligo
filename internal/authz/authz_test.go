@@ -42,7 +42,7 @@ func ldap(names ...string) Principal {
 func TestViewer(t *testing.T) {
 	g := authorizer(t).For(ldap("ligo-viewers"))
 	if !g.Sees("dc/corp-prod") || !g.Sees("cloud/fin-01/payments") {
-		t.Error("viewer on * does not see every scope")
+		t.Error("viewer on * does not see every jurisdiction")
 	}
 	if g.ActsFor("dc/corp-prod", "") || g.CanApprove("dc/corp-prod") {
 		t.Error("viewer acts or approves")
@@ -52,20 +52,20 @@ func TestViewer(t *testing.T) {
 	}
 }
 
-func TestOperatorScopes(t *testing.T) {
+func TestOperatorJurisdictions(t *testing.T) {
 	a := authorizer(t)
 	ledger := a.For(ldap("ledger-dbas"))
 	if !ledger.ActsFor("dc/corp-prod/ledger", "oracle-prod") || ledger.ActsFor("dc/corp-prod", "") || ledger.ActsFor("dc/corp-prod/orders", "") {
-		t.Error("ledger operator scopes")
+		t.Error("ledger operator jurisdictions")
 	}
 	if !ledger.Sees("dc/corp-prod/ledger") || ledger.Sees("dc/corp-prod") {
 		t.Error("ledger operator visibility")
 	}
 	prod := a.For(ldap("ligo-operators-prod"))
 	if !prod.ActsFor("dc/corp-prod", "") || prod.ActsFor("dc/corp-prod/ledger", "") {
-		t.Error("an exact pattern must not cover the scopes below it")
+		t.Error("an exact pattern must not cover the jurisdictions below it")
 	}
-	// a binding is visible through any of its scopes (§7.2.2)
+	// a binding is visible through any of its jurisdictions (§7.2.2)
 	if !prod.Sees("cloud/fin-01/payments", "dc/corp-prod/ledger", "dc/corp-prod") {
 		t.Error("platform owner does not see a binding on its platform")
 	}
@@ -98,7 +98,7 @@ func TestTrustedAutomation(t *testing.T) {
 		t.Error("delegation outside its platforms")
 	}
 	if g.Delegates("cloud/fin-01/payments", "oracle-prod") != nil {
-		t.Error("delegation outside its scopes")
+		t.Error("delegation outside its jurisdictions")
 	}
 	if !g.ActsFor("dc/corp-prod/ledger", "oracle-prod") || !g.ActsFor("dc/corp-prod/ledger", "") || g.CanApprove("dc/corp-prod/ledger") {
 		t.Error("trusted_automation operator rights")
@@ -116,7 +116,7 @@ func TestTrustedAutomation(t *testing.T) {
 func TestBreakGlassAlone(t *testing.T) {
 	g := authorizer(t).For(ldap("ligo-breakglass-prod"))
 	if !g.BreakGlass("dc/corp-prod/ledger") || g.BreakGlass("cloud/fin-01/payments") {
-		t.Error("break_glass scopes")
+		t.Error("break_glass jurisdictions")
 	}
 	if g.Sees("dc/corp-prod/ledger") || g.ActsFor("dc/corp-prod/ledger", "") {
 		t.Error("break_glass alone grants visibility or operator rights")
@@ -124,9 +124,9 @@ func TestBreakGlassAlone(t *testing.T) {
 }
 
 func TestFullAccess(t *testing.T) {
-	a := authorizer(t, config.RoleBinding{LDAPGroupDN: "cn=ligo-admins" + groups, Role: config.RoleFullAccess, Scopes: []string{"*"}})
+	a := authorizer(t, config.RoleBinding{LDAPGroupDN: "cn=ligo-admins" + groups, Role: config.RoleFullAccess, Jurisdictions: []string{"*"}})
 	g := a.For(ldap("ligo-admins"))
-	if !g.FullAccess() || !g.ActsFor("sec/infosec", "x") || !g.CanApprove("dc/corp-prod/ledger") || !g.Sees("any/scope") {
+	if !g.FullAccess() || !g.ActsFor("sec/infosec", "x") || !g.CanApprove("dc/corp-prod/ledger") || !g.Sees("any/jurisdiction") {
 		t.Error("admin.full_access")
 	}
 	if g.BreakGlass("dc/corp-prod") {
@@ -137,14 +137,14 @@ func TestFullAccess(t *testing.T) {
 	}
 }
 
-// TestVisible: a resource is visible through a role on its scopes, or
+// TestVisible: a resource is visible through a role on its jurisdictions, or
 // beyond them as its visibility says (§7.2.4).
 func TestVisible(t *testing.T) {
-	gs := Grants{{Role: config.RoleOperator, Scopes: []string{"dc/corp-prod/ledger"}}}
+	gs := Grants{{Role: config.RoleOperator, Jurisdictions: []string{"dc/corp-prod/ledger"}}}
 	for _, tc := range []struct {
-		scope, mode string
-		visibleTo   []string
-		want        bool
+		jurisdiction, mode string
+		visibleTo          []string
+		want               bool
 	}{
 		{"dc/corp-prod/ledger", "PRIVATE", nil, true},
 		{"cloud/fin-01/payments", "PRIVATE", nil, false},
@@ -152,11 +152,11 @@ func TestVisible(t *testing.T) {
 		{"cloud/fin-01/payments", "LISTED", []string{"dc/corp-test/*"}, false},
 		{"cloud/fin-01/payments", "PUBLIC", nil, true},
 	} {
-		if got := gs.Visible([]string{tc.scope}, tc.mode, tc.visibleTo); got != tc.want {
+		if got := gs.Visible([]string{tc.jurisdiction}, tc.mode, tc.visibleTo); got != tc.want {
 			t.Errorf("%+v: %t", tc, got)
 		}
 	}
-	if (Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}).Visible([]string{"x"}, "PUBLIC", nil) {
+	if (Grants{{Role: config.RoleBreakGlass, Jurisdictions: []string{"*"}}}).Visible([]string{"x"}, "PUBLIC", nil) {
 		t.Error("break_glass alone sees a PUBLIC resource")
 	}
 }
@@ -167,41 +167,41 @@ func TestAccountAdmin(t *testing.T) {
 	if !admin.AccountAdmin() {
 		t.Error("account_admin is no account admin")
 	}
-	if !(Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}).AccountAdmin() {
+	if !(Grants{{Role: config.RoleFullAccess, Jurisdictions: []string{"*"}}}).AccountAdmin() {
 		t.Error("admin.full_access includes account_admin")
 	}
-	if (Grants{{Role: config.RoleOperator, Scopes: []string{"*"}}}).AccountAdmin() {
+	if (Grants{{Role: config.RoleOperator, Jurisdictions: []string{"*"}}}).AccountAdmin() {
 		t.Error("an operator is no account admin")
 	}
 	if admin.Viewer() {
 		t.Error("account_admin alone reads resources")
 	}
 	if admin.Sees("cloud/acme") || admin.ActsFor("cloud/acme", "") || admin.CanApprove("cloud/acme") || admin.Operator("cloud/acme") {
-		t.Error("account_admin alone reaches a scope")
+		t.Error("account_admin alone reaches a jurisdiction")
 	}
 	if admin.Visible([]string{"cloud/acme"}, "PUBLIC", nil) {
 		t.Error("account_admin alone sees PUBLIC resources")
 	}
 }
 
-func TestInScopes(t *testing.T) {
+func TestInJurisdictions(t *testing.T) {
 	const account = "cloud/acme/*"
 	for _, c := range []struct {
 		gs   Grants
 		want bool
 	}{
-		{Grants{{Role: config.RoleViewer, Scopes: []string{"*"}}}, true},
-		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/*"}}}, true},
-		{Grants{{Role: config.RoleApprover, Scopes: []string{"cloud/acme/*"}}}, true},
-		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acme/app/p1"}}}, true},
-		{Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}, true},
-		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/globex/*"}}}, false},
-		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acmesub/*"}}}, false},
-		{Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}, false},
+		{Grants{{Role: config.RoleViewer, Jurisdictions: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Jurisdictions: []string{"cloud/*"}}}, true},
+		{Grants{{Role: config.RoleApprover, Jurisdictions: []string{"cloud/acme/*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Jurisdictions: []string{"cloud/acme/app/p1"}}}, true},
+		{Grants{{Role: config.RoleFullAccess, Jurisdictions: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Jurisdictions: []string{"cloud/globex/*"}}}, false},
+		{Grants{{Role: config.RoleOperator, Jurisdictions: []string{"cloud/acmesub/*"}}}, false},
+		{Grants{{Role: config.RoleBreakGlass, Jurisdictions: []string{"*"}}}, false},
 		{Grants{{Role: config.RoleAccountAdmin}}, false},
 		{nil, false},
 	} {
-		if got := c.gs.InScopes(account); got != c.want {
+		if got := c.gs.InJurisdictions(account); got != c.want {
 			t.Errorf("%+v: %v", c.gs, got)
 		}
 	}
@@ -211,8 +211,8 @@ func TestInScopes(t *testing.T) {
 // account only while that account is active, added to the static bindings.
 func TestAccountGroups(t *testing.T) {
 	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=corp", Roles: []governance.AccountRole{
-		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Scope: "cloud/{account}/*"},
-		{GroupDN: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Scope: "cloud/{account}/app/{project}"},
+		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/*"},
+		{GroupDN: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/app/{project}"},
 	}}).Compile()
 	if err != nil {
 		t.Fatal(err)

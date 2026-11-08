@@ -42,7 +42,9 @@ func caller(name string, grants ...authz.Grant) changerequests.Caller {
 	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: grants}
 }
 
-func role(r string, scopes ...string) authz.Grant { return authz.Grant{Role: r, Scopes: scopes} }
+func role(r string, jurisdictions ...string) authz.Grant {
+	return authz.Grant{Role: r, Jurisdictions: jurisdictions}
+}
 
 var (
 	cloudOp   = caller("carla", role(config.RoleOperator, "cloud/fin-01/*"))
@@ -106,16 +108,16 @@ func newWorld(t *testing.T, o *pgxpool.Pool) *world {
 	x := uuid.NewV7().String()[24:]
 	w := &world{suffix: x, cloudSrc: "fin-01-payments-src-" + x, dcSrc: "dc-src-" + x, testSrc: "test-src-" + x, fin02Src: "fin-02-x-src-" + x,
 		ledger: "ledger-" + x, dcShared: "dc-shared-" + x, cloudTgt: "cloud-tgt-" + x, ledgerID: uuid.NewV7()}
-	sources := []struct{ name, scope, td, regex, vis, to string }{
+	sources := []struct{ name, jurisdiction, td, regex, vis, to string }{
 		{w.cloudSrc, "cloud/fin-01/payments", "cloud.internal", `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + x + `$`, "LISTED", `["dc/corp-prod/*"]`},
 		{w.dcSrc, "dc/corp-prod", "prod.internal", `^spiffe://prod\.internal/ns/payments/sa/` + x + `$`, "PUBLIC", "[]"},
 		{w.testSrc, "dc/corp-test", "test.internal", `^spiffe://test\.internal/ns/payments/sa/` + x + `$`, "PUBLIC", "[]"},
 		{w.fin02Src, "cloud/fin-02/x", "cloud.internal", `^spiffe://cloud\.internal/acct/fin-02/tenant/x/sa/` + x + `$`, "PUBLIC", "[]"},
 	}
 	targets := []struct {
-		id                   uuid.UUID
-		name, platform, typ  string
-		scope, platformScope string
+		id                                 uuid.UUID
+		name, platform, typ                string
+		jurisdiction, platformJurisdiction string
 	}{
 		{w.ledgerID, w.ledger, "oracle-prod", "oracle.v1", "dc/corp-prod/ledger", "dc/corp-prod"},
 		{uuid.NewV7(), w.dcShared, "oracle-prod", "oracle.v1", "dc/corp-prod", "dc/corp-prod"},
@@ -123,14 +125,14 @@ func newWorld(t *testing.T, o *pgxpool.Pool) *world {
 	}
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
 		for _, s := range sources {
-			if _, err := tx.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, visible_to, created_by, updated_by)
-				values ($1, $2, $3, $4, $5, $6, $7::jsonb, 't', 't')`, uuid.NewV7(), s.name, s.scope, s.td, s.regex, s.vis, s.to); err != nil {
+			if _, err := tx.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, visible_to, created_by, updated_by)
+				values ($1, $2, $3, $4, $5, $6, $7::jsonb, 't', 't')`, uuid.NewV7(), s.name, s.jurisdiction, s.td, s.regex, s.vis, s.to); err != nil {
 				return err
 			}
 		}
 		for _, tg := range targets {
-			if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
-				values ($1, $2, $3, $4, 'prod', $5, $6, '{"schema":"LEDGER_APP"}', 'PUBLIC', 't', 't')`, tg.id, tg.name, tg.platform, tg.typ, tg.scope, tg.platformScope); err != nil {
+			if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
+				values ($1, $2, $3, $4, 'prod', $5, $6, '{"schema":"LEDGER_APP"}', 'PUBLIC', 't', 't')`, tg.id, tg.name, tg.platform, tg.typ, tg.jurisdiction, tg.platformJurisdiction); err != nil {
 				return err
 			}
 			for _, l := range []struct{ name, grants, privileges string }{
@@ -274,7 +276,7 @@ func TestApplied(t *testing.T) {
 	}
 }
 
-// TestAC47: a target owner offering a binding to another scope's source
+// TestAC47: a target owner offering a binding to another jurisdiction's source
 // waits for the source side; declining it rejects the request.
 func TestAC47(t *testing.T) {
 	s, o, w, _ := setup(t)
@@ -409,7 +411,7 @@ func TestAC52(t *testing.T) {
 	p := example(t).Policy()
 	for i := range p.Interconnects.Rules {
 		if p.Interconnects.Rules[i].Name == "cloud-to-dc" {
-			p.Interconnects.Rules[i].AdditionalApprovals = append(p.Interconnects.Rules[i].AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Scope: "sec/privacy"})
+			p.Interconnects.Rules[i].AdditionalApprovals = append(p.Interconnects.Rules[i].AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
 		}
 	}
 	s.Requests.Policy = p
@@ -483,7 +485,7 @@ func active(t *testing.T, s *Service, o *pgxpool.Pool, by changerequests.Caller,
 }
 
 // TestRevoke: either owner, or the platform owner, revokes alone with
-// consent ANY; a side in a self-service scope revokes at once; the binding
+// consent ANY; a side in a self-service jurisdiction revokes at once; the binding
 // is DELETING with its active snapshot cleared (ADR-13 rules 4 and 5).
 func TestRevoke(t *testing.T) {
 	s, o, w, _ := setup(t)
@@ -636,7 +638,7 @@ func TestAC50(t *testing.T) {
 // and its children, for oracle-prod only (ADR-11).
 var automation = changerequests.Caller{
 	Principal: authz.Principal{SPIFFEID: "spiffe://prod.internal/ns/automation-prod/sa/awx-runner"},
-	Grants: authz.Grants{{Role: config.RoleTrustedAutomation, Scopes: []string{"dc/corp-prod/*"}, Platforms: []string{"oracle-prod"},
+	Grants: authz.Grants{{Role: config.RoleTrustedAutomation, Jurisdictions: []string{"dc/corp-prod/*"}, Platforms: []string{"oracle-prod"},
 		ApprovalReference: regexp.MustCompile(`^CHG[0-9]{7}$`)}},
 }
 
@@ -651,12 +653,12 @@ func ledgerWorld(t *testing.T, s *Service, o *pgxpool.Pool, w *world) (source, o
 	s.Rules.Platforms[p.Name] = p
 	target := uuid.NewV7()
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+		if _, err := tx.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
 			values ($1, $2, 'dc/corp-prod/ledger', 'prod.internal', $3, 't', 't')`, uuid.NewV7(), source,
 			`^spiffe://prod\.internal/ns/ledger/sa/`+w.suffix+`$`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+		if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 			values ($1, $2, 'oracle-prod-2', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, target, other); err != nil {
 			return err
 		}
@@ -670,7 +672,7 @@ func ledgerWorld(t *testing.T, s *Service, o *pgxpool.Pool, w *world) (source, o
 	return source, other
 }
 
-// TestAC27: a trusted automation files a same-scope binding with its change
+// TestAC27: a trusted automation files a same-jurisdiction binding with its change
 // reference: the side is decided by delegation and provisioning starts.
 func TestAC27(t *testing.T) {
 	s, o, w, _ := setup(t)
@@ -744,7 +746,7 @@ func TestSourceNotExact(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
 	wide := "wide-src-" + w.suffix
-	if _, err := o.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := o.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), wide, `^spiffe://prod\.internal/ns/`+w.suffix+`/sa/[a-z]+$`); err != nil {
 		t.Fatal(err)
 	}

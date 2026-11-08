@@ -17,20 +17,20 @@ const (
 	tenancy = "{tenancy}"
 )
 
-// accountValueRE is narrower than a scope segment on purpose: with no "-",
+// accountValueRE is narrower than a jurisdiction segment on purpose: with no "-",
 // and no "_" in a value, a namespace such as {account}_{tenancy} is injective.
 var accountValueRE = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 
 // ValidAccountValue reports whether v may stand for a placeholder.
 func ValidAccountValue(v string) bool { return accountValueRE.MatchString(v) }
 
-// Accounts is the structure of account-managed scopes and of their LDAP
+// Accounts is the structure of account-managed jurisdictions and of their LDAP
 // groups; absent, ligo has no accounts.
 type Accounts struct {
-	Scope       string        `yaml:"scope"`
-	SourceScope string        `yaml:"source_scope"`
-	TargetScope string        `yaml:"target_scope"`
-	LDAPGroups  AccountGroups `yaml:"ldap_groups"`
+	Jurisdiction       string        `yaml:"jurisdiction"`
+	SourceJurisdiction string        `yaml:"source_jurisdiction"`
+	TargetJurisdiction string        `yaml:"target_jurisdiction"`
+	LDAPGroups         AccountGroups `yaml:"ldap_groups"`
 }
 
 // AccountGroups derives roles from the directory, one rule for all accounts.
@@ -39,18 +39,18 @@ type AccountGroups struct {
 	Roles      []AccountRole `yaml:"roles"`
 }
 
-// AccountRole gives Role on Scope to the members of the groups GroupDN
+// AccountRole gives Role on Jurisdiction to the members of the groups GroupDN
 // describes.
 type AccountRole struct {
-	GroupDN string `yaml:"group_dn"`
-	Role    string `yaml:"role"`
-	Scope   string `yaml:"scope"`
+	GroupDN      string `yaml:"group_dn"`
+	Role         string `yaml:"role"`
+	Jurisdiction string `yaml:"jurisdiction"`
 }
 
-// MatchScope matches scope against template, segment by segment, and returns
+// MatchJurisdiction matches jurisdiction against template, segment by segment, and returns
 // the placeholders' values; both must have the same number of segments.
-func MatchScope(template, scope string) (map[string]string, bool) {
-	ts, ss := strings.Split(template, "/"), strings.Split(scope, "/")
+func MatchJurisdiction(template, jurisdiction string) (map[string]string, bool) {
+	ts, ss := strings.Split(template, "/"), strings.Split(jurisdiction, "/")
 	if len(ts) != len(ss) {
 		return nil, false
 	}
@@ -78,15 +78,15 @@ func ExpandTemplate(template string, values map[string]string) string {
 	return strings.NewReplacer(pairs...).Replace(template)
 }
 
-// AccountOf returns the account of an account-managed scope: one that matches
-// Scope or lies below it, on its literal segments. The value is not checked
+// AccountOf returns the account of an account-managed jurisdiction: one that matches
+// Jurisdiction or lies below it, on its literal segments. The value is not checked
 // against the grammar, so that "cloud/a-b" reads as an account no registry
-// holds and is refused, not as a scope that needs no account.
-func (a *Accounts) AccountOf(scope string) (string, bool) {
+// holds and is refused, not as a jurisdiction that needs no account.
+func (a *Accounts) AccountOf(jurisdiction string) (string, bool) {
 	if a == nil {
 		return "", false
 	}
-	ts, ss := strings.Split(a.Scope, "/"), strings.Split(scope, "/")
+	ts, ss := strings.Split(a.Jurisdiction, "/"), strings.Split(jurisdiction, "/")
 	if len(ss) < len(ts) {
 		return "", false
 	}
@@ -102,35 +102,35 @@ func (a *Accounts) AccountOf(scope string) (string, bool) {
 	return value, true
 }
 
-// conforms reports whether scope has the form of template, when it is
+// conforms reports whether jurisdiction has the form of template, when it is
 // account-managed at all.
-func (a *Accounts) conforms(template, scope string) bool {
-	if _, managed := a.AccountOf(scope); !managed {
+func (a *Accounts) conforms(template, jurisdiction string) bool {
+	if _, managed := a.AccountOf(jurisdiction); !managed {
 		return true
 	}
-	_, ok := MatchScope(template, scope)
+	_, ok := MatchJurisdiction(template, jurisdiction)
 	return ok
 }
 
-// SourceConforms reports whether a source may have scope: outside accounts,
-// or in the form of SourceScope.
-func (a *Accounts) SourceConforms(scope string) bool {
-	return a == nil || a.conforms(a.SourceScope, scope)
+// SourceConforms reports whether a source may have jurisdiction: outside accounts,
+// or in the form of SourceJurisdiction.
+func (a *Accounts) SourceConforms(jurisdiction string) bool {
+	return a == nil || a.conforms(a.SourceJurisdiction, jurisdiction)
 }
 
-// TargetConforms reports whether a target may have scope: outside accounts,
-// or in the form of TargetScope.
-func (a *Accounts) TargetConforms(scope string) bool {
-	return a == nil || a.conforms(a.TargetScope, scope)
+// TargetConforms reports whether a target may have jurisdiction: outside accounts,
+// or in the form of TargetJurisdiction.
+func (a *Accounts) TargetConforms(jurisdiction string) bool {
+	return a == nil || a.conforms(a.TargetJurisdiction, jurisdiction)
 }
 
-// NamespaceOf expands template with the values of a target's scope; false if
-// the scope does not have the form of TargetScope.
-func (a *Accounts) NamespaceOf(template, scope string) (string, bool) {
+// NamespaceOf expands template with the values of a target's jurisdiction; false if
+// the jurisdiction does not have the form of TargetJurisdiction.
+func (a *Accounts) NamespaceOf(template, jurisdiction string) (string, bool) {
 	if a == nil {
 		return "", false
 	}
-	values, ok := MatchScope(a.TargetScope, scope)
+	values, ok := MatchJurisdiction(a.TargetJurisdiction, jurisdiction)
 	if !ok {
 		return "", false
 	}
@@ -141,11 +141,11 @@ func (a *Accounts) NamespaceOf(template, scope string) (string, bool) {
 var namespacePlaceholderRE = regexp.MustCompile(`\{[^{}]*\}`)
 
 // CheckNamespaceTemplate refuses a template that two tenancies could share: it
-// must use each placeholder of TargetScope once, and what separates two of
+// must use each placeholder of TargetJurisdiction once, and what separates two of
 // them must hold a character that values cannot.
 func (a *Accounts) CheckNamespaceTemplate(template string) error {
 	var want []string
-	for _, s := range strings.Split(a.TargetScope, "/") {
+	for _, s := range strings.Split(a.TargetJurisdiction, "/") {
 		if isPlaceholder(s) {
 			want = append(want, s)
 		}
@@ -155,7 +155,7 @@ func (a *Accounts) CheckNamespaceTemplate(template string) error {
 	for i, l := range locations {
 		name := template[l[0]:l[1]]
 		if !slices.Contains(want, name) || seen[name] {
-			return fmt.Errorf("namespace template %q: %s must be a placeholder of %q, used once", template, name, a.TargetScope)
+			return fmt.Errorf("namespace template %q: %s must be a placeholder of %q, used once", template, name, a.TargetJurisdiction)
 		}
 		seen[name] = true
 		if i > 0 && !strings.ContainsFunc(template[locations[i-1][1]:l[0]], outsideValues) {
@@ -170,27 +170,27 @@ func (a *Accounts) CheckNamespaceTemplate(template string) error {
 
 func outsideValues(r rune) bool { return (r < 'a' || r > 'z') && (r < '0' || r > '9') }
 
-// SampleScope is the account root for an example account, to check what
+// SampleJurisdiction is the account root for an example account, to check what
 // patterns cover: only "*"-ended patterns above the root can cover it.
-func (a *Accounts) SampleScope() string {
-	return ExpandTemplate(a.Scope, map[string]string{account: "zzzsample"})
+func (a *Accounts) SampleJurisdiction() string {
+	return ExpandTemplate(a.Jurisdiction, map[string]string{account: "zzzsample"})
 }
 
 // Validate checks the structure itself (§8.2 rule 16).
 func (a *Accounts) Validate() error {
 	errs := []error{
-		checkScopeTemplate("scope", a.Scope, []string{account}, []string{account}),
-		checkScopeTemplate("source_scope", a.SourceScope, []string{account, project}, []string{account, project}),
-		checkScopeTemplate("target_scope", a.TargetScope, []string{account, tenancy}, []string{account, tenancy}),
+		checkJurisdictionTemplate("jurisdiction", a.Jurisdiction, []string{account}, []string{account}),
+		checkJurisdictionTemplate("source_jurisdiction", a.SourceJurisdiction, []string{account, project}, []string{account, project}),
+		checkJurisdictionTemplate("target_jurisdiction", a.TargetJurisdiction, []string{account, tenancy}, []string{account, tenancy}),
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	if !below(a.Scope, a.SourceScope) || !below(a.Scope, a.TargetScope) {
-		errs = append(errs, fmt.Errorf("source_scope and target_scope must lie below scope %q", a.Scope))
+	if !below(a.Jurisdiction, a.SourceJurisdiction) || !below(a.Jurisdiction, a.TargetJurisdiction) {
+		errs = append(errs, fmt.Errorf("source_jurisdiction and target_jurisdiction must lie below jurisdiction %q", a.Jurisdiction))
 	}
-	if templatesOverlap(a.SourceScope, a.TargetScope) {
-		errs = append(errs, fmt.Errorf("source_scope %q and target_scope %q overlap: a project and a tenancy of one name would be one scope", a.SourceScope, a.TargetScope))
+	if templatesOverlap(a.SourceJurisdiction, a.TargetJurisdiction) {
+		errs = append(errs, fmt.Errorf("source_jurisdiction %q and target_jurisdiction %q overlap: a project and a tenancy of one name would be one jurisdiction", a.SourceJurisdiction, a.TargetJurisdiction))
 	}
 	errs = append(errs, a.LDAPGroups.validate(a))
 	return errors.Join(errs...)
@@ -219,7 +219,7 @@ func (g *AccountGroups) validate(a *Accounts) error {
 			}
 			depths[name] = depth
 		}
-		errs = append(errs, checkRoleScope(where, r.Scope, a.Scope, found))
+		errs = append(errs, checkRoleJurisdiction(where, r.Jurisdiction, a.Jurisdiction, found))
 	}
 	return errors.Join(errs...)
 }
@@ -261,30 +261,30 @@ func dnPlaceholders(groupDN string, base *ldap.DN) (map[string]int, error) {
 	return found, nil
 }
 
-// checkRoleScope checks a rule's scope, which may end in "/*": it lies at or
+// checkRoleJurisdiction checks a rule's jurisdiction, which may end in "/*": it lies at or
 // below the account's root and uses only placeholders of its group DN.
-func checkRoleScope(where, scope, root string, inDN map[string]int) error {
-	path := strings.TrimSuffix(scope, "/*")
-	var inScope []string
+func checkRoleJurisdiction(where, jurisdiction, root string, inDN map[string]int) error {
+	path := strings.TrimSuffix(jurisdiction, "/*")
+	var inJurisdiction []string
 	for k := range inDN {
-		inScope = append(inScope, k)
+		inJurisdiction = append(inJurisdiction, k)
 	}
-	if err := checkScopeTemplate("scope", path, inScope, []string{account}); err != nil {
+	if err := checkJurisdictionTemplate("jurisdiction", path, inJurisdiction, []string{account}); err != nil {
 		return fmt.Errorf("%s: %w", where, err)
 	}
 	if path != root && !below(root, path) {
-		return fmt.Errorf("%s: scope %q must lie at or below %q", where, scope, root)
+		return fmt.Errorf("%s: jurisdiction %q must lie at or below %q", where, jurisdiction, root)
 	}
 	return nil
 }
 
-// checkScopeTemplate checks a scope with placeholders: every segment is a
-// valid scope segment or one allowed placeholder, used once.
-func checkScopeTemplate(name, template string, allowed, required []string) error {
+// checkJurisdictionTemplate checks a jurisdiction with placeholders: every segment is a
+// valid jurisdiction segment or one allowed placeholder, used once.
+func checkJurisdictionTemplate(name, template string, allowed, required []string) error {
 	seen := map[string]bool{}
 	segments := strings.Split(template, "/")
-	if len(segments) > maxScopeSegments {
-		return fmt.Errorf("%s %q has more than %d segments", name, template, maxScopeSegments)
+	if len(segments) > maxJurisdictionSegments {
+		return fmt.Errorf("%s %q has more than %d segments", name, template, maxJurisdictionSegments)
 	}
 	for _, s := range segments {
 		switch {
@@ -293,8 +293,8 @@ func checkScopeTemplate(name, template string, allowed, required []string) error
 				return fmt.Errorf("%s %q: %s must be allowed here and used once", name, template, s)
 			}
 			seen[s] = true
-		case !ValidScopePath(s):
-			return fmt.Errorf("%s %q: segment %q is neither a scope segment nor a placeholder", name, template, s)
+		case !ValidJurisdictionPath(s):
+			return fmt.Errorf("%s %q: segment %q is neither a jurisdiction segment nor a placeholder", name, template, s)
 		}
 	}
 	for _, r := range required {
@@ -314,7 +314,7 @@ func below(root, template string) bool {
 	return strings.HasPrefix(template, root+"/")
 }
 
-// templatesOverlap reports whether one scope could match both templates.
+// templatesOverlap reports whether one jurisdiction could match both templates.
 func templatesOverlap(a, b string) bool {
 	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
 	if len(as) != len(bs) {
@@ -328,10 +328,10 @@ func templatesOverlap(a, b string) bool {
 	return true
 }
 
-// GroupRole is what a directory group gives: Role on Scope, while Account is
+// GroupRole is what a directory group gives: Role on Jurisdiction, while Account is
 // registered and ACTIVE.
 type GroupRole struct {
-	Account, Role, Scope string
+	Account, Role, Jurisdiction string
 }
 
 // GroupRules are the compiled rules of ldap_groups.
@@ -340,8 +340,8 @@ type GroupRules struct {
 }
 
 type groupRule struct {
-	dn          *ldap.DN
-	role, scope string
+	dn                 *ldap.DN
+	role, jurisdiction string
 }
 
 // Compile parses the rules, which have passed Validate.
@@ -352,7 +352,7 @@ func (g *AccountGroups) Compile() (*GroupRules, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ldap_groups: group_dn %q: %w", r.GroupDN, err)
 		}
-		out.rules = append(out.rules, groupRule{dn: dn, role: r.Role, scope: r.Scope})
+		out.rules = append(out.rules, groupRule{dn: dn, role: r.Role, jurisdiction: r.Jurisdiction})
 	}
 	return out, nil
 }
@@ -371,7 +371,7 @@ func (r *GroupRules) Match(groupDN string) []GroupRole {
 	var out []GroupRole
 	for _, rule := range r.rules {
 		if values, ok := rule.match(dn); ok {
-			out = append(out, GroupRole{Account: values[account], Role: rule.role, Scope: ExpandTemplate(rule.scope, values)})
+			out = append(out, GroupRole{Account: values[account], Role: rule.role, Jurisdiction: ExpandTemplate(rule.jurisdiction, values)})
 		}
 	}
 	return out

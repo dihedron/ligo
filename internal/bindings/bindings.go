@@ -54,7 +54,7 @@ func Plugins(m *pluginmgr.Manager) ValidateBinding {
 
 // Platform is what bindings need of a configured platform (§8.1).
 type Platform struct {
-	Name, Type, Realm, Scope                       string
+	Name, Type, Realm, Jurisdiction                string
 	AllowedTrustDomains                            []string
 	IdentityProviderType, IdentityProviderInstance string
 	SecretStoreType, SecretStoreInstance           string
@@ -96,7 +96,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
 			r.Allow[p.Name] = allow
-			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Scope: p.Scope,
+			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Jurisdiction: p.Jurisdiction,
 				AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix,
 				IdentityProviderType: p.IdentityProvider.Type, IdentityProviderInstance: p.IdentityProvider.Instance,
 				SecretStoreType: p.SecretStore.Type, SecretStoreInstance: p.SecretStore.Instance,
@@ -123,15 +123,15 @@ func (r *Rules) checkExpiry(e *time.Time, now time.Time) error {
 	return nil
 }
 
-// Recheck fails a cross-scope request with consent ALL that the policy now
+// Recheck fails a cross-jurisdiction request with consent ALL that the policy now
 // in force denies, or that lacks a party it now requires (ADR-14 rule 5).
 // Parties the policy no longer requires do not let it pass more easily:
 // their sides were stored and still need their decisions.
 func (s *Service) Recheck(r *changerequests.Request, p *governance.Policy) error {
-	if r.Consent != changerequests.ConsentAll || r.SourceScope == r.TargetScope {
+	if r.Consent != changerequests.ConsentAll || r.SourceJurisdiction == r.TargetJurisdiction {
 		return nil
 	}
-	d := p.Evaluate(r.SourceScope, r.TargetScope)
+	d := p.Evaluate(r.SourceJurisdiction, r.TargetJurisdiction)
 	if !d.Allowed {
 		return refuse(409, "governance-policy-changed", "the interconnection policy now denies this pair (%s): file the change again", d.Rule)
 	}
