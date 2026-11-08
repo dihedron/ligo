@@ -1,0 +1,228 @@
+# ligo — the soak
+
+- **Version:** 1.0 (2026-11-08)
+- **Status:** approved plan, harness to build
+- **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
+
+## 1. Purpose
+
+The release-run proves each behaviour once. The soak proves that the behaviours still hold after hours of load, faults and recovery. It answers four questions:
+
+1. Does any invariant ever break, even for a moment, under load and faults?
+2. Does every fault end with recovery inside its limit, with nobody stepping in?
+3. Does anything drift (memory, connections, processes, tables, latency) once warm-up is over?
+4. Can every failure be reproduced from its seed?
+
+It runs on the lab of `.specs/ligo-test-environment.md`, with every scenario up: `storage identity ha lb otel vault webhook`. It reuses the patterns of `lab.sh serve test-faults` and `test-accounts-chaos`:
+- bash in `test/lab/lib/soak.sh` causes the faults on the inner instances;
+- `lab`-tagged Go tests run on ligo1 (`serve_e2e`) and drive the API.
+
+## 2. Pieces
+
+| Piece | Where |
+| :-- | :-- |
+| Orchestration: `lab.sh soak run`, `prove`, `report` | `test/lab/lib/soak.sh` |
+| Generator: `TestSoak` | `internal/command/serve/serve_soak_lab_test.go` (`lab` tag) |
+| Checker: SK-1 to SK-10 | `internal/command/serve/soak_invariants_lab_test.go` (`lab` tag) |
+| Mutants | `test/lab/soak/mutants/*.patch` |
+| Evidence | `test/lab/.evidence/soak-<commit>-<label>/` |
+
+The generator and the checker live in package `serve`, so they reuse its lab helpers: `newAdmin`, `admin.try`, `approveAll`, `decide`, `breakGlass`, `storeCredential`, `ledgerConn`, `selectFrom` and `waitMarker`.
+
+## 3. Settings
+
+| Variable | Default | Meaning |
+| :-- | :-- | :-- |
+| `SOAK_SEED` | the current time in nanoseconds, printed | Seeds the generator and the fault scheduler |
+| `SOAK_DURATION` | `15m` | How long the load runs |
+| `SOAK_FAULTS` | `none` | `none`, `single` (one at a time) or `all` (single, then combinations) |
+| `SOAK_RACE` | `0` | `1`: `ligo` is built and deployed with `-race` |
+| `SOAK_MAX_CONNS` | unset | Sets `storage.postgres.max_conns` in the lab's `server.yaml` |
+| `SOAK_ACCOUNTS` | `20` | Accounts the generator uses at once |
+| `SOAK_WORKLOADS` | `16` | Workload loops reading credentials and connecting |
+
+`lab.sh soak run` writes every setting, the commit and the lab's versions to `settings.json` in the evidence directory. The tree must be clean, as for the release-run, so that the evidence names what ran.
+
+## 4. The generator
+
+`TestSoak` runs on ligo1 until `SOAK_DURATION` ends, then stops the load, waits for convergence (SK-7's limit) and checks every invariant one last time.
+
+### 4.1 Actors
+
+- **People:**
+  - each account's approvers, from the directory groups that `soak.sh` creates (`ou=soakNN`), as in `serve_chaos_directory`;
+  - the platform approver;
+  - an operator holding break-glass;
+  - the account administrator who registers and retires accounts.
+- **Workloads:** `SOAK_WORKLOADS` X.509-SVIDs minted by `soak.sh` under each account's SPIFFE paths. They are minted with a 1-hour TTL and re-minted every 30 minutes, and a loop reads them from disk on every request.
+
+### 4.2 Actions
+
+Each tick, every 2 seconds, draws one action from the seeded source, with these weights:
+
+| Weight | Action |
+| :-- | :-- |
+| 25 | A workload reads its bindings, takes its credential from the store and connects to its tenancy |
+| 15 | Create a binding, then decide its sides, by the right people |
+| 10 | Revoke a binding (DELETE, owner alone) |
+| 8 | Publish or update a target (a tenancy) |
+| 8 | Register or update a source |
+| 6 | Decline or withdraw a pending change |
+| 5 | Rotate a binding's credential (REAPPLY) |
+| 4 | Break-glass a binding; half are ratified, half are left to be reverted |
+| 4 | Move a person into or out of an account's approver group |
+| 3 | Register an account |
+| 2 | Retire an account: its sources and targets first, then the registration |
+| 10 | Read-only admin calls: lists, `GET /v1/flows`, the charter |
+
+Workload actions also run continuously in `SOAK_WORKLOADS` loops, once every 30 seconds each, beside the ticks. Live bindings are capped at 200: above the cap, create actions turn into revocations.
+
+### 4.3 History
+
+Every action, decision, fault start, fault end and invariant check is one JSON line in `history.jsonl`, with these fields:
+- `t`: the time, in RFC 3339 with milliseconds;
+- `seq`: the sequence number;
+- `kind`;
+- `actor`;
+- the resource names;
+- the HTTP status;
+- the latency in milliseconds;
+- the load of the lab VM, sampled every minute.
+
+No secret ever goes in the history. A credential appears only as the user name.
+
+## 5. Invariants
+
+The checker runs every 60 seconds, and again 30 seconds after each fault ends. A violation is written to the history with the evidence that showed it. The run goes on and reports at the end. A run with any violation fails.
+
+| ID | Must hold | How it is checked |
+| :-- | :-- | :-- |
+| SK-1 | A revoked binding delivers nothing, and its role is gone, within 2 minutes of the revocation being applied | Workload: the binding is absent from its list. Target admin: `pg_roles` no longer has the role |
+| SK-2 | Every `ACTIVE` binding's current credential connects | For each one: the store read, then a connection as that user. Skipped only while the store or that target is under a fault |
+| SK-3 | No credential reads another tenant's schema | Each binding's user tries `select` on a different account's schema: it must be refused (`42501`) |
+| SK-4 | No `APPLIED` change was decided by its requester, or by one person on two people-decided sides | SQL on `change_requests` joined to `change_request_sides`. The lab keeps `require_distinct_approvers_across_jurisdictions` at its default, `true` |
+| SK-5 | No live source or target on a retired account | SQL: `accounts.status = 'RETIRED'` joined to `sources` or `targets` whose state is not `RETIRED` |
+| SK-6 | The roles in PostgreSQL match the bindings: none orphaned, none missing | Target admin: the roles under the lab's ligo role prefix compared with `ACTIVE` bindings' users |
+| SK-7 | Nothing stays in `PROVISIONING` or `DELETING` longer than 10 minutes. An expired break-glass is reverted within 2 minutes of its expiry | SQL on `bindings.phase` and `updated_at`; SQL on `BREAK_GLASS` change requests past `expires_at` with no `SYSTEM_REVERT` |
+| SK-8 | `ligo audit verify` is valid. No password appears in the database or the journals | The CLI as an approver; `serve_scan_secrets`, from `soak.sh`, every 30 minutes and at the end |
+| SK-9 | Every outbox event is delivered or abandoned within its retry window, and none is lost | SQL on `notification_outbox`. The receiver's log has every `event_id` marked delivered |
+| SK-10 | Both replicas give the same answer within 30 seconds | The same list (bindings, accounts) from ligo1 and ligo2 directly: equal after at most 30 seconds of retries |
+
+While a fault holds, a check that depends on the faulted component is recorded as skipped, not failed. Its limit counts again from the fault's end.
+
+## 6. Faults
+
+`SOAK_FAULTS=single` runs the catalogue one fault at a time, in seeded order, 5 minutes apart. `all` does the same, then pairs at random. A fault ends at its duration, or at the end of the run. Every fault is undone in a `trap`, even when the run is interrupted.
+
+| Fault | How | Duration | Recovery limit |
+| :-- | :-- | :-- | :-- |
+| ligo hangs | `systemctl kill -s STOP ligo` on one replica, then `CONT` | 60 s | 60 s; the other replica serves throughout |
+| Plugin hangs | `kill -STOP` on one plugin process | 60 s | 2 min |
+| PostgreSQL hangs | `kill -STOP` on the postmaster and its backends | 30 s | 2 min |
+| Directory hangs | `systemctl kill -s STOP slapd` | 60 s | 2 min after it resumes |
+| Slow PostgreSQL | `tc netem` on ligo1 and ligo2, 200 ms ± 50 ms and 1 % loss, filtered to pg's IP | 5 min | 1 min |
+| Slow directory | the same, to ldap's IP, 2 s | 5 min | 1 min |
+| Slow store | the same, to the store's IP, 500 ms | 5 min | 1 min |
+| Partition | `nft` on one replica dropping traffic to pg, while it keeps serving | 2 min | 2 min |
+| Connections full | idle sessions as a non-ligo role, up to `max_connections` minus the reserved | 2 min | 2 min |
+| Long lock | `lock table bindings in exclusive mode` held | 60 s | 2 min |
+| Disk full | `fallocate` on pg's data volume, leaving 50 MiB | 2 min | 5 min after the space is freed |
+| Memory pressure | `systemctl set-property ligo MemoryHigh=` on ligo2, at its RSS plus 20 % | 5 min | none: no restart, no error rate above 1 % |
+| SPIRE down | SPIRE Server stopped past the workload SVIDs' renewal | 10 min | 2 min after it starts |
+| Store sealed | the backend sealed during an apply, then unsealed | 2 min | 2 min |
+| Bad plugin | `ligo-plugin-echo`'s lab mode, set through a file it reads: `hang`, `garbage`, `oversized` or `exit-mid-stage` | 2 min each | 2 min |
+| Webhook slow | the receiver answering after 20 s | 5 min | outbox drained 5 min after |
+| Webhook failing | the receiver answering 500 | 5 min | outbox drained 5 min after |
+| Reload | `SIGHUP` to one replica | at once | none: no error |
+| Maintenance | maintenance on, then off after 2 min | 2 min | 1 min |
+| Rolling restart | `systemctl restart ligo`, one replica, then the other | about 1 min | 1 min each |
+
+`sch_netem` is in the lab VM's kernel. ligo1 and ligo2 are VMs with their own kernels, so `soak.sh` checks for netem there before the first run.
+
+The bad-plugin modes are lab-only code in `test/lab/plugins/ligo-plugin-echo`, which never ships. With no mode file, the plugin behaves exactly as today.
+
+## 7. Builds and drift
+
+- **Race build:** `SOAK_RACE=1` builds `ligo` with `-race` for the replicas. Any race report in the journals is a violation.
+- **Connection pool:** `SOAK_MAX_CONNS=2` starves the pools on purpose. The pool deadlock of 7f62dae is that class of bug.
+- **Drift:** `soak.sh` samples every 10 minutes into `drift.csv`, one row per host and metric:
+  - RSS, threads and open FDs of `ligo`, from `/proc`;
+  - the number of plugin processes;
+  - PostgreSQL connections per role;
+  - the sizes of `audit_log`, `notification_outbox` and `bindings`;
+  - the generator's p50 and p95 per hour, from the history.
+- **Drift that fails the run:** after the first hour, RSS, FDs, connections or plugin processes keep rising across the remaining samples, by more than 20 % from the first hour's median. Tables grow with the audit; their growth is reported, not judged.
+- **Hang evidence:** ligo has no goroutine endpoint, and adding one would be a product change. So when a request takes over 30 seconds, `soak.sh` keeps that minute's journals and the drift. At the end, before the replicas stop, it sends `SIGQUIT`, and each replica dumps its goroutines to its journal.
+
+## 8. Proving the checker
+
+A quiet night proves nothing unless the checker is shown to catch bugs. `lab.sh soak prove` takes each mutant in turn:
+1. applies it to a scratch copy of the tree;
+2. builds and deploys that copy;
+3. runs 15 minutes with `SOAK_FAULTS=none`, except where noted below;
+4. expects the named invariant to trip.
+
+It then runs the unmodified build for 15 minutes, which must trip nothing.
+
+| Mutant | Bug put back | Must trip |
+| :-- | :-- | :-- |
+| `pool-deadlock.patch` | The registry listener on the shared app pool, as before 7f62dae; run with `SOAK_MAX_CONNS=2` | SK-7 or SK-10 |
+| `no-target-check.patch` | A binding applied without its TARGET side's decision | SK-4 |
+| `revoke-keeps-role.patch` | A revocation that skips dropping the role | SK-1 and SK-6 |
+| `cross-tenant-grant.patch` | A tenancy's role granted on the platform's other schemas | SK-3 |
+
+A mutant that trips nothing means a gap in the checker. That gap is fixed before any night run.
+
+## 9. Runs
+
+| Run | Settings | Before it |
+| :-- | :-- | :-- |
+| Shakedown | 2 h, OpenBao, `SOAK_FAULTS=all` | lxd-spiffe 0.4.0 with `keep_alive = true`, a lab rebuild, and a passing `release-run` |
+| Night 1 | Vault, `SOAK_RACE=1`, `SOAK_MAX_CONNS=2`, `SOAK_FAULTS=single` | Night-time resources |
+| Night 2 | OpenBao, the normal build, `SOAK_FAULTS=all` | Night 1's fixes merged |
+
+**Night-time resources**, set through `lab.local.env` and reverted for daytime work:
+- the lab VM: `LAB_LXD_CPUS=12`, `LAB_LXD_MEMORY=48GiB`;
+- ligo1 and ligo2: 4 CPUs and 4 GiB each;
+- pg: 4 GiB.
+
+**Applying them:** `lab.sh stop`, then `lab.sh start`, with no rebuild. Nothing else runs on the host at night.
+
+**Also during a night, on the host:**
+- all 5 fuzz targets, at `nice -n 19`, for the length of the night;
+- the load, recorded beside every failure.
+
+**After night 2:**
+- **Backup and restore drill:** `pg_dump` of ligo's database, a restore into a new database, and one replica pointed at it. Then every invariant again.
+- **Audit tamper:** one `audit_log` row changed as the superuser. `ligo audit verify` must report it.
+
+## 10. Reproducing a failure
+
+`lab.sh soak run` with the same `SOAK_SEED`, on the same commit and settings, draws the same actions and the same faults in the same order. Timing differs, so a race may not repeat. The history therefore records enough to replay the actions around a violation by hand: who did what, to which resource, with which answer. A failure that cannot be reproduced is still reported, with its evidence.
+
+## 11. Pass criteria
+
+A run passes when all of these hold:
+- no violation of SK-1 to SK-10;
+- no race report;
+- no drift that fails the run (§7);
+- every fault recovered within its limit, with nobody stepping in;
+- every replica's `NRestarts` unchanged, except where a fault itself restarts it.
+
+## 12. Evidence
+
+Each run keeps this in `test/lab/.evidence/soak-<commit>-<label>/`:
+- `settings.json` and the seed;
+- `history.jsonl` and `drift.csv`;
+- `faults.log`;
+- each replica's journal;
+- the goroutine dumps;
+- `versions.txt`;
+- `summary.md`: invariants, faults with their recovery times, drift trends and the verdict.
+
+## 13. Not proven even so
+
+- A real production network.
+- Real failover of a managed PostgreSQL.
+- Clock skew between hosts.
+- Load beyond what one lab host can generate.
