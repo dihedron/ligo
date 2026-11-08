@@ -283,7 +283,7 @@ soak_prove() {
 			2>&1 | tee "$out/$name.log" || true
 		dir="$(find "$LAB_STATE_DIR" -maxdepth 1 -name 'soak-dev-*' | sort | tail -n 1)" # names sort by time; ls | head would SIGPIPE under pipefail
 		cp "$dir/summary.md" "$out/$name-summary.md" 2>/dev/null || true
-		got="$({ cat "$dir/history.jsonl" 2>/dev/null; cat "$dir/violations-lab.jsonl" 2>/dev/null; } | jq -rs '[.[] | select(.kind == "violation") | .res] | unique | join(" ")')"
+		got="$({ cat "$dir/history.jsonl" 2>/dev/null || true; cat "$dir/violations-lab.jsonl" 2>/dev/null || true; } | jq -rs '[.[] | select(.kind == "violation") | .res] | unique | join(" ")')"
 		if [[ -z "$expect" ]]; then
 			[[ -z "$got" ]] && verdict=pass || verdict=FAIL
 		else
