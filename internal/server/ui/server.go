@@ -92,8 +92,36 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /ui/theme/", s.Theme.Handler())
 	mux.HandleFunc("GET /ui/login", s.loginPage)
 	mux.HandleFunc("POST /ui/login", s.login)
-	mux.Handle("/ui/", s.authed(s.routes()))
+	mux.Handle("/ui/", s.authed(s.refusals(s.routes())))
 	return s.secure(mux)
+}
+
+// statusWriter remembers the status of a response.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) { w.code = code; w.ResponseWriter.WriteHeader(code) }
+
+// Unwrap keeps the underlying writer's optional interfaces reachable.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// refusals logs what a signed-in user was refused, as the admin API logs its
+// requests (the audit log records changes, not refusals); 5xx are logged where
+// they occur.
+func (s *Server) refusals(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		if sw.code >= 400 && sw.code < 500 {
+			s.logRefused(w, r, session(r).Username, sw.code)
+		}
+	})
+}
+
+func (s *Server) logRefused(w http.ResponseWriter, r *http.Request, user string, code int) {
+	s.Logger.Info("ui: request refused", "request_id", w.Header().Get("X-Request-Id"), "user", user, "method", r.Method, "path", r.URL.Path, "status", code, "remote", r.RemoteAddr)
 }
 
 // routes are the pages and actions of a signed-in user.
@@ -136,6 +164,10 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /ui/targets/{name}/{op}", s.targetState)
 	mux.HandleFunc("POST /ui/targets/{name}/access-levels/{level}/{op}", s.targetState)
 	mux.HandleFunc("POST /ui/targets/{name}/bindings/revoke", s.revokeOn)
+	mux.HandleFunc("GET /ui/accounts", s.accountList)
+	mux.HandleFunc("GET /ui/accounts/{name}", s.account)
+	mux.HandleFunc("POST /ui/accounts", s.accountRegister)
+	mux.HandleFunc("POST /ui/accounts/{name}/retire", s.accountRetire)
 	mux.HandleFunc("GET /ui/platforms/{name}/fields", s.platformFieldsFragment)
 	mux.HandleFunc("GET /ui/platforms/fields", s.platformFieldsFragment)
 	mux.HandleFunc("GET /ui/platforms", s.platforms)

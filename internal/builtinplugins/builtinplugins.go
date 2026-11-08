@@ -6,6 +6,7 @@ package builtinplugins
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -18,7 +19,9 @@ import (
 
 // emptyConfig is the instance configuration schema of the builtins that take
 // no settings.
-const emptyConfig = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false}`
+//
+//go:embed schemas/empty-config.json
+var emptyConfig string
 
 // minPasswordLength is §5.8 rule 3's minimum.
 const minPasswordLength = 32
@@ -42,8 +45,9 @@ func Lookup(typ string) (pluginsdk.Plugins, bool) {
 func identityPlugin(m *marker) pluginsdk.Plugins { return pluginsdk.Plugins{Control: m, Identity: m} }
 
 // targetLocalConfig: the length of the password the target generates.
-const targetLocalConfig = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"properties":{"password_length":{"type":"integer","minimum":32,"maximum":128}}}`
+//
+//go:embed schemas/target-local-config.json
+var targetLocalConfig string
 
 // marker is an identity mode marker (ADR-01): it creates no principal.
 // Its artifact names the binding's derived principal in its mode; the target
@@ -127,7 +131,9 @@ func (m *marker) CleanupIdentity(context.Context, *pluginv1.CleanupIdentityReque
 
 // noneOutputSchema allows only none.v1's finalized_client_auth_json, {}: with
 // the secret storage strategy svid the client presents its own SVID and configures nothing.
-const noneOutputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false}`
+//
+//go:embed schemas/none-output.json
+var noneOutputSchema string
 
 // none is the secret store of SVID mode (§5.6): there is no secret to store.
 type none struct {

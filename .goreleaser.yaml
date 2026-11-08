@@ -64,8 +64,9 @@ builds:
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitBranch={{.Branch}}'
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GoReleaserVersion={{.Env._GORELEASER_VERSION}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
-  # operators pin this binary's hash (plugins[].sha256), so its version is the
-  # only value stamped in it: the same source gives the same hash
+  # operators pin this binary's hash (plugins[].sha256), so only what the commit
+  # and tag fix is stamped, never the build time or branch: the same source
+  # gives the same hash
   - id: ligo-plugin-openldap
     main: ./cmd/plugins/ligo-plugin-openldap
     binary: ligo-plugin-openldap
@@ -84,7 +85,20 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Name=ligo-plugin-openldap'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Description={{.Env._GO_MK_VARS_DESCRIPTION}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Copyright={{.Env._GO_MK_VARS_COPYRIGHT}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.License={{.Env._GO_MK_VARS_LICENSE}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.LicenseURL={{.Env._GO_MK_VARS_LICENSE_URL}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Vendor={{.Env._GO_MK_VARS_VENDOR}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Maintainer={{.Env._GO_MK_VARS_MAINTAINER}}'
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMajor={{.Major}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMinor={{.Minor}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionPatch={{.Patch}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTag={{.Tag}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitCommit={{.Commit}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTime={{.CommitDate}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
   - id: ligo-plugin-postgres
     main: ./cmd/plugins/ligo-plugin-postgres
@@ -104,7 +118,20 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Name=ligo-plugin-postgres'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Description={{.Env._GO_MK_VARS_DESCRIPTION}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Copyright={{.Env._GO_MK_VARS_COPYRIGHT}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.License={{.Env._GO_MK_VARS_LICENSE}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.LicenseURL={{.Env._GO_MK_VARS_LICENSE_URL}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Vendor={{.Env._GO_MK_VARS_VENDOR}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Maintainer={{.Env._GO_MK_VARS_MAINTAINER}}'
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMajor={{.Major}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMinor={{.Minor}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionPatch={{.Patch}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTag={{.Tag}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitCommit={{.Commit}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTime={{.CommitDate}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
   - id: ligo-plugin-vault
     main: ./cmd/plugins/ligo-plugin-vault
@@ -124,7 +151,20 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Name=ligo-plugin-vault'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Description={{.Env._GO_MK_VARS_DESCRIPTION}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Copyright={{.Env._GO_MK_VARS_COPYRIGHT}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.License={{.Env._GO_MK_VARS_LICENSE}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.LicenseURL={{.Env._GO_MK_VARS_LICENSE_URL}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Vendor={{.Env._GO_MK_VARS_VENDOR}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Maintainer={{.Env._GO_MK_VARS_MAINTAINER}}'
       - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMajor={{.Major}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMinor={{.Minor}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionPatch={{.Patch}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTag={{.Tag}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitCommit={{.Commit}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTime={{.CommitDate}}'
     mod_timestamp: "{{ .CommitTimestamp }}"
 # one archive per application
 archives:

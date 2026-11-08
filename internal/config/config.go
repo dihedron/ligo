@@ -197,6 +197,7 @@ const (
 	RoleBreakGlass        = "break_glass"
 	RoleTrustedAutomation = "trusted_automation"
 	RoleFullAccess        = "admin.full_access"
+	RoleAccountAdmin      = "account_admin"
 )
 
 // RoleBinding grants a role on scope patterns to an LDAP group or a SPIFFE
@@ -226,6 +227,7 @@ type Governance struct {
 	SourceScopes  []governance.SourceScope `yaml:"source_scopes"`
 	NamePrefixes  []governance.NamePrefix  `yaml:"name_prefixes"`
 	Interconnects governance.Interconnects `yaml:"interconnects"`
+	Accounts      *governance.Accounts     `yaml:"accounts"`
 }
 
 type BindingsPolicy struct {
@@ -359,6 +361,7 @@ type Platform struct {
 	Zone                      string        `yaml:"zone"`
 	Scope                     string        `yaml:"scope"`
 	TargetScopes              []string      `yaml:"target_scopes"`
+	NamespaceTemplate         string        `yaml:"namespace_template"`
 	DisplayName               string        `yaml:"display_name"`
 	Description               string        `yaml:"description"`
 	Contacts                  []Contact     `yaml:"contacts"`
@@ -405,12 +408,20 @@ func (p *Platform) AllowedEndpoints() []string {
 // read others here when a plugin type declares them
 func (p *Platform) PrivilegeBounds() map[string]any {
 	var b struct {
-		GrantableRoles []string `yaml:"grantable_roles"`
+		GrantableRoles     []string `yaml:"grantable_roles"`
+		GrantableTemplates []string `yaml:"grantable_role_templates"`
 	}
-	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || b.GrantableRoles == nil {
+	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || (b.GrantableRoles == nil && b.GrantableTemplates == nil) {
 		return nil
 	}
-	return map[string]any{"grantableRoles": b.GrantableRoles}
+	bounds := map[string]any{}
+	if b.GrantableRoles != nil {
+		bounds["grantableRoles"] = b.GrantableRoles
+	}
+	if b.GrantableTemplates != nil {
+		bounds["grantableRoleTemplates"] = b.GrantableTemplates
+	}
+	return bounds
 }
 
 // hostKeys decodes the keys ligo reads from a plugin's config node.

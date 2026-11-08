@@ -528,3 +528,73 @@ func (cmd *GovernanceCheck) Execute([]string) error {
 			col("PREFIX OK", "namePrefix.valid"), col("CONSENT", "consent"), col("INTERCONNECT", "interconnect"), col("SIDES", "sides")}, nil
 	})
 }
+
+// Account: ligo account list|get|register|retire.
+type Account struct {
+	List     AccountList     `command:"list" alias:"ls" description:"List the accounts visible to you."`
+	Get      AccountGet      `command:"get" description:"Show an account and its counts of sources, targets and bindings."`
+	Register AccountRegister `command:"register" description:"Register an account, at once (account_admin)."`
+	Retire   AccountRetire   `command:"retire" description:"Retire an account with no active source or target (account_admin). Its name is never reused."`
+}
+
+type accountName struct {
+	Name string `positional-arg-name:"name" description:"Account name."`
+}
+
+type AccountList struct {
+	Base
+	Page
+}
+
+func (cmd *AccountList) Execute([]string) error {
+	return cmd.get(path("accounts"), cmd.query(), columns["account"]...)
+}
+
+type AccountGet struct {
+	Base
+	Args accountName `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *AccountGet) Execute([]string) error {
+	return cmd.get(path("accounts", cmd.Args.Name), nil, columns["account"]...)
+}
+
+type AccountRegister struct {
+	Base
+	DisplayName string      `long:"display-name" description:"A name for people."`
+	Args        accountName `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *AccountRegister) Execute([]string) error {
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		var v any
+		return v, columns["account"], c.Do(ctx, "POST", path("accounts"), nil, map[string]any{"name": cmd.Args.Name, "displayName": cmd.DisplayName}, &v)
+	})
+}
+
+type AccountRetire struct {
+	Base
+	Yes  bool        `long:"yes" description:"Do not ask for confirmation."`
+	Args accountName `positional-args:"yes" required:"yes"`
+}
+
+// retireInput is where the confirmation is read; tests replace it.
+var retireInput io.Reader = os.Stdin
+
+func (cmd *AccountRetire) Execute([]string) error {
+	name := cmd.Args.Name
+	if !cmd.Yes {
+		_, _ = fmt.Fprintf(cmd.writer(), "A retired account cannot be restored, and its name can never be used again.\nType the account name to continue: ")
+		line, err := bufio.NewReader(retireInput).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if strings.TrimSpace(line) != name {
+			return errors.New("not confirmed: nothing was changed")
+		}
+	}
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		var v any
+		return v, columns["account"], c.Do(ctx, "POST", path("accounts", name, "retire"), nil, nil, &v)
+	})
+}

@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/engine"
@@ -68,6 +69,9 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", t.Metadata.Name)
 	}
 	if err := s.Rules.validate(ctx, s.Validate, &t, nil, authorize(c)); err != nil {
+		return nil, err
+	}
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Scope); err != nil {
 		return nil, err
 	}
 	return s.file(ctx, c, "CREATE", nil, &t, &req.Common, true)
@@ -258,6 +262,11 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 	if err := s.Rules.validate(ctx, s.Validate, t, cur, nil); err != nil {
 		return nil, err
 	}
+	if cur == nil { // TN-5: an existing target cannot be on a retired account
+		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Scope); err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(t)
 }
 
@@ -271,7 +280,11 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		return s.applyUpdate(ctx, tx, r, &t)
 	}
 	id := uuid.NewV7()
-	if err := insert(ctx, tx, id, &t, r.RequestedBy); err != nil {
+	account, err := accounts.Require(ctx, tx, s.Rules.Accounts, t.Metadata.Scope)
+	if err != nil {
+		return nil, err
+	}
+	if err := insert(ctx, tx, id, &t, account, r.RequestedBy); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, "UPDATE change_requests SET resource_id = $2 WHERE id = $1", r.ID, id); err != nil {
@@ -309,19 +322,19 @@ func multirange(f *pluginv1.NetworkFlow) string {
 	return "{" + strings.Join(parts, ",") + "}"
 }
 
-func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, actor string) error {
+func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, account, actor string) error {
 	m := t.Metadata
 	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, zone, scope, platform_scope, definition,
-		display_name, description, labels, documentation_url, contacts, visibility, visible_to, state, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15::jsonb, 'ACTIVE', $16, $16)`,
+		display_name, description, labels, documentation_url, contacts, visibility, visible_to, account, state, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15::jsonb, $17, 'ACTIVE', $16, $16)`,
 		id, m.Name, m.Platform, m.PlatformType, m.Zone, m.Scope, m.PlatformScope, string(t.Definition), null(t.DisplayName),
 		null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
-		jsonb(t.Visibility.VisibleTo, "[]"), actor)
+		jsonb(t.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_targets_name" {
 		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", m.Name)
 	}
 	if err != nil {
-		return err
+		return accounts.Refused(err)
 	}
 	return putLevelsAndFlows(ctx, tx, id, t)
 }

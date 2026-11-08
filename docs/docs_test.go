@@ -103,11 +103,9 @@ func TestConfigurationReferenceIsComplete(t *testing.T) {
 func TestPluginConfigurationIsComplete(t *testing.T) {
 	doc := read(t, configurationReference)
 	for _, name := range []string{"openldap", "postgres", "vault"} {
-		source := goSources(t, "../cmd/plugins/ligo-plugin-"+name)
-		schema := source[strings.Index(source, "const configSchema"):]
-		schema = schema[:strings.Index(schema, "}}}`")]
+		schema := read(t, "../cmd/plugins/ligo-plugin-"+name+"/schemas/config.json")
 		properties := schema[strings.Index(schema, `"properties"`):]
-		fields := matches(`"([a-z_]+)":\{"type"`, properties)
+		fields := matches(`"([a-z_]+)":\s*\{\s*"type"`, properties)
 		if len(fields) < 4 {
 			t.Fatalf("%s: only %d fields: the test is broken", name, len(fields))
 		}

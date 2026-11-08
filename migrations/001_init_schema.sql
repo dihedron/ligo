@@ -24,6 +24,26 @@ CREATE DOMAIN resource_name AS VARCHAR(63)
     CHECK (VALUE ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$');
 
 -- ---------------------------------------------------------------------------
+-- Accounts (.specs/ligo-tenancy.md §7): the registered tenants. Registered at
+-- run time, and never deleted: audit entries and SPIFFE paths refer to their
+-- names, so a retired name is not reused.
+-- ---------------------------------------------------------------------------
+CREATE TYPE account_status AS ENUM ('ACTIVE', 'RETIRED');
+
+CREATE TABLE accounts (
+    name           VARCHAR(30) PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9]*$'),
+    display_name   VARCHAR(128),
+    status         account_status NOT NULL DEFAULT 'ACTIVE',
+    registered_by  VARCHAR(255) NOT NULL,
+    registered_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retired_by     VARCHAR(255),
+    retired_at     TIMESTAMPTZ,
+    CONSTRAINT chk_account_retired CHECK (
+        (status = 'RETIRED') = (retired_by IS NOT NULL) AND (status = 'RETIRED') = (retired_at IS NOT NULL)
+    )
+);
+
+-- ---------------------------------------------------------------------------
 -- Sources (ADR-15): who may use bindings. The identity specification (trust
 -- domain, regex, sample IDs) plus descriptive metadata. Never hard-deleted:
 -- retiring a source sets state = 'RETIRED' and releases its name.
@@ -32,6 +52,7 @@ CREATE TABLE sources (
     id                 UUID PRIMARY KEY,                    -- UUIDv7
     name               resource_name NOT NULL,
     scope              scope_path NOT NULL,                 -- derived from the regex (§3.9); immutable
+    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the scope; NULL outside account-managed scopes
     trust_domain       VARCHAR(255) NOT NULL,               -- immutable
     svid_regex         TEXT NOT NULL CHECK (length(svid_regex) <= 512),   -- may only be narrowed (§3.10)
     sample_spiffe_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of SPIFFE IDs the regex must match
@@ -73,6 +94,7 @@ CREATE TABLE targets (
     platform_type      VARCHAR(128) NOT NULL,               -- plugin type of the platform; immutable
     zone               VARCHAR(63)  NOT NULL,               -- the platform's zone; immutable
     scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
+    account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the scope; NULL outside account-managed scopes
     platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
     definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
     display_name       VARCHAR(128),
@@ -128,7 +150,8 @@ CREATE TABLE target_network_flows (
 -- Sources and targets: immutable identity and ownership columns (INV-08, INV-21).
 CREATE FUNCTION sources_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NEW.scope <> OLD.scope AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
+  IF (NEW.scope <> OLD.scope OR NEW.account IS DISTINCT FROM OLD.account)
+     AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
     RAISE EXCEPTION 'source scope modified outside the re-scoping procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.trust_domain <> OLD.trust_domain OR NEW.name <> OLD.name
@@ -142,7 +165,7 @@ CREATE TRIGGER trg_sources_immutable BEFORE UPDATE ON sources
 
 CREATE FUNCTION targets_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.scope <> OLD.scope OR NEW.platform_scope <> OLD.platform_scope)
+  IF (NEW.scope <> OLD.scope OR NEW.platform_scope <> OLD.platform_scope OR NEW.account IS DISTINCT FROM OLD.account)
      AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
     RAISE EXCEPTION 'target scope modified outside the re-scoping procedure';
   END IF;
@@ -155,6 +178,56 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_targets_immutable BEFORE UPDATE ON targets
     FOR EACH ROW EXECUTE FUNCTION targets_immutable_guard();
+
+-- A source or target never joins a retired account. The shared lock orders it
+-- against a retirement, whose guard below then sees it, or which it then sees.
+CREATE FUNCTION resource_account_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  current account_status;
+BEGIN
+  IF NEW.account IS NOT NULL THEN
+    SELECT status INTO current FROM accounts WHERE name = NEW.account FOR SHARE;
+    IF current = 'RETIRED' THEN
+      RAISE EXCEPTION 'account % is retired', NEW.account USING ERRCODE = 'LG001';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_sources_account BEFORE INSERT OR UPDATE OF account ON sources
+    FOR EACH ROW EXECUTE FUNCTION resource_account_guard();
+CREATE TRIGGER trg_targets_account BEFORE INSERT OR UPDATE OF account ON targets
+    FOR EACH ROW EXECUTE FUNCTION resource_account_guard();
+
+-- An account changes only by retiring, once, and only when empty. A BEFORE
+-- trigger runs with the row locked, so that no source or target can be joining.
+CREATE FUNCTION accounts_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  sources_held INT;
+  targets_held INT;
+BEGIN
+  IF OLD.status = 'RETIRED' OR NEW.status <> 'RETIRED' OR NEW.name <> OLD.name
+     OR NEW.display_name IS DISTINCT FROM OLD.display_name
+     OR NEW.registered_by <> OLD.registered_by OR NEW.registered_at <> OLD.registered_at THEN
+    RAISE EXCEPTION 'an account can only be retired, once';
+  END IF;
+  SELECT count(*) INTO sources_held FROM sources WHERE account = OLD.name AND state <> 'RETIRED';
+  SELECT count(*) INTO targets_held FROM targets WHERE account = OLD.name AND state <> 'RETIRED';
+  IF sources_held + targets_held > 0 THEN
+    RAISE EXCEPTION 'account % has % sources and % targets', OLD.name, sources_held, targets_held USING ERRCODE = 'LG002';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_accounts_guard BEFORE UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION accounts_guard();
+
+-- Replicas learn of registry changes as they do of bindings' (§4.5).
+CREATE FUNCTION accounts_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('ligo_accounts_changed', NEW.name);
+  RETURN NULL;
+END $$;
+CREATE TRIGGER trg_accounts_notify AFTER INSERT OR UPDATE ON accounts
+    FOR EACH ROW EXECUTE FUNCTION accounts_notify();
 
 -- ---------------------------------------------------------------------------
 -- Bindings: the link between one source and one target at one access level.
@@ -761,7 +834,7 @@ CREATE INDEX idx_outbox_due ON notification_outbox (next_attempt_at)
     WHERE delivered_at IS NULL AND abandoned_at IS NULL;
 
 -- Grants (role names fixed; executed by ligo_migrator)
-GRANT SELECT, INSERT, UPDATE ON sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
+GRANT SELECT, INSERT, UPDATE ON accounts, sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
 GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue,
       change_requests, admin_sessions TO ligo_app;

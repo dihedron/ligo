@@ -197,3 +197,23 @@ func TestDelivery(t *testing.T) {
 		t.Error("a webhook without its CA file")
 	}
 }
+
+// TestDispatchSparesThePool: a pass does not hold a connection while asking
+// the pool for another.
+func TestDispatchSparesThePool(t *testing.T) {
+	cfg, err := pgxpool.ParseConfig(os.Getenv("LIGO_TEST_PG_APP_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	if _, err := (&Dispatcher{DB: db, Logger: slog.New(slog.DiscardHandler)}).Dispatch(ctx); err != nil {
+		t.Errorf("dispatch: %v", err)
+	}
+}

@@ -323,3 +323,70 @@ func TestDiff(t *testing.T) {
 		t.Errorf("Diff = %q, want %q", strings.Join(got, " "), want)
 	}
 }
+
+// TestPlatformApprover: TN-11, TN-13 and TN-14 (.specs/ligo-tenancy.md §9.3): an
+// approver of a binding's platform scope qualifies for its TARGET side, and for
+// nothing else.
+func TestPlatformApprover(t *testing.T) {
+	const platform = "dc/corp-prod"
+	target := "cloud/globex/data/db01"
+	request := func(change func(*Request)) *Request {
+		r := &Request{ResourceType: "BINDING", Operation: "CREATE", PlatformScope: platform, RequestedBy: "alice", DistinctApprovers: true, Sides: []Side{
+			{Name: "SOURCE", Scope: "cloud/acme/app/app01", Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "TARGET", Scope: target, Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "PLATFORM", Scope: platform, Basis: BasisHuman, ApprovalRequired: true},
+			{Name: "PARTY:security", Scope: platform, Basis: BasisHuman, ApprovalRequired: true},
+		}}
+		if change != nil {
+			change(r)
+		}
+		return r
+	}
+	approver := func(name string, scopes ...string) Caller {
+		return Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{grant(config.RoleApprover, scopes...)}}
+	}
+	dora, acme := approver("dora", platform), approver("ada", "cloud/acme/*")
+	for name, tc := range map[string]struct {
+		r      *Request
+		caller Caller
+		side   string
+		want   []string
+		err    string
+	}{
+		"TARGET":                 {request(nil), dora, "TARGET", []string{"TARGET"}, ""},
+		"TN-13: SOURCE":          {request(nil), dora, "SOURCE", nil, "forbidden"},
+		"TN-14: the filer":       {request(func(r *Request) { r.RequestedBy = "dora" }), dora, "TARGET", nil, "four-eyes-violation"},
+		"TN-11: another account": {request(nil), acme, "TARGET", nil, "forbidden"},
+		"a delete":               {request(func(r *Request) { r.Operation = "DELETE" }), dora, "TARGET", nil, "forbidden"},
+		"not a binding":          {request(func(r *Request) { r.ResourceType = "TARGET" }), dora, "TARGET", nil, "forbidden"},
+		"no platform scope":      {request(func(r *Request) { r.PlatformScope = "" }), dora, "TARGET", nil, "forbidden"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := SelectSides(tc.r, tc.caller, policy, true, tc.side)
+			if status(err) != tc.err || !equal(got, tc.want) {
+				t.Errorf("got %v, %v; want %v, %q", got, err, tc.want, tc.err)
+			}
+		})
+	}
+	r := request(nil)
+	if !dora.ByPlatform(r, r.Sides[1]) || dora.ByPlatform(r, r.Sides[0]) || dora.ByPlatform(r, r.Sides[2]) || dora.ByPlatform(r, r.Sides[3]) {
+		t.Error("ByPlatform: only the TARGET side")
+	}
+	both := approver("bea", platform, "cloud/globex/*")
+	if both.ByPlatform(r, r.Sides[1]) || !both.Decides(r, r.Sides[1]) {
+		t.Error("an approver of the target's own scope decides as that, not as the platform")
+	}
+	// a break-glass TARGET side is ratified, whatever the operation; SOURCE never
+	bg := request(func(r *Request) {
+		r.Operation = "DELETE"
+		for i := range r.Sides {
+			r.Sides[i].Basis = BasisBreakGlass
+		}
+	})
+	if got, err := RatifiableSides(bg, dora, "TARGET"); err != nil || !equal(got, []string{"TARGET"}) {
+		t.Errorf("ratify: %v %v", got, err)
+	}
+	if _, err := RatifiableSides(bg, dora, "SOURCE"); status(err) == "" {
+		t.Error("ratified SOURCE")
+	}
+}

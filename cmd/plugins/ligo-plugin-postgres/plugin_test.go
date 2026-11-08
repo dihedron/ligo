@@ -56,6 +56,10 @@ func TestParseConfig(t *testing.T) {
 		"database":          {set("database", `"a b"`), 0, "database"},
 		"no roles":          {set("grantable_roles", ""), 0, "grantable_roles"},
 		"bad role":          {set("grantable_roles", `["a;b"]`), 0, "grantable_roles"},
+		"bad template":      {set("grantable_role_templates", `["{namespace};x"]`), 0, "grantable_role_templates"},
+		"shared template":   {set("grantable_role_templates", `["shared"]`), 0, "grantable_role_templates"},
+		"twice":             {set("grantable_role_templates", `["{namespace}_{namespace}"]`), 0, "grantable_role_templates"},
+		"other placeholder": {set("grantable_role_templates", `["{namespace}_{account}"]`), 0, "grantable_role_templates"},
 		"endpoint":          {set("allowed_endpoints", `["other:1"]`), 0, "allowed_endpoints"},
 		"group":             {set("directory_group", `"a b"`), 0, "directory_group"},
 		"no group":          {goodConfig, pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR, "directory_group"},
@@ -70,6 +74,75 @@ func TestParseConfig(t *testing.T) {
 				t.Errorf("%v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// templateConfig has tenant roles and one deliberately shared role.
+const templateConfig = `{"host":"db.lab","port":5432,"database":"ledger","grantable_role_templates":["{namespace}_read","{namespace}_write"],"grantable_roles":["SHARED"],"allowed_endpoints":["db.lab:5432"],
+	"bootstrap_credential":{"source":"vault","address":"https://v.lab","auth_mount":"m","role":"r","jwt_audience":"a","kv_path":"kv/data/x"}}`
+
+// TestRoleTemplates: TN-2, a level's bound follows the definition's schema, in
+// ValidateTarget, ValidateBinding and EnsureTarget, with no connection.
+func TestRoleTemplates(t *testing.T) {
+	ctx := context.Background()
+	c, err := parseConfig([]byte(templateConfig), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{instances: map[string]*instance{"pg": {config: *c, dial: func(context.Context) (*pgx.Conn, error) {
+		t.Error("connected")
+		return nil, errors.New("no database here")
+	}}}}
+	if _, err := parseConfig([]byte(strings.Replace(templateConfig, `"grantable_roles":["SHARED"],`, "", 1)), 0); err != nil {
+		t.Errorf("templates alone: %v", err)
+	}
+	definition := func(schema string) []byte { return []byte(`{"database":"ledger","schema":"` + schema + `"}`) }
+	grants := func(role string) []byte { return []byte(`{"roles":["` + role + `"]}`) }
+	long := strings.Repeat("s", 60) // with _read, past the 63 of an identifier
+	for name, tc := range map[string]struct {
+		schema, role string
+		ok           bool
+	}{
+		"its own":            {"acme_db01", "acme_db01_read", true},
+		"shared":             {"acme_db01", "SHARED", true},
+		"another tenant":     {"acme_db01", "globex_db02_read", false},
+		"the template":       {"acme_db01", "{namespace}_read", false},
+		"not a template":     {"acme_db01", "acme_db01_admin", false},
+		"too long":           {long, long + "_read", false},
+		"no schema, no role": {"", "_read", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name != "no schema, no role" { // ValidateTarget refuses the definition first
+				vt, err := p.ValidateTarget(ctx, &pluginv1.ValidateTargetRequest{Instance: "pg", DefinitionJson: definition(tc.schema),
+					AccessLevels: []*pluginv1.AccessLevelInput{{Name: "l", GrantsJson: grants(tc.role)}}})
+				if err != nil || vt.GetValid() != tc.ok {
+					t.Errorf("ValidateTarget: %v %v", vt, err)
+				}
+			}
+			vb, err := p.ValidateBinding(ctx, &pluginv1.ValidateBindingRequest{Instance: "pg", DefinitionJson: definition(tc.schema), AccessLevelGrantsJson: grants(tc.role)})
+			if err != nil || vb.GetValid() != tc.ok {
+				t.Errorf("ValidateBinding: %v %v", vb, err)
+			}
+			if tc.ok {
+				return // EnsureTarget would connect
+			}
+			spec, _ := json.Marshal(spec{Database: "ledger", Schema: tc.schema, Roles: []string{tc.role}})
+			_, err = p.EnsureTarget(ctx, &pluginv1.EnsureTargetRequest{Instance: "pg", RequestedSpecJson: spec})
+			if code, _ := errorCode(t, err); code != "PRIVILEGE_OUT_OF_BOUNDS" {
+				t.Errorf("EnsureTarget: %v", err)
+			}
+		})
+	}
+	ui, err := p.GetUISchemas(ctx, &pluginv1.GetUISchemasRequest{Instance: "pg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var options []string
+	for _, o := range ui.GetAccessLevelGrants().GetFields()[0].GetOptions() {
+		options = append(options, o.GetValue())
+	}
+	if strings.Join(options, " ") != "SHARED {namespace}_read {namespace}_write" {
+		t.Errorf("options %v", options)
 	}
 }
 
@@ -252,6 +325,9 @@ func TestHealth(t *testing.T) {
 	d, err := p.Describe(context.Background(), &pluginv1.DescribeRequest{})
 	if err != nil || d.GetPlatformProvider().GetClientOutputSchemaJson() == "" {
 		t.Errorf("%v %v", d, err)
+	}
+	if got := d.GetPlatformProvider().GetNamespaceField(); got != "schema" {
+		t.Errorf("namespace_field %q", got)
 	}
 	for _, m := range d.GetPlatformProvider().GetAcceptedIdentityModes() {
 		if m == pluginv1.IdentityMode_IDENTITY_MODE_SVID {

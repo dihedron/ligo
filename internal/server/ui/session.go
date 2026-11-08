@@ -242,6 +242,7 @@ func (s *Server) authed(next http.Handler) http.Handler {
 		}
 		// before anything is written: a refused request leaves the session as it was
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && (!equal(r.Header.Get("X-CSRF-Token"), sess.CSRF) || !s.sameOrigin(r)) {
+			s.logRefused(w, r, sess.Username, http.StatusForbidden)
 			s.alert(w, r, http.StatusForbidden, "The request was refused: reload the page and try again.")
 			return
 		}
@@ -339,6 +340,9 @@ func (s *Server) frame(r *http.Request, title, current string) Page {
 		{Path: "/ui/platforms", Label: "Platforms"}} {
 		n.Current = n.Path == current
 		p.Nav = append(p.Nav, n)
+	}
+	if s.showsAccounts(sess.Grants) {
+		p.Nav = append(p.Nav, NavItem{Path: "/ui/accounts", Label: "Accounts", Current: current == "/ui/accounts"})
 	}
 	if breakGlassMember(sess.Grants) {
 		p.Nav = append(p.Nav, NavItem{Path: "/ui/break-glass/new-form", Label: "Break glass", Current: current == "/ui/break-glass/new-form"})

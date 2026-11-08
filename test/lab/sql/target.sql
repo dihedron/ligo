@@ -35,3 +35,22 @@ GRANT USAGE ON SCHEMA ledger TO "LEDGER_RO_ROLE", "LEDGER_RW_ROLE", "LEDGER_DDL_
 GRANT CREATE ON SCHEMA ledger TO "LEDGER_DDL_ROLE";
 GRANT SELECT ON ledger.entries TO "LEDGER_RO_ROLE", "LEDGER_RW_ROLE";
 GRANT INSERT, UPDATE ON ledger.entries TO "LEDGER_RW_ROLE";
+
+-- Two tenancies on one database, as the platform team creates them outside
+-- ligo (.specs/ligo-tenancy.md §6): lab.sh serve test-accounts.
+\connect postgres
+SELECT format('CREATE ROLE %I NOLOGIN', r) FROM unnest(ARRAY['acme_db01_read', 'acme_db01_write', 'globex_db02_read', 'globex_db02_write']) r
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = r) \gexec
+GRANT acme_db01_read, acme_db01_write, globex_db02_read, globex_db02_write TO lab_target_admin WITH ADMIN OPTION;
+\connect ledger
+GRANT CONNECT ON DATABASE ledger TO acme_db01_read, acme_db01_write, globex_db02_read, globex_db02_write;
+CREATE SCHEMA IF NOT EXISTS acme_db01;
+CREATE TABLE IF NOT EXISTS acme_db01.entries (id bigint PRIMARY KEY, amount numeric NOT NULL);
+GRANT USAGE ON SCHEMA acme_db01 TO acme_db01_read, acme_db01_write;
+GRANT SELECT ON acme_db01.entries TO acme_db01_read, acme_db01_write;
+GRANT INSERT, UPDATE ON acme_db01.entries TO acme_db01_write;
+CREATE SCHEMA IF NOT EXISTS globex_db02;
+CREATE TABLE IF NOT EXISTS globex_db02.entries (id bigint PRIMARY KEY, amount numeric NOT NULL);
+GRANT USAGE ON SCHEMA globex_db02 TO globex_db02_read, globex_db02_write;
+GRANT SELECT ON globex_db02.entries TO globex_db02_read, globex_db02_write;
+GRANT INSERT, UPDATE ON globex_db02.entries TO globex_db02_write;

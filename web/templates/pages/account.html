@@ -1,0 +1,15 @@
+{{define "content"}}{{with .Content}}{{with .Account}}<h1>{{.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</h1>
+<section class="card"><dl class="fields">
+  <dt>Status</dt><dd><span class="{{badge .Status}}">{{.Status}}</span></dd>
+  <dt>Registered</dt><dd>{{when .RegisteredAt}} by {{.RegisteredBy}}</dd>
+  {{with .RetiredAt}}<dt>Retired</dt><dd>{{when .}} by {{$.Content.Account.RetiredBy}}</dd>{{end}}
+  {{with .Counts}}<dt>Sources</dt><dd>{{.Sources}}</dd><dt>Targets</dt><dd>{{.Targets}}</dd><dt>Bindings</dt><dd>{{.Bindings}}</dd>{{end}}
+</dl></section>
+{{if and $.Content.CanChange (eq .Status "ACTIVE")}}<div id="account-errors" class="errors"></div>
+<div class="actions">
+  <form hx-post="/ui/accounts/{{.Name}}/retire" hx-confirm="Retire {{.Name}}? This cannot be undone: the name can never be registered again."
+    hx-status:409="target:#account-errors swap:innerHTML" hx-status:422="target:#account-errors swap:innerHTML" {{hxnonce}}>
+    <button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Retire</button></form>
+</div>{{end}}{{end}}
+<p><a href="/ui/accounts">All accounts</a></p>
+{{end}}{{end}}

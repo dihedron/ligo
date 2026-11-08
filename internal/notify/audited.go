@@ -17,7 +17,7 @@ var sameName = []string{"BREAK_GLASS_USED", "BREAK_GLASS_EXPIRING", "BREAK_GLASS
 	"BREAK_GLASS_RATIFIED", "BREAK_GLASS_REVIEW_OVERDUE", "CR_INTERCONNECT_DENIED", "BINDING_EXPIRED", "SOURCE_DEPRECATED",
 	"TARGET_DEPRECATED", "ACCESS_LEVEL_DEPRECATED", "CONFIG_APPROVAL_POLICY_WEAKENED", "CONFIG_GOVERNANCE_POLICY_CHANGED",
 	"CONFIG_PLATFORM_CHANGED", "PROPAGATION_FAILED", "SYSTEM_INTERCONNECT_VIOLATIONS", "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS", "SYSTEM_MAINTENANCE_ENABLED",
-	"SYSTEM_MAINTENANCE_DISABLED", "SYSTEM_EXECUTOR_RECOVERED"}
+	"SYSTEM_MAINTENANCE_DISABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_TARGET_DECIDED_BY_PLATFORM"}
 
 // derived are the events announced by audit actions of another name.
 var derived = map[string]string{"BINDING_EXPIRY_WARNED": "BINDING_EXPIRING", "CR_CREATED": "CR_AWAITING_APPROVAL",
@@ -143,6 +143,11 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 		if scopes, err = o.affected(ctx, tx, name, e); err != nil {
 			return nil, err
 		}
+	case "BINDING_TARGET_DECIDED_BY_PLATFORM": // to the target's account, which did not take part (.specs/ligo-tenancy.md §9.3)
+		if cr == nil || cr.scopes[2] == nil {
+			return nil, nil
+		}
+		scopes = []string{*cr.scopes[2]}
 	case "CR_INTERCONNECT_DENIED": // no change request: the scopes are in the snapshot
 		var snap struct{ SourceScope, TargetScope string }
 		_ = json.Unmarshal(e.Snapshot, &snap)

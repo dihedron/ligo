@@ -16,6 +16,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
@@ -329,6 +330,8 @@ func samples() map[string]any {
 		"source":          SourcePage{Source: src, Bindings: []*bindings.View{v}, Audit: trail},
 		"targets":         TargetsPage{Targets: []*targets.View{tgt}, Next: "t"},
 		"target":          TargetPage{Target: tgt, Bindings: []*bindings.View{v}, Audit: trail},
+		"accounts":        AccountsPage{Accounts: []*accounts.Account{{Name: "a", DisplayName: "d", Status: "ACTIVE", RegisteredBy: "r", RegisteredAt: now}}, Next: "a", CanChange: true},
+		"account":         AccountPage{Account: &accounts.Account{Name: "a", DisplayName: "d", Status: "ACTIVE", RegisteredBy: "r", RegisteredAt: now, RetiredBy: "r", RetiredAt: &now, Counts: &accounts.Counts{}}, CanChange: true},
 		"platforms":       []PlatformRow{{Name: "p", Serving: true, Health: "serving", TargetScopes: []string{"dc/x/*"}}},
 		"catalog":         CatalogPage{Types: []string{"oracle.v1"}, Targets: []catalog.Target{{Name: "t", State: "DEPRECATED"}}, Next: "t"},
 		"catalog-card":    CardPage{Target: tgt, Flows: []flows.Flow{{Name: "f"}}, FlowsJSON: "{}", Outcomes: []catalog.Outcome{{Source: "s", Allowed: true, Sides: []string{"TARGET"}}}},

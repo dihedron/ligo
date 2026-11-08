@@ -150,6 +150,55 @@ func (s *Server) values(r *http.Request, f *pluginv1.UIForm, prefix string) (map
 	return out, nil
 }
 
+// namespacePlaceholder is how a plugin offers a role of a namespace it cannot
+// know yet: the option is sent as the role of the schema submitted with it.
+const namespacePlaceholder = "{namespace}"
+
+// namespace is the namespace in a definition's values, "" if its platform's
+// plugin declares none. The plugin's ValidateTarget checks what results.
+func (s *Server) namespace(platform string, def map[string]any) string {
+	rules := s.Targets.Rules
+	if rules.NamespaceField == nil {
+		return ""
+	}
+	ns, _ := def[rules.NamespaceField(rules.Platforms[platform].Type)].(string)
+	return ns
+}
+
+// expandNamespace turns the chosen options of a level's grants into roles.
+func expandNamespace(grants map[string]any, ns string) {
+	if ns == "" {
+		return // the placeholder stays, and the plugin refuses it
+	}
+	for _, v := range grants {
+		if list, ok := v.([]string); ok {
+			for i, e := range list {
+				list[i] = strings.ReplaceAll(e, namespacePlaceholder, ns)
+			}
+		}
+	}
+}
+
+// selectTemplates marks the options whose expansion a level's stored grants
+// hold, so that they show selected and follow the schema if it changes.
+func selectTemplates(form *pluginv1.UIForm, grants map[string]any, ns string) {
+	if ns == "" {
+		return
+	}
+	for _, d := range form.GetFields() {
+		list, ok := grants[d.GetJsonKey()].([]any)
+		if !ok {
+			continue
+		}
+		for _, o := range d.GetOptions() {
+			if strings.Contains(o.GetValue(), namespacePlaceholder) && slices.Contains(list, any(strings.ReplaceAll(o.GetValue(), namespacePlaceholder, ns))) {
+				list = append(list, o.GetValue())
+			}
+		}
+		grants[d.GetJsonKey()] = list
+	}
+}
+
 // LevelBlock is one access level's inputs and the button that adds the next.
 type LevelBlock struct {
 	Platform    string
@@ -187,6 +236,9 @@ func (s *Server) platformFields(ctx context.Context, platform string, t *targets
 	for i, l := range levels {
 		grants := map[string]any{}
 		_ = json.Unmarshal(l.Grants, &grants)
+		if t != nil {
+			selectTemplates(ui.GetAccessLevelGrants(), grants, s.namespace(platform, def))
+		}
 		pf.Levels = append(pf.Levels, LevelBlock{Platform: platform, Index: i, Name: l.Name, Description: l.Description,
 			Grants: s.fields(ui.GetAccessLevelGrants(), "level."+strconv.Itoa(i)+".grant.", grants)})
 	}
@@ -355,6 +407,7 @@ func (s *Server) targetOf(r *http.Request, name string) (*targets.Target, error)
 		if err != nil {
 			return nil, err
 		}
+		expandNamespace(grants, s.namespace(t.Metadata.Platform, def))
 		g, _ := json.Marshal(grants)
 		t.AccessLevels = append(t.AccessLevels, targets.AccessLevel{Name: lname, Description: strings.TrimSpace(r.PostFormValue(p + "description")), Grants: g})
 	}

@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/command/version"
 	"github.com/dihedron/ligo/pkg/metadata"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
@@ -36,6 +38,7 @@ const (
 	typ            = "postgres.v1"
 	connectTimeout = 10 * time.Second
 	scramRounds    = 4096
+	namespace      = "{namespace}" // in grantable_role_templates: the target's schema
 )
 
 // Grammars (§4): nothing else reaches SQL, and identifiers are quoted anyway.
@@ -45,15 +48,11 @@ var (
 	uuidRE      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["host","port","database","grantable_roles","allowed_endpoints","bootstrap_credential"],
-"properties":{"host":{"type":"string"},"port":{"type":"integer"},"database":{"type":"string"},
-"grantable_roles":{"type":"array","items":{"type":"string"}},"allowed_endpoints":{"type":"array","items":{"type":"string"}},
-"ca_file":{"type":"string"},"directory_group":{"type":"string"},"bootstrap_credential":{"type":"object"}}}`
+//go:embed schemas/config.json
+var configSchema string
 
-const outputSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["endpoint","database"],
-"properties":{"endpoint":{"type":"string","x-ligo-endpoint":true},"database":{"type":"string"},"user":{"type":"string"}}}`
+//go:embed schemas/output.json
+var outputSchema string
 
 // config is an instance's checked config_json.
 type config struct {
@@ -61,6 +60,7 @@ type config struct {
 	Port                int                                 `json:"port"`
 	Database            string                              `json:"database"`
 	GrantableRoles      []string                            `json:"grantable_roles"`
+	GrantableTemplates  []string                            `json:"grantable_role_templates"`
 	AllowedEndpoints    []string                            `json:"allowed_endpoints"`
 	CAFile              string                              `json:"ca_file"`
 	DirectoryGroup      string                              `json:"directory_group"`
@@ -84,12 +84,18 @@ func parseConfig(data []byte, mode pluginv1.IdentityMode) (*config, error) {
 	if !identRE.MatchString(c.Database) {
 		return nil, errors.New("database is not a valid identifier")
 	}
-	if len(c.GrantableRoles) == 0 {
-		return nil, errors.New("grantable_roles is required")
+	if len(c.GrantableRoles) == 0 && len(c.GrantableTemplates) == 0 {
+		return nil, errors.New("grantable_roles or grantable_role_templates is required")
 	}
 	for _, r := range c.GrantableRoles {
 		if !identRE.MatchString(r) {
 			return nil, fmt.Errorf("grantable_roles: %q is not a valid identifier", r)
+		}
+	}
+	for _, r := range c.GrantableTemplates {
+		// without its placeholder a template would be a role shared across tenants
+		if strings.Count(r, namespace) != 1 || !identRE.MatchString(strings.ReplaceAll(r, namespace, "x")) {
+			return nil, fmt.Errorf("grantable_role_templates: %q must hold %s once and otherwise be an identifier", r, namespace)
 		}
 	}
 	if endpoint := net.JoinHostPort(c.Host, strconv.Itoa(c.Port)); !slices.Contains(c.AllowedEndpoints, endpoint) {
@@ -132,6 +138,7 @@ func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 			AcceptedIdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC,
 				pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR},
 			ClientOutputSchemaJson: outputSchema,
+			NamespaceField:         "schema",
 		}},
 	}, nil
 }
@@ -265,9 +272,21 @@ func strict(data []byte, v any) error {
 	return dec.Decode(v)
 }
 
-// roles checks a level's grants against the privilege bounds and returns its
-// roles, sorted and without duplicates.
-func (in *instance) roles(grants []byte) ([]string, error) {
+// bound is what a level on schema may grant: grantable_roles and the templates
+// expanded with schema. A schema outside the grammar expands nothing.
+func (in *instance) bound(schema string) []string {
+	out := slices.Clone(in.GrantableRoles)
+	if identRE.MatchString(schema) {
+		for _, t := range in.GrantableTemplates {
+			out = append(out, strings.ReplaceAll(t, namespace, schema))
+		}
+	}
+	return out
+}
+
+// roles checks a level's grants against the privilege bounds on schema and
+// returns its roles, sorted and without duplicates.
+func (in *instance) roles(grants []byte, schema string) ([]string, error) {
 	var g struct {
 		Roles []string `json:"roles"`
 	}
@@ -276,9 +295,10 @@ func (in *instance) roles(grants []byte) ([]string, error) {
 	}
 	slices.Sort(g.Roles)
 	g.Roles = slices.Compact(g.Roles)
+	bound := in.bound(schema)
 	for _, r := range g.Roles {
-		if !identRE.MatchString(r) || !slices.Contains(in.GrantableRoles, r) {
-			return nil, fmt.Errorf("role %q is not in grantable_roles", r)
+		if !identRE.MatchString(r) || !slices.Contains(bound, r) {
+			return nil, fmt.Errorf("role %q is not in grantable_roles or grantable_role_templates", r)
 		}
 	}
 	return g.Roles, nil
@@ -311,7 +331,7 @@ func (p *plugin) ValidateTarget(ctx context.Context, r *pluginv1.ValidateTargetR
 	resp.NormalizedDefinitionJson, _ = json.Marshal(d)
 	var all []string
 	for _, l := range r.GetAccessLevels() {
-		roles, err := in.roles(l.GetGrantsJson())
+		roles, err := in.roles(l.GetGrantsJson(), d.Schema)
 		if err != nil {
 			return invalid("accessLevels." + l.GetName() + ": " + err.Error())
 		}
@@ -364,7 +384,7 @@ func (p *plugin) ValidateBinding(_ context.Context, r *pluginv1.ValidateBindingR
 	if err := strict(r.GetDefinitionJson(), &d); err != nil {
 		return refuse("definition: not a valid definition")
 	}
-	roles, err := in.roles(r.GetAccessLevelGrantsJson())
+	roles, err := in.roles(r.GetAccessLevelGrantsJson(), d.Schema)
 	if err != nil {
 		return refuse("accessLevel: " + err.Error())
 	}
@@ -450,7 +470,7 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 		return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_SPEC", "the requested spec is not valid", false)
 	}
 	grants, _ := json.Marshal(map[string][]string{"roles": s.Roles})
-	roles, err := in.roles(grants)
+	roles, err := in.roles(grants, s.Schema)
 	if err != nil { // a bound tightened since the level was published (§5.8 rule 3)
 		return nil, pluginsdk.Error(codes.FailedPrecondition, "PRIVILEGE_OUT_OF_BOUNDS", err.Error(), false)
 	}
@@ -624,15 +644,16 @@ func (p *plugin) CleanupTarget(ctx context.Context, r *pluginv1.CleanupTargetReq
 	return &pluginv1.CleanupTargetResponse{}, nil
 }
 
-// GetUISchemas gives the forms of §4, with the bounds as the role options.
+// GetUISchemas gives the forms of §4, with the bounds as the role options; a
+// template stays one, as the schema is not known here (.specs/ligo-tenancy.md §6).
 func (p *plugin) GetUISchemas(_ context.Context, r *pluginv1.GetUISchemasRequest) (*pluginv1.GetUISchemasResponse, error) {
 	in, err := p.instance(r.GetInstance())
 	if err != nil {
 		return nil, err
 	}
-	options := make([]*pluginv1.UIFieldOption, len(in.GrantableRoles))
-	for i, role := range in.GrantableRoles {
-		options[i] = &pluginv1.UIFieldOption{Value: role, Label: role}
+	var options []*pluginv1.UIFieldOption
+	for _, role := range slices.Concat(in.GrantableRoles, in.GrantableTemplates) {
+		options = append(options, &pluginv1.UIFieldOption{Value: role, Label: role})
 	}
 	return &pluginv1.GetUISchemasResponse{PluginType: typ, Instance: r.GetInstance(),
 		TargetDefinition: &pluginv1.UIForm{Fields: []*pluginv1.UIFieldDescriptor{
@@ -649,6 +670,9 @@ func (p *plugin) GetUISchemas(_ context.Context, r *pluginv1.GetUISchemasRequest
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "version" {
+		os.Exit(version.Run(os.Args[2:]))
+	}
 	if len(os.Args) == 3 && os.Args[1] == "-svids" {
 		os.Exit(pluginsdk.PrintSVIDs(os.Args[2]))
 	}

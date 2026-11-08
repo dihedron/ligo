@@ -74,13 +74,17 @@ hooks_env() {
 hooks_notifications() {
 	inner_exists hooks || return 0
 	local events='[BREAK_GLASS_USED, CR_AWAITING_APPROVAL, BINDING_REVOKED, SYSTEM_MAINTENANCE_ENABLED, SYSTEM_MAINTENANCE_DISABLED, SYSTEM_EXECUTOR_RECOVERED]'
+	local dba="dc/corp-prod/ledger" elsewhere="dc/elsewhere/*"
+	if [[ -n "$LAB_ACCOUNTS" ]]; then # TN-12: the target's account hears, the source's does not
+		events="${events%]}, BINDING_TARGET_DECIDED_BY_PLATFORM]" dba="tenants/globex/*" elsewhere="tenants/acme/*"
+	fi
 	local common="ca_cert_file: /etc/ligo-lab/ca.crt, timeout: 5s, events: $events"
 	cat <<YAML
 notifications:
   webhooks:
     - { name: oncall, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/oncall", hmac_secret_env: LIGO_WEBHOOK_ONCALL_SECRET, $common }
-    - { name: dba, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/dba", hmac_secret_env: LIGO_WEBHOOK_DBA_SECRET, scopes: ["dc/corp-prod/ledger"], $common }
-    - { name: elsewhere, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/elsewhere", hmac_secret_env: LIGO_WEBHOOK_ELSEWHERE_SECRET, scopes: ["dc/elsewhere/*"], $common }
+    - { name: dba, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/dba", hmac_secret_env: LIGO_WEBHOOK_DBA_SECRET, scopes: ["$dba"], $common }
+    - { name: elsewhere, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/elsewhere", hmac_secret_env: LIGO_WEBHOOK_ELSEWHERE_SECRET, scopes: ["$elsewhere"], $common }
 YAML
 }
 

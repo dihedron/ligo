@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/command/version"
 	"github.com/dihedron/ligo/pkg/metadata"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/go-ldap/ldap/v3"
@@ -34,10 +36,8 @@ const (
 // principalRE is the grammar of the one request value in a DN (§5.8 rule 3).
 var principalRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,19}$`)
 
-const configSchema = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
-"required":["url","service_ou_dn","allowed_endpoints","bootstrap_credential"],
-"properties":{"url":{"type":"string"},"service_ou_dn":{"type":"string"},"allowed_endpoints":{"type":"array","items":{"type":"string"}},
-"ca_file":{"type":"string"},"bootstrap_credential":{"type":"object"}}}`
+//go:embed schemas/config.json
+var configSchema string
 
 // config is an instance's checked config_json.
 type config struct {
@@ -300,6 +300,9 @@ func failure(err error) error {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "version" {
+		os.Exit(version.Run(os.Args[2:]))
+	}
 	if len(os.Args) == 3 && os.Args[1] == "-svids" {
 		os.Exit(pluginsdk.PrintSVIDs(os.Args[2]))
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -62,6 +63,7 @@ const (
 type directory struct {
 	passwords map[string]string
 	groups    map[string][]string
+	accounts  map[string][]string // the AccountGroups of a user
 	down      bool
 }
 
@@ -79,7 +81,7 @@ func (d *directory) Lookup(_ context.Context, user string) (authz.Principal, err
 	if _, ok := d.passwords[user]; !ok {
 		return authz.Principal{}, adminauth.ErrInvalidCredentials
 	}
-	return authz.Principal{Name: user, DisplayName: "Full " + user, Groups: slices.Clone(d.groups[user])}, nil
+	return authz.Principal{Name: user, DisplayName: "Full " + user, Groups: slices.Clone(d.groups[user]), AccountGroups: slices.Clone(d.accounts[user])}, nil
 }
 
 // workflows records the retries and rotations started.
@@ -167,7 +169,9 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	az, err := authz.New([]config.RoleBinding{{LDAPGroupDN: viewers, Role: config.RoleViewer, Scopes: []string{"*"}},
 		{LDAPGroupDN: operators, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
 		{LDAPGroupDN: approvers, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
-		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}}})
+		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: accountAdmins, Role: config.RoleAccountAdmin},
+		{LDAPGroupDN: "cn=ligo-full,ou=groups,dc=ligo,dc=lab", Role: config.RoleFullAccess, Scopes: []string{"*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,6 +425,33 @@ func TestSessionCSRF(t *testing.T) {
 	}
 	if resp, _ := b.do("POST", "/ui/preferences/theme", url.Values{"mode": {"sepia"}}); resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("unknown mode: %d", resp.StatusCode)
+	}
+}
+
+// TestSessionAccountRetired: TN-8, the account is retired and the group is
+// unchanged: the next re-check removes the only grant, so the session ends.
+func TestSessionAccountRetired(t *testing.T) {
+	v := sessionSetup(t)
+	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=ligo,dc=lab", Roles: []governance.AccountRole{
+		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=ligo,dc=lab", Role: config.RoleApprover, Scope: "cloud/{account}/*"}}}).Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := true
+	v.s.Authz.UseAccounts(rules, func(account string) bool { return account == "acme" && active })
+	v.dir.groups[v.user] = nil
+	v.dir.accounts = map[string][]string{v.user: {"cn=approvers,ou=acme,ou=accounts,dc=ligo,dc=lab"}}
+	b := v.browser(t)
+	b.signIn("right")
+	if resp, _ := b.page(); resp.StatusCode != http.StatusOK {
+		t.Fatalf("signed in through the account's group: %d", resp.StatusCode)
+	}
+	active = false
+	if _, err := v.owner.Exec(context.Background(), "UPDATE admin_sessions SET authz_checked_at = authz_checked_at - interval '6 minutes' WHERE username = $1 AND revoked_at IS NULL", v.user); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := b.do("GET", "/ui/bindings", nil, "HX-Request", ""); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/ui/login" {
+		t.Errorf("TN-8: %d %v", resp.StatusCode, resp.Header)
 	}
 }
 

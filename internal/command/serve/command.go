@@ -22,6 +22,7 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/adminauth"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
@@ -71,7 +72,11 @@ type Serve struct {
 
 // SetGlobals receives the root's --log-level.
 func (cmd *Serve) SetGlobals(g *client.Globals) {
-	_ = cmd.level.UnmarshalText([]byte(g.LogLevel)) // the parser allows debug, info, warn and error only
+	if g.LogLevel == "off" {
+		cmd.level = slog.Level(1000) // above every level logged
+		return
+	}
+	_ = cmd.level.UnmarshalText([]byte(g.LogLevel)) // the parser allows debug, info, warn, error and off only
 }
 
 // Execute runs until SIGINT or SIGTERM, then shuts down in order.
@@ -209,6 +214,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err := checks.Platforms(ctx, targets.Plugins(plugins)); err != nil {
 		return err
 	}
+	if err := checks.Namespaces(ctx, plugins.NamespaceField); err != nil {
+		return err
+	}
 	engine := &workflows.Engine{DB: pools.App, Plugins: workflows.Manager(plugins), Sealer: sealer,
 		Backoff: workflows.Backoff{Attempts: p.Retry.MaxAttempts, Initial: p.Retry.InitialBackoff, Max: p.Retry.MaxBackoff}}
 	health(ctx, log, cfg, engine.Plugins)
@@ -244,6 +252,20 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("serve: resolution cache: %w", err)
 	}
 
+	// the accounts behind the roles that directory groups derive
+	var registry *accounts.Registry
+	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+		rules, err := a.LDAPGroups.Compile()
+		if err != nil {
+			return err
+		}
+		registry = accounts.NewRegistry(pools.App, rc.FullReloadInterval)
+		if err := registry.Load(ctx); err != nil {
+			return fmt.Errorf("serve: account registry: %w", err)
+		}
+		s.Authz.UseAccounts(rules, registry.Active)
+	}
+
 	// 8. the background loops, the cache's LISTEN subscriber with them
 	loops, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -254,6 +276,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 			log.Error("resolution cache", "error", err)
 		}
 	})
+	if registry != nil {
+		run(registry.Run)
+	}
 	rotation := map[string]time.Duration{}
 	for _, pp := range cfg.PlatformProviders {
 		for _, pl := range pp.Platforms {
@@ -397,6 +422,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 	if err != nil {
 		return nil, err
 	}
+	targetRules.NamespaceField = plugins.NamespaceField
 	requests := &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: cfg.Authorization.Approval.ChangeRequestTTL,
 		Resources: map[string]changerequests.Resource{}, BreakGlassRules: cfg.BreakGlass}
 	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: requests}
@@ -607,5 +633,9 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 			groups = append(groups, b.LDAPGroupDN)
 		}
 	}
-	return &adminauth.LDAP{Config: c, BindPassword: password, RootCAs: roots, Groups: groups}, nil
+	l := &adminauth.LDAP{Config: c, BindPassword: password, RootCAs: roots, Groups: groups}
+	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+		l.GroupSearchBase = a.LDAPGroups.SearchBase
+	}
+	return l, nil
 }

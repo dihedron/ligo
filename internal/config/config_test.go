@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // example returns examples/server.yaml (the §8.1 reference) with its
@@ -290,5 +292,108 @@ func TestPluginRules(t *testing.T) {
 		if err := Validate(cfg, Options{LookupEnv: lookupEnv}); err == nil {
 			t.Errorf("%s: accepted", v.name)
 		}
+	}
+}
+
+func TestAccounts(t *testing.T) {
+	const block = `governance:
+  accounts:
+    scope: "cloud/{account}"
+    source_scope: "cloud/{account}/app/{project}"
+    target_scope: "cloud/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "ou=accounts,dc=corp,dc=internal"
+      roles:
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+`
+	const required = `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`
+	load := func(t *testing.T, replacements ...string) error {
+		t.Helper()
+		doc := strings.NewReplacer(replacements...).Replace(example(t))
+		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
+	}
+	head := "governance:                               # ADR-13, ADR-14, §3.9\n"
+	if err := load(t, head, block, required, `required_scopes: ["cloud/*"]`); err != nil {
+		t.Fatal(err)
+	}
+	if err := load(t); err != nil { // absent: as v0.1.0
+		t.Fatal(err)
+	}
+	for name, r := range map[string][]string{
+		"approval not required on accounts": {head, block},
+		"role not for groups":               {head, strings.Replace(block, "role: approver", "role: admin.full_access", 1), required, `required_scopes: ["cloud/*"]`},
+		"bad structure":                     {head, strings.Replace(block, "cloud/{account}/data", "cloud/{account}/app", 1), required, `required_scopes: ["cloud/*"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := load(t, r...); err == nil || !strings.Contains(err.Error(), "rule 16") {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
+// account_admin is global: it takes no scopes; every other role needs them.
+func TestAccountAdminBinding(t *testing.T) {
+	load := func(role, scopes string) error {
+		doc := strings.Replace(example(t), "  bindings:\n", "  bindings:\n    - { spiffe_id: \"spiffe://prod.internal/ops/reg\", role: "+role+scopes+" }\n", 1)
+		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
+	}
+	if err := load(RoleAccountAdmin, ""); err != nil {
+		t.Errorf("no scopes: %v", err)
+	}
+	if err := load(RoleAccountAdmin, `, scopes: ["*"]`); err == nil || !strings.Contains(err.Error(), "takes no scopes") {
+		t.Errorf("with scopes: %v", err)
+	}
+	if err := load(RoleViewer, ""); err == nil || !strings.Contains(err.Error(), "scopes is required") {
+		t.Errorf("a viewer without scopes: %v", err)
+	}
+}
+
+func TestNamespaceTemplate(t *testing.T) {
+	const accounts = `governance:
+  accounts:
+    scope: "cloud/{account}"
+    source_scope: "cloud/{account}/app/{project}"
+    target_scope: "cloud/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "ou=accounts,dc=corp,dc=internal"
+      roles:
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+`
+	load := func(template string, withAccounts bool) error {
+		r := []string{`        target_scopes: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_scopes: ["dc/corp-prod/*"]`}
+		if withAccounts {
+			r = append(r, "governance:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_scopes: ["cloud/*"]`)
+		}
+		return Validate(parse(t, strings.NewReplacer(r...).Replace(example(t))), Options{LookupEnv: lookupEnv})
+	}
+	if err := load("{account}_{tenancy}", true); err != nil {
+		t.Errorf("accepted form: %v", err)
+	}
+	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "governance.accounts") {
+		t.Errorf("without accounts: %v", err)
+	}
+	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {
+		t.Errorf("no separator: %v", err)
+	}
+}
+
+// TestPrivilegeBounds: a tenant's roles are bounds too, so changing them is
+// audited and shown like grantable_roles (.specs/ligo-tenancy.md §6).
+func TestPrivilegeBounds(t *testing.T) {
+	var p Platform
+	if err := yaml.Unmarshal([]byte(`config: {grantable_role_templates: ["{namespace}_read"]}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	b := p.PrivilegeBounds()
+	if _, ok := b["grantableRoles"]; ok || !slices.Equal(b["grantableRoleTemplates"].([]string), []string{"{namespace}_read"}) {
+		t.Errorf("bounds %v", b)
+	}
+	var none Platform
+	if err := yaml.Unmarshal([]byte(`config: {host: h}`), &none); err != nil {
+		t.Fatal(err)
+	}
+	if b := none.PrivilegeBounds(); b != nil {
+		t.Errorf("no bounds: %v", b)
 	}
 }

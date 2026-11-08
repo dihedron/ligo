@@ -289,3 +289,21 @@ func TestPropagateRefused(t *testing.T) {
 		t.Errorf("transient binding %+v", got)
 	}
 }
+
+// TestPropagateSparesThePool: a pass does not hold a connection while asking
+// the pool for another.
+func TestPropagateSparesThePool(t *testing.T) {
+	s, _, _, _ := setup(t)
+	cfg := s.DB.Config()
+	cfg.MaxConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	if _, err := (&Propagator{Service: &Service{DB: db}}).Propagate(ctx); err != nil {
+		t.Errorf("propagate: %v", err)
+	}
+}

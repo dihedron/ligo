@@ -55,16 +55,11 @@ func (s *Sweeper) Run(ctx context.Context) {
 // Sweep runs one pass if this replica takes the lock ligo_sweeper; it
 // reports whether it ran.
 func (s *Sweeper) Sweep(ctx context.Context) (bool, error) {
-	conn, err := s.Engine.DB.Acquire(ctx)
-	if err != nil {
+	release, locked, err := store.TryLock(ctx, s.Engine.DB, "ligo_sweeper")
+	if err != nil || !locked {
 		return false, err
 	}
-	defer conn.Release()
-	var locked bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext('ligo_sweeper'))").Scan(&locked); err != nil || !locked {
-		return false, err
-	}
-	defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_sweeper'))") }()
+	defer release()
 	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx), s.expiry(ctx))
 }
 

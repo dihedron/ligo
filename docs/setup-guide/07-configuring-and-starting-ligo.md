@@ -62,6 +62,7 @@ Roles are granted on scope patterns. A pattern matches whole segments only, and 
 | `break_glass` | Apply emergency changes. People only, by `ldap_group_dn` |
 | `trusted_automation` | File changes approved by delegation. SPIFFE principals only, with a reference to an upstream approval |
 | `admin.full_access` | All of the above except deciding one's own requests, and maintenance and recovery |
+| `account_admin` | Register, retire and list accounts, and nothing else. Global: it takes no `scopes`. `admin.full_access` includes it |
 
 ```yaml
 authorization:
@@ -81,6 +82,46 @@ governance:
 ```
 
 Each trust domain a platform accepts needs one `source_scopes` entry. Across scopes, `ligo` denies by default: add a rule for each flow you intend.
+
+## Accounts
+
+Accounts let many tenants share platforms, each managed by its own people. They are optional. Tenants are registered at run time; only their common structure goes in `server.yaml`:
+
+```yaml
+authorization:
+  bindings:
+    - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,dc=corp,dc=internal", role: account_admin }
+  approval:
+    required_scopes: ["cloud/*"]    # startup refuses accounts this does not cover
+    require_distinct_approvers_across_scopes: true
+governance:
+  accounts:
+    scope: "cloud/{account}"
+    source_scope: "cloud/{account}/app/{project}"
+    target_scope: "cloud/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "ou=accounts,dc=corp,dc=internal"
+      roles:
+        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=corp,dc=internal", role: operator, scope: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/app/{project}" }
+  source_scopes:
+    - { trust_domain: cloud.internal, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', scope_template: 'cloud/${1}/app/${2}' }
+  interconnects:
+    default_cross_scope: deny
+    rules:
+      - { name: accounts, from: ["cloud/*"], to: ["cloud/*"], action: allow }
+```
+
+Account, project and tenancy names are lower-case letters and digits, starting with a letter. A segment such as `fin-01` cannot be an account, and a scope using it under `scope` is refused, so keep existing scopes outside this root. The `path_regex` above also lets through a name starting with a digit, because each group must be one character class repeated with `+`; such a scope is refused as no account can have that name.
+
+Three things outside `ligo` become part of its security:
+
+- **The directory.** Whoever can create groups or add members under an account's unit can grant `ligo` roles in that account. Restrict writing there as you restrict `server.yaml`. Only direct membership counts, and only for registered accounts.
+- **SPIRE.** An account's isolation rests on who can register SPIFFE IDs under `/acct/<account>/`.
+- **The secret store.** A binding using a store works only if the store accepts JWT-SVIDs of the source's trust domain. Keep accounts' SPIFFE IDs in the trust domain of the store's zone, or configure the store's JWT auth for theirs. `ligo` does not check this: the binding reaches `ACTIVE`, and the workload then fails when it reads its credential.
+
+For a shared PostgreSQL, set `namespace_template` on the platform and use `grantable_role_templates`; see the chapter on plugins. For each tenancy, the platform team creates, outside `ligo`, the schema `<account>_<tenancy>`, its roles with `ADMIN OPTION` for the plugin's admin, and the privileges of those roles. `ligo` checks the names, not what the roles grant.
 
 ## Sealing and storage
 

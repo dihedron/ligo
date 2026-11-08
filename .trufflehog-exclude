@@ -1,6 +1,8 @@
 # Paths TruffleHog skips in "make secrets" (working-tree scan only): build
-# output, the lab state (keys and passwords of the local lab) and git.
+# output, the lab state (keys and passwords of the local lab), the release
+# evidence (scanned on its own before it is published) and git.
 ^/repo/dist/
 ^/repo/build/
 ^/repo/\.git/
 ^/repo/test/lab/\.state/
+^/repo/test/lab/\.evidence/

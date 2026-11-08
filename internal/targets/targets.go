@@ -68,6 +68,7 @@ type ValidateTarget func(ctx context.Context, req *pluginv1.ValidateTargetReques
 type Platform struct {
 	Name, Type, Zone, Scope string
 	TargetScopes            []string
+	NamespaceTemplate       string
 	CheckExistence          bool
 	Allow                   flows.Allowlist
 }
@@ -76,11 +77,15 @@ type Platform struct {
 type Rules struct {
 	Platforms    map[string]Platform
 	NamePrefixes []governance.NamePrefix
+	Accounts     *governance.Accounts // nil: no accounts
+	// NamespaceField is the definition field a platform type declares for
+	// its namespace (pluginmgr.Manager.NamespaceField).
+	NamespaceField func(platformType string) string
 }
 
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes}
+	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Accounts: cfg.Governance.Accounts}
 	for _, pp := range cfg.PlatformProviders {
 		for _, p := range pp.Platforms {
 			var pc struct {
@@ -93,7 +98,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 			if err != nil {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
-			pl := Platform{Name: p.Name, Type: pp.Type, Zone: p.Zone, Scope: p.Scope, TargetScopes: p.TargetScopes,
+			pl := Platform{Name: p.Name, Type: pp.Type, Zone: p.Zone, Scope: p.Scope, TargetScopes: p.TargetScopes, NamespaceTemplate: p.NamespaceTemplate,
 				CheckExistence: p.CheckExistence == nil || *p.CheckExistence, Allow: allow}
 			if len(pl.TargetScopes) == 0 {
 				pl.TargetScopes = []string{p.Scope + "/*"} // the platform's scope and below
@@ -143,6 +148,9 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	if cur == nil && !slices.ContainsFunc(p.TargetScopes, func(pat string) bool { return governance.ScopeMatches(pat, m.Scope) }) {
 		return invalid("metadata.scope %s is not in the target_scopes of %s", m.Scope, p.Name)
 	}
+	if !r.Accounts.TargetConforms(m.Scope) {
+		return refuse(422, "account-scope-mismatch", "metadata.scope %s does not have the form %s", m.Scope, r.Accounts.TargetScope)
+	}
 	m.PlatformType, m.PlatformScope, m.Zone = p.Type, p.Scope, p.Zone
 	if cur == nil {
 		m.State = "ACTIVE"
@@ -169,13 +177,43 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 			return err
 		}
 	}
-	if err := normalize(ctx, call, p, t); err != nil || cur == nil {
+	if err := normalize(ctx, call, p, t); err != nil {
 		return err
+	}
+	if p.NamespaceTemplate != "" {
+		var field string
+		if r.NamespaceField != nil {
+			field = r.NamespaceField(p.Type)
+		}
+		if err := CheckNamespace(r.Accounts, p.NamespaceTemplate, field, m.Scope, t.Definition); err != nil {
+			return err
+		}
+	}
+	if cur == nil {
+		return nil
 	}
 	for _, l := range t.AccessLevels {
 		if c := level(cur, l.Name); c != nil && !engine.PrivilegesNarrower(c.Privileges, l.Privileges) {
 			return refuse(422, "widening-not-allowed", "wider: access level %s would add privileges to %v: %v", l.Name, c.Privileges, l.Privileges)
 		}
+	}
+	return nil
+}
+
+// CheckNamespace compares the namespace in a normalized definition with what
+// the target's scope gives (.specs/ligo-tenancy.md §5). ligo does it, not each
+// plugin, so that a plugin cannot get it wrong or forget it.
+func CheckNamespace(a *governance.Accounts, template, field, scope string, definition []byte) error {
+	want, ok := a.NamespaceOf(template, scope)
+	if !ok {
+		return refuse(422, "namespace-scope-mismatch", "scope %s has no namespace: a namespaced platform holds only tenancies", scope)
+	}
+	var def map[string]any
+	if err := json.Unmarshal(definition, &def); err != nil {
+		return invalid("definition: %v", err)
+	}
+	if got, _ := def[field].(string); got != want {
+		return refuse(422, "namespace-mismatch", "definition.%s must be %q in scope %s", field, want, scope)
 	}
 	return nil
 }

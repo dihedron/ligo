@@ -6,13 +6,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	flags "github.com/jessevdk/go-flags"
 )
 
 func TestRelevantEnv(t *testing.T) {
+	const userInfo = "admin:" + "hunter2" + "@" // built here, so that scanners do not flag a fixture
 	tests := []struct {
 		env, want string
 		ok        bool
 	}{
+		{"LIGO_PG_APP_DSN=host=db password=hunter2", "LIGO_PG_APP_DSN=********", true},
+		{"LIGO_MIGRATOR_DSN=postgres://" + userInfo + "db/ligo", "LIGO_MIGRATOR_DSN=********", true},
+		{"LIGO_DATABASE_URL=postgres://" + userInfo + "db/ligo", "LIGO_DATABASE_URL=********", true},
+		{"LIGO_ODD_URL=://" + userInfo + "%zz", "LIGO_ODD_URL=********", true}, // does not parse
+		{"LIGO_PUBLIC_URL=https://ligo.example/ui", "LIGO_PUBLIC_URL=https://ligo.example/ui", true},
 		{"LIGO_DOTENV=/etc/ligo/.env", "LIGO_DOTENV=/etc/ligo/.env", true},
 		{"LIGO_LOG_LEVEL=debug", "LIGO_LOG_LEVEL=debug", true},
 		{"LIGO_TRUST_PASSWORD=hunter2", "LIGO_TRUST_PASSWORD=********", true},
@@ -63,4 +71,32 @@ func capture(t *testing.T, f func() error) string {
 	}
 	out, _ := io.ReadAll(r)
 	return string(out)
+}
+
+// TestRun is how a plugin answers "NAME version [-v]".
+func TestRun(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{nil, 0},
+		{[]string{"-v"}, 0},
+		{[]string{"--verbose"}, 0},
+		{[]string{"--nonsense"}, 2},
+	} {
+		if got := Run(tc.args); got != tc.want {
+			t.Errorf("Run(%v) = %d, want %d", tc.args, got, tc.want)
+		}
+	}
+}
+
+// TestDotEnvValue: every form takes the file, none leaves it as an argument.
+func TestDotEnvValue(t *testing.T) {
+	for _, args := range [][]string{{"--dotenv", "x"}, {"--dotenv=x"}, {"-D", "x"}} {
+		var cmd Version
+		rest, err := flags.ParseArgs(&cmd, args)
+		if err != nil || cmd.DotEnv == nil || *cmd.DotEnv != "x" || len(rest) != 0 {
+			t.Errorf("%v: dotenv %v, rest %v, err %v", args, cmd.DotEnv, rest, err)
+		}
+	}
 }

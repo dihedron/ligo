@@ -105,6 +105,7 @@ const (
 	admin2ID = "spiffe://prod.lab/ops/ada"
 	secID    = "spiffe://prod.lab/ops/sec"
 	viewerID = "spiffe://prod.lab/ops/vera"
+	regID    = "spiffe://prod.lab/ops/reg"
 	bgID     = "spiffe://prod.lab/ops/glass"
 )
 
@@ -260,6 +261,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		{SPIFFEID: admin2ID, Role: config.RoleFullAccess, Scopes: []string{"*"}},
 		{SPIFFEID: secID, Role: config.RoleApprover, Scopes: []string{"sec/*"}},
 		{SPIFFEID: viewerID, Role: config.RoleViewer, Scopes: []string{"*"}},
+		{SPIFFEID: regID, Role: config.RoleAccountAdmin},
 		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}},
 		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Scopes: []string{"*"}},
 		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
@@ -1210,5 +1212,58 @@ func TestAuditNamesake(t *testing.T) {
 		if slices.Contains(a, "SOURCE_RETIRED") || slices.Contains(a, "CR_REJECTED") || !slices.Contains(a, "CR_CREATED") {
 			t.Errorf("audit: %v", a)
 		}
+	}
+}
+
+// TN-17, and account_admin reaches the registry and nothing else.
+func TestAccountsAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	reg, viewer, olga, dora := v.client(t, regID), v.client(t, viewerID), v.client(t, opID), v.client(t, appID)
+	name := "api" + v.suffix
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from accounts where name = $1", name) })
+	base := "/v1/admin/accounts"
+	for _, c := range []*http.Client{viewer, olga, dora} {
+		if r := v.do(t, c, "POST", base, map[string]any{"name": name}); r.code != 403 {
+			t.Errorf("register without account_admin: %d", r.code)
+		}
+	}
+	if r := v.do(t, reg, "POST", base, map[string]any{"name": "a-b"}); r.code != 422 {
+		t.Errorf("a name outside the grammar: %d", r.code)
+	}
+	if r := v.do(t, reg, "POST", base, map[string]any{"name": name, "displayName": "API", "extra": true}); r.code != 422 {
+		t.Errorf("an unknown field: %d", r.code)
+	}
+	r := v.do(t, reg, "POST", base, map[string]any{"name": name, "displayName": "API"})
+	if r.code != 201 || r.body["name"] != name || r.body["status"] != "ACTIVE" || r.body["registeredBy"] != regID {
+		t.Fatalf("register: %+v", r)
+	}
+	if r := v.do(t, reg, "POST", base, map[string]any{"name": name}); r.code != 409 {
+		t.Errorf("twice: %d", r.code)
+	}
+	r = v.do(t, reg, "GET", base+"/"+name, nil)
+	if counts, _ := r.body["counts"].(map[string]any); r.code != 200 || counts["sources"] != float64(0) {
+		t.Errorf("get: %+v", r)
+	}
+	r = v.do(t, reg, "GET", base+"?pageSize=200", nil)
+	if items, _ := r.body["items"].([]any); r.code != 200 || len(items) == 0 {
+		t.Errorf("list: %+v", r)
+	}
+	// the example configuration has no accounts: a role on a scope reaches none
+	if r := v.do(t, viewer, "GET", base+"/"+name, nil); r.code != 404 {
+		t.Errorf("a viewer's get: %d", r.code)
+	}
+	for _, path := range []string{"/v1/admin/sources", "/v1/admin/targets", "/v1/admin/bindings", "/v1/admin/maintenance"} {
+		if r := v.do(t, reg, "GET", path, nil); r.code != 403 {
+			t.Errorf("account_admin reads %s: %d", path, r.code)
+		}
+	}
+	if r := v.do(t, olga, "POST", base+"/"+name+"/retire", nil); r.code != 403 {
+		t.Errorf("retire without account_admin: %d", r.code)
+	}
+	if r := v.do(t, reg, "POST", base+"/"+name+"/retire", nil); r.code != 200 || r.body["status"] != "RETIRED" {
+		t.Errorf("retire: %+v", r)
+	}
+	if r := v.do(t, reg, "POST", base+"/"+name+"/retire", nil); r.code != 409 {
+		t.Errorf("retired twice: %d", r.code)
 	}
 }

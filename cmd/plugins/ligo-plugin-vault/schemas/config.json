@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "address",
+    "allowed_endpoints",
+    "auth_mount",
+    "role",
+    "workload_jwt_audience"
+  ],
+  "properties": {
+    "address": {
+      "type": "string"
+    },
+    "allowed_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "auth_mount": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "workload_jwt_audience": {
+      "type": "string"
+    },
+    "kv_mount": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "database_mount": {
+      "type": "string"
+    },
+    "db_connection": {
+      "type": "string"
+    },
+    "ca_file": {
+      "type": "string"
+    }
+  }
+}

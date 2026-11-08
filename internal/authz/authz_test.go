@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 )
 
 const groups = ",ou=groups,dc=corp,dc=internal"
@@ -157,5 +158,90 @@ func TestVisible(t *testing.T) {
 	}
 	if (Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}).Visible([]string{"x"}, "PUBLIC", nil) {
 		t.Error("break_glass alone sees a PUBLIC resource")
+	}
+}
+
+// account_admin manages the registry and nothing else (spec §7.3).
+func TestAccountAdmin(t *testing.T) {
+	admin := Grants{{Role: config.RoleAccountAdmin}}
+	if !admin.AccountAdmin() {
+		t.Error("account_admin is no account admin")
+	}
+	if !(Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}).AccountAdmin() {
+		t.Error("admin.full_access includes account_admin")
+	}
+	if (Grants{{Role: config.RoleOperator, Scopes: []string{"*"}}}).AccountAdmin() {
+		t.Error("an operator is no account admin")
+	}
+	if admin.Viewer() {
+		t.Error("account_admin alone reads resources")
+	}
+	if admin.Sees("cloud/acme") || admin.ActsFor("cloud/acme", "") || admin.CanApprove("cloud/acme") || admin.Operator("cloud/acme") {
+		t.Error("account_admin alone reaches a scope")
+	}
+	if admin.Visible([]string{"cloud/acme"}, "PUBLIC", nil) {
+		t.Error("account_admin alone sees PUBLIC resources")
+	}
+}
+
+func TestInScopes(t *testing.T) {
+	const account = "cloud/acme/*"
+	for _, c := range []struct {
+		gs   Grants
+		want bool
+	}{
+		{Grants{{Role: config.RoleViewer, Scopes: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/*"}}}, true},
+		{Grants{{Role: config.RoleApprover, Scopes: []string{"cloud/acme/*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acme/app/p1"}}}, true},
+		{Grants{{Role: config.RoleFullAccess, Scopes: []string{"*"}}}, true},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/globex/*"}}}, false},
+		{Grants{{Role: config.RoleOperator, Scopes: []string{"cloud/acmesub/*"}}}, false},
+		{Grants{{Role: config.RoleBreakGlass, Scopes: []string{"*"}}}, false},
+		{Grants{{Role: config.RoleAccountAdmin}}, false},
+		{nil, false},
+	} {
+		if got := c.gs.InScopes(account); got != c.want {
+			t.Errorf("%+v: %v", c.gs, got)
+		}
+	}
+}
+
+// TestAccountGroups: TN-7, TN-8 and TN-18: a group gives its rule's role on its
+// account only while that account is active, added to the static bindings.
+func TestAccountGroups(t *testing.T) {
+	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=corp", Roles: []governance.AccountRole{
+		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Scope: "cloud/{account}/*"},
+		{GroupDN: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Scope: "cloud/{account}/app/{project}"},
+	}}).Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := map[string]bool{"acme": true, "globex": true}
+	a := authorizer(t)
+	a.UseAccounts(rules, func(name string) bool { return active[name] })
+	account := Principal{Name: "u", AccountGroups: []string{"cn=approvers,ou=acme,ou=accounts,dc=corp"}}
+	gs := a.For(account)
+	if !gs.CanApprove("cloud/acme/data/db01") || gs.CanApprove("cloud/globex/data/db01") {
+		t.Errorf("TN-7: %+v", gs)
+	}
+	project := a.For(Principal{Name: "u", AccountGroups: []string{"cn=approvers,ou=app01,ou=acme,ou=accounts,dc=corp"}})
+	if !project.CanApprove("cloud/acme/app/app01") || project.CanApprove("cloud/acme/app/app02") || project.CanApprove("cloud/acme/data/db01") {
+		t.Errorf("TN-18: %+v", project)
+	}
+	static := ldap("ligo-viewers")
+	static.AccountGroups = account.AccountGroups
+	if gs := a.For(static); len(gs) != len(a.For(ldap("ligo-viewers")))+1 {
+		t.Errorf("not the union: %+v", gs)
+	}
+	if gs := a.For(Principal{Name: "u", AccountGroups: []string{"cn=approvers,ou=nosuch,ou=accounts,dc=corp"}}); len(gs) != 0 {
+		t.Errorf("an unregistered account: %+v", gs)
+	}
+	if gs := a.For(Principal{SPIFFEID: "spiffe://x/y", AccountGroups: account.AccountGroups}); len(gs) != 0 {
+		t.Errorf("a SPIFFE principal: %+v", gs)
+	}
+	active["acme"] = false
+	if gs := a.For(account); len(gs) != 0 {
+		t.Errorf("TN-8, retired: %+v", gs)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
+	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -188,16 +189,11 @@ func (d *Dispatcher) Run(ctx context.Context) {
 // Dispatch delivers the due rows if this replica takes the lock
 // ligo_notifier, and purges old ones; it reports whether it ran.
 func (d *Dispatcher) Dispatch(ctx context.Context) (bool, error) {
-	conn, err := d.DB.Acquire(ctx)
-	if err != nil {
+	release, locked, err := store.TryLock(ctx, d.DB, "ligo_notifier")
+	if err != nil || !locked {
 		return false, err
 	}
-	defer conn.Release()
-	var locked bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtext('ligo_notifier'))").Scan(&locked); err != nil || !locked {
-		return false, err
-	}
-	defer func() { _, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtext('ligo_notifier'))") }()
+	defer release()
 	rows, err := d.DB.Query(ctx, `SELECT id, webhook, payload, attempts, created_at < now() - $1::interval FROM notification_outbox
 		WHERE delivered_at IS NULL AND abandoned_at IS NULL AND next_attempt_at <= now() ORDER BY id LIMIT 100`, abandonAfter.String())
 	if err != nil {

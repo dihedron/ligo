@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "host",
+    "port",
+    "database",
+    "allowed_endpoints",
+    "bootstrap_credential"
+  ],
+  "properties": {
+    "host": {
+      "type": "string"
+    },
+    "port": {
+      "type": "integer"
+    },
+    "database": {
+      "type": "string"
+    },
+    "grantable_roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "grantable_role_templates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ca_file": {
+      "type": "string"
+    },
+    "directory_group": {
+      "type": "string"
+    },
+    "bootstrap_credential": {
+      "type": "object"
+    }
+  }
+}

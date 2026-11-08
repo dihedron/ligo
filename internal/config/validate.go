@@ -32,12 +32,16 @@ var (
 	sha256RE        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	ruleNameRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	partyNameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess}
+	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess, RoleAccountAdmin}
 	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	maxPlatformFlow = 32
 	// instanceIDRE leaves room for "ligo/" in the 63 bytes of application_name
 	instanceIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,58}$`)
 )
+
+// accountRoles are the roles a group of an account may give: people's roles
+// on the account's scopes, never trusted_automation or a global one.
+var accountRoles = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass}
 
 // checker collects the failures of every rule, so that one run reports them
 // all.
@@ -354,7 +358,10 @@ func (c *checker) roleBinding(i int, b RoleBinding) {
 	if !slices.Contains(knownRoles, b.Role) {
 		c.failf(16, "authorization binding %q: unknown role %q", who, b.Role)
 	}
-	if len(b.Scopes) == 0 {
+	switch {
+	case b.Role == RoleAccountAdmin && len(b.Scopes) > 0:
+		c.failf(16, "authorization binding %q: account_admin is global and takes no scopes", who)
+	case b.Role != RoleAccountAdmin && len(b.Scopes) == 0:
 		c.failf(16, "authorization binding %q: scopes is required", who)
 	}
 	c.patterns(16, "authorization binding "+who, b.Scopes)
@@ -446,6 +453,41 @@ func (c *checker) governance(cfg *Config) {
 		}
 		names[r.Name] = true
 		c.interconnectRule(r)
+	}
+	c.accounts(cfg)
+}
+
+// accounts checks governance.accounts, when present (.specs/ligo-tenancy.md
+// §4, §9.1): without approval on every account, an account operator's own
+// sides would be approved automatically.
+func (c *checker) accounts(cfg *Config) {
+	a := cfg.Governance.Accounts
+	if a == nil {
+		for _, p := range allPlatforms(cfg) {
+			if p.NamespaceTemplate != "" {
+				c.failf(16, "platform %q: namespace_template needs governance.accounts", p.Name)
+			}
+		}
+		return
+	}
+	if err := a.Validate(); err != nil {
+		c.failf(16, "governance.accounts: %v", err)
+		return
+	}
+	for _, p := range allPlatforms(cfg) {
+		if p.NamespaceTemplate != "" {
+			if err := a.CheckNamespaceTemplate(p.NamespaceTemplate); err != nil {
+				c.failf(16, "platform %q: %v", p.Name, err)
+			}
+		}
+	}
+	for i, r := range a.LDAPGroups.Roles {
+		if !slices.Contains(accountRoles, r.Role) {
+			c.failf(16, "governance.accounts.ldap_groups.roles[%d]: role %q must be one of %v", i, r.Role, accountRoles)
+		}
+	}
+	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredScopes, func(p string) bool { return governance.ScopeMatches(p, a.SampleScope()) }) {
+		c.failf(16, "governance.accounts: approval.required_scopes must cover every account of %q", a.Scope)
 	}
 }
 

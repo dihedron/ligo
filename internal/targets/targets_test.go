@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/governance"
 )
 
 func example(t *testing.T) *config.Config {
@@ -285,5 +286,48 @@ func TestMetadata(t *testing.T) {
 	tg.DocumentationURL = "https://wiki.example.org/ledger"
 	if err := r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil); err != nil {
 		t.Errorf("absolute URL: %v", err)
+	}
+}
+
+// TN-1 and the form of a target's scope, in the pipeline itself.
+func TestNamespace(t *testing.T) {
+	r := rules(t)
+	r.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}", TargetScope: "cloud/{account}/data/{tenancy}"}
+	r.NamespaceField = func(typ string) string { return "schema" }
+	p := r.Platforms["oracle-prod"]
+	p.TargetScopes, p.NamespaceTemplate = []string{"cloud/*", "dc/corp-prod/*"}, "{account}_{tenancy}"
+	r.Platforms["oracle-prod"] = p
+	r.NamePrefixes = nil
+	run := func(scope, definition string) error {
+		tg := ledger()
+		tg.Metadata.Scope, tg.Definition = scope, json.RawMessage(definition)
+		return r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil)
+	}
+	for _, c := range []struct {
+		description, scope, definition, slug string
+	}{
+		{"its namespace", "cloud/acme/data/db01", `{"schema":"acme_db01"}`, ""},
+		{"TN-1: another tenant's", "cloud/acme/data/db01", `{"schema":"globex_db02"}`, "namespace-mismatch"},
+		{"case is exact", "cloud/acme/data/db01", `{"schema":"ACME_DB01"}`, "namespace-mismatch"},
+		{"no field", "cloud/acme/data/db01", `{}`, "namespace-mismatch"},
+		{"not a string", "cloud/acme/data/db01", `{"schema":["acme_db01"]}`, "namespace-mismatch"},
+		{"a nested field does not count", "cloud/acme/data/db01", `{"x":{"schema":"acme_db01"}}`, "namespace-mismatch"},
+		{"a project's scope", "cloud/acme/app/db01", `{"schema":"acme_db01"}`, "account-scope-mismatch"},
+		{"the account's root", "cloud/acme", `{"schema":"acme_db01"}`, "account-scope-mismatch"},
+		{"outside the grammar", "cloud/a-b/data/c", `{"schema":"a-b_c"}`, "account-scope-mismatch"},
+		{"a namespaced platform outside accounts", "dc/corp-prod/ledger", `{"schema":"x"}`, "namespace-scope-mismatch"},
+	} {
+		if err := run(c.scope, c.definition); slug(err) != c.slug {
+			t.Errorf("%s: %v", c.description, err)
+		}
+	}
+	// a platform without a template: only the scope's form applies
+	p.NamespaceTemplate = ""
+	r.Platforms["oracle-prod"] = p
+	if err := run("cloud/acme/data/db01", `{"schema":"anything"}`); err != nil {
+		t.Errorf("no template: %v", err)
+	}
+	if err := run("cloud/acme/app/db01", `{"schema":"anything"}`); slug(err) != "account-scope-mismatch" {
+		t.Errorf("no template, a project's scope: %v", err)
 	}
 }

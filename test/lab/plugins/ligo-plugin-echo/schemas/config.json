@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "data_address",
+    "control_address",
+    "server_id",
+    "mode",
+    "ca_file",
+    "allowed_endpoints"
+  ],
+  "properties": {
+    "data_address": {
+      "type": "string"
+    },
+    "control_address": {
+      "type": "string"
+    },
+    "server_id": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "svid",
+        "password"
+      ]
+    },
+    "ca_file": {
+      "type": "string"
+    },
+    "allowed_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

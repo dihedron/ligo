@@ -27,6 +27,7 @@ Users (passwords in `test/lab/.state/passwords/ldap-<user>`): `carol` operator, 
 | B-3 | Break-glass refusals in the form | d473d23 (9.6b) | failed 2026-11-01 (F-10, F-11, F-12); passed 2026-11-01 after the fixes (R-3, R-4) |
 | B-4 | Emergency revoke (DELETE), then ratified | d473d23 (9.6b) | passed 2026-11-02 (overdue review raised once, after a power cut) |
 | C-1 | `ligo cr review` on a real terminal | phase 7 (34abf50) | passed 2026-11-02 (through `lab.sh cli`) |
+| A-1 | The Accounts page in a real browser: register, refusals in the form, retire with its confirmation | b13c234 | open |
 
 ## Findings of 2026-11-01 (fixed in 4b7adb2 on feature/ui; F-1 on feature/echo)
 
@@ -114,3 +115,14 @@ As `livia`, each of these must show an error in the form, and the change must no
 1. File two requests, e.g. the source and a binding of the echo guide (2a), as `ligo-ops`.
 2. On a real terminal: `test/lab/lab.sh cli ligo-approver cr review`. The queue lists both requests. Read one, approve it, decline the other with a comment, and quit.
 3. `cr list` shows the decisions you made.
+
+### A-1: the Accounts page
+
+Prerequisite: `test/lab/lab.sh serve test-accounts`, which leaves `ligo` installed with `governance.accounts`. Afterwards, run `reset` and `serve install` before any other scenario. Users: `kim` is the account administrator, `alan` an approver of `acme`.
+
+1. As `alan`, open **Accounts**: `acme` only, and no register form. Its page shows the counts and no Retire.
+2. As `kim`, register `umbrella`. The browser goes to its page.
+3. Register `umbrella` again, then `a-b` with the browser's own check bypassed: the reason appears inside the form, and the form stays usable.
+4. On `acme`, press Retire and confirm: `account-in-use` appears on the page, and `acme` stays `ACTIVE`.
+5. On `umbrella`, press Retire. The dialog says the name can never be registered again. Cancel: nothing changes. Press it again and confirm: the status turns `RETIRED`, and Retire is gone.
+6. Turn maintenance on: both buttons are disabled.

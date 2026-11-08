@@ -12,6 +12,7 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -343,5 +344,92 @@ func TestTargetStates(t *testing.T) {
 	approved(t, s, r, err)
 	if _, err := s.SetState(ctx, alice, tg.Metadata.Name, "reactivate", 2, "", nil); slug(err) != "not-found" {
 		t.Errorf("a retired target is final: %v", err)
+	}
+}
+
+// TN-4 and TN-5 for targets: the account is that of the target's scope.
+func TestAccountRequired(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	x := uuid.NewV7().String()[24:]
+	s.Rules.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	const account = "ledger"
+	tg := ledger()
+	tg.Metadata.Name = "acct-" + x
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = owner.Exec(ctx, "delete from change_requests where resource_type = 'TARGET' and resource_name like $1", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from target_access_levels where target_id in (select id from targets where name like $1)", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from accounts where name = $1", account)
+	})
+	if _, err := s.Create(ctx, alice, body(t, tg)); slug(err) != "account-not-registered" {
+		t.Fatalf("TN-4: %v", err)
+	}
+	if _, err := owner.Exec(ctx, "insert into accounts (name, registered_by) values ($1, 't')", account); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Create(ctx, alice, body(t, tg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	later := ledger()
+	later.Metadata.Name = "acct2-" + x
+	second, err := s.Create(ctx, alice, body(t, later))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, dora, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := owner.QueryRow(ctx, "select account from targets where name = $1", tg.Metadata.Name).Scan(&stored); err != nil || stored != account {
+		t.Errorf("account %q (%v)", stored, err)
+	}
+	if _, err := owner.Exec(ctx, "update targets set state = 'RETIRED' where name = $1", tg.Metadata.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, "update accounts set status = 'RETIRED', retired_by = 't', retired_at = now() where name = $1", account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, bob, second.ID, second.PayloadSHA256, "", "ok"); slug(err) != "account-not-registered" {
+		t.Errorf("TN-5: %v", err)
+	}
+}
+
+// TN-1 at approval: a request filed under one template fails under another,
+// with the same refusal as at filing.
+func TestNamespaceAtApproval(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	x := uuid.NewV7().String()[24:]
+	s.Rules.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	s.Rules.NamespaceField = func(string) string { return "schema" }
+	p := s.Rules.Platforms["oracle-prod"]
+	p.NamespaceTemplate = "{account}_ok"
+	s.Rules.Platforms["oracle-prod"] = p
+	tg := ledger()
+	tg.Metadata.Name = "acct-" + x
+	tg.Definition = json.RawMessage(`{"schema":"ledger_ok"}`)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = owner.Exec(ctx, "delete from change_requests where resource_type = 'TARGET' and resource_name like $1", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from accounts where name = 'ledger'")
+	})
+	if _, err := owner.Exec(ctx, "insert into accounts (name, registered_by) values ('ledger', 't')"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Create(ctx, alice, body(t, tg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.NamespaceTemplate = "{account}_other"
+	s.Rules.Platforms["oracle-prod"] = p
+	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); slug(err) != "namespace-mismatch" {
+		t.Errorf("at approval: %v", err)
 	}
 }

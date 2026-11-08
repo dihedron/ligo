@@ -21,7 +21,8 @@ As `.specs/ligo-openldap-plugin.md` §2: source in `cmd/plugins/ligo-plugin-post
 | `host` | yes | The server's name, verified against its certificate. |
 | `port` | yes | 1 to 65535. |
 | `database` | yes | An identifier (§4). |
-| `grantable_roles` | yes | One or more identifiers: the privilege bounds. |
+| `grantable_roles` | one of these two | Identifiers: the privilege bounds, deliberately shared roles on a namespaced platform. |
+| `grantable_role_templates` | one of these two | Each an identifier once `{namespace}`, held exactly once, is replaced by the target's schema: the bounds of that target (.specs/ligo-tenancy.md §6). |
 | `allowed_endpoints` | yes | Must contain `host:port`. |
 | `bootstrap_credential` | yes | §5.5, `kv_path` only. Its `username` is the admin role of §5. |
 | `ca_file` | no | A PEM file of the roots that verify the server and the Vault of `bootstrap_credential`; the system roots when absent. |
@@ -34,15 +35,15 @@ Connections always use `sslmode=verify-full`, with a 10 s connection timeout, on
 Identifiers match `^[A-Za-z_][A-Za-z0-9_]{0,62}$` and are always quoted. A principal matches `^[A-Za-z][A-Za-z0-9_]{0,62}$`, a binding ID must be a UUID, as it reaches a `COMMENT`. Anything else is refused before any statement runs.
 
 - **Definition**: `{"database": <the instance's>, "schema": <identifier>}`.
-- **Level grants**: `{"roles": [<identifiers within grantable_roles>]}`. Privileges are `role:<name>`, sorted, without duplicates.
+- **Level grants**: `{"roles": [<identifiers within the bounds on this schema>]}`. Privileges are `role:<name>`, sorted, without duplicates.
 - **Binding parameters**: `{"connectionLimit": 0..1000}`, 0 meaning no limit. They never add privilege.
-- **`GetUISchemas`** gives the forms for these three, with `grantable_roles` as the options of `roles`.
+- **`GetUISchemas`** gives the forms for these three, with `grantable_roles` and the templates, placeholder included, as the options of `roles`.
 
 ## 5. The admin role
 
 The bootstrap credential names a role of the operator's that has:
 
-- `CREATEROLE`, and `ADMIN OPTION` on every `grantable_roles` entry and on `directory_group`;
+- `CREATEROLE`, and `ADMIN OPTION` on every `grantable_roles` entry, every role expanded from `grantable_role_templates`, and `directory_group`;
 - `CONNECT` on the database;
 - membership of `pg_signal_backend`, to end a revoked role's sessions.
 
@@ -67,6 +68,8 @@ It is not a superuser. If it also holds `ADMIN` on `directory_group`, it counts 
 **`Health`**: a connection and `SELECT 1`. `Serving = false` with a fixed message otherwise.
 
 **`-svids SOCKET`**: as `openldap.v1`.
+
+**`version [-v]`**: as `openldap.v1`.
 
 ## 7. Errors
 
@@ -93,7 +96,7 @@ Messages are fixed. PostgreSQL's text can echo a statement, so only the SQLSTATE
 | ID | Given | When | Then | Level |
 | :--- | :--- | :--- | :--- | :--- |
 | PG-1 | A bad host, port, identifier, endpoint list or unknown field; `EXTERNAL_DIR` with no group | `ConfigureInstances` | `INVALID_CONFIG` naming the field | U |
-| PG-2 | A role outside `grantable_roles`, or a bad definition | `ValidateTarget`, `ValidateBinding` | Refused; no statement | U |
+| PG-2 | A role outside `grantable_roles` and the templates expanded with the schema, or a bad definition | `ValidateTarget`, `ValidateBinding` | Refused; no statement | U |
 | PG-3 | A principal or binding ID outside the grammar | Either RPC | `INVALID_*`; no statement | U |
 | PG-4 | No role | `EnsureTarget`, `TARGET_LOCAL` | The password connects; the catalog holds a SCRAM verifier | I |
 | PG-5 | The role | `EnsureTarget`, not rotated; rotated | No secret, the old password connects; a new one connects, the old does not | I |

@@ -322,3 +322,69 @@ func TestBusy(t *testing.T) {
 		t.Errorf("retry: %s, %v", retry.Status, err)
 	}
 }
+
+// TestPlatformDecision: TN-12 at service level: both sides decide, and the
+// platform's decision is marked and raises its own audit entry for the webhook.
+func TestPlatformDecision(t *testing.T) {
+	s, f, owner := setup(t)
+	s.Resources["BINDING"] = f
+	s.Policy = &governance.Policy{RequiredScopes: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
+	ctx := context.Background()
+	const platform = "dc/corp-prod"
+	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE", Consent: ConsentAll, Zone: "prod",
+		SourceScope: "cloud/acme/app/app01", TargetScope: "cloud/globex/data/db01", PlatformScope: platform, DistinctApprovers: true,
+		Payload: json.RawMessage(`{"kind":"Binding"}`)}
+	filer := Caller{Principal: authz.Principal{Name: "carla"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/acme/*")}}
+	if err := s.Create(ctx, filer, r, []Candidate{{Side: "SOURCE", Scope: r.SourceScope}, {Side: "TARGET", Scope: r.TargetScope}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "delete from change_requests where id = $1", r.ID) })
+	dora := Caller{Principal: authz.Principal{Name: "dora"}, Grants: authz.Grants{grant(config.RoleApprover, platform)}}
+	if _, err := s.Approve(ctx, dora, r.ID, r.PayloadSHA256, "SOURCE", "ok"); status(err) != "forbidden" {
+		t.Errorf("TN-13, SOURCE: %v", err)
+	}
+	if _, err := s.Approve(ctx, dora, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := statusOf(t, owner, r.ID); st != "PENDING" {
+		t.Errorf("TN-13, alone: %s", st)
+	}
+	awaiting := func(c Caller) int {
+		t.Helper()
+		got, _, err := s.List(ctx, c, Filter{AwaitingMe: true, Limit: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, g := range got {
+			if g.ID == r.ID {
+				n++
+			}
+		}
+		return n
+	}
+	if n := awaiting(dora); n != 0 {
+		t.Errorf("awaiting the platform approver after deciding: %d", n)
+	}
+	ada := Caller{Principal: authz.Principal{Name: "ada"}, Grants: authz.Grants{grant(config.RoleApprover, "cloud/acme/*")}}
+	if n := awaiting(ada); n != 1 {
+		t.Errorf("awaiting the source's approver: %d", n)
+	}
+	if _, err := s.Approve(ctx, ada, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := statusOf(t, owner, r.ID); st != "APPLIED" {
+		t.Errorf("TN-12: %s", st)
+	}
+	var decidedAs, event string
+	if err := owner.QueryRow(ctx, `select coalesce(snapshot->>'decidedAs', '') from audit_log where change_request_id = $1 and action = 'CR_SIDE_APPROVED' and actor = 'dora'`, r.ID).Scan(&decidedAs); err != nil || decidedAs != "PLATFORM" {
+		t.Errorf("decidedAs %q %v", decidedAs, err)
+	}
+	if err := owner.QueryRow(ctx, `select snapshot->>'side' from audit_log where change_request_id = $1 and action = 'BINDING_TARGET_DECIDED_BY_PLATFORM'`, r.ID).Scan(&event); err != nil || event != "TARGET" {
+		t.Errorf("event %q %v", event, err)
+	}
+	var other string
+	if err := owner.QueryRow(ctx, `select coalesce(snapshot->>'decidedAs', '') from audit_log where change_request_id = $1 and action = 'CR_SIDE_APPROVED' and actor = 'ada'`, r.ID).Scan(&other); err != nil || other != "" {
+		t.Errorf("the source's approver: %q %v", other, err)
+	}
+}

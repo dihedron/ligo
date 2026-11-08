@@ -19,6 +19,7 @@ import (
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
@@ -336,6 +337,57 @@ func (c *Checks) names(ctx context.Context) error {
 	return nil
 }
 
+// Namespaces refuses a namespace_template on a platform whose plugin holds no
+// namespace, and an existing target outside its namespace (.specs/ligo-tenancy.md
+// §5, TN-16). It needs the plugins, as Platforms does.
+func (c *Checks) Namespaces(ctx context.Context, declared func(platformType string) string) error {
+	var fatal []string
+	for _, pp := range c.Config.PlatformProviders {
+		for _, p := range pp.Platforms {
+			if p.NamespaceTemplate != "" && declared(pp.Type) == "" {
+				fatal = append(fatal, fmt.Sprintf("platform %s: plugin %s declares no namespace_field", p.Name, pp.Type))
+			}
+			bounds := p.PrivilegeBounds()
+			if shared, _ := bounds["grantableRoles"].([]string); p.NamespaceTemplate != "" && len(shared) > 0 {
+				c.Logger.Warn("grantable_roles on a namespaced platform are shared across tenants", "platform", p.Name, "roles", shared)
+			}
+			if templates, _ := bounds["grantableRoleTemplates"].([]string); p.NamespaceTemplate == "" && len(templates) > 0 {
+				c.Logger.Warn("grantable_role_templates with no namespace_template: a target's schema, and so its roles, are the operator's choice", "platform", p.Name)
+			}
+		}
+	}
+	rows, err := c.DB.Query(ctx, "SELECT name, platform, scope, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	if err != nil {
+		return err
+	}
+	type target struct {
+		name, platform, scope string
+		definition            []byte
+	}
+	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
+		var t target
+		return t, r.Scan(&t.name, &t.platform, &t.scope, &t.definition)
+	})
+	if err != nil {
+		return err
+	}
+	for _, t := range all {
+		p, typ := c.platform(t.platform)
+		if p == nil || p.NamespaceTemplate == "" {
+			continue
+		}
+		if field := declared(typ); field != "" {
+			if err := targets.CheckNamespace(c.Config.Governance.Accounts, p.NamespaceTemplate, field, t.scope, t.definition); err != nil {
+				fatal = append(fatal, fmt.Sprintf("target %s: %v", t.name, err))
+			}
+		}
+	}
+	if len(fatal) > 0 {
+		return fmt.Errorf("startup: namespaces: correct or retire these: %s", strings.Join(fatal, "; "))
+	}
+	return nil
+}
+
 // drift is a resource whose stored scope no longer matches the
 // configuration.
 type drift struct {
@@ -344,22 +396,72 @@ type drift struct {
 	old, scope string
 }
 
+// accountDrift is a source or target whose account column differs from what
+// its scope gives under the configuration.
+type accountDrift struct {
+	drift
+	typ, table string
+}
+
+// accountOf compares the stored account of a resource with its scope's. A new
+// account must be registered: a server that cannot start cannot register it,
+// so the message says how to get there.
+func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, scope, stored string, fatal, drifted *[]string, out *[]accountDrift) error {
+	a := c.Config.Governance.Accounts
+	want, _ := a.AccountOf(scope)
+	if want == stored {
+		return nil
+	}
+	if _, err := accounts.Require(ctx, c.DB, a, scope); err != nil {
+		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
+			*fatal = append(*fatal, fmt.Sprintf("%s %s: account %q of scope %s is not registered: restore the configuration, register it, and start again",
+				strings.ToLower(typ), d.name, want, scope))
+			return nil
+		}
+		return err
+	}
+	d.old, d.scope = stored, want
+	*out = append(*out, accountDrift{drift: d, typ: typ, table: table})
+	*drifted = append(*drifted, fmt.Sprintf("%s %s: account %q to %q", strings.ToLower(typ), d.name, stored, want))
+	return nil
+}
+
+// reaccount sets the account of one source or target: a pending request needs
+// no failing, as its approval checks the registry again.
+func (c *Checks) reaccount(ctx context.Context, d accountDrift) error {
+	return pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "UPDATE "+d.table+" SET account = nullif($2, '') WHERE id = $1", d.id, d.scope); err != nil {
+			return err
+		}
+		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: d.typ, ResourceID: &d.id, ResourceName: d.name, Action: d.typ + "_RESCOPED", Actor: actor,
+			Snapshot: snapshot(map[string]string{"column": "account", "old": d.old, "new": d.scope})})
+		if err == nil {
+			c.Logger.Warn("re-scoped", "resource_type", d.typ, "name", d.name, "old_account", d.old, "new_account", d.scope)
+		}
+		return err
+	})
+}
+
 // scopes is rule 17: sources, targets and bindings whose scopes drifted
 // fail startup, unless --accept-scope-changes re-scopes them.
 func (c *Checks) scopes(ctx context.Context) error {
 	var fatal, drifted []string
 	var sources, targets []drift
-	rows, err := c.DB.Query(ctx, "SELECT id, name, scope, trust_domain, svid_regex FROM sources WHERE state <> 'RETIRED' ORDER BY name")
+	var reaccounted []accountDrift
+	rows, err := c.DB.Query(ctx, "SELECT id, name, scope, trust_domain, svid_regex, coalesce(account, '') FROM sources WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type source struct {
 		drift
-		td, regex string
+		td, regex, account string
 	}
 	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (source, error) {
 		var s source
-		return s, r.Scan(&s.id, &s.name, &s.old, &s.td, &s.regex)
+		return s, r.Scan(&s.id, &s.name, &s.old, &s.td, &s.regex, &s.account)
 	})
 	if err != nil {
 		return err
@@ -376,18 +478,26 @@ func (c *Checks) scopes(ctx context.Context) error {
 			sources = append(sources, s.drift)
 			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.scope))
 		}
+		if ok && err == nil {
+			if a := c.Config.Governance.Accounts; !a.SourceConforms(s.scope) {
+				fatal = append(fatal, fmt.Sprintf("source %s: scope %s does not conform to %s", s.name, s.scope, a.SourceScope))
+			}
+			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.scope, s.account, &fatal, &drifted, &reaccounted); err != nil {
+				return err
+			}
+		}
 	}
-	rows, err = c.DB.Query(ctx, "SELECT id, name, scope, platform_scope, platform FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err = c.DB.Query(ctx, "SELECT id, name, scope, platform_scope, platform, coalesce(account, '') FROM targets WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type target struct {
 		drift
-		scope, platform string
+		scope, platform, account string
 	}
 	tgts, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
 		var t target
-		return t, r.Scan(&t.id, &t.name, &t.scope, &t.old, &t.platform)
+		return t, r.Scan(&t.id, &t.name, &t.scope, &t.old, &t.platform, &t.account)
 	})
 	if err != nil {
 		return err
@@ -404,6 +514,12 @@ func (c *Checks) scopes(ctx context.Context) error {
 			t.drift.scope = p.Scope
 			targets = append(targets, t.drift)
 			drifted = append(drifted, fmt.Sprintf("target %s: platform scope %s to %s", t.name, t.old, p.Scope))
+		}
+		if a := c.Config.Governance.Accounts; !a.TargetConforms(t.scope) {
+			fatal = append(fatal, fmt.Sprintf("target %s: scope %s does not conform to %s", t.name, t.scope, a.TargetScope))
+		}
+		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.scope, t.account, &fatal, &drifted, &reaccounted); err != nil {
+			return err
 		}
 	}
 	var stale int
@@ -432,6 +548,11 @@ func (c *Checks) scopes(ctx context.Context) error {
 	for _, t := range targets {
 		if err := c.rescope(ctx, "TARGET", t, "UPDATE targets SET platform_scope = $2 WHERE id = $1",
 			"target_id = $1", "platform_scope", "payload->>'target' = $2"); err != nil {
+			return err
+		}
+	}
+	for _, d := range reaccounted {
+		if err := c.reaccount(ctx, d); err != nil {
 			return err
 		}
 	}

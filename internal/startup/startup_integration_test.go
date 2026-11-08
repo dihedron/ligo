@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	dto "github.com/prometheus/client_model/go"
+	"go.yaml.in/yaml/v3"
 )
 
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
@@ -77,6 +78,7 @@ func setup(t *testing.T) *env {
 		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+v.x)
 		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+v.x)
+		_, _ = owner.Exec(ctx, "delete from accounts where name like $1", "%"+v.x)
 	})
 	return v
 }
@@ -480,5 +482,156 @@ func TestPlatforms(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0], `"level": "admin"`) || !strings.Contains(got[0], "DBA is not grantable") ||
 		!strings.Contains(got[0], `"flow": "legacy"`) || strings.Contains(got[0], `"level": "read"`) || strings.Contains(got[0], `"flow": "ledger"`) {
 		t.Errorf("violations: %v", got)
+	}
+}
+
+// Rule 17 for the account column: a change of the structure moves resources
+// between accounts, only into registered ones and only with the flag.
+func TestAccountDrift(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	td := account + ".internal"
+	c := v.checks(t)
+	scope := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Extractors[td] = static
+	src := v.source(t, "acs-"+x, scope, td)
+	tgt := v.target(t, "act-"+x, "oracle-prod", scope, "dc/corp-prod")
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	stored := func(table string, id uuid.UUID) string {
+		t.Helper()
+		var a string
+		if err := v.owner.QueryRow(ctx, "select coalesce(account, '') from "+table+" where id = $1", id).Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+
+	c.AcceptScopeChanges = true
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "`+account+`" of scope`) ||
+		!strings.Contains(err.Error(), "target act-"+x+`: account "`+account+`" of scope`) || !strings.Contains(err.Error(), "register it") {
+		t.Fatalf("an unregistered account, even with the flag: %v", err)
+	}
+	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
+	c.AcceptScopeChanges = false
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), "source acs-"+x+`: account "" to "`+account+`"`) {
+		t.Fatalf("drift without the flag: %v", err)
+	}
+	c.AcceptScopeChanges = true
+	before := v.lastAudit(t)
+	if err := c.scopes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := stored("sources", src), stored("targets", tgt); a != account || b != account {
+		t.Errorf("accounts %q, %q", a, b)
+	}
+	var n int
+	if err := v.owner.QueryRow(ctx, `select count(*) from audit_log where id > $1 and action in ('SOURCE_RESCOPED', 'TARGET_RESCOPED')
+		and snapshot->>'column' = 'account' and snapshot->>'new' = $2`, before, account).Scan(&n); err != nil || n != 2 {
+		t.Errorf("audited %d (%v)", n, err)
+	}
+	c.AcceptScopeChanges = false
+	if err := c.scopes(ctx); err != nil {
+		t.Errorf("settled: %v", err)
+	}
+	// the structure removed: the resources are no longer account-managed
+	c.Config.Governance.Accounts = nil
+	if err := c.scopes(ctx); err == nil || !strings.Contains(err.Error(), `account "`+account+`" to ""`) {
+		t.Fatalf("structure removed: %v", err)
+	}
+	c.AcceptScopeChanges = true
+	if err := c.scopes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a := stored("sources", src); a != "" {
+		t.Errorf("account %q", a)
+	}
+}
+
+// Existing resources that do not fit the structure stop startup: no
+// re-scoping can fix them.
+func TestScopeForm(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	c := v.checks(t)
+	td := account + ".internal"
+	scope := "dc/corp-prod/" + account
+	static, err := governance.NewStaticExtractor(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Extractors[td] = static
+	v.exec(t, "insert into accounts (name, registered_by) values ($1, 't')", account)
+	v.source(t, "fs-"+x, scope, td)
+	v.target(t, "ft-"+x, "oracle-prod", scope, "dc/corp-prod")
+	c.AcceptScopeChanges = true
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}/app/{project}", TargetScope: "dc/corp-prod/{account}/data/{tenancy}"}
+	err = c.scopes(ctx)
+	if err == nil || !strings.Contains(err.Error(), "source fs-"+x+": scope "+scope+" does not conform") ||
+		!strings.Contains(err.Error(), "target ft-"+x+": scope "+scope+" does not conform") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// TN-16, and a platform whose plugin cannot hold a namespace.
+func TestNamespaces(t *testing.T) {
+	v := setup(t)
+	ctx := context.Background()
+	x := v.x
+	account := "st" + x
+	c := v.checks(t)
+	c.Config.Governance.Accounts = &governance.Accounts{Scope: "dc/corp-prod/{account}", SourceScope: "dc/corp-prod/{account}", TargetScope: "dc/corp-prod/{account}"}
+	declared := func(string) string { return "schema" }
+	id := v.target(t, "nt-"+x, "oracle-prod", "dc/corp-prod/"+account, "dc/corp-prod")
+	v.exec(t, `update targets set definition = '{"schema":"other"}' where id = $1`, id)
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("no template: %v", err)
+	}
+	var pl *config.Platform
+	for i := range c.Config.PlatformProviders {
+		for j := range c.Config.PlatformProviders[i].Platforms {
+			if p := &c.Config.PlatformProviders[i].Platforms[j]; p.Name == "oracle-prod" {
+				pl = p
+			}
+		}
+	}
+	// templates with no namespace_template: an operator picks the schema, and
+	// so any tenant's role
+	bounds := pl.Config
+	if err := yaml.Unmarshal([]byte(`{grantable_role_templates: ["{namespace}_read"]}`), &pl.Config); err != nil {
+		t.Fatal(err)
+	}
+	var unbound bytes.Buffer
+	logger := c.Logger
+	c.Logger = slog.New(slog.NewTextHandler(&unbound, nil))
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("templates alone: %v", err)
+	}
+	if !strings.Contains(unbound.String(), "no namespace_template") || !strings.Contains(unbound.String(), "oracle-prod") {
+		t.Errorf("no warning of unbound templates: %s", unbound.String())
+	}
+	pl.Config, c.Logger = bounds, logger
+	pl.NamespaceTemplate = "{account}_ok"
+	if err := c.Namespaces(ctx, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "oracle-prod") || !strings.Contains(err.Error(), "namespace_field") {
+		t.Errorf("no capability: %v", err)
+	}
+	if err := c.Namespaces(ctx, declared); err == nil || !strings.Contains(err.Error(), "nt-"+x) || !strings.Contains(err.Error(), account+"_ok") {
+		t.Errorf("TN-16: %v", err)
+	}
+	v.exec(t, `update targets set definition = jsonb_build_object('schema', $2::text) where id = $1`, id, account+"_ok")
+	var logged bytes.Buffer
+	c.Logger = slog.New(slog.NewTextHandler(&logged, nil))
+	if err := c.Namespaces(ctx, declared); err != nil {
+		t.Errorf("matching: %v", err)
+	}
+	if !strings.Contains(logged.String(), "shared across tenants") || !strings.Contains(logged.String(), "oracle-prod") {
+		t.Errorf("no warning of shared roles: %s", logged.String())
 	}
 }

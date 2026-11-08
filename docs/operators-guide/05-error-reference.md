@@ -17,6 +17,12 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `sample-not-matched` | 422 | A sample SPIFFE ID does not match the regex | Fix either |
 | `scope-unresolvable` | 422 | The regex's fixed beginning identifies no single scope | Make its beginning fixed enough |
 | `source-not-exact` | 422 | The Vault store releases to one exact SPIFFE ID, and this regex matches more | Register one source per workload |
+| `account-not-registered` | 422 | The scope belongs to an account that is not registered, or is retired | Have an `account_admin` register it, or correct the scope |
+| `account-exists` | 409 | The account exists, or once did: a retired name is never reused | Choose another name |
+| `account-in-use` | 409 | The account still has sources or targets that are not retired | Retire them first; the `detail` counts them |
+| `account-scope-mismatch` | 422 | The scope is an account's, but is not in the form of `source_scope` or `target_scope` | Use the form the `detail` names |
+| `namespace-mismatch` | 422 | The target's definition holds another namespace than its scope gives | Use the value the `detail` names |
+| `namespace-scope-mismatch` | 422 | A namespaced platform holds only tenancies, and this scope is not one | Choose a scope in the form of `target_scope`, or another platform |
 | `widening-not-allowed` | 422 | A source can only narrow, and this would add workloads, or the check was undecided | Register a new source |
 | `flow-destination-not-allowed` | 422 | A flow's destination is outside the platform's `allowed_endpoints` | Fix the flow, or ask the platform team |
 | `interconnect-denied` | 403 | The interconnection policy denies this pair of scopes | Ask whoever owns `governance.interconnects` |
@@ -68,7 +74,7 @@ A binding's `status.message` gives the code. A retryable error is retried within
 | `BOOTSTRAP_CREDENTIAL_UNAVAILABLE` | `postgres.v1`, `openldap.v1` | yes | The credential cannot be read from Vault | Check Vault, the role, the policy |
 | `BOOTSTRAP_CREDENTIAL_REJECTED` | `postgres.v1`, `openldap.v1` | yes | The backend refused it, perhaps mid-rotation | Check the password in KV |
 | `INVALID_SPEC` | `postgres.v1` | no | The requested spec is not valid | Report it |
-| `PRIVILEGE_OUT_OF_BOUNDS` | `postgres.v1` | no | `grantable_roles` was tightened | Change the access level, or the bound |
+| `PRIVILEGE_OUT_OF_BOUNDS` | `postgres.v1` | no | `grantable_roles` or `grantable_role_templates` was tightened | Change the access level, or the bound |
 | `TARGET_UNAVAILABLE` | `postgres.v1` | yes | The database cannot be reached, or is going away | Check it |
 | `TARGET_BUSY` | `postgres.v1` | yes | A concurrent change | It clears by itself |
 | `ROLE_NOT_FOUND` | `postgres.v1` | no | A granted group role does not exist | Create it on the database |
