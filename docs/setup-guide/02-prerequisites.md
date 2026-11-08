@@ -5,7 +5,7 @@
 | Service | Needed for | Tested with |
 | :------------- | :------------------------ | :------------- |
 | PostgreSQL | `ligo`'s own database, with TLS | 16 |
-| SPIRE | `ligo`'s identity, its plugins' and its workloads', one agent per zone on each `ligo` host | 1.15 |
+| SPIRE | `ligo`'s identity, its plugins' and its workloads', one agent per realm on each `ligo` host | 1.15 |
 | Vault or OpenBao | Transit sealing, and the plugins' credentials | Vault 2.2, OpenBao 2.7 |
 | An LDAP directory | Signing administrators in; optional when they all use SVIDs | OpenLDAP |
 | PostgreSQL, as a target | What the bindings give access to | 16 |
@@ -26,7 +26,7 @@
 
 ## What to decide first
 
-- **Zones and trust domains.** A zone is one trust domain with one SPIRE agent socket on the `ligo` host. Decide which domains are zones of their own, and which `ligo` only verifies through federation. A single zone is the simplest start.
+- **Realms and trust domains.** A realm is one trust domain with one SPIRE agent socket on the `ligo` host. Decide which domains are realms of their own, and which `ligo` only verifies through federation. A single realm is the simplest start.
 - **Governance scopes.** A scope is who decides: `dc/corp-prod`, `cloud/fin-01/payments`. Every source, target and platform has one owner scope. Decide how a trust domain's SPIFFE paths map to scopes: one fixed scope for a data centre, or a template over the path for tenancies.
 - **Accounts.** To host many tenants on shared platforms, decide the shape of their scopes and of their directory groups once, for all of them. See "Accounts" in the chapter on configuring `ligo`. Without `governance.accounts`, `ligo` has no accounts.
 - **Who approves.** Which scopes require an approver, and which LDAP groups or SPIFFE IDs hold the roles.

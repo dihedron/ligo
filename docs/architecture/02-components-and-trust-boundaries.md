@@ -22,7 +22,7 @@ The two listeners are separate so that they can be exposed differently, and so t
 | :-- | :---------------- | :----------------------- | :------------------------------ |
 | 1 | Workloads to `ligo` | SVIDs over the workload API | mTLS, or a JWT-SVID with an exact audience and bounded lifetime; bundle per trust domain |
 | 2 | Administrators to `ligo` | The admin API and UI | SVID mTLS, LDAP, sessions, RBAC by scope |
-| 3 | `ligo` to plugins | gRPC | Root-owned binaries, SHA-256 before every spawn, fd-based exec, AutoMTLS, one process per type and zone |
+| 3 | `ligo` to plugins | gRPC | Root-owned binaries, SHA-256 before every spawn, fd-based exec, AutoMTLS, one process per type and realm |
 | 4 | Plugins to backends | SQL, LDAP, Vault | TLS verified, identifier grammars, privilege bounds, output validation |
 | 5 | `ligo` to PostgreSQL | SQL | `verify-full`, four roles, triggers and checks in the database |
 | 6 | Governance | People's decisions | Two-sided consent, distinct approvers, payload hash |
@@ -35,10 +35,12 @@ A plugin holds powerful credentials for its backend, but `ligo` does not take it
 - Its output is validated against its schema, and every endpoint against the platform's `allowed_endpoints`, so a compromised plugin cannot point workloads at an attacker.
 - Data it supplies is rendered as plain data, and never placed in `hx-*` attributes. This is tested with hostile values through every page.
 - Only an error's `code` and fixed `public_message` are persisted.
-- Identity is per process and zone: each instance must select exactly one SVID, in its zone's trust domain.
+- Identity is per process and realm: each instance must select exactly one SVID, in its realm's trust domain.
 
-## Zones and scopes
+## Realms and scopes
 
-These are separate on purpose. A **zone** is technical: one trust domain, one SPIRE agent, one set of plugin processes. A **scope** is organisational: who decides. A flat data centre is a short scope; a cloud tenancy is a deeper one.
+These are separate on purpose. A **realm** is technical: one trust domain, one SPIRE agent, one set of plugin processes. A **scope** is organisational: who decides. A flat data centre is a short scope; a cloud tenancy is a deeper one.
 
-`ligo` verifies each trust domain against one authoritative bundle source, its own zone's agent or a declared federation through one zone. So an administrator of one SPIRE server cannot publish a forged bundle for another domain.
+A realm is not a network zone. A network zone, such as a data centre segment or a cloud region, is where workloads run and what they can reach; one realm may serve workloads in several network zones, and one network zone may hold workloads of several realms.
+
+`ligo` verifies each trust domain against one authoritative bundle source, its own realm's agent or a declared federation through one realm. So an administrator of one SPIRE server cannot publish a forged bundle for another domain.

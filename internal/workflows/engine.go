@@ -215,7 +215,7 @@ type ApplyInput struct {
 	Revision             int64           `json:"revision"`
 	Attempt              int64           `json:"attempt"`
 	Rotate               bool            `json:"rotate"`
-	Zone                 string          `json:"zone"`
+	Realm                string          `json:"realm"`
 	TrustDomain          string          `json:"trustDomain"`
 	SVIDRegex            string          `json:"svidRegex"`
 	DerivedPrincipalName string          `json:"derivedPrincipalName"`
@@ -252,12 +252,12 @@ func (e *Engine) input(ctx context.Context, bindingID uuid.UUID) (ApplyInput, st
 	in := ApplyInput{BindingID: bindingID.String()}
 	var phase string
 	var targetID uuid.UUID
-	err := e.DB.QueryRow(ctx, `SELECT b.name, b.workflow_id, b.operation, b.revision, b.attempt, b.rotate_static_secrets, b.zone,
+	err := e.DB.QueryRow(ctx, `SELECT b.name, b.workflow_id, b.operation, b.revision, b.attempt, b.rotate_static_secrets, b.realm,
 		b.source_trust_domain, b.source_svid_regex, b.derived_principal_name, s.name, b.source_revision, b.target_id, t.name,
 		b.target_revision, b.access_level, b.requested_spec, b.identity_provider_type, b.identity_provider_instance, b.platform_type,
 		b.platform, b.secret_store_type, b.secret_store_instance, b.secret_storage_strategy, b.phase
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id WHERE b.id = $1`, bindingID).
-		Scan(&in.BindingName, &in.WorkflowID, &in.Operation, &in.Revision, &in.Attempt, &in.Rotate, &in.Zone, &in.TrustDomain,
+		Scan(&in.BindingName, &in.WorkflowID, &in.Operation, &in.Revision, &in.Attempt, &in.Rotate, &in.Realm, &in.TrustDomain,
 			&in.SVIDRegex, &in.DerivedPrincipalName, &in.Source, &in.SourceRevision, &targetID, &in.Target, &in.TargetRevision,
 			&in.AccessLevel, &in.RequestedSpec, &in.Wiring.IdentityType, &in.Wiring.IdentityInstance, &in.Wiring.PlatformType,
 			&in.Wiring.Platform, &in.Wiring.StoreType, &in.Wiring.StoreInstance, &in.Wiring.Strategy, &phase)
@@ -369,11 +369,11 @@ func finished(op, result string, start time.Time) {
 
 // reverted is a break-glass revert's outcome, counted once its transaction
 // commits (ligo_break_glass_total).
-type reverted struct{ zone, operation, outcome string }
+type reverted struct{ realm, operation, outcome string }
 
 func (r *reverted) count() {
 	if r != nil {
-		metrics.BreakGlass.WithLabelValues(r.zone, r.operation, r.outcome).Inc()
+		metrics.BreakGlass.WithLabelValues(r.realm, r.operation, r.outcome).Inc()
 	}
 }
 
@@ -393,10 +393,10 @@ func revertOutcome(ctx context.Context, tx pgx.Tx, f fence, in ApplyInput, ok bo
 	if !ok {
 		r.outcome = "revert_failed"
 	}
-	err := tx.QueryRow(ctx, `SELECT a.change_request_id, coalesce(bg.zone, ''), bg.operation::text FROM audit_log a
+	err := tx.QueryRow(ctx, `SELECT a.change_request_id, coalesce(bg.realm, ''), bg.operation::text FROM audit_log a
 		JOIN change_requests c ON c.id = a.change_request_id JOIN change_requests bg ON bg.id = c.reverts_cr_id
 		WHERE a.resource_type = 'BINDING' AND a.resource_name = $1 AND a.resource_id = $2 AND a.revision = $3 AND a.action = $4
-		AND c.kind = 'SYSTEM_REVERT' ORDER BY a.id DESC LIMIT 1`, in.BindingName, f.bindingID, in.Revision, started).Scan(&cr, &r.zone, &r.operation)
+		AND c.kind = 'SYSTEM_REVERT' ORDER BY a.id DESC LIMIT 1`, in.BindingName, f.bindingID, in.Revision, started).Scan(&cr, &r.realm, &r.operation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

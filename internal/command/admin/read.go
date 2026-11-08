@@ -22,7 +22,7 @@ func (cmd *Get) Execute([]string) error {
 type List struct {
 	Base
 	Page
-	Zone           string `short:"z" long:"zone" description:"Filter by zone (targets, bindings)."`
+	Realm          string `long:"realm" description:"Filter by realm (targets, bindings)."`
 	Scope          string `long:"scope" description:"Filter by governance scope pattern (any scope of the resource)."`
 	Source         string `long:"source" description:"Bindings of this source."`
 	Target         string `long:"target" description:"Bindings of this target."`
@@ -38,7 +38,7 @@ type List struct {
 }
 
 func (cmd *List) Execute([]string) error {
-	q := cmd.query("zone", cmd.Zone, "scope", cmd.Scope, "source", cmd.Source, "target", cmd.Target, "platform", cmd.Platform,
+	q := cmd.query("realm", cmd.Realm, "scope", cmd.Scope, "source", cmd.Source, "target", cmd.Target, "platform", cmd.Platform,
 		"platformType", cmd.Type, "state", cmd.State, "phase", cmd.Phase, "trustDomain", cmd.TrustDomain, "expiringBefore", cmd.ExpiringBefore)
 	return cmd.get(path(cmd.Args.Kind), q, columns[strings.TrimSuffix(cmd.Args.Kind, "s")]...)
 }
@@ -249,7 +249,7 @@ type ChangeRequestList struct {
 	Base
 	Page
 	Status     string `long:"status" choice:"PENDING" choice:"APPLIED" choice:"REJECTED" choice:"WITHDRAWN" choice:"EXPIRED" choice:"FAILED_TO_APPLY" description:"Filter by status."`
-	Zone       string `short:"z" long:"zone" description:"Filter by zone."`
+	Realm      string `long:"realm" description:"Filter by realm."`
 	Scope      string `long:"scope" description:"Filter by governance scope pattern (any scope of the request)."`
 	AwaitingMe bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
 	Kind       string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
@@ -261,7 +261,7 @@ func (cmd *ChangeRequestList) Execute([]string) error {
 	if cmd.AwaitingMe {
 		awaiting = "true"
 	}
-	q := cmd.query("status", cmd.Status, "zone", cmd.Zone, "scope", cmd.Scope, "awaitingMe", awaiting,
+	q := cmd.query("status", cmd.Status, "realm", cmd.Realm, "scope", cmd.Scope, "awaitingMe", awaiting,
 		"resourceType", strings.ToUpper(cmd.Kind), "resourceName", cmd.Name)
 	return cmd.get(path("change-requests"), q, columns["request"]...)
 }

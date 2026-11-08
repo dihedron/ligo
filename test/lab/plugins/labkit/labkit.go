@@ -1,5 +1,5 @@
 // Package labkit is what the lab's plugins share (test tooling, never
-// shipped): each instance selects its SVID from the zone's SPIRE agent and
+// shipped): each instance selects its SVID from the realm's SPIRE agent and
 // reads its bootstrap credential from OpenBao with it (§5.4, §5.5).
 package labkit
 

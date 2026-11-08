@@ -39,7 +39,7 @@ type deps struct {
 	SVIDs   x509svid.Source
 	Bundles x509bundle.Source
 	JWT     func(ctx context.Context, audience string) (string, error) // a JWT-SVID for audience
-	Roots   *x509.CertPool                                           // the lab CA, of OpenBao's certificate
+	Roots   *x509.CertPool                                             // the lab CA, of OpenBao's certificate
 }
 
 // binding is an item of GET /v1/bindings (§3.6) as an echo target fills it.

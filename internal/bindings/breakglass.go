@@ -163,7 +163,7 @@ func (s *Service) breakGlassDelete(ctx context.Context, c changerequests.Caller,
 	}
 	res := &resolved{platform: s.Rules.Platforms[cur.platform], sourceScope: cur.sourceScope, targetScope: cur.targetScope,
 		platformScope: cur.platformScope}
-	res.platform.Zone = cur.zone
+	res.platform.Realm = cur.realm
 	sides := res.anySides(c, true)
 	if len(sides) == 0 {
 		return nil, nil, refuse(403, "forbidden", "%s holds no break_glass on %s, %s or %s", c.ID(), cur.sourceScope, cur.targetScope, cur.platformScope)
@@ -286,7 +286,7 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 		return nil, err
 	}
 	if left == 0 {
-		metrics.BreakGlass.WithLabelValues(r.Zone, r.Operation, "ratified").Inc()
+		metrics.BreakGlass.WithLabelValues(r.Realm, r.Operation, "ratified").Inc()
 	}
 	return s.Requests.Get(ctx, c, id)
 }

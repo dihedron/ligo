@@ -153,7 +153,7 @@ func TestValidate(t *testing.T) {
 				return
 			}
 			m := tg.Metadata
-			if tg.Kind != "Target" || m.State != "ACTIVE" || m.PlatformType != "oracle.v1" || m.PlatformScope != "dc/corp-prod" || m.Zone != "prod" ||
+			if tg.Kind != "Target" || m.State != "ACTIVE" || m.PlatformType != "oracle.v1" || m.PlatformScope != "dc/corp-prod" || m.Realm != "prod" ||
 				tg.Visibility.Mode != "PRIVATE" || tg.AccessLevels[0].State != "ACTIVE" {
 				t.Errorf("not normalized: %+v", tg)
 			}

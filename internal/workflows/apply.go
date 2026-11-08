@@ -55,7 +55,7 @@ func endpoints(eps []*pluginv1.Endpoint) json.RawMessage {
 func (in ApplyInput) bindingContext() *pluginv1.BindingContext {
 	op := pluginv1.Operation(pluginv1.Operation_value["OPERATION_"+in.Operation])
 	return &pluginv1.BindingContext{BindingId: in.BindingID, BindingName: in.BindingName, Revision: in.Revision, Attempt: in.Attempt,
-		Operation: op, Zone: in.Zone, SourceTrustDomain: in.TrustDomain, SourceSvidRegex: in.SVIDRegex, RotateStaticSecrets: in.Rotate,
+		Operation: op, Realm: in.Realm, SourceTrustDomain: in.TrustDomain, SourceSvidRegex: in.SVIDRegex, RotateStaticSecrets: in.Rotate,
 		DerivedPrincipalName: in.DerivedPrincipalName, SourceName: in.Source, TargetId: in.TargetID, TargetName: in.Target,
 		AccessLevel: in.AccessLevel, SourceRevision: in.SourceRevision, TargetRevision: in.TargetRevision}
 }

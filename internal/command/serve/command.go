@@ -153,7 +153,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("serve: storage.postgres.dbos_dsn_env: %w", err)
 	}
 
-	// 3. SPIRE: every zone, the composite bundle source, the core identity,
+	// 3. SPIRE: every realm, the composite bundle source, the core identity,
 	// and 4. the sealer, before step 2 audits CONFIG_LOADED: a missing
 	// dependency (a sealed OpenBao) fails startup with nothing audited, so a
 	// restart loop cannot flood the audit log (§8.2)
@@ -161,12 +161,12 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	// socket or OpenBao fails startup, and the supervisor restarts ligo.
 	ready, cancel := context.WithTimeout(ctx, cfg.Service.StartupTimeout)
 	defer cancel()
-	zones, err := identity.Open(ready, cfg)
+	realms, err := identity.Open(ready, cfg)
 	if err != nil {
 		return notReady("SPIRE", cfg.Service.StartupTimeout, err)
 	}
-	defer func() { _ = zones.Close() }()
-	sealer, err := cmd.sealer(ready, cfg, zones)
+	defer func() { _ = realms.Close() }()
+	sealer, err := cmd.sealer(ready, cfg, realms)
 	if err != nil {
 		return notReady("the sealer", cfg.Service.StartupTimeout, err)
 	}
@@ -297,7 +297,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 	run(dispatcher.Run)
 	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, time.Hour) })
-	run(func(ctx context.Context) { zones.WatchConflicts(ctx, log, time.Minute) })
+	run(func(ctx context.Context) { realms.WatchConflicts(ctx, log, time.Minute) })
 
 	// the metrics: the process-wide ones, and this run's database and cache
 	// gauges in a registry of its own (§10.1)
@@ -316,12 +316,12 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	exposed := promhttp.HandlerFor(prometheus.Gatherers{metrics.Registry, scraped}, promhttp.HandlerOpts{ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn)})
 
 	// 9. the workload, admin and metrics listeners
-	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: zones, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
+	w := &workloadhttp.Server{Listener: cfg.Server.WorkloadListener, Bundles: realms, Cache: cache, Rules: s.Bindings.Rules, Logger: log}
 	u, err := ui.New(look, cfg.UI.Theme, log)
 	if err != nil {
 		return err
 	}
-	return cmd.listen(ctx, log, cfg, zones, w, s, u, exposed)
+	return cmd.listen(ctx, log, cfg, realms, w, s, u, exposed)
 }
 
 // traced gives each HTTP request a span named after the listener and the
@@ -368,12 +368,12 @@ func notReady(what string, timeout time.Duration, err error) error {
 }
 
 // sealer is secret_sealing's provider, checked for key availability.
-func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, zones *identity.Zones) (*sealing.Sealer, error) {
+func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, realms *identity.Realms) (*sealing.Sealer, error) {
 	var kek sealing.KEK
 	var err error
 	switch ss := cfg.SecretSealing; ss.Provider {
 	case "vault-transit":
-		kek, err = sealing.NewTransitKEK(ss.VaultTransit, zones, nil)
+		kek, err = sealing.NewTransitKEK(ss.VaultTransit, realms, nil)
 	case "local-kek":
 		kek, err = sealing.NewLocalKEK(ss.LocalKEKFile, cmd.InsecureDev)
 	default:
@@ -442,10 +442,10 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 // listen serves the workload and admin APIs until ctx ends, then drains
 // both; SIGHUP reloads the certificate files, everything else needs a
 // restart.
-func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, zones *identity.Zones, w *workloadhttp.Server,
+func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Config, realms *identity.Realms, w *workloadhttp.Server,
 	s *adminhttp.Server, u *ui.Server, exposed http.Handler) error {
 	wl, al := cfg.Server.WorkloadListener, cfg.Server.AdminListener
-	s.Bundles, s.Logger = zones, log
+	s.Bundles, s.Logger = realms, log
 	var directory *adminauth.LDAP
 	if al.AllowBasicAuth || cfg.AdminAuth.LDAP.URL != "" { // Basic credentials, and the UI's login
 		var err error
@@ -466,11 +466,11 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 	if directory != nil {
 		u.LDAP = directory
 	}
-	workloadCert, reloadWorkload, err := certificate("workload_listener", wl.TLSSource, wl.TLSCertFile, wl.TLSKeyFile, zones)
+	workloadCert, reloadWorkload, err := certificate("workload_listener", wl.TLSSource, wl.TLSCertFile, wl.TLSKeyFile, realms)
 	if err != nil {
 		return err
 	}
-	adminCert, reloadAdmin, err := certificate("admin_listener", al.TLSSource, al.TLSCertFile, al.TLSKeyFile, zones)
+	adminCert, reloadAdmin, err := certificate("admin_listener", al.TLSSource, al.TLSCertFile, al.TLSKeyFile, realms)
 	if err != nil {
 		return err
 	}
@@ -572,7 +572,7 @@ func reload(log *slog.Logger, cfg *config.Config, certs map[string]func() error,
 // certificate is a listener's: the core identity's SVID, rotated by
 // SPIRE, or the configured files, which the returned function reloads (nil
 // for SPIRE).
-func certificate(listener, source, certFile, keyFile string, zones *identity.Zones) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), func() error, error) {
+func certificate(listener, source, certFile, keyFile string, realms *identity.Realms) (func(*tls.ClientHelloInfo) (*tls.Certificate, error), func() error, error) {
 	if source == "file" {
 		var current atomic.Pointer[tls.Certificate]
 		load := func() error {
@@ -589,7 +589,7 @@ func certificate(listener, source, certFile, keyFile string, zones *identity.Zon
 		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return current.Load(), nil }, load, nil
 	}
 	return func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		svid, err := zones.GetX509SVID()
+		svid, err := realms.GetX509SVID()
 		if err != nil {
 			return nil, err
 		}

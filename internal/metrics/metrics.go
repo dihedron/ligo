@@ -38,11 +38,11 @@ var (
 	BindingExpirations     = counter("ligo_binding_expirations_total", "Expired bindings revoked or deferred.", "result")
 	RegexNarrowingChecks   = counter("ligo_regex_narrowing_checks_total", "Regex narrowing checks by result.", "result")
 	InterconnectDenied     = counter("ligo_interconnect_denied_total", "Changes denied by the interconnection policy, by rule.", "rule")
-	PluginRestarts         = counter("ligo_plugin_process_restarts_total", "Plugin process restarts.", "type", "zone")
-	BreakGlass             = counter("ligo_break_glass_total", "Break-glass changes by outcome.", "zone", "operation", "outcome")
+	PluginRestarts         = counter("ligo_plugin_process_restarts_total", "Plugin process restarts.", "type", "realm")
+	BreakGlass             = counter("ligo_break_glass_total", "Break-glass changes by outcome.", "realm", "operation", "outcome")
 	NotificationsAbandoned = counter("ligo_notifications_abandoned_total", "Webhook notifications given up after their retries.", "webhook")
-	DelegatedApprovals     = counter("ligo_delegated_approvals_total", "Sides approved by delegation (ADR-11).", "principal", "zone", "operation")
-	BundleConflicts        = counter("ligo_bundle_conflicts_total", "Bundles discarded because they came from a non-authoritative socket.", "trust_domain", "socket_zone")
+	DelegatedApprovals     = counter("ligo_delegated_approvals_total", "Sides approved by delegation (ADR-11).", "principal", "realm", "operation")
+	BundleConflicts        = counter("ligo_bundle_conflicts_total", "Bundles discarded because they came from a non-authoritative socket.", "trust_domain", "socket_realm")
 )
 
 // State known in the process: set by startup's checks and the audit

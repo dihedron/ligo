@@ -27,18 +27,18 @@ No metric carries a scope label, as scopes are unbounded. Per-scope views come f
 
 | Metric | Labels | Meaning |
 | :------------------------------- | :------------------- | :----------------------------- |
-| `ligo_bindings` | `phase`, `zone` | Bindings by phase |
+| `ligo_bindings` | `phase`, `realm` | Bindings by phase |
 | `ligo_bindings_expiring` | `within` | Bindings expiring within `24h` or `7d` |
 | `ligo_binding_expirations_total` | `result` | Expiries: `revoked`, `deferred` |
 | `ligo_workflow_duration_seconds` | `op`, `result` | Workflow duration |
 | `ligo_step_duration_seconds` | `stage`, `provider_type`, `result` | Step duration |
 | `ligo_plugin_rpc_total` | `provider_type`, `instance`, `method`, `code` | Plugin calls |
-| `ligo_plugin_process_restarts_total` | `type`, `zone` | Plugin process restarts |
+| `ligo_plugin_process_restarts_total` | `type`, `realm` | Plugin process restarts |
 | `ligo_workload_requests_total` | `auth_mode`, `result` | Workload API calls |
 | `ligo_resolution_cache_age_seconds` | | Age of the resolver's cache |
 | `ligo_resolution_invalid_regex_total` | | Stored regexes the resolver refused |
 | `ligo_bundle_conflicts_total` | | Conflicting trust bundles |
-| `ligo_change_requests` | `status`, `zone` | Change requests |
+| `ligo_change_requests` | `status`, `realm` | Change requests |
 | `ligo_change_request_sides_pending` | `resource_type`, `side_kind` | Sides awaiting a decision |
 | `ligo_delegated_approvals_total` | | Sides approved by delegation |
 | `ligo_sources` | `state` | Sources |
@@ -52,8 +52,8 @@ No metric carries a scope label, as scopes are unbounded. Per-scope views come f
 | `ligo_interconnect_denied_total` | `rule` | Requests the policy refused |
 | `ligo_interconnect_violations` | | Existing bindings the policy would deny |
 | `ligo_audit_chain_valid` | | 1 while the chain verifies |
-| `ligo_break_glass_open` | `zone` | Open emergency changes |
-| `ligo_break_glass_total` | `zone`, `operation`, `outcome` | `ratified`, `reverted`, `revert_failed`, `review_overdue` |
+| `ligo_break_glass_open` | `realm` | Open emergency changes |
+| `ligo_break_glass_total` | `realm`, `operation`, `outcome` | `ratified`, `reverted`, `revert_failed`, `review_overdue` |
 | `ligo_notifications_abandoned_total` | | Notifications given up on |
 | `ligo_rotation_overdue` | | Static secrets past their rotation |
 | `ligo_db_scrape_success` | | 1 when the database's gauges are current |

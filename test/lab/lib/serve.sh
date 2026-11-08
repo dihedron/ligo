@@ -302,7 +302,7 @@ serve_accounts_platform() {
 	local aud="$1" bao="$2"
 	cat <<YAML
       - name: pg-shared
-        zone: prod
+        realm: prod
         scope: "platform/shared"
         target_scopes: ["tenants/*"]
         namespace_template: "{account}_{tenancy}"
@@ -361,11 +361,11 @@ service:
   workload_advertise: { destination: "$advertise", port: 8443, server_name: "$advertise" }
 $(serve_observability)
 $(hooks_notifications)
-zones:
+realms:
   - { name: prod, trust_domain: prod.lab, spiffe_workload_socket: "unix:///run/spire/prod/agent.sock" }
   - { name: test, trust_domain: test.lab, spiffe_workload_socket: "unix:///run/spire/test/agent.sock" }
 core_identity:
-  zone: prod
+  realm: prod
   svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["$aud"] }
 server:
   metrics_listener: { listen_address: "127.0.0.1:9090" }
@@ -444,19 +444,19 @@ plugins:
 identity_providers:
   - type: target-local.v1
     builtin: true
-    instances: [ { name: local-prod, zone: prod } ]
+    instances: [ { name: local-prod, realm: prod } ]
   - type: svid.v1
     builtin: true
-    instances: [ { name: svid-prod, zone: prod } ]
+    instances: [ { name: svid-prod, realm: prod } ]
   - type: delegated-dynamic.v1
     builtin: true
-    instances: [ { name: dynamic-prod, zone: prod } ]
+    instances: [ { name: dynamic-prod, realm: prod } ]
   - type: openldap.v1
     binary: ligo-plugin-openldap
     sha256: "$ol"
     instances:
       - name: openldap-prod
-        zone: prod
+        realm: prod
         svid_selector: { match_expr: 'path == "/ligo/plugin/openldap"', jwt_audience: ["$aud"] }
         config:
           url: "$LDAP_URL"
@@ -473,13 +473,13 @@ identity_providers:
 secret_stores:
   - type: none.v1
     builtin: true
-    instances: [ { name: none-prod, zone: prod } ]
+    instances: [ { name: none-prod, realm: prod } ]
   - type: vault.v1
     binary: ligo-plugin-vault
     sha256: "$sv"
     instances:
       - name: vault-prod
-        zone: prod
+        realm: prod
         svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["$aud"] }
         config:
           address: "$bao"
@@ -497,7 +497,7 @@ platform_providers:
     sha256: "$tp"
     platforms:
       - name: pg-ledger
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger"
         allowed_source_trust_domains: [prod.lab, test.lab]
@@ -521,7 +521,7 @@ platform_providers:
             jwt_audience: "$aud"
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-cloud
-        zone: prod
+        realm: prod
         scope: "cloud/fin-01/ledger"
         target_scopes: ["cloud/fin-01/*"]
         display_name: "Lab PostgreSQL ledger, owned by a tenancy"
@@ -546,7 +546,7 @@ platform_providers:
             jwt_audience: "$aud"
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-dynamic
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger, credentials on demand"
         allowed_source_trust_domains: [prod.lab]
@@ -570,7 +570,7 @@ platform_providers:
             jwt_audience: "$aud"
             kv_path: kv/data/ligo/bootstrap/postgres
       - name: pg-ledger-ldap
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Lab PostgreSQL ledger, accounts in the directory"
         allowed_source_trust_domains: [prod.lab]
@@ -600,7 +600,7 @@ $(serve_accounts_platform "$aud" "$bao")
     sha256: "$te"
     platforms:   # the echo target (.specs/ligo-echo-target.md)
       - name: echo-svid
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Lab echo server, admits SVIDs"
         allowed_source_trust_domains: [prod.lab]
@@ -615,7 +615,7 @@ $(serve_accounts_platform "$aud" "$bao")
           ca_file: /etc/ligo-lab/ca.crt
           allowed_endpoints: ["ligo1.ligo.lab:7101"]
       - name: echo-local
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Lab echo server, admits users with a password"
         allowed_source_trust_domains: [prod.lab]

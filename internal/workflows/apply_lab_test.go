@@ -63,11 +63,11 @@ func labClient(t *testing.T) *http.Client {
 }
 
 // labPlugins starts the plugin manager with the lab's three plugins in the
-// zone prod: target-local.v1, ligo-plugin-postgres (platform pg-ledger, wired to
+// realm prod: target-local.v1, ligo-plugin-postgres (platform pg-ledger, wired to
 // them) and ligo-plugin-vault.
 func labPlugins(t *testing.T) *pluginmgr.Manager {
 	t.Helper()
-	zone := config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}
+	realm := config.Realm{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")}
 	aud := labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")
 	sum := func(name string) []byte {
 		b, err := hex.DecodeString(labEnv(t, name))
@@ -86,13 +86,13 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
 		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
-		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Zone: zone,
+		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},
-		{Type: "postgres.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Binary: "ligo-plugin-postgres", SHA256: sum("LIGO_TEST_POSTGRES_SHA256"), Zone: zone,
+		{Type: "postgres.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Binary: "ligo-plugin-postgres", SHA256: sum("LIGO_TEST_POSTGRES_SHA256"), Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "pg-ledger", ConfigJson: target, SvidSelector: selector("postgres"),
 				IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod",
 				SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod", SecretStorageStrategy: "vault-static"}}},
-		{Type: "vault.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Binary: "ligo-plugin-vault", SHA256: sum("LIGO_TEST_VAULT_SHA256"), Zone: zone,
+		{Type: "vault.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Binary: "ligo-plugin-vault", SHA256: sum("LIGO_TEST_VAULT_SHA256"), Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "vault-prod", ConfigJson: vault, SvidSelector: selector("vault")}}},
 	}, pluginmgr.Options{Directory: labEnv(t, "LIGO_TEST_PLUGIN_DIR"), Owner: pluginmgr.Root, RPCTimeout: 30 * time.Second,
 		MaxConcurrentRPCsPerInstance: 4, Backoff: config.Backoff{Initial: time.Second, Max: 10 * time.Second}, Logger: slog.Default()})
@@ -171,7 +171,7 @@ func labBinding(t *testing.T) *lab {
 		}{
 			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'dc/corp-prod', 'prod.lab', $3, 't', 't')`,
 				[]any{uuid.NewV7(), source, `^spiffe://prod\.lab/ns/e2e/sa/` + x + `$`}},
-			{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 				values ($1, $2, 'pg-ledger', 'postgres.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{"database":"ledger","schema":"ledger"}', 't', 't')`, []any{targetID, target}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}', '["role:LEDGER_RO_ROLE"]')`, []any{targetID}},
 		} {
@@ -187,7 +187,7 @@ func labBinding(t *testing.T) *lab {
 
 	bs := &bindings.Service{DB: pools.App, Validate: bindings.Plugins(m),
 		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Platforms: map[string]bindings.Platform{"pg-ledger": {
-			Name: "pg-ledger", Type: "postgres.v1", Zone: "prod", Scope: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
+			Name: "pg-ledger", Type: "postgres.v1", Realm: "prod", Scope: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
 			IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod",
 			SecretStorageStrategy: "vault-static"}}},
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}

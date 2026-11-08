@@ -127,7 +127,7 @@ type Request struct {
 	// RevertsID is the break-glass change a SYSTEM_REVERT reverts.
 	RevertsID     *uuid.UUID
 	Consent       string
-	Zone          string // TARGET, BINDING
+	Realm         string // TARGET, BINDING
 	OwnerScope    string // SOURCE, TARGET
 	SourceScope   string // BINDING
 	TargetScope   string // BINDING

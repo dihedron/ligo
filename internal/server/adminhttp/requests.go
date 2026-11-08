@@ -41,7 +41,7 @@ type requestDTO struct {
 	Kind                      string          `json:"kind"`
 	Consent                   string          `json:"consent"`
 	Status                    string          `json:"status"`
-	Zone                      string          `json:"zone,omitempty"`
+	Realm                     string          `json:"realm,omitempty"`
 	OwnerScope                string          `json:"ownerScope,omitempty"`
 	SourceScope               string          `json:"sourceScope,omitempty"`
 	TargetScope               string          `json:"targetScope,omitempty"`
@@ -73,7 +73,7 @@ type breakGlassDTO struct {
 
 func dto(r *changerequests.Request, full bool) requestDTO {
 	d := requestDTO{ID: r.ID, ResourceType: r.ResourceType, ResourceName: r.ResourceName, ResourceID: r.ResourceID, Operation: r.Operation,
-		Kind: r.Kind, Consent: r.Consent, Status: r.Status, Zone: r.Zone, OwnerScope: r.OwnerScope, SourceScope: r.SourceScope,
+		Kind: r.Kind, Consent: r.Consent, Status: r.Status, Realm: r.Realm, OwnerScope: r.OwnerScope, SourceScope: r.SourceScope,
 		TargetScope: r.TargetScope, PlatformScope: r.PlatformScope, InterconnectRule: r.InterconnectRule, DependsOn: r.DependsOn,
 		RevertsChangeRequest: r.RevertsID, PolicySHA256: r.PolicySHA256, DistinctApproversRequired: r.DistinctApprovers,
 		PayloadSHA256: r.PayloadSHA256, ApprovalReference: r.ApprovalReference, RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt,
@@ -121,7 +121,7 @@ func (s *Server) listKind(w http.ResponseWriter, r *http.Request, kind string) {
 	}
 	q := r.URL.Query()
 	list, more, err := s.Requests.List(r.Context(), c, changerequests.Filter{Status: q.Get("status"), ResourceType: q.Get("resourceType"),
-		ResourceName: q.Get("resourceName"), Zone: q.Get("zone"), Scope: q.Get("scope"), AwaitingMe: q.Get("awaitingMe") == "true", Kind: kind,
+		ResourceName: q.Get("resourceName"), Realm: q.Get("realm"), Scope: q.Get("scope"), AwaitingMe: q.Get("awaitingMe") == "true", Kind: kind,
 		Before: cursor.BeforeID, Limit: size})
 	if err != nil {
 		s.fail(w, r, err)

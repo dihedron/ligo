@@ -111,7 +111,7 @@ func TestAC63(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Status != "PENDING" || len(r.Sides) != 2 || r.Sides[0].Name != "OWNER" || r.Sides[1].Name != "PLATFORM" ||
-		r.Sides[0].Scope != "dc/corp-prod/ledger" || r.Sides[1].Scope != "dc/corp-prod" || r.Zone != "prod" || r.PlatformScope != "dc/corp-prod" {
+		r.Sides[0].Scope != "dc/corp-prod/ledger" || r.Sides[1].Scope != "dc/corp-prod" || r.Realm != "prod" || r.PlatformScope != "dc/corp-prod" {
 		t.Fatalf("request %+v", r)
 	}
 	if _, err := s.Requests.Approve(ctx, marco, r.ID, r.PayloadSHA256, "OWNER", "ok"); err != nil {
@@ -207,7 +207,7 @@ func bindingAt(t *testing.T, o *pgxpool.Pool, target uuid.UUID, level string) uu
 			values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, source, "s-"+suffix, regex); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+		_, err := tx.Exec(ctx, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 			source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
 			source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)

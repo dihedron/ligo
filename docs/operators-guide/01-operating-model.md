@@ -2,7 +2,7 @@
 
 ## What runs
 
-Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It starts one plugin process per plugin type and zone. Replicas share one PostgreSQL database and hold no state of their own, beyond their stable ID, `LIGO_INSTANCE_ID`.
+Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It starts one plugin process per plugin type and realm. Replicas share one PostgreSQL database and hold no state of their own, beyond their stable ID, `LIGO_INSTANCE_ID`.
 
 | Port | Serves | If it is down |
 | :---- | :---------------------- | :-------------------------------- |

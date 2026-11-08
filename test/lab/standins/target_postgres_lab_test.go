@@ -37,7 +37,7 @@ func bootstrap(t *testing.T, name string) string {
 }
 
 // start launches a lab plugin from the plugins directory with the
-// production checks, and configures its one instance in the zone prod.
+// production checks, and configures its one instance in the realm prod.
 func start(t *testing.T, binary string, kind pluginv1.PluginKind, in *pluginv1.InstanceDescriptor) *pluginmgr.Client {
 	t.Helper()
 	sum, err := hex.DecodeString(labEnv(t, "LIGO_TEST_"+strings.ToUpper(strings.TrimPrefix(binary, "ligo-plugin-"))+"_SHA256"))
@@ -54,10 +54,10 @@ func start(t *testing.T, binary string, kind pluginv1.PluginKind, in *pluginv1.I
 		t.Fatal(err)
 	}
 	t.Cleanup(c.Kill)
-	in.Zone, in.TrustDomain = "prod", "prod.lab"
+	in.Realm, in.TrustDomain = "prod", "prod.lab"
 	in.SvidSelector = &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + strings.TrimPrefix(binary, "ligo-plugin-") + `"`,
 		JwtAudience: []string{labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}}
-	if _, err := c.Control.ConfigureInstances(context.Background(), &pluginv1.ConfigureInstancesRequest{Zone: "prod",
+	if _, err := c.Control.ConfigureInstances(context.Background(), &pluginv1.ConfigureInstancesRequest{Realm: "prod",
 		SpiffeWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET"), Instances: []*pluginv1.InstanceDescriptor{in}}); err != nil {
 		t.Fatal(err)
 	}

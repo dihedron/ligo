@@ -87,9 +87,10 @@ func TestExample(t *testing.T) {
 
 func TestStrict(t *testing.T) {
 	for name, doc := range map[string]string{
-		"unknown top-level key": example(t) + "\nbogus: 1\n",
-		"unknown nested key":    strings.Replace(example(t), "  max_length: 512", "  max_length: 512\n  max_lenght: 1", 1),
-		"two documents":         example(t) + "\n---\nservice: {}\n",
+		"unknown top-level key":             example(t) + "\nbogus: 1\n",
+		"unknown nested key":                strings.Replace(example(t), "  max_length: 512", "  max_length: 512\n  max_lenght: 1", 1),
+		"two documents":                     example(t) + "\n---\nservice: {}\n",
+		"zones, renamed to realms in 4.0.3": strings.Replace(example(t), "\nrealms:", "\nzones:", 1),
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -105,11 +106,11 @@ func TestRules(t *testing.T) {
 		rule           int
 		also           []int // rules that fail in consequence
 	}{
-		{"duplicate zone", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
+		{"duplicate realm", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
 		{"type in two sections", `  - type: "oracle.v1"`, `  - type: "openldap.v1"`, 1, nil},
 		{"duplicate instance", `name: "vault-test"`, `name: "vault-prod"`, 1, []int{2}},
-		{"unknown zone", `      - { name: "no-store-prod", zone: prod`, `      - { name: "no-store-prod", zone: nowhere`, 2, nil},
-		{"wiring across zones", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
+		{"unknown realm", `      - { name: "no-store-prod", realm: prod`, `      - { name: "no-store-prod", realm: nowhere`, 2, nil},
+		{"wiring across realms", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
 		{"missing instance", `identity_provider: { type: "openldap.v1", instance: "ldap-prod" }`, `identity_provider: { type: "openldap.v1", instance: "ldap-nope" }`, 2, nil},
 		{"bootstrap audience", `role: "ligo-plugin-openldap-prod"
             jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-openldap-prod"
@@ -121,8 +122,8 @@ func TestRules(t *testing.T) {
     sha256: "ABC"`, 7, nil},
 		{"local-kek without --insecure-dev", "provider: vault-transit", "provider: local-kek", 9, nil},
 		{"tracing CA without TLS", "    insecure: false                       # true only for a collector without TLS", "    insecure: true\n    ca_cert_file: /etc/ligo/ca.crt", 9, nil},
-		{"zone domain also federated", "{ trust_domain: cloud.internal, via_zone: prod }", "{ trust_domain: prod.internal, via_zone: prod }", 12, nil},
-		{"unknown via_zone", "via_zone: prod }", "via_zone: nowhere }", 12, nil},
+		{"realm domain also federated", "{ trust_domain: cloud.internal, via_realm: prod }", "{ trust_domain: prod.internal, via_realm: prod }", 12, nil},
+		{"unknown via_realm", "via_realm: prod }", "via_realm: nowhere }", 12, nil},
 		{"no auth mode", "auth_modes: [x509_svid, jwt_svid]", "auth_modes: []", 12, nil},
 		{"unknown auth mode", "auth_modes: [x509_svid, jwt_svid]", "auth_modes: [x509_svid, basic]", 12, nil},
 		{"jwt_svid without audience", `expected_jwt_audience: "spiffe://prod.internal/ns/sys/sa/ligo"`, `expected_jwt_audience: ""`, 12, nil},
@@ -214,7 +215,7 @@ func TestLoad(t *testing.T) {
 	if _, _, err := Load(dir + "/missing.yaml"); err == nil {
 		t.Error("missing file accepted")
 	}
-	if err := os.WriteFile(path, []byte("zones: {"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("realms: {"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := Load(path); err == nil {
@@ -274,8 +275,8 @@ func TestPluginRules(t *testing.T) {
 		{"bad action", "        action: deny\n", "        action: drop\n"},
 		{"duplicate party", `- { name: security, scope: "sec/infosec" }`, `- { name: security, scope: "sec/infosec" }
           - { name: security, scope: "sec/other" }`},
-		{"unknown core zone", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  zone: prod", "core_identity:\n  zone: nowhere"},
-		{"bad zone trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
+		{"unknown core realm", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  realm: prod", "core_identity:\n  realm: nowhere"},
+		{"bad realm trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
 		{"source scope for an unused trust domain", `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }`, `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
     - { trust_domain: other.internal, mode: static, scope: "dc/other" }`},
 		{"bad source scope mode", `mode: static, scope: "dc/corp-test"`, `mode: dynamic, scope: "dc/corp-test"`},

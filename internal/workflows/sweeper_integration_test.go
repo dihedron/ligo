@@ -150,7 +150,7 @@ func TestSweepRequests(t *testing.T) {
 		distinct_approvers_required, payload, payload_sha256, status, requested_by, expires_at)
 		values ($1, 'SOURCE', $2, 'CREATE', 'STANDARD', 'ALL', 'dc/corp-prod', repeat('a', 64), true, '{}', repeat('b', 64), 'WITHDRAWN', 'alice', now() + interval '1 day')`,
 		[]any{source, "s-" + x}, "OWNER")
-	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, zone, source_scope, target_scope,
+	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm, source_scope, target_scope,
 		platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, depends_on_cr_id, requested_by, expires_at)
 		values ($1, 'BINDING', $2, 'CREATE', 'STANDARD', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64), true,
 		'{}', repeat('b', 64), $3, 'alice', now() + interval '1 day')`, []any{dependent, "b-" + x, source}, "TARGET")
@@ -231,7 +231,7 @@ func TestRevertOutcome(t *testing.T) {
 	}
 	bg, revert := uuid.NewV7(), uuid.NewV7()
 	err := pgx.BeginFunc(ctx, v.owner, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
 			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
 			break_glass_justification, break_glass_ttl_seconds, status, requested_by, decided_by, decided_at, expires_at)
 			values ($1, 'BINDING', $2, $3, 'CREATE', 'BREAK_GLASS', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
@@ -239,7 +239,7 @@ func TestRevertOutcome(t *testing.T) {
 			'system:break-glass', now(), now() + interval '1 day')`, bg, name, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
 			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256,
 			reverts_cr_id, requested_by, expires_at)
 			values ($1, 'BINDING', $2, $3, 'UPDATE', 'SYSTEM_REVERT', 'ANY', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),

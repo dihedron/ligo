@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// Bundles is the composite bundle source of the zones (§7.1).
+// Bundles is the composite bundle source of the realms (§7.1).
 type Bundles interface {
 	x509bundle.Source
 	jwtbundle.Source
@@ -152,7 +152,7 @@ func (s *Server) authenticate(r *http.Request) (spiffeid.ID, string, error) {
 	return spiffeid.ID{}, "none", errUnauthenticated
 }
 
-// jwt validates a JWT-SVID: signature and expiry against the zones'
+// jwt validates a JWT-SVID: signature and expiry against the realms'
 // bundles, expected_jwt_audience among its audiences, a required iat, a
 // lifetime within max_token_ttl and no iat beyond clock_skew (EXT-12,
 // AC-16).

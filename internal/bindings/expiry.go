@@ -87,7 +87,7 @@ func (s *Service) expire(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE", Kind: kindExpiry,
-		Consent: changerequests.ConsentAny, Zone: cur.zone, SourceScope: cur.sourceScope, TargetScope: cur.targetScope,
+		Consent: changerequests.ConsentAny, Realm: cur.realm, SourceScope: cur.sourceScope, TargetScope: cur.targetScope,
 		PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"), RequestedBy: actorExpiry,
 		Sides: []changerequests.Side{{Name: "TARGET", Scope: cur.targetScope, Basis: kindExpiry, Decision: changerequests.Approved,
 			DecidedBy: expiryApprover}}}

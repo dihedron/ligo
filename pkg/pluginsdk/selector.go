@@ -57,12 +57,12 @@ type WorkloadClient interface {
 // InstanceSVIDSelector resolves a plugin instance's own SVID among those the
 // agent issues to the plugin process.
 type InstanceSVIDSelector struct {
-	client          WorkloadClient
-	program         *vm.Program
-	instanceName    string
-	zoneTrustDomain string
-	audience        []string
-	now             func() time.Time
+	client           WorkloadClient
+	program          *vm.Program
+	instanceName     string
+	realmTrustDomain string
+	audience         []string
+	now              func() time.Time
 
 	mu       sync.Mutex
 	jwt      string
@@ -70,20 +70,20 @@ type InstanceSVIDSelector struct {
 }
 
 // NewInstanceSVIDSelector compiles cfg's expression for one instance of the
-// zone with trust domain zoneTrustDomain.
-func NewInstanceSVIDSelector(client WorkloadClient, instanceName, zoneTrustDomain string, cfg SelectorConfig) (*InstanceSVIDSelector, error) {
+// realm with trust domain realmTrustDomain.
+func NewInstanceSVIDSelector(client WorkloadClient, instanceName, realmTrustDomain string, cfg SelectorConfig) (*InstanceSVIDSelector, error) {
 	program, err := CompileSelector(cfg.MatchExpr)
 	if err != nil {
 		return nil, fmt.Errorf("instance %q: %w", instanceName, err)
 	}
 	return &InstanceSVIDSelector{
 		client: client, program: program, instanceName: instanceName,
-		zoneTrustDomain: zoneTrustDomain, audience: cfg.JWTAudience, now: time.Now,
+		realmTrustDomain: realmTrustDomain, audience: cfg.JWTAudience, now: time.Now,
 	}, nil
 }
 
 // SelectX509SVID returns the single SVID matching the instance expression,
-// which must belong to the zone's trust domain.
+// which must belong to the realm's trust domain.
 func (s *InstanceSVIDSelector) SelectX509SVID(ctx context.Context) (*x509svid.SVID, error) {
 	svids, err := s.client.FetchX509SVIDs(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *InstanceSVIDSelector) SelectX509SVID(ctx context.Context) (*x509svid.SV
 }
 
 // Pick returns the single SVID of svids matching the instance expression,
-// which must belong to the zone's trust domain.
+// which must belong to the realm's trust domain.
 func (s *InstanceSVIDSelector) Pick(svids []*x509svid.SVID) (*x509svid.SVID, error) {
 	var match *x509svid.SVID
 	for _, c := range svids {
@@ -118,7 +118,7 @@ func (s *InstanceSVIDSelector) Pick(svids []*x509svid.SVID) (*x509svid.SVID, err
 	if match == nil {
 		return nil, fmt.Errorf("selector for %q matched no SVID", s.instanceName)
 	}
-	if match.ID.TrustDomain().Name() != s.zoneTrustDomain {
+	if match.ID.TrustDomain().Name() != s.realmTrustDomain {
 		return nil, fmt.Errorf("selector for %q resolved to foreign trust domain", s.instanceName)
 	}
 	return match, nil

@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// SelectInstances connects to the zone's agent, and selects each instance's
+// SelectInstances connects to the realm's agent, and selects each instance's
 // SVID (§5.4): the selectors by instance, and the response that resolves them.
 func SelectInstances(ctx context.Context, r *pluginv1.ConfigureInstancesRequest) (map[string]*InstanceSVIDSelector, *pluginv1.ConfigureInstancesResponse, error) {
 	// the client lives as long as the process

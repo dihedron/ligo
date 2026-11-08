@@ -3,7 +3,7 @@
 | Decision | Why | Rejected |
 | :------------------------- | :------------------------------------- | :------------------------ |
 | Three orthogonal plugin stages | Identity, target and store vary independently | Monolithic plugins: N × M × K of them |
-| Plugins as processes, per type and zone | A crash or a compromise is contained; each gets its zone's identity | In-process plugins |
+| Plugins as processes, per type and realm | A crash or a compromise is contained; each gets its realm's identity | In-process plugins |
 | Durable workflows on DBOS, in `ligo`'s own database | One dependency; a step's result commits with the data | An external workflow engine |
 | Sealing with Transit | No secret in clear in checkpoints, and a retry does not need it back | Encrypting with a local key; keeping secrets out of the workflow, which then cannot resume |
 | Regex validation on the syntax tree | Text checks miss what the parser sees | Globs, which `*` makes cross `/` |

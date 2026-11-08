@@ -32,7 +32,7 @@ type ViewMetadata struct {
 	Platform               string     `json:"platform"`
 	PlatformType           string     `json:"platformType"`
 	PlatformScope          string     `json:"platformScope"`
-	Zone                   string     `json:"zone"`
+	Realm                  string     `json:"realm"`
 	State                  string     `json:"state"`
 	Revision               int64      `json:"revision"`
 	CreatedAt              time.Time  `json:"createdAt"`
@@ -47,7 +47,7 @@ type ViewMetadata struct {
 func (s *Service) view(ctx context.Context, c changerequests.Caller, st *stored) (*View, error) {
 	m := st.Metadata
 	v := &View{APIVersion: sources.APIVersion, Target: st.Target, Metadata: ViewMetadata{ID: st.ID, Name: m.Name, Scope: m.Scope,
-		Platform: m.Platform, PlatformType: m.PlatformType, PlatformScope: m.PlatformScope, Zone: m.Zone, State: m.State, Revision: st.Revision}}
+		Platform: m.Platform, PlatformType: m.PlatformType, PlatformScope: m.PlatformScope, Realm: m.Realm, State: m.State, Revision: st.Revision}}
 	vm := &v.Metadata
 	err := s.DB.QueryRow(ctx, `SELECT created_at, updated_at, created_by, updated_by, (SELECT c.id FROM change_requests c
 		WHERE c.resource_type = 'TARGET' AND c.resource_name = t.name AND c.status = 'PENDING') FROM targets t WHERE id = $1`,

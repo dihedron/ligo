@@ -295,7 +295,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		}{
 			{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
 				'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/api/sa/` + x + `$`}},
-			{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{targetID, "tgt-" + x}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}',
 				'["role:LEDGER_RO_ROLE"]')`, []any{targetID}},

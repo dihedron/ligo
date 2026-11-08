@@ -1,12 +1,12 @@
-# ligo serve's integration test: one zone, built-in plugins only, local-kek
+# ligo serve's integration test: one realm, built-in plugins only, local-kek
 service:
   application_version: "test"
   instance_id_env: "LIGO_INSTANCE_ID"
   workload_advertise: { destination: "ligo.prod.internal", port: 8443, server_name: "ligo.prod.internal" }
-zones:
+realms:
   - { name: prod, trust_domain: prod.internal, spiffe_workload_socket: "unix:///replaced/by/the/test" }
 core_identity:
-  zone: prod
+  realm: prod
   svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"' }
 server:
   workload_listener:
@@ -39,6 +39,6 @@ secret_sealing:
 plugins:
   directory: "/nonexistent"
 identity_providers:
-  - { type: svid.v1, builtin: true, instances: [ { name: svid-prod, zone: prod } ] }
+  - { type: svid.v1, builtin: true, instances: [ { name: svid-prod, realm: prod } ] }
 secret_stores:
-  - { type: none.v1, builtin: true, instances: [ { name: none-prod, zone: prod } ] }
+  - { type: none.v1, builtin: true, instances: [ { name: none-prod, realm: prod } ] }

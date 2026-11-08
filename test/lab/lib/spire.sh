@@ -5,16 +5,16 @@
 # lxd-spiffe's lxd_iid plugins through the inner LXD
 # (.specs/ligo-test-environment.md, "SPIRE").
 
-ZONES=(prod test)
+REALMS=(prod test)
 SPIRE_PREFIX=/opt/spire
 SPIRE_PORT=8081
 OIDC_PORT=8008
 
-# spire ZONE ARGS: spire-server on a zone's server.
+# spire REALM ARGS: spire-server on a realm's server.
 spire() {
-	local zone="$1"
+	local realm="$1"
 	shift
-	inner_exec "spire-$zone" "$SPIRE_PREFIX/bin/spire-server" "$@" -socketPath /run/spire/server/api.sock
+	inner_exec "spire-$realm" "$SPIRE_PREFIX/bin/spire-server" "$@" -socketPath /run/spire/server/api.sock
 }
 
 # inner_container NAME MEMORY: creates an inner container with its fixed
@@ -33,18 +33,18 @@ inner_container() {
 # inner_lxd_fingerprint: the SHA-256 of the inner LXD's certificate (the pin).
 inner_lxd_fingerprint() { inner query /1.0 | jq -r .environment.certificate_fingerprint; }
 
-# spire_identity ZONE: the zone's SPIRE server identity on the inner LXD:
-# group spire-ZONE with can_view and can_view_instances on project default,
+# spire_identity REALM: the realm's SPIRE server identity on the inner LXD:
+# group spire-REALM with can_view and can_view_instances on project default,
 # and can_view and can_access_files on each ligo host (file_pull).
 spire_identity() {
-	local zone="$1" group="spire-$1"
-	pki_client "spire-$zone-lxd"
+	local realm="$1" group="spire-$1"
+	pki_client "spire-$realm-lxd"
 	if ! inner query /1.0/auth/groups | jq -e --arg g "/1.0/auth/groups/$group" 'index($g)' >/dev/null; then
 		inner auth group create "$group" >/dev/null
 	fi
 	if ! inner auth identity list -f csv | grep "^tls,[^,]*,$group," >/dev/null; then
 		inner query -X POST /1.0/auth/identities/tls --data "$(jq -n --arg name "$group" --arg group "$group" \
-			--rawfile cert "$LAB_STATE_DIR/pki/spire-$zone-lxd.crt" '{name: $name, certificate: $cert, groups: [$group]}')" >/dev/null ||
+			--rawfile cert "$LAB_STATE_DIR/pki/spire-$realm-lxd.crt" '{name: $name, certificate: $cert, groups: [$group]}')" >/dev/null ||
 			die "cannot trust identity $group on the inner LXD"
 	fi
 	local entitlement
@@ -62,19 +62,19 @@ spire_identity() {
 		die "$group: the grants on the ligo hosts are missing"
 }
 
-# server_conf ZONE CHECKSUM: SPIRE Server's configuration.
+# server_conf REALM CHECKSUM: SPIRE Server's configuration.
 server_conf() {
-	local zone="$1"
+	local realm="$1"
 	cat <<CONF
 server {
   bind_address = "0.0.0.0"
   bind_port    = "$SPIRE_PORT"
   socket_path  = "/run/spire/server/api.sock"
-  trust_domain = "$zone.lab"
+  trust_domain = "$realm.lab"
   data_dir     = "/var/lib/spire/server"
   log_level    = "INFO"
   ca_ttl       = "168h"
-  jwt_issuer   = "https://spire-$zone.ligo.lab:$OIDC_PORT"
+  jwt_issuer   = "https://spire-$realm.ligo.lab:$OIDC_PORT"
 }
 
 plugins {
@@ -94,8 +94,8 @@ plugins {
     plugin_checksum = "$2"
     plugin_data {
       proof_mode = "file_pull"
-      # the agent of this zone on each ligo host uses its own directory: they must match
-      proof_dir  = "/run/spire/lxd-$zone"
+      # the agent of this realm on each ligo host uses its own directory: they must match
+      proof_dir  = "/run/spire/lxd-$realm"
       servers = {
         "inner" = {
           url                     = "https://$(inner_gateway):8443"
@@ -111,7 +111,7 @@ plugins {
 CONF
 }
 
-# oidc_conf ZONE: the OIDC discovery provider's configuration: the zone's JWT
+# oidc_conf REALM: the OIDC discovery provider's configuration: the realm's JWT
 # keys over TLS with the lab CA's certificate, read from the server's socket.
 oidc_conf() {
 	cat <<CONF
@@ -150,9 +150,9 @@ WantedBy=multi-user.target
 UNIT
 }
 
-# spire_server_up ZONE: the zone's SPIRE Server and OIDC discovery provider.
+# spire_server_up REALM: the realm's SPIRE Server and OIDC discovery provider.
 spire_server_up() {
-	local zone="$1" name="spire-$1" tarball extras deb checksum tmp
+	local realm="$1" name="spire-$1" tarball extras deb checksum tmp
 	inner_container "$name" "$LAB_SPIRE_MEMORY"
 	tarball="$(spire_release spire)"
 	extras="$(spire_release spire-extras)"
@@ -172,15 +172,15 @@ spire_server_up() {
 		info "$name: SPIRE $LAB_SPIRE_VERSION and lxd-server-plugin $LAB_LXD_SPIFFE_VERSION installed"
 	fi
 	checksum="$(inner_exec "$name" sha256sum /usr/bin/lxd-server-plugin | cut -d' ' -f1)"
-	inner_push "$LAB_STATE_DIR/pki/spire-$zone-lxd.crt" "$name" /etc/spire/lxd/client.crt 0444
-	inner_push "$LAB_STATE_DIR/pki/spire-$zone-lxd.key" "$name" /etc/spire/lxd/client.key 0400
+	inner_push "$LAB_STATE_DIR/pki/spire-$realm-lxd.crt" "$name" /etc/spire/lxd/client.crt 0444
+	inner_push "$LAB_STATE_DIR/pki/spire-$realm-lxd.key" "$name" /etc/spire/lxd/client.key 0400
 	inner_push "$LAB_STATE_DIR/pki/$name.crt" "$name" /etc/spire/oidc/server.crt 0444
 	inner_push "$LAB_STATE_DIR/pki/$name.key" "$name" /etc/spire/oidc/server.key 0400
 	tmp="$(mktemp -d)"
-	server_conf "$zone" "$checksum" >"$tmp/server.conf"
-	oidc_conf "$zone" >"$tmp/oidc.conf"
-	unit "SPIRE Server $zone.lab" spire "$SPIRE_PREFIX/bin/spire-server run -config /etc/spire/server.conf" "" spire/server >"$tmp/spire-server.service"
-	unit "SPIRE OIDC discovery provider $zone.lab" spire "$SPIRE_PREFIX/bin/oidc-discovery-provider -config /etc/spire/oidc.conf" spire-server.service >"$tmp/spire-oidc.service"
+	server_conf "$realm" "$checksum" >"$tmp/server.conf"
+	oidc_conf "$realm" >"$tmp/oidc.conf"
+	unit "SPIRE Server $realm.lab" spire "$SPIRE_PREFIX/bin/spire-server run -config /etc/spire/server.conf" "" spire/server >"$tmp/spire-server.service"
+	unit "SPIRE OIDC discovery provider $realm.lab" spire "$SPIRE_PREFIX/bin/oidc-discovery-provider -config /etc/spire/oidc.conf" spire-server.service >"$tmp/spire-oidc.service"
 	inner_push "$tmp/server.conf" "$name" /etc/spire/server.conf 0644
 	inner_push "$tmp/oidc.conf" "$name" /etc/spire/oidc.conf 0644
 	inner_push "$tmp/spire-server.service" "$name" /etc/systemd/system/spire-server.service 0644
@@ -193,26 +193,26 @@ spire_server_up() {
 		systemctl restart spire-server"
 	local i
 	for i in $(seq 1 60); do
-		spire "$zone" healthcheck >/dev/null 2>&1 && break
+		spire "$realm" healthcheck >/dev/null 2>&1 && break
 		sleep 2
 	done
-	spire "$zone" healthcheck >/dev/null 2>&1 || die "$name: SPIRE Server is not healthy (lab.sh logs $name spire-server)"
+	spire "$realm" healthcheck >/dev/null 2>&1 || die "$name: SPIRE Server is not healthy (lab.sh logs $name spire-server)"
 	inner_exec "$name" systemctl restart spire-oidc
-	info "$name: SPIRE Server of $zone.lab healthy; OIDC discovery on https://$name.ligo.lab:$OIDC_PORT"
+	info "$name: SPIRE Server of $realm.lab healthy; OIDC discovery on https://$name.ligo.lab:$OIDC_PORT"
 }
 
-# agent_conf ZONE CHECKSUM: the zone's SPIRE Agent on a ligo host.
+# agent_conf REALM CHECKSUM: the realm's SPIRE Agent on a ligo host.
 agent_conf() {
-	local zone="$1"
+	local realm="$1"
 	cat <<CONF
 agent {
-  data_dir          = "/var/lib/spire/agent-$zone"
+  data_dir          = "/var/lib/spire/agent-$realm"
   log_level         = "INFO"
-  server_address    = "spire-$zone.ligo.lab"
+  server_address    = "spire-$realm.ligo.lab"
   server_port       = "$SPIRE_PORT"
-  socket_path       = "/run/spire/$zone/agent.sock"
-  trust_bundle_path = "/etc/spire/$zone/bundle.pem"
-  trust_domain      = "$zone.lab"
+  socket_path       = "/run/spire/$realm/agent.sock"
+  trust_bundle_path = "/etc/spire/$realm/bundle.pem"
+  trust_domain      = "$realm.lab"
 }
 
 plugins {
@@ -223,12 +223,12 @@ plugins {
       claim {
         project = "default"
       }
-      proof_dir = "/run/spire/lxd-$zone"
+      proof_dir = "/run/spire/lxd-$realm"
     }
   }
   KeyManager "disk" {
     plugin_data {
-      directory = "/var/lib/spire/agent-$zone"
+      directory = "/var/lib/spire/agent-$realm"
     }
   }
   WorkloadAttestor "unix" {
@@ -272,44 +272,44 @@ ligo_vm_up() {
 	fi
 }
 
-# spire_agents_up HOST: one agent per zone on HOST, as root (file_pull,
-# lxd-spiffe FR-A7), with the zone's trust bundle.
+# spire_agents_up HOST: one agent per realm on HOST, as root (file_pull,
+# lxd-spiffe FR-A7), with the realm's trust bundle.
 spire_agents_up() {
-	local host="$1" zone checksum tmp
+	local host="$1" realm checksum tmp
 	checksum="$(inner_exec "$host" sha256sum /usr/bin/lxd-agent-plugin | cut -d' ' -f1)"
 	tmp="$(mktemp -d)"
-	for zone in "${ZONES[@]}"; do
-		spire "$zone" bundle show -format pem >"$tmp/bundle.pem"
-		agent_conf "$zone" "$checksum" >"$tmp/agent.conf"
-		unit "SPIRE Agent $zone.lab" root "$SPIRE_PREFIX/bin/spire-agent run -config /etc/spire/$zone/agent.conf" lxd-agent.service >"$tmp/unit"
-		inner_exec "$host" mkdir -p "/etc/spire/$zone" "/var/lib/spire/agent-$zone"
-		inner_push "$tmp/bundle.pem" "$host" "/etc/spire/$zone/bundle.pem" 0644
-		inner_push "$tmp/agent.conf" "$host" "/etc/spire/$zone/agent.conf" 0644
-		inner_push "$tmp/unit" "$host" "/etc/systemd/system/spire-agent-$zone.service" 0644
-		inner_exec "$host" sh -ec "systemctl daemon-reload; systemctl enable spire-agent-$zone >/dev/null 2>&1; systemctl restart spire-agent-$zone"
+	for realm in "${REALMS[@]}"; do
+		spire "$realm" bundle show -format pem >"$tmp/bundle.pem"
+		agent_conf "$realm" "$checksum" >"$tmp/agent.conf"
+		unit "SPIRE Agent $realm.lab" root "$SPIRE_PREFIX/bin/spire-agent run -config /etc/spire/$realm/agent.conf" lxd-agent.service >"$tmp/unit"
+		inner_exec "$host" mkdir -p "/etc/spire/$realm" "/var/lib/spire/agent-$realm"
+		inner_push "$tmp/bundle.pem" "$host" "/etc/spire/$realm/bundle.pem" 0644
+		inner_push "$tmp/agent.conf" "$host" "/etc/spire/$realm/agent.conf" 0644
+		inner_push "$tmp/unit" "$host" "/etc/systemd/system/spire-agent-$realm.service" 0644
+		inner_exec "$host" sh -ec "systemctl daemon-reload; systemctl enable spire-agent-$realm >/dev/null 2>&1; systemctl restart spire-agent-$realm"
 	done
 	rm -rf "${tmp:?}"
 }
 
-# spire_entries HOST: the node alias of HOST in each zone, and ligo's
+# spire_entries HOST: the node alias of HOST in each realm, and ligo's
 # entries under it (§10.5): the core identity on prod, the bundle-access
 # identity on test, both for the user ligo (lab deviation: unix:uid only).
 # Each host has its own alias, and the same SPIFFE IDs under it.
 spire_entries() {
-	local host="$1" uuid uid zone id out
+	local host="$1" uuid uid realm id out
 	uuid="$(inner config get "$host" volatile.uuid)"
 	uid="$(inner_exec "$host" id -u ligo)"
-	for zone in "${ZONES[@]}"; do
-		spire "$zone" entry show -spiffeID "spiffe://$zone.lab/node/$host" 2>/dev/null | grep "lxd_iid:uuid:$uuid" >/dev/null ||
-			spire "$zone" entry create -node -spiffeID "spiffe://$zone.lab/node/$host" \
+	for realm in "${REALMS[@]}"; do
+		spire "$realm" entry show -spiffeID "spiffe://$realm.lab/node/$host" 2>/dev/null | grep "lxd_iid:uuid:$uuid" >/dev/null ||
+			spire "$realm" entry create -node -spiffeID "spiffe://$realm.lab/node/$host" \
 				-selector lxd_iid:server:inner -selector "lxd_iid:uuid:$uuid" >/dev/null
 	done
 	for id in "prod ns/sys/sa/ligo" "test ns/sys/sa/ligo-bundles"; do
-		zone="${id%% *}"
+		realm="${id%% *}"
 		# captured first: grep -q would cut the pipe, which pipefail reports as a failure
-		out="$(spire "$zone" entry show -parentID "spiffe://$zone.lab/node/$host" -spiffeID "spiffe://$zone.lab/${id#* }" 2>/dev/null)" || true
+		out="$(spire "$realm" entry show -parentID "spiffe://$realm.lab/node/$host" -spiffeID "spiffe://$realm.lab/${id#* }" 2>/dev/null)" || true
 		grep -q "unix:uid:$uid" <<<"$out" ||
-			spire "$zone" entry create -parentID "spiffe://$zone.lab/node/$host" -spiffeID "spiffe://$zone.lab/${id#* }" \
+			spire "$realm" entry create -parentID "spiffe://$realm.lab/node/$host" -spiffeID "spiffe://$realm.lab/${id#* }" \
 				-selector "unix:uid:$uid" >/dev/null
 	done
 	env_set ".$host" "$(jq -n --arg uuid "$uuid" --argjson uid "$uid" --arg ip "$(inner_ip "$host")" '{uuid: $uuid, ligo_uid: $uid, address: $ip}')"
@@ -318,31 +318,31 @@ spire_entries() {
 # spire_check HOST: as the user ligo on HOST, fetches an X.509-SVID and a
 # JWT-SVID from each agent (step 2's done criterion).
 spire_check() {
-	local host="$1" zone uid out="" i
+	local host="$1" realm uid out="" i
 	uid="$(env_get ".$host.ligo_uid")"
-	for zone in "${ZONES[@]}"; do
+	for realm in "${REALMS[@]}"; do
 		for i in $(seq 1 60); do
-			out="$(lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 -socketPath "/run/spire/$zone/agent.sock" 2>/dev/null)" && break
+			out="$(lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch x509 -socketPath "/run/spire/$realm/agent.sock" 2>/dev/null)" && break
 			sleep 2
 		done
-		grep -q "SPIFFE ID:" <<<"$out" || die "$host: no X.509-SVID from the $zone agent (lab.sh logs $host spire-agent-$zone)"
+		grep -q "SPIFFE ID:" <<<"$out" || die "$host: no X.509-SVID from the $realm agent (lab.sh logs $host spire-agent-$realm)"
 		info "$host, user ligo: X.509-SVID $(awk '/SPIFFE ID:/ {print $3; exit}' <<<"$out")"
 		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$SPIRE_PREFIX/bin/spire-agent" api fetch jwt -audience lab-check \
-			-socketPath "/run/spire/$zone/agent.sock" 2>/dev/null | grep "token(" >/dev/null || die "$host: no JWT-SVID from the $zone agent"
-		info "$host, user ligo: JWT-SVID from the $zone agent"
+			-socketPath "/run/spire/$realm/agent.sock" 2>/dev/null | grep "token(" >/dev/null || die "$host: no JWT-SVID from the $realm agent"
+		info "$host, user ligo: JWT-SVID from the $realm agent"
 	done
 }
 
 # identity_spire_up: everything of SPIRE, in order.
 identity_spire_up() {
 	section "SPIRE (prod.lab, test.lab) with lxd-spiffe"
-	local zone host
+	local realm host
 	for host in $(ligo_hosts); do
 		ligo_vm_up "$host"
 	done
-	for zone in "${ZONES[@]}"; do
-		spire_identity "$zone"
-		spire_server_up "$zone"
+	for realm in "${REALMS[@]}"; do
+		spire_identity "$realm"
+		spire_server_up "$realm"
 	done
 	for host in $(ligo_hosts); do
 		spire_agents_up "$host"

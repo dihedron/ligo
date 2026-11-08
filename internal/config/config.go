@@ -21,7 +21,7 @@ import (
 // Config is server.yaml.
 type Config struct {
 	Service           Service            `yaml:"service"`
-	Zones             []Zone             `yaml:"zones"`
+	Realms            []Realm            `yaml:"realms"`
 	CoreIdentity      CoreIdentity       `yaml:"core_identity"`
 	Server            Server             `yaml:"server"`
 	AdminAuth         AdminAuth          `yaml:"admin_auth"`
@@ -79,7 +79,7 @@ type WorkloadAdvertise struct {
 	ServerName  string `yaml:"server_name"`
 }
 
-type Zone struct {
+type Realm struct {
 	Name                 string `yaml:"name"`
 	TrustDomain          string `yaml:"trust_domain"`
 	SPIFFEWorkloadSocket string `yaml:"spiffe_workload_socket"`
@@ -92,7 +92,7 @@ type SVIDSelector struct {
 }
 
 type CoreIdentity struct {
-	Zone         string       `yaml:"zone"`
+	Realm        string       `yaml:"realm"`
 	SVIDSelector SVIDSelector `yaml:"svid_selector"`
 }
 
@@ -125,7 +125,7 @@ const (
 
 type FederatedDomain struct {
 	TrustDomain string `yaml:"trust_domain"`
-	ViaZone     string `yaml:"via_zone"`
+	ViaRealm    string `yaml:"via_realm"`
 }
 
 type WorkloadRateLimit struct {
@@ -339,7 +339,7 @@ type InstanceProvider struct {
 
 type Instance struct {
 	Name         string        `yaml:"name"`
-	Zone         string        `yaml:"zone"`
+	Realm        string        `yaml:"realm"`
 	SVIDSelector *SVIDSelector `yaml:"svid_selector"`
 	// Config is plugin-specific: it is validated against the plugin's schema
 	// (§8.2 rule 8).
@@ -358,7 +358,7 @@ type PlatformProvider struct {
 
 type Platform struct {
 	Name                      string        `yaml:"name"`
-	Zone                      string        `yaml:"zone"`
+	Realm                     string        `yaml:"realm"`
 	Scope                     string        `yaml:"scope"`
 	TargetScopes              []string      `yaml:"target_scopes"`
 	NamespaceTemplate         string        `yaml:"namespace_template"`

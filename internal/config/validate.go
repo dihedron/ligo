@@ -65,9 +65,9 @@ func Validate(cfg *Config, opts Options) error {
 	if id, _ := opts.LookupEnv(cfg.Service.InstanceIDEnv); !instanceIDRE.MatchString(id) {
 		c.failf(1, "service.instance_id_env %q: the instance ID %q must match %s", cfg.Service.InstanceIDEnv, id, instanceIDRE)
 	}
-	zones := c.zones(cfg)
-	c.instances(cfg, zones)
-	c.trustDomains(cfg, zones)
+	realms := c.realms(cfg)
+	c.instances(cfg, realms)
+	c.trustDomains(cfg, realms)
 	c.sealing(cfg, opts)
 	c.authorization(cfg)
 	c.breakGlass(cfg, opts)
@@ -99,22 +99,22 @@ func (c *checker) theme(cfg *Config) {
 	}
 }
 
-// zones checks rule 1 for zones and returns them by name.
-func (c *checker) zones(cfg *Config) map[string]Zone {
-	zones := map[string]Zone{}
-	for _, z := range cfg.Zones {
-		if _, dup := zones[z.Name]; dup {
-			c.failf(1, "zone %q is defined twice", z.Name)
+// realms checks rule 1 for realms and returns them by name.
+func (c *checker) realms(cfg *Config) map[string]Realm {
+	realms := map[string]Realm{}
+	for _, z := range cfg.Realms {
+		if _, dup := realms[z.Name]; dup {
+			c.failf(1, "realm %q is defined twice", z.Name)
 		}
 		if _, err := spiffeid.TrustDomainFromString(z.TrustDomain); err != nil {
-			c.failf(2, "zone %q: invalid trust domain %q", z.Name, z.TrustDomain)
+			c.failf(2, "realm %q: invalid trust domain %q", z.Name, z.TrustDomain)
 		}
-		zones[z.Name] = z
+		realms[z.Name] = z
 	}
-	if _, ok := zones[cfg.CoreIdentity.Zone]; !ok {
-		c.failf(2, "core_identity.zone %q is not a configured zone", cfg.CoreIdentity.Zone)
+	if _, ok := realms[cfg.CoreIdentity.Realm]; !ok {
+		c.failf(2, "core_identity.realm %q is not a configured realm", cfg.CoreIdentity.Realm)
 	}
-	return zones
+	return realms
 }
 
 const (
@@ -141,18 +141,18 @@ type providedPlatform struct {
 
 // instances checks rules 1, 2, 5 and 7 for plugin types, instances and
 // platforms.
-func (c *checker) instances(cfg *Config, zones map[string]Zone) {
-	// instance zones by type, then name
-	zoneOf := map[string]map[string]string{}
-	c.instanceProviders("identity provider", cfg.IdentityProviders, zones, zoneOf)
-	c.instanceProviders("secret store", cfg.SecretStores, zones, zoneOf)
+func (c *checker) instances(cfg *Config, realms map[string]Realm) {
+	// instance realms by type, then name
+	realmOf := map[string]map[string]string{}
+	c.instanceProviders("identity provider", cfg.IdentityProviders, realms, realmOf)
+	c.instanceProviders("secret store", cfg.SecretStores, realms, realmOf)
 	for _, tp := range cfg.PlatformProviders {
 		c.binary("platform provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
-		if zoneOf[tp.Type] != nil {
+		if realmOf[tp.Type] != nil {
 			c.failf(1, "platform provider type %q is declared twice", tp.Type)
 			continue
 		}
-		zoneOf[tp.Type] = map[string]string{} // a platform provider has no instances to wire
+		realmOf[tp.Type] = map[string]string{} // a platform provider has no instances to wire
 	}
 	names := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {
@@ -160,25 +160,25 @@ func (c *checker) instances(cfg *Config, zones map[string]Zone) {
 			c.failf(1, "platform %q is defined twice", p.Name)
 		}
 		names[p.Name] = true
-		if _, ok := zones[p.Zone]; !ok {
-			c.failf(2, "platform %q: zone %q does not exist", p.Name, p.Zone)
+		if _, ok := realms[p.Realm]; !ok {
+			c.failf(2, "platform %q: realm %q does not exist", p.Name, p.Realm)
 		}
-		c.wiring(p.Platform, "identity_provider", p.IdentityProvider, zoneOf)
-		c.wiring(p.Platform, "secret_store", p.SecretStore, zoneOf)
+		c.wiring(p.Platform, "identity_provider", p.IdentityProvider, realmOf)
+		c.wiring(p.Platform, "secret_store", p.SecretStore, realmOf)
 		c.plugin(platformPrefix+p.Name, p.builtin, p.SVIDSelector, &Instance{Config: p.Config})
 	}
 }
 
 // instanceProviders checks the plugin types of one kind and their instances,
-// recording the zone of each instance in zoneOf.
-func (c *checker) instanceProviders(kind string, list []InstanceProvider, zones map[string]Zone, zoneOf map[string]map[string]string) {
+// recording the realm of each instance in realmOf.
+func (c *checker) instanceProviders(kind string, list []InstanceProvider, realms map[string]Realm, realmOf map[string]map[string]string) {
 	names := map[string]bool{}
 	for _, p := range list {
 		c.binary(kind, p.Type, p.Builtin, p.Binary, p.SHA256)
-		if zoneOf[p.Type] != nil {
+		if realmOf[p.Type] != nil {
 			c.failf(1, "%s type %q is declared twice", kind, p.Type)
 		}
-		zoneOf[p.Type] = map[string]string{}
+		realmOf[p.Type] = map[string]string{}
 		for _, in := range p.Instances {
 			if names[in.Name] {
 				c.failf(1, "%s instance %q is defined twice", kind, in.Name)
@@ -187,23 +187,23 @@ func (c *checker) instanceProviders(kind string, list []InstanceProvider, zones 
 				c.failf(1, "%s instance %q: the name must match %s", kind, in.Name, ruleNameRE)
 			}
 			names[in.Name] = true
-			zoneOf[p.Type][in.Name] = in.Zone
-			if _, ok := zones[in.Zone]; !ok {
-				c.failf(2, "%s instance %q: zone %q does not exist", kind, in.Name, in.Zone)
+			realmOf[p.Type][in.Name] = in.Realm
+			if _, ok := realms[in.Realm]; !ok {
+				c.failf(2, "%s instance %q: realm %q does not exist", kind, in.Name, in.Realm)
 			}
 			c.plugin(kind+" instance "+in.Name, p.Builtin, in.SVIDSelector, &in)
 		}
 	}
 }
 
-// wiring checks that a platform's instance exists in the platform's zone.
-func (c *checker) wiring(p Platform, role string, w Wiring, zoneOf map[string]map[string]string) {
-	z, ok := zoneOf[w.Type][w.Instance]
+// wiring checks that a platform's instance exists in the platform's realm.
+func (c *checker) wiring(p Platform, role string, w Wiring, realmOf map[string]map[string]string) {
+	z, ok := realmOf[w.Type][w.Instance]
 	switch {
 	case !ok:
 		c.failf(2, "platform %q: %s %s/%s does not exist", p.Name, role, w.Type, w.Instance)
-	case z != p.Zone:
-		c.failf(2, "platform %q (zone %s): %s %q is in zone %s", p.Name, p.Zone, role, w.Instance, z)
+	case z != p.Realm:
+		c.failf(2, "platform %q (realm %s): %s %q is in realm %s", p.Name, p.Realm, role, w.Instance, z)
 	}
 }
 
@@ -241,23 +241,23 @@ func (c *checker) plugin(what string, builtin bool, sel *SVIDSelector, in *Insta
 }
 
 // trustDomains checks rules 6 and 12.
-func (c *checker) trustDomains(cfg *Config, zones map[string]Zone) {
-	zoneDomains := map[string]int{}
-	for _, z := range zones {
-		zoneDomains[z.TrustDomain]++
+func (c *checker) trustDomains(cfg *Config, realms map[string]Realm) {
+	realmDomains := map[string]int{}
+	for _, z := range realms {
+		realmDomains[z.TrustDomain]++
 	}
 	federated := map[string]int{}
 	wl := cfg.Server.WorkloadListener
 	for _, f := range wl.FederatedTrustDomains {
 		federated[f.TrustDomain]++
-		if _, ok := zones[f.ViaZone]; !ok {
-			c.failf(12, "federated trust domain %q: via_zone %q is not a configured zone", f.TrustDomain, f.ViaZone)
+		if _, ok := realms[f.ViaRealm]; !ok {
+			c.failf(12, "federated trust domain %q: via_realm %q is not a configured realm", f.TrustDomain, f.ViaRealm)
 		}
 	}
 	check := func(where string, domains []string) {
 		for _, td := range domains {
-			if zoneDomains[td]+federated[td] != 1 {
-				c.failf(12, "%s: trust domain %q must be the trust domain of exactly one zone or listed once in federated_trust_domains, not both", where, td)
+			if realmDomains[td]+federated[td] != 1 {
+				c.failf(12, "%s: trust domain %q must be the trust domain of exactly one realm or listed once in federated_trust_domains, not both", where, td)
 			}
 		}
 	}

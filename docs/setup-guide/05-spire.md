@@ -6,11 +6,11 @@
 
 | Topology | On the `ligo` host | `server.yaml` | Choose it when |
 | :--------- | :---------------- | :---------------- | :----------------- |
-| **A**, several zones | One agent per trust domain | One `zones` entry each | One `ligo` serves several domains, and you want each verified independently |
-| **B**, one domain | One agent | One `zones` entry | Each environment has its own `ligo`, or all share one domain |
-| **C**, federated | One agent, whose server federates with the other domain | `federated_trust_domains`, with `via_zone` | `ligo` only verifies workloads of the other domain, and runs no plugins in it |
+| **A**, several realms | One agent per trust domain | One `realms` entry each | One `ligo` serves several domains, and you want each verified independently |
+| **B**, one domain | One agent | One `realms` entry | Each environment has its own `ligo`, or all share one domain |
+| **C**, federated | One agent, whose server federates with the other domain | `federated_trust_domains`, with `via_realm` | `ligo` only verifies workloads of the other domain, and runs no plugins in it |
 
-A trust domain is either a zone or federated, never both. Topology C rests trust in the other domain's bundle on your own server's federation configuration, which is the safe direction when the higher-assurance environment decides what it trusts.
+A trust domain is either a realm or federated, never both. Topology C rests trust in the other domain's bundle on your own server's federation configuration, which is the safe direction when the higher-assurance environment decides what it trusts.
 
 ## Registration entries
 
@@ -18,8 +18,8 @@ Create these on the agent's server, with the `ligo` host's agent as the parent. 
 
 | SPIFFE ID path | Selectors | For |
 | :------------------ | :------------------------ | :---------------- |
-| `/ns/sys/sa/ligo` | `unix:uid`, `unix:sha256` of `/usr/bin/ligo` | `ligo` itself, in the core zone: serving TLS and logging in to Transit |
-| `/ns/sys/sa/ligo-bundles` | The same | Each other zone: an agent releases bundles only to a caller it has an entry for |
+| `/ns/sys/sa/ligo` | `unix:uid`, `unix:sha256` of `/usr/bin/ligo` | `ligo` itself, in the core realm: serving TLS and logging in to Transit |
+| `/ns/sys/sa/ligo-bundles` | The same | Each other realm: an agent releases bundles only to a caller it has an entry for |
 | `/ligo/plugin/postgres` | `unix:uid`, `unix:sha256` of its binary | The plugin |
 | `/ligo/plugin/vault` | `unix:uid`, `unix:sha256` of its binary | The plugin |
 | `/ligo/plugin/openldap` | `unix:uid`, `unix:sha256` of its binary | The plugin |

@@ -208,7 +208,7 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 	}
 	m := t.Metadata
 	r := &changerequests.Request{ResourceType: "TARGET", ResourceName: m.Name, Operation: op, Consent: changerequests.ConsentAll,
-		Zone: m.Zone, OwnerScope: m.Scope, PlatformScope: m.PlatformScope, ExpectedRevision: common.ExpectedRevision,
+		Realm: m.Realm, OwnerScope: m.Scope, PlatformScope: m.PlatformScope, ExpectedRevision: common.ExpectedRevision,
 		Payload: payload, AutomationContext: common.AutomationContext}
 	if cur != nil {
 		r.ResourceID = &cur.ID
@@ -236,7 +236,7 @@ func payload(r *changerequests.Request) (*Target, error) {
 	}
 	if r.Operation == "CREATE" { // derived again
 		m := &t.Metadata
-		m.PlatformType, m.PlatformScope, m.Zone, m.State = "", "", "", ""
+		m.PlatformType, m.PlatformScope, m.Realm, m.State = "", "", "", ""
 		for i := range t.AccessLevels {
 			t.AccessLevels[i].State = ""
 		}
@@ -324,10 +324,10 @@ func multirange(f *pluginv1.NetworkFlow) string {
 
 func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, account, actor string) error {
 	m := t.Metadata
-	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, zone, scope, platform_scope, definition,
+	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, realm, scope, platform_scope, definition,
 		display_name, description, labels, documentation_url, contacts, visibility, visible_to, account, state, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15::jsonb, $17, 'ACTIVE', $16, $16)`,
-		id, m.Name, m.Platform, m.PlatformType, m.Zone, m.Scope, m.PlatformScope, string(t.Definition), null(t.DisplayName),
+		id, m.Name, m.Platform, m.PlatformType, m.Realm, m.Scope, m.PlatformScope, string(t.Definition), null(t.DisplayName),
 		null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
 		jsonb(t.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_targets_name" {
@@ -379,14 +379,14 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	t := &st.Target
 	m := &t.Metadata
 	t.Kind = "Target"
-	sql := `SELECT id, revision, name, scope, platform, platform_type, platform_scope, zone, state, definition,
+	sql := `SELECT id, revision, name, scope, platform, platform_type, platform_scope, realm, state, definition,
 		coalesce(display_name, ''), coalesce(description, ''), labels, coalesce(documentation_url, ''), contacts, visibility, visible_to
 		FROM targets WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE"
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.ID, &st.Revision, &m.Name, &m.Scope, &m.Platform, &m.PlatformType, &m.PlatformScope,
-		&m.Zone, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Labels, &t.DocumentationURL, &t.Contacts,
+		&m.Realm, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Labels, &t.DocumentationURL, &t.Contacts,
 		&t.Visibility.Mode, &t.Visibility.VisibleTo)
 	if err != nil {
 		return nil, err

@@ -18,7 +18,7 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 
 ## Lab rules (§11.1)
 
-- **Rule 1, tenancies.** `TestServeTopologies` runs the four topologies of ADR-13 on the lab: cloud to cloud, data centre to data centre, cloud to data centre with an additional party, and data centre to cloud. Another account's source is refused. Limit: the tenancy's workload is minted by `lab.sh`, not registered by a registrar, and it reads its binding from ligo but not its credential from the store, because the store of zone `prod` does not trust `test.lab` tokens.
+- **Rule 1, tenancies.** `TestServeTopologies` runs the four topologies of ADR-13 on the lab: cloud to cloud, data centre to data centre, cloud to data centre with an additional party, and data centre to cloud. Another account's source is refused. Limit: the tenancy's workload is minted by `lab.sh`, not registered by a registrar, and it reads its binding from ligo but not its credential from the store, because the store of realm `prod` does not trust `test.lab` tokens.
 - **Shipped plugins.** `.specs/ligo-postgres-plugin.md` §9 and `.specs/ligo-vault-plugin.md` §9 list their acceptance rows, and `TestServeDynamicCredentials` runs `vault-dynamic` end to end. `SVID` mode on PostgreSQL is not offered in v0.1.0 (OI-4), and `vault.v1` accepts exact SPIFFE IDs only (OI-1, `TestSourceNotExact`).
 - **Rule 3, faults.** `lab.sh serve test-faults` stops the secrets backend under a binding's sealing (AC-09), and PostgreSQL for 10 s under bindings being applied (`TestServeFaultDatabase`): every binding converges, and no replica restarts.
 

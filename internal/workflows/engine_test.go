@@ -62,11 +62,11 @@ func TestCall(t *testing.T) {
 // manager (§5.3); here with the built-in identity provider and store, and a
 // platform that is not configured.
 func TestManager(t *testing.T) {
-	zone := config.Zone{Name: "prod", TrustDomain: "prod.lab"}
+	realm := config.Realm{Name: "prod", TrustDomain: "prod.lab"}
 	m := pluginmgr.New([]pluginmgr.Spec{
-		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Zone: zone,
+		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},
-		{Type: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Builtin: true, Zone: zone,
+		{Type: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Builtin: true, Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}},
 	}, pluginmgr.Options{RPCTimeout: 5 * time.Second, MaxConcurrentRPCsPerInstance: 2, Logger: slog.New(slog.DiscardHandler)})
 	t.Cleanup(m.Stop)

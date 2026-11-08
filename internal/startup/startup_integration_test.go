@@ -121,7 +121,7 @@ func (v *env) source(t *testing.T, name, scope, td string) uuid.UUID {
 func (v *env) target(t *testing.T, name, platform, scope, platformScope string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	v.exec(t, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+	v.exec(t, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 		values ($1, $2, $3, 'oracle.v1', 'prod', $4, $5, '{}', 't', 't')`, id, name, platform, scope, platformScope)
 	v.exec(t, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, id)
 	return id
@@ -132,7 +132,7 @@ func (v *env) target(t *testing.T, name, platform, scope, platformScope string) 
 func (v *env) binding(t *testing.T, name string, src, tgt uuid.UUID, store string, scopes [3]string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	v.exec(t, `insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+	v.exec(t, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision, source_trust_domain, source_svid_regex,
 		requested_spec, created_by, updated_by)
@@ -154,7 +154,7 @@ func (v *env) request(t *testing.T, name, op string, id *uuid.UUID, source strin
 		revision = &one
 	}
 	err := pgx.BeginFunc(context.Background(), v.owner, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(context.Background(), `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+		if _, err := tx.Exec(context.Background(), `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
 		source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at,
 		expected_revision) values ($1, 'BINDING', $2, $3, $4, 'STANDARD', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64), true,
 		$5, repeat('b', 64), 'carla', now() + interval '1 day', $6)`, cr, name, id, op, payload, revision); err != nil {

@@ -286,7 +286,7 @@ func insertRequest(t *testing.T, o *pgxpool.Pool, sides ...string) uuid.UUID {
 	name := "test-" + id.String()[24:]
 	scopes := map[string]string{"SOURCE": "cloud/fin-01/payments", "TARGET": "dc/corp-prod/ledger"}
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, zone,
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm,
 			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision, payload,
 			payload_sha256, requested_by, expires_at)
 			values ($1, 'BINDING', $2, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger',
@@ -325,10 +325,10 @@ func insertBinding(t *testing.T, o *pgxpool.Pool) (uuid.UUID, string) {
 		}{
 			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
 				values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, []any{source, "s-" + suffix, regex}},
-			{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + suffix}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
-			{`insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)

@@ -7,7 +7,7 @@
 LIGO_TESTS=/home/ligo/tests
 
 # LIGO_PLUGINS is the ligo hosts' plugins.directory; LAB_PLUGINS are the lab's
-# plugins (test/lab/plugins), in the zone prod. A plugin's binary is
+# plugins (test/lab/plugins), in the realm prod. A plugin's binary is
 # ligo-plugin-<backend>; its SPIFFE path, hint and bootstrap use <backend>.
 # ligo-plugin-openldap is the shipped one, from cmd/plugins.
 LIGO_PLUGINS=/usr/lib/ligo/plugins
@@ -183,31 +183,31 @@ HCL
 		die "$server: cannot write the role lab-standins-check"
 }
 
-# plugin_svid_wait ZONE NAME UID HOST: waits until the zone's agent on HOST
+# plugin_svid_wait REALM NAME UID HOST: waits until the realm's agent on HOST
 # issues the plugin's SVID to the plugin's binary run as the user ligo (a new
 # entry reaches the agents at their next sync); the binary asks the agent
 # itself, so the agent attests exactly what it will attest for the plugin.
 plugin_svid_wait() {
-	local zone="$1" name="$2" uid="$3" host="$4"
+	local realm="$1" name="$2" uid="$3" host="$4"
 	for _ in $(seq 1 30); do
-		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$LIGO_PLUGINS/$name" -svids "unix:///run/spire/$zone/agent.sock" 2>/dev/null |
-			grep -qx "spiffe://$zone.lab/ligo/plugin/${name#ligo-plugin-}" && return
+		lxd exec lxd -- lxc exec "$host" --user "$uid" -- "$LIGO_PLUGINS/$name" -svids "unix:///run/spire/$realm/agent.sock" 2>/dev/null |
+			grep -qx "spiffe://$realm.lab/ligo/plugin/${name#ligo-plugin-}" && return
 		sleep 1
 	done
-	die "the $zone agent on $host does not issue the SVID of the plugin $name after 30s (uid $uid)"
+	die "the $realm agent on $host does not issue the SVID of the plugin $name after 30s (uid $uid)"
 }
 
-# plugin_entry ZONE PATH HINT UID SHA256 HOST: the plugin's entry under
+# plugin_entry REALM PATH HINT UID SHA256 HOST: the plugin's entry under
 # HOST's node alias, replaced when the binary's hash changed.
 plugin_entry() {
-	local zone="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" parent="spiffe://$1.lab/node/$6" entry out
+	local realm="$1" id="spiffe://$1.lab/$2" hint="$3" uid="$4" sum="$5" parent="spiffe://$1.lab/node/$6" entry out
 	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
-	out="$(spire "$zone" entry show -parentID "$parent" -spiffeID "$id" 2>/dev/null)" || true
+	out="$(spire "$realm" entry show -parentID "$parent" -spiffeID "$id" 2>/dev/null)" || true
 	grep -q "unix:sha256:$sum" <<<"$out" && return
 	for entry in $(awk '/^Entry ID/ {print $4}' <<<"$out"); do
-		spire "$zone" entry delete -entryID "$entry" >/dev/null
+		spire "$realm" entry delete -entryID "$entry" >/dev/null
 	done
-	spire "$zone" entry create -parentID "$parent" -spiffeID "$id" -hint "$hint" \
+	spire "$realm" entry create -parentID "$parent" -spiffeID "$id" -hint "$hint" \
 		-selector "unix:uid:$uid" -selector "unix:sha256:$sum" >/dev/null || die "cannot register $id"
 }
 

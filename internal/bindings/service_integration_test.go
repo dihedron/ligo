@@ -129,7 +129,7 @@ func newWorld(t *testing.T, o *pgxpool.Pool) *world {
 			}
 		}
 		for _, tg := range targets {
-			if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, created_by, updated_by)
+			if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
 				values ($1, $2, $3, $4, 'prod', $5, $6, '{"schema":"LEDGER_APP"}', 'PUBLIC', 't', 't')`, tg.id, tg.name, tg.platform, tg.typ, tg.scope, tg.platformScope); err != nil {
 				return err
 			}
@@ -656,7 +656,7 @@ func ledgerWorld(t *testing.T, s *Service, o *pgxpool.Pool, w *world) (source, o
 			`^spiffe://prod\.internal/ns/ledger/sa/`+w.suffix+`$`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+		if _, err := tx.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 			values ($1, $2, 'oracle-prod-2', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, target, other); err != nil {
 			return err
 		}

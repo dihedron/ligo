@@ -52,9 +52,9 @@ func (o *Outbox) Audited(ctx context.Context, tx pgx.Tx, e audit.Entry) error {
 
 // request is what an event says of its change request.
 type request struct {
-	zone, operation, consent, kind, requestedBy string
-	scopes                                      [4]*string // owner, source, target, platform
-	justification, incident                     *string
+	realm, operation, consent, kind, requestedBy string
+	scopes                                       [4]*string // owner, source, target, platform
+	justification, incident                      *string
 }
 
 // events builds the events of e named name: none when a derived event's
@@ -72,16 +72,16 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 	var cr *request
 	if e.ChangeRequestID != nil {
 		cr = &request{}
-		err := tx.QueryRow(ctx, `SELECT coalesce(zone, ''), operation, consent, kind, requested_by, owner_scope, source_scope, target_scope,
+		err := tx.QueryRow(ctx, `SELECT coalesce(realm, ''), operation, consent, kind, requested_by, owner_scope, source_scope, target_scope,
 			platform_scope, break_glass_justification, external_approval_ref FROM change_requests WHERE id = $1`, *e.ChangeRequestID).
-			Scan(&cr.zone, &cr.operation, &cr.consent, &cr.kind, &cr.requestedBy, &cr.scopes[0], &cr.scopes[1], &cr.scopes[2], &cr.scopes[3],
+			Scan(&cr.realm, &cr.operation, &cr.consent, &cr.kind, &cr.requestedBy, &cr.scopes[0], &cr.scopes[1], &cr.scopes[2], &cr.scopes[3],
 				&cr.justification, &cr.incident)
 		if err != nil {
 			return nil, err
 		}
 		p["changeRequestId"], p["operation"] = e.ChangeRequestID.String(), cr.operation
-		if cr.zone != "" {
-			p["zone"] = cr.zone
+		if cr.realm != "" {
+			p["realm"] = cr.realm
 		}
 		for i, key := range []string{"ownerScope", "sourceScope", "targetScope", "platformScope"} {
 			if s := cr.scopes[i]; s != nil {
@@ -94,16 +94,16 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 		}
 	}
 	if e.ResourceType == "BINDING" {
-		var zone, source, target, platform string
+		var realm, source, target, platform string
 		var bs [3]string
 		var expires *time.Time
-		err := tx.QueryRow(ctx, `SELECT b.zone, s.name, t.name, b.platform, b.source_scope, b.target_scope, b.platform_scope,
+		err := tx.QueryRow(ctx, `SELECT b.realm, s.name, t.name, b.platform, b.source_scope, b.target_scope, b.platform_scope,
 			coalesce(b.break_glass_expires_at, b.expires_at) FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
-			WHERE b.name = $1`, e.ResourceName).Scan(&zone, &source, &target, &platform, &bs[0], &bs[1], &bs[2], &expires)
+			WHERE b.name = $1`, e.ResourceName).Scan(&realm, &source, &target, &platform, &bs[0], &bs[1], &bs[2], &expires)
 		switch {
 		case err == nil:
 			resource["source"], resource["target"], resource["platform"] = source, target, platform
-			p["zone"], p["sourceScope"], p["targetScope"], p["platformScope"] = zone, bs[0], bs[1], bs[2]
+			p["realm"], p["sourceScope"], p["targetScope"], p["platformScope"] = realm, bs[0], bs[1], bs[2]
 			if expires != nil {
 				p["expiresAt"] = expires.UTC().Format(time.RFC3339)
 			}

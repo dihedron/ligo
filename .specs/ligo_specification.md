@@ -1,8 +1,8 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.2` (`v1alpha1` API)
+- **Document Version:** `4.0.3` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.0.1` (no migration from 3.x, Go 1.27.3, §0.5). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.6). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.7).
+- **Supersedes:** `4.0.2` ("zone" becomes "realm", §0.5). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.6). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.7). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.8).
 - **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
@@ -72,11 +72,16 @@ Identifiers that name a **resource** use its name: the tables `sources`, `target
 
 PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_migrator`, `ligo_dbos`) and tables use resource names, so the two can never be confused.
 
-**Zone and scope.** The two words are never interchangeable:
-- A **zone** is a technical placement (ADR-03): one SPIRE trust domain, its agent socket, and the plugin processes attached to it. Zones decide where plugins run and which SVIDs they hold. A platform belongs to one zone.
+**Realm and scope.** The two words are never interchangeable:
+- A **realm** is a technical placement (ADR-03): one SPIRE trust domain, its agent socket, and the plugin processes attached to it. Realms decide where plugins run and which SVIDs they hold. A platform belongs to one realm.
 - A **governance scope** (or simply **scope**) is an organisational ownership boundary (ADR-13, §3.9), such as a cloud tenancy (`cloud/fin-01/payments`) or a data centre (`dc/corp-prod`). Every source, target and platform has an owner scope. Scopes decide who may propose, approve, see and revoke.
 
-### 0.5 Changelog from 4.0.1 (4.0.2)
+### 0.5 Changelog from 4.0.2 (4.0.3)
+| Area | Change |
+| :--- | :--- |
+| Terminology (ADR-03 and throughout) | **Breaking change.** The configuration term "zone" becomes **realm**: one trust domain, its SPIRE agent socket and the plugin processes attached to it. "Zone" is what architects call a network segment (a data centre segment, a DMZ, a cloud region), and one realm may serve workloads in several of them. Renamed, with no alias (no deployment depends on the old names): the `server.yaml` keys `zones`, `zone` (instances, platforms, `core_identity`) and `via_zone` (now `realms`, `realm`, `via_realm`), which strict decoding now refuses; the column `zone` of `targets`, `bindings` and `change_requests` and the indexes `idx_bindings_zone`, `idx_cr_status_zone` in `001`, edited in place; the plugin contract fields `InstanceDescriptor.zone`, `BindingContext.zone` and `ConfigureInstancesRequest.zone` (field numbers unchanged); the resource field `metadata.zone`, the admin API filter `zone` and the CLI flag `--zone` (now `--realm`, with no short form, as `-r` is `--expected-revision`); the webhook payload key `zone`; the metric labels `zone` and `socket_zone`. Older changelog entries keep the names that were current at the time. No behavioral change. |
+
+### 0.6 Changelog from 4.0.1 (4.0.2)
 | Area | Change |
 | :--- | :--- |
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
@@ -106,7 +111,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
-### 0.6 Changelog from 4.0.0 (4.0.1)
+### 0.7 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
 | :--- | :--- |
 | Web UI (§7.4, EXT-14) | The UI moves from htmx 2.x to **htmx 4.0** (released 2026-08-28), pinned to `4.0.0` and served from `ligo`'s own static files. The `htmx-config` is rewritten for htmx 4: `allowEval`, `allowScriptTags`, `selfRequestsOnly`, `historyCacheSize` and `responseHandling` no longer exist. 4xx responses are now swapped by default, so `409` and `422` fragments are directed to the form's error container with `hx-status:409`/`hx-status:422`, and `5xx` is added to `noSwap`. Requests stay same-origin (`mode: same-origin`, the htmx 4 default) and the request timeout is raised to 90 s, above the plugin RPC timeout. htmx 4 no longer stores pages in browser storage for history. Attribute inheritance is no longer implicit, so templates set every htmx attribute on the element that needs it. The CSRF header hook in `app.js` uses the htmx 4 event `htmx:config:request`. |
@@ -116,7 +121,7 @@ The plugin contract (`v1`, unreleased) gains secret storage strategies and renam
 
 No change to the API, the data model or the workflows.
 
-### 0.7 Changelog from 3.0.2 (4.0.0)
+### 0.8 Changelog from 3.0.2 (4.0.0)
 | Area | Change |
 | :--- | :--- |
 | Resource model (ADR-15, §0.4, §3) | **Breaking change.** Sources and targets become first-class resources, managed through the API with their own change requests, revisions, audit history and lifecycle (`ACTIVE`, `DEPRECATED`, `RETIRED`). A **Source** is an identity specification (trust domain, SVID regex, sample SPIFFE IDs) with metadata; a **Target** is a specific resource on a platform, with access levels and network flows; **Platforms** replace 3.x target instances and stay in `server.yaml`. A **Binding** links one source to one target at one access level, with optional parameters and expiry, and at most one binding exists per (source, target). The free-form `spec`/`roleGrants` of 3.x is replaced by access levels reviewed once by the target and platform owners. Targets are register-only: publishing a target does not create the resource (FW-3). API version `v1alpha2`. |
@@ -135,14 +140,14 @@ No change to the API, the data model or the workflows.
 | Open issues and future work (§13) | FW-1 resolved by first-class targets. FW-2 becomes consumer policies stored with targets. New FW-3 (target provisioning), FW-4 (access recertification) and OI-3 (privilege identifiers of the existing plugins). |
 | Process flows (Appendix E) | E.3, E.4, E.6 and E.7 updated; new E.14 (register and narrow a source), E.15 (publish a target), E.16 (propagation), E.17 (catalog and network pre-flight check), E.18 (binding expiry). |
 
-### 0.8 Changelog from 3.0.1 (3.0.2)
+### 0.9 Changelog from 3.0.1 (3.0.2)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | The conceptual diagram is split into three parts and the logical diagram into two, with the logical diagrams showing keys and the main attributes only (full columns stay in §4.2), so that every diagram remains legible when printed. Content unchanged. |
 
 A printable PDF edition is generated from this Markdown source; this file remains authoritative.
 
-### 0.9 Changelog from 3.0.0 (3.0.1)
+### 0.10 Changelog from 3.0.0 (3.0.1)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | New conceptual model (business entities, including those held in configuration, with definitions, relationships and cardinalities) and logical model (Mermaid entity-relationship diagrams), with a normative table of every relationship, how it is enforced (foreign key, trigger, startup check or none) and why, and the deliberate denormalizations. Checked against the DDL of §4.2. |
@@ -150,7 +155,7 @@ A printable PDF edition is generated from this Markdown source; this file remain
 
 No behavioral change.
 
-### 0.10 Changelog from 2.9.2 (3.0.0)
+### 0.11 Changelog from 2.9.2 (3.0.0)
 | Area | Change |
 | :--- | :--- |
 | Governance scopes (ADR-13, §3.1, §3.3, §3.7, §4.2, §7.2.2, §8.1, §8.2, Appendix D) | Authorization and approval move from zones to **governance scopes**: slash-separated paths (`dc/corp-prod`, `cloud/fin-01/payments`) that model both multi-tenant cloud tenancies and flat, centrally managed data centres. Every binding has an immutable **source scope**, derived from the fixed literal prefix of its SVID regex by an extractor configured per source trust domain, and a **target scope**, configured on its target instance. A regex whose fixed prefix does not identify one scope is rejected, so no pattern can span two tenancies. Role bindings use `scopes` instead of `zones`; `approval.required_zones` becomes `required_scopes`. Zones remain the technical placement of plugins and trust domains. **Breaking change** for configuration, database schema and API. |
@@ -164,33 +169,33 @@ No behavioral change.
 | Fix (§4.2) | `chk_regex_shape` contained `NOT LIKE '%\$'`. In `LIKE`, `\$` is an escaped literal `$`, so the condition contradicted `LIKE '%$'` and the check rejected **every** valid regex. Replaced by `right(source_svid_regex, 2) <> '\$'`. Found while testing the 3.0.0 schema. |
 | Future work (§13) | FW-1: a target scope chosen by a request field, only for plugins that guarantee the field determines the resource. FW-2: standing interconnection approvals stored in the database. |
 
-### 0.11 Changelog from 2.9.1 (2.9.2)
+### 0.12 Changelog from 2.9.1 (2.9.2)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §5.9, §7.1) | Go module path changed from the placeholder `github.com/yourorg/ligo` to `github.com/dihedron/ligo`, including both Protobuf `go_package` options. |
 
-### 0.12 Changelog from 2.9.0 (2.9.1)
+### 0.13 Changelog from 2.9.0 (2.9.1)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §3.1) | Resource API version changed from `bindings.spiffe.io/v1alpha1` to `ligo.dihedron.org/v1alpha1`, a domain owned by the project, instead of a name under the SPIFFE project's domain. |
 
-### 0.13 Changelog from 2.8.0 (2.9.0)
+### 0.14 Changelog from 2.8.0 (2.9.0)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4 and throughout) | Application renamed from `binding` to `ligo` (Latin for "I bind"). Every application-derived identifier was renamed: binary, CLI and `cmd/` directory, Go module and Protobuf packages, environment variables, metrics, DBOS workflow IDs, PostgreSQL roles, advisory locks and `NOTIFY` channel, cookies, HTTP headers, file system paths, SPIFFE IDs, Vault/OpenBao objects, problem URN, endpoint annotation, ownership tag, go-plugin handshake, example host and group names. Identifiers that name the binding resource are unchanged (§0.4). Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.14 Changelog from 2.7.0 (2.8.0)
+### 0.15 Changelog from 2.7.0 (2.8.0)
 | Area | Change |
 | :--- | :--- |
 | Testing (§11.1, §8.3, EXT-17) | All code MUST be tested on a lab built as code in `deploy/lab/`: two SPIRE servers (two trust domains) with agents, Vault or OpenBao, two `binding` replicas, PostgreSQL, an LDAP directory, workload hosts, target systems and a webhook receiver, extended as development needs emerge. Production-like security settings, real machine separation where attestation is tested, fault injection, a merge gate on the full lab suite, both Vault and OpenBao supported only if both pass, clean state per run, no production data, archived evidence. Acceptance scenarios moved to §11.2. |
 
-### 0.15 Changelog from 2.6.0 (2.7.0)
+### 0.16 Changelog from 2.6.0 (2.7.0)
 | Area | Change |
 | :--- | :--- |
 | Final consistency review (ADR-11, §3.1, §3.6, §4.2, §4.3, §5.6, §6.2, §6.3, §7.2, §7.6, §8.2) | Break-glass: ratify/revert concurrency defined (binding row lock, `409 break-glass-not-open`); refused in maintenance mode (reverts still run); revert payload and its re-validation defined; deleting a binding closes its open break-glass change, which then falls under the overdue-review rule; "emit once" markers stored (`break_glass_warned_at`, `review_overdue_notified_at`); API needs Basic credentials, UI needs password re-entry, failures audited; `status.breakGlass` in the admin representation; RBAC rows for `break_glass`, ratify and revert. Also: stale text removed (ADR-11, §6.2), `zones: ["*"]` defined, `s3-e2ee.v1` marked as planned, dispatcher added to startup, shutdown and the HA singletons, webhook `eventId` made restore-safe (UUIDv7 instead of the outbox row number), maintenance list includes break-glass, SVG responses replace the page CSP, theme wording made consistent with T-27, `min_justification_length ≥ 20` validated. New AC-38a–AC-38c. |
 | UI theming (§7.4, §7.6, §8.1, §8.2, T-27, AC-39–AC-43) | External theming through design tokens: conventional files in `/etc/binding/theme` (`theme.css`, `logo`, `logo-dark`, `favicon`, `fonts/`), explicit paths and token colors in `server.yaml` (explicit paths take precedence). Light, dark and system color modes, with a per-user choice stored in a cookie and rendered server-side (no inline script). Theme files validated at startup, served from memory with safe types and sandboxed SVG, and audited in `CONFIG_LOADED`. CSP gains `font-src 'self'`. |
 
-### 0.16 Changelog from 2.5.0 (2.6.0)
+### 0.17 Changelog from 2.5.0 (2.6.0)
 | Area | Change |
 | :--- | :--- |
 | Break-glass (ADR-12, INV-14, INV-16, §4.2, §6.2, §6.3, §7.2, §7.4, §7.5, §8.1, §8.2, §8.4, T-26, R-07, AC-31–AC-38) | People in a per-zone `break_glass` LDAP group can apply emergency changes in approval-required zones immediately, with fresh re-authentication, justification, incident reference and TTL. Creates and updates are reverted automatically on expiry unless a different approver ratifies them; emergency deletes are final but still reviewed. Database-enforced (`chk_break_glass`, `chk_ratification`, `chk_revert`). New `/v1/admin/break-glass`, `/ratify` and `/revert` endpoints, UI form and banner, CLI commands. |
@@ -198,12 +203,12 @@ No behavioral change.
 | Scope | The plugin SDK, the external plugins (Oracle, PostgreSQL, Kafka, OpenStack, Nexus), the Terraform/OpenTofu provider and the Ansible collection will each have their own specification, with the same structure as this one. They are not part of this document. |
 | Open issues (§13) | OI-1: secondary enforcement points (Vault, Keystone, Kafka) cannot express binding regexes. OI-2: the example Oracle + OpenLDAP wiring is not supported by Oracle. |
 
-### 0.17 Changelog from 2.4.0 (2.5.0)
+### 0.18 Changelog from 2.4.0 (2.5.0)
 | Area | Change |
 | :--- | :--- |
 | Delegated approval (ADR-11, INV-14, §4.2, §6.2, §7.2, §8.1, §8.2, §8.4, §10.6, T-25, R-06, AC-27–AC-30) | New `trusted_automation` role lets a portal or automation platform create, update and delete bindings in approval-required zones without a human approver in `binding`, by delegating approval to its upstream process. SPIFFE principals only (enforced in the database); scoped by zone and optional target instances; every request carries an upstream `approvalReference` (optional format pattern); optional self-asserted `automationContext`; optional per-principal rate limit. Change requests record `approval_basis` (`HUMAN`, `ZONE_AUTO`, `DELEGATED`), and `chk_four_eyes` enforces which decider each basis allows. New §10.6 explains what SPIFFE attestation can and cannot distinguish for Ansible and Terraform, and how to separate automation from people running the same tools. |
 
-### 0.18 Changelog from 2.3.1 (2.4.0)
+### 0.19 Changelog from 2.3.1 (2.4.0)
 | Area | Change |
 | :--- | :--- |
 | Regex validator (Appendix A, ADR-06, T-02, AC-03) | Closed a bypass of segment confinement: a `/` inside a repeated or optional group (`(?:[a-z]+\|/)+`, `(/[a-z]+)*`, `(/[a-z]+)?`) let one pattern match identities at any depth. New rule 7d rejects any `/` under `*`, `+`, `?` or `{n,m}`. Removed the 2.3.0 empty-alternation-branch rule, which protected nothing and was trivially bypassed. Appendix A now states the segment-confinement property, gives the rationale for every rule, and includes normative test vectors (A.5). |
@@ -217,7 +222,7 @@ No behavioral change.
 | Principal names (Appendix B, §3.4, §8.1) | Default prefix changed from `bnd-` to `bnd_`, and `-` removed from the custom-prefix grammar (now `^[a-zA-Z][a-zA-Z0-9_]{0,3}$`; example `svc_`). A hyphen is illegal in unquoted Oracle identifiers and needs quoting in PostgreSQL, so 2.3.0 names were rejected by the Oracle plugin's own identifier grammar. |
 | Trust bundles (§7.1, §8.1, §8.2, §10.5, T-24, EXT-16) | Each accepted trust domain now has exactly one authoritative bundle source (its own zone's socket, or a declared `via_zone` for federated domains), closing a path by which a lower-assurance SPIRE server could inject a bundle for another trust domain. `binding` registers on every zone's agent, because SPIRE releases bundles only to registered callers (verified in SPIRE's source, EXT-16). New `federated_trust_domains` setting and Topology C document how to verify additional trust domains through federation with a single agent. |
 
-### 0.19 Changelog from 2.3.0 (editorial patch 2.3.1)
+### 0.20 Changelog from 2.3.0 (editorial patch 2.3.1)
 | Area | Change |
 | :--- | :--- |
 | Editorial | Removed stray `[cite: 1]` tags throughout the prose. |
@@ -230,7 +235,7 @@ No behavioral change.
 
 No behavioral change. Design issues raised in the 2.3.0 review are addressed separately.
 
-### 0.20 Changelog from 2.2.0 (introduced in 2.3.0)
+### 0.21 Changelog from 2.2.0 (introduced in 2.3.0)
 | Area | Change |
 | :--- | :--- |
 | Regex AST (Appendix A) | Forbade `OpAnyCharNotNL` (normal `.`), any `OpCharClass` containing `'/'` (`0x2F`), and `OpEmptyMatch` inside `OpAlternate`, preventing wildcards from crossing SPIFFE path segment boundaries (`/`) or matching empty alternation branches. |
@@ -243,13 +248,13 @@ No behavioral change. Design issues raised in the 2.3.0 review are addressed sep
 | Naming (Appendix B) | Shortened `derived_principal_name` from 23 characters to 20 characters (`"bnd-"` + 16 Base32 chars = 80 bits of entropy) so it satisfies Active Directory's 20-char `sAMAccountName` limit out of the box without plugin-specific truncation. |
 | Pagination & CLI (§7.2.3, §8.4) | Standardized keyset pagination cursors across all list endpoints. Added normative `github.com/jessevdk/go-flags` CLI command/subcommand structure (`serve`, `apply`, `get`, `list`, `delete`, `retry`, `rotate`, `cr`, `target`, `audit`). |
 
-### 0.21 Changelog from 2.1.0 (introduced in 2.2.0)
+### 0.22 Changelog from 2.1.0 (introduced in 2.2.0)
 | Area | Change |
 | :--- | :--- |
 | Naming | Application renamed from `bindd` to `binding`. Every derived identifier was renamed accordingly (§0.4). |
 | Config | `service.application_version` set to `2.2.0` (now `3.0.2`). |
 
-### 0.22 Changelog from 2.0.0 (introduced in 2.1.0)
+### 0.23 Changelog from 2.0.0 (introduced in 2.1.0)
 | Area | Change |
 | :--- | :--- |
 | Regex security | SVID regex validated on the parsed AST (alternation/flag bypass closed); matching moved from PostgreSQL ARE to Go RE2 (ADR-06, Appendix A). |
@@ -297,7 +302,7 @@ The **SPIFFE Binding Lifecycle Service (`ligo`)** is an active control plane and
 |  | REST GET /v1/bindings, /flows |        | REST /v1/admin/* (SVID mTLS/LDAP)  |  |
 |  | gRPC WorkloadBindingService   |        | HTMX /ui/* (server-side sessions)  |  |
 |  | Resolution cache (Go RE2)     |        | Change requests + maker-checker    |  |
-|  | Composite Zone Bundle Watcher |        | Catalog, propagation, expiry       |  |
+|  | Composite Realm Bundle Watcher |        | Catalog, propagation, expiry       |  |
 |  +---------------+---------------+        +-----------------+------------------+  |
 |                  | LISTEN/NOTIFY + reload                   | approved change     |
 |                  v                                          v                     |
@@ -311,8 +316,8 @@ The **SPIFFE Binding Lifecycle Service (`ligo`)** is an active control plane and
                   | pgx/v5 (TLS verify-full, 3 DB roles)        | go-plugin gRPC (AutoMTLS)
                   v                                             v
    +-------------------------------+        +--------------------------------------+
-   | PostgreSQL                    |        | Plugin processes: one per (type,zone)|
-   | public: sources, targets,     |        | each attached to its zone's SPIRE    |
+   | PostgreSQL                    |        | Plugin processes: one per (type,realm)|
+   | public: sources, targets,     |        | each attached to its realm's SPIRE    |
    |   bindings, change requests,  |        | agent socket; exactly-one SVID per   |
    |   audit (hash-chained)        |        | logical instance (expr-lang)         |
    | dbos: workflow journal        |        +--------------------------------------+
@@ -349,18 +354,18 @@ Code generators and maintainers MUST preserve these decisions.
   - This makes cleanup correct after partial failures.
   - Cleanup uses the provider wiring recorded in the row, so later configuration changes cannot redirect cleanup to a different system.
 
-### ADR-03: Zones, Plugin Process Topology and Expression-Based SVID Selection
+### ADR-03: Realms, Plugin Process Topology and Expression-Based SVID Selection
 - **Problem:**
   - A SPIRE agent issues SVIDs only for its own trust domain; federation distributes bundles, not identities. One plugin process therefore cannot hold SVIDs from two trust domains if attached to a single agent.
   - Co-locating prod and test identities in one process also widens the blast radius of a compromise.
 - **Decision:**
-  1. The configuration defines **zones**. A zone is `{name, trust_domain, spiffe_workload_socket}`. Every logical instance (identity provider, platform or secret store) belongs to exactly one zone.
-  2. `ligo` launches **one subprocess per (external plugin type, zone)** and attaches it to that zone's SPIRE agent socket. The process is configured with all instances of that type in that zone. Every plugin RPC carries `instance`.
+  1. The configuration defines **realms**. A realm is `{name, trust_domain, spiffe_workload_socket}`. Every logical instance (identity provider, platform or secret store) belongs to exactly one realm.
+  2. `ligo` launches **one subprocess per (external plugin type, realm)** and attaches it to that realm's SPIRE agent socket. The process is configured with all instances of that type in that realm. Every plugin RPC carries `instance`.
   3. Each instance declares an `svid_selector`: an `expr-lang/expr` boolean expression evaluated over the SVIDs the agent issues to that plugin process, plus JWT audiences.
      - The selector MUST resolve to **exactly one** X.509-SVID. Zero matches or multiple matches is an error.
-     - The resolved SPIFFE ID's trust domain MUST equal the zone's trust domain.
+     - The resolved SPIFFE ID's trust domain MUST equal the realm's trust domain.
      - Resolved SPIFFE IDs MUST be distinct across instances unless the instance sets `allow_shared_svid: true`.
-  4. A platform's identity and secret-store instances MUST be in the same zone as the platform.
+  4. A platform's identity and secret-store instances MUST be in the same realm as the platform.
   5. Plugin binaries SHOULD be registered in SPIRE with the `unix:sha256` selector (plus `unix:uid`/`unix:gid`), so that workload attestation reinforces binary integrity (T-09).
 
 ### ADR-04: Declarative UI Component Descriptors
@@ -453,13 +458,13 @@ Code generators and maintainers MUST preserve these decisions.
 ### ADR-13: Governance Scopes and Two-Sided Consent
 - **Problem:**
   - Workloads and targets live under different governance models. In a **multi-tenant cloud**, authority is partitioned into accounts, tenancies or projects: each team is autonomous inside its own tenancy and has no rights in its neighbours'. In a **traditional data centre**, authority is flat and central: infrastructure, IAM and DBA teams run shared systems on behalf of everybody. A binding can connect any combination: cloud to cloud (in the same tenancy or another one), data centre to data centre, cloud to data centre, and data centre to cloud.
-  - Until 2.9, authorization was scoped by zone. A zone is a technical boundary (one trust domain, one SPIRE agent, one set of plugin processes, ADR-03) and does not follow ownership.
+  - Until 2.9, authorization was scoped by realm. A realm is a technical boundary (one trust domain, one SPIRE agent, one set of plugin processes, ADR-03) and does not follow ownership.
   - Any rule that lets a principal provision a binding with authority over only one of its two ends allows privilege escalation:
     - **Target hijacking.** An operator who owns a workload binds it to a database owned by another team and grants their workload roles there.
     - **Credential injection.** An operator who owns a target binds it to another team's workloads. Those workloads then receive connection details, and possibly credentials, for a system that operator controls.
   - Requiring the **proposer** to hold rights on both ends instead makes cross-boundary bindings impossible without a global administrator: the cloud developer has no rights in the data centre, and the central DBA none in the tenancy. Requiring both ends to consent to a **revocation** stops a resource owner from cutting off a compromised client.
 - **Decision:**
-  1. **Governance scopes.** A scope is a slash-separated path such as `dc/corp-prod` or `cloud/fin-01/payments` (§3.9). A flat data centre is a short scope; a cloud tenancy is a deeper one. Scopes are independent of zones: zones say where plugins run and which trust domains are verified, scopes say who decides.
+  1. **Governance scopes.** A scope is a slash-separated path such as `dc/corp-prod` or `cloud/fin-01/payments` (§3.9). A flat data centre is a short scope; a cloud tenancy is a deeper one. Scopes are independent of realms: realms say where plugins run and which trust domains are verified, scopes say who decides.
   2. **Every resource has an owner scope.** A **source**'s scope is derived from the fixed literal prefix of its SVID regex by the extractor configured for its trust domain (§3.9); a regex whose fixed prefix does not identify exactly one scope is rejected. A **platform**'s scope is configured (`platforms[].scope`). A **target**'s scope is chosen when it is published, among the scopes the platform allows (`target_scopes`). A **binding** has three scopes, copied from the resources it links: the **source scope** (its source's), the **target scope** (its target's) and the **platform scope** (its target's platform's). None of them changes, except through the re-scoping procedure (§8.2 rule 17).
   3. **Either side proposes.** A principal holding `operator` (or `trusted_automation`) on one of the scopes a change concerns may file it: the owner scope for a source; the target scope or the platform scope for a target; the source scope or the target scope for a binding, and also the platform scope for a revocation or a downgrade.
   4. **Consent rules** (fixed at creation, stored as `change_requests.consent`, enforced by the database):
@@ -603,7 +608,7 @@ Field rules:
     "platform": "oracle-prod",
     "platformType": "oracle.v1",
     "platformScope": "dc/corp-prod",
-    "zone": "prod",
+    "realm": "prod",
     "state": "ACTIVE",
     "revision": 2,
     "createdAt": "2026-09-20T08:00:00Z",
@@ -636,7 +641,7 @@ Field rules:
 ```
 
 Field rules:
-- `metadata.platform` names a configured platform (§8.1). `platformType`, `platformScope` and `zone` are copied from it. `metadata.scope` MUST match one of the platform's `target_scopes` patterns (default: the platform's scope and every scope below it).
+- `metadata.platform` names a configured platform (§8.1). `platformType`, `platformScope` and `realm` are copied from it. `metadata.scope` MUST match one of the platform's `target_scopes` patterns (default: the platform's scope and every scope below it).
 - `definition` is type-specific. `PlatformProvider.ValidateTarget` (§5.9) checks it against the platform and returns it normalized; it MAY verify, over a read-only connection, that the resource exists. Publishing a target does not create the resource (ADR-15).
 - `accessLevels` has 1 to 16 entries with unique names matching `^[a-z][a-z0-9-]{0,31}$`. `grants` is type-specific; `ValidateTarget` checks it against the platform's privilege bounds (for example `grantable_roles`) and returns the normalized `grants` and `privileges`, a canonical, sorted list of privilege identifiers used to compare levels (§3.10). `privileges` is output only.
 - `networkFlows` has 0 to 32 entries with unique names. Each entry follows the flow schema below, with every destination inside the platform's `allowed_endpoints` (`422 flow-destination-not-allowed`, ADR-16).
@@ -684,7 +689,7 @@ Platforms are read-only through the API. Their representation is derived from `s
   "kind": "Platform",
   "name": "oracle-prod",
   "type": "oracle.v1",
-  "zone": "prod",
+  "realm": "prod",
   "scope": "dc/corp-prod",
   "targetScopes": ["dc/corp-prod/*"],
   "displayName": "Oracle production cluster",
@@ -715,7 +720,7 @@ Platforms are read-only through the API. Their representation is derived from `s
   "metadata": {
     "id": "019286f8-7c80-7b2e-9f1a-4b5a6c7d8e9f",
     "name": "payments-ledger-workers-ledger",
-    "zone": "prod",
+    "realm": "prod",
     "sourceScope": "cloud/fin-01/payments",
     "targetScope": "dc/corp-prod/ledger",
     "platformScope": "dc/corp-prod",
@@ -897,7 +902,7 @@ When the target scope equals the platform scope, "owner and platform" is a singl
 | :--- | :--- | :--- | :--- | :--- |
 | `metadata.name` | Yes | **No** | | §3.8. |
 | `source`, `target` | Yes | **No** | | A different pair is a different binding. |
-| `metadata.zone`, `platform*`, `wiring`, scopes, `derivedPrincipalName` | Derived at creation | **No** | | Snapshotted (INV-08). |
+| `metadata.realm`, `platform*`, `wiring`, scopes, `derivedPrincipalName` | Derived at creation | **No** | | Snapshotted (INV-08). |
 | `accessLevel` | Yes | Yes | `ALL`, or `ANY` if the new level's privileges are a subset of the current one's | The new level MUST be `ACTIVE`. |
 | `parameters` | Yes | Yes | `ALL` | Validated by `ValidateBinding`. |
 | `expiresAt` | Yes | Yes | `ANY` if brought forward or set where there was none, `ALL` if extended or removed | |
@@ -931,7 +936,7 @@ Matching works on whole segments. There is no other wildcard.
 
 **Target scope.** Chosen when the target is published; it MUST match one of the platform's `target_scopes`. A cluster with one schema per tenant is modelled as one target per schema, each owned by its tenant's scope, all approved by the platform's owner.
 
-**Source scope.** `governance.source_scopes` has exactly one entry for each trust domain that any platform accepts (`allowed_source_trust_domains`), whether that trust domain is a zone or federated (§7.1). An entry uses one of two modes:
+**Source scope.** `governance.source_scopes` has exactly one entry for each trust domain that any platform accepts (`allowed_source_trust_domains`), whether that trust domain is a realm or federated (§7.1). An entry uses one of two modes:
 
 | Mode | Use | Configuration | Result |
 | :--- | :--- | :--- | :--- |
@@ -1014,9 +1019,9 @@ Any other trigger in any other phase MUST be rejected with `409 binding-busy`, o
 | INV-05 | Before any `Ensure*` RPC is invoked, a `binding_stage_state` row with status `STARTED` exists for that stage, carrying the provider wiring. |
 | INV-06 | At most one workflow mutates a binding at any time. All workflow writes are fenced by `workflow_id`. |
 | INV-07 | Every `Ensure*` and `Cleanup*` implementation is idempotent and convergent. |
-| INV-08 | A binding's `source_id`, `target_id`, `zone`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `secret_storage_strategy`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `zone`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
+| INV-08 | A binding's `source_id`, `target_id`, `realm`, `platform_type`, `platform`, wiring columns, `source_trust_domain`, `secret_storage_strategy`, `derived_principal_name` and scopes never change after insert; nor do a source's `trust_domain` and `scope`, or a target's `platform`, `platform_type`, `realm`, `scope` and `platform_scope`. Scopes change only through the re-scoping procedure (§8.2 rule 17). |
 | INV-09 | A workflow ID is never reused. |
-| INV-10 | Each logical plugin instance authenticates with exactly one SVID, from its own zone's trust domain. |
+| INV-10 | Each logical plugin instance authenticates with exactly one SVID, from its own realm's trust domain. |
 | INV-11 | Every state-changing admin action, propagation and workflow outcome produces an audit record. The audit hash chain verifies end to end. |
 | INV-12 | Plugin-supplied data is never rendered as raw HTML and never placed into `hx-*` attributes. |
 | INV-13 | Finalized plugin outputs and target flow destinations are validated against the plugin's declared output schema and the platform's endpoint allowlist before they are persisted. |
@@ -1053,10 +1058,10 @@ The data model is described at three levels. The **conceptual model** names the 
 *Configuration and ownership:*
 ```mermaid
 erDiagram
-    ZONE ||--|| TRUST_DOMAIN : "verifies SVIDs of"
-    ZONE ||--o{ FEDERATED_TRUST_DOMAIN : "delivers bundle of"
-    ZONE ||--o{ PROVIDER_INSTANCE : "hosts plugin process of"
-    PLATFORM }o--|| ZONE : "runs in"
+    REALM ||--|| TRUST_DOMAIN : "verifies SVIDs of"
+    REALM ||--o{ FEDERATED_TRUST_DOMAIN : "delivers bundle of"
+    REALM ||--o{ PROVIDER_INSTANCE : "hosts plugin process of"
+    PLATFORM }o--|| REALM : "runs in"
     PLATFORM }o--|| PROVIDER_INSTANCE : "is wired to"
     PLATFORM }o--|| GOVERNANCE_SCOPE : "is owned by"
     TRUST_DOMAIN ||--|| SOURCE_SCOPE_EXTRACTOR : "has"
@@ -1117,10 +1122,10 @@ erDiagram
 
 | Entity | Kind | Definition |
 | :--- | :--- | :--- |
-| Zone | Configuration | A technical placement: one trust domain, its SPIRE agent socket and the plugin processes attached to it (ADR-03). |
-| Trust domain | Configuration | A SPIFFE trust domain whose SVIDs `ligo` verifies, either a zone's own or a federated one reached through a zone (§7.1). |
-| Provider instance | Configuration | A configured identity provider or secret store (`identity_providers`, `secret_stores`), in exactly one zone. |
-| Platform | Configuration | A system that hosts targets (`platform_providers[].platforms`): a plugin type and configuration in one zone, wired to one identity provider and one secret store of that zone, owned by one governance scope, with privilege bounds, an endpoint allowlist and its own network flows (§3.4). |
+| Realm | Configuration | A technical placement: one trust domain, its SPIRE agent socket and the plugin processes attached to it (ADR-03). |
+| Trust domain | Configuration | A SPIFFE trust domain whose SVIDs `ligo` verifies, either a realm's own or a federated one reached through a realm (§7.1). |
+| Provider instance | Configuration | A configured identity provider or secret store (`identity_providers`, `secret_stores`), in exactly one realm. |
+| Platform | Configuration | A system that hosts targets (`platform_providers[].platforms`): a plugin type and configuration in one realm, wired to one identity provider and one secret store of that realm, owned by one governance scope, with privilege bounds, an endpoint allowlist and its own network flows (§3.4). |
 | Governance scope | Configuration (implicit) | An ownership boundary (§3.9). Scopes are not declared in a list: a scope exists when a platform, a target, a source-scope extractor or a party names it. |
 | Source-scope extractor | Configuration | The rule that derives a source's scope from its regex, one per accepted source trust domain (§3.9). |
 | Principal | External | A person (LDAP user) or a machine (SPIFFE ID) that uses the admin API or UI. Role bindings (§8.1 `authorization.bindings`) grant it roles on scope patterns. |
@@ -1327,13 +1332,13 @@ erDiagram
 | `change_requests` | `sources`, `targets`, `bindings` | `resource_type`, `resource_name`, `resource_id` | **None** (application) | A `CREATE` request exists before its resource, and requests outlive a deleted binding or a retired resource (and a later one with the same name). The name, plus `resource_id` once applied, identifies the resource at the time; `uq_cr_one_pending_per_resource` allows one pending request per resource name and type. |
 | `audit_log` | resources, `change_requests` | `resource_type`, `resource_id`, `resource_name`, `change_request_id` | **None** (deliberate) | The audit log is append-only and must keep its history after a binding is deleted; a foreign key would either block the delete or erase history. |
 | `bindings`, `binding_stage_state` | DBOS workflows | `workflow_id` | None (text); fencing (ADR-08) | DBOS owns its schema; every workflow write is fenced on `bindings.workflow_id`. |
-| `targets`, `bindings`, `binding_stage_state`, `change_requests`, `change_request_sides`, `notification_outbox` | Configuration entities | `platform`, `platform_type`, `zone`, wiring columns, scopes, `interconnect_rule`, `webhook` | Startup checks (§8.2 rules 10, 11, 16–18) | Configuration is not in the database. Startup refuses to run if stored references point to platforms or instances that no longer exist, or if stored scopes no longer match the configuration. |
+| `targets`, `bindings`, `binding_stage_state`, `change_requests`, `change_request_sides`, `notification_outbox` | Configuration entities | `platform`, `platform_type`, `realm`, wiring columns, scopes, `interconnect_rule`, `webhook` | Startup checks (§8.2 rules 10, 11, 16–18) | Configuration is not in the database. Startup refuses to run if stored references point to platforms or instances that no longer exist, or if stored scopes no longer match the configuration. |
 | `admin_sessions` | Principals | `username`, `roles` | LDAP re-check every `authz_recheck_interval` (§7.3) | Principals live in LDAP. |
 
 **Integrity rules that span rows** (cardinalities a plain foreign key cannot express) are enforced by deferred constraint triggers at commit (`change_request_check`, §4.2): a change request has at least one side and no two sides with the same scope; side scopes equal the request's scopes; a source change has exactly one `OWNER` side; a target change has an `OWNER` side and at most a `PLATFORM` side of a different scope, with consent `ALL`; a binding change with consent `ALL` has exactly one `TARGET` side, a `SOURCE` side exactly when the scopes differ, no `PLATFORM` side, and parties only across scopes; a binding change with consent `ANY` has no parties; `APPLIED` and `REJECTED` require the decisions of INV-14 and INV-20; distinct people per side (INV-18).
 
 **Normalization.** The model is in third normal form except for these deliberate redundancies:
-- `targets` copies `platform_type`, `zone` and `platform_scope` from its platform, and `bindings` copies the wiring and the three scopes, as snapshots (INV-08), so that a configuration change never silently changes an existing resource; startup detects any divergence (§8.2 rules 10 and 17).
+- `targets` copies `platform_type`, `realm` and `platform_scope` from its platform, and `bindings` copies the wiring and the three scopes, as snapshots (INV-08), so that a configuration change never silently changes an existing resource; startup detects any divergence (§8.2 rules 10 and 17).
 - `bindings` copies, per revision, the source's trust domain and regex and the composed `requested_spec`, with `source_revision` and `target_revision`, so that each revision is a consistent snapshot and provisioning never depends on live joins (ADR-15 rule 6). It keeps the requested state and the active snapshot (`active_*`) side by side, so that workloads keep the last good revision while a new one is provisioned (§4.4, INV-02).
 - `target_access_levels.privileges` is derived from `grants` by the plugin and stored so that narrowing can be checked without calling the plugin for the old revision.
 - `change_request_sides` copies `requested_by` and `kind`, guarded by the composite foreign key, so that four-eyes is a row check.
@@ -1430,7 +1435,7 @@ CREATE TABLE targets (
     name               resource_name NOT NULL,
     platform           VARCHAR(128) NOT NULL,               -- configured platform (§8.1); immutable
     platform_type      VARCHAR(128) NOT NULL,               -- plugin type of the platform; immutable
-    zone               VARCHAR(63)  NOT NULL,               -- the platform's zone; immutable
+    realm               VARCHAR(63)  NOT NULL,               -- the platform's realm; immutable
     scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
     platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
     definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
@@ -1506,7 +1511,7 @@ BEGIN
     RAISE EXCEPTION 'target scope modified outside the re-scoping procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.platform <> OLD.platform
-     OR NEW.platform_type <> OLD.platform_type OR NEW.zone <> OLD.zone
+     OR NEW.platform_type <> OLD.platform_type OR NEW.realm <> OLD.realm
      OR (OLD.state = 'RETIRED' AND NEW.state <> 'RETIRED') THEN
     RAISE EXCEPTION 'immutable target column modified';
   END IF;
@@ -1527,7 +1532,7 @@ CREATE TABLE bindings (
     source_id                   UUID NOT NULL REFERENCES sources(id) ON DELETE RESTRICT,   -- immutable
     target_id                   UUID NOT NULL REFERENCES targets(id) ON DELETE RESTRICT,   -- immutable
     access_level                VARCHAR(32) NOT NULL,
-    zone                        VARCHAR(63)  NOT NULL,
+    realm                        VARCHAR(63)  NOT NULL,
     platform_type               VARCHAR(128) NOT NULL,
     platform                    VARCHAR(128) NOT NULL,
     identity_provider_type      VARCHAR(128) NOT NULL,
@@ -1601,7 +1606,7 @@ CREATE INDEX idx_bindings_active_td ON bindings (source_trust_domain)
 CREATE INDEX idx_bindings_phase           ON bindings (phase, last_transition_at);
 CREATE INDEX idx_bindings_platform        ON bindings (platform_type, platform);
 CREATE INDEX idx_bindings_target          ON bindings (target_id, access_level);
-CREATE INDEX idx_bindings_zone            ON bindings (zone);
+CREATE INDEX idx_bindings_realm            ON bindings (realm);
 CREATE INDEX idx_bindings_source_scope    ON bindings (source_scope, name);
 CREATE INDEX idx_bindings_target_scope    ON bindings (target_scope, name);
 CREATE INDEX idx_bindings_break_glass     ON bindings (break_glass_expires_at) WHERE break_glass_cr_id IS NOT NULL;
@@ -1616,7 +1621,7 @@ BEGIN
      AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
     RAISE EXCEPTION 'binding scope modified outside the re-scoping procedure';
   END IF;
-  IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.zone <> OLD.zone
+  IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.realm <> OLD.realm
      OR NEW.source_id <> OLD.source_id OR NEW.target_id <> OLD.target_id
      OR NEW.platform_type <> OLD.platform_type OR NEW.platform <> OLD.platform
      OR NEW.identity_provider_type <> OLD.identity_provider_type
@@ -1722,7 +1727,7 @@ CREATE TABLE change_requests (
     operation          change_request_op NOT NULL,
     kind               change_request_kind NOT NULL,        -- STANDARD, BREAK_GLASS (ADR-12), SYSTEM_REVERT, SYSTEM_EXPIRY; immutable
     consent            consent_rule NOT NULL,               -- ALL: every side must approve; ANY: one side suffices (ADR-13, ADR-15); immutable
-    zone               VARCHAR(63),                         -- TARGET and BINDING: the platform's zone
+    realm               VARCHAR(63),                         -- TARGET and BINDING: the platform's realm
     owner_scope        scope_path,                          -- SOURCE, TARGET
     source_scope       scope_path,                          -- BINDING
     target_scope       scope_path,                          -- BINDING
@@ -1754,11 +1759,11 @@ CREATE TABLE change_requests (
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
     CONSTRAINT chk_cr_scope_columns CHECK (
         (resource_type = 'SOURCE'  AND owner_scope IS NOT NULL AND source_scope IS NULL AND target_scope IS NULL
-                                   AND platform_scope IS NULL AND zone IS NULL)
-     OR (resource_type = 'TARGET'  AND owner_scope IS NOT NULL AND platform_scope IS NOT NULL AND zone IS NOT NULL
+                                   AND platform_scope IS NULL AND realm IS NULL)
+     OR (resource_type = 'TARGET'  AND owner_scope IS NOT NULL AND platform_scope IS NOT NULL AND realm IS NOT NULL
                                    AND source_scope IS NULL AND target_scope IS NULL)
      OR (resource_type = 'BINDING' AND owner_scope IS NULL AND source_scope IS NOT NULL AND target_scope IS NOT NULL
-                                   AND platform_scope IS NOT NULL AND zone IS NOT NULL)
+                                   AND platform_scope IS NOT NULL AND realm IS NOT NULL)
     ),
     CONSTRAINT chk_interconnect_rule CHECK (
         interconnect_rule IS NULL
@@ -1859,7 +1864,7 @@ CREATE FUNCTION change_requests_immutable_guard() RETURNS trigger LANGUAGE plpgs
 BEGIN
   IF NEW.resource_type <> OLD.resource_type OR NEW.resource_name <> OLD.resource_name
      OR NEW.kind <> OLD.kind OR NEW.consent <> OLD.consent OR NEW.operation <> OLD.operation
-     OR NEW.zone IS DISTINCT FROM OLD.zone
+     OR NEW.realm IS DISTINCT FROM OLD.realm
      OR NEW.owner_scope IS DISTINCT FROM OLD.owner_scope
      OR NEW.source_scope IS DISTINCT FROM OLD.source_scope
      OR NEW.target_scope IS DISTINCT FROM OLD.target_scope
@@ -1995,7 +2000,7 @@ CREATE UNIQUE INDEX uq_cr_one_pending_per_resource ON change_requests (resource_
 
 ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
-CREATE INDEX idx_cr_status_zone ON change_requests (status, zone, id DESC);
+CREATE INDEX idx_cr_status_realm ON change_requests (status, realm, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
 CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
@@ -2233,7 +2238,7 @@ FROM v_active_bindings WHERE id = $1;
 - The external identity provider `openldap.v1` is specified in `.specs/ligo-openldap-plugin.md`.
 
 ### 5.2 Process topology (ADR-03)
-- The plugin manager spawns one process per `(type, zone)`. Each process receives `ConfigureInstances` containing only its zone's instances (for target plugins, its zone's platforms) and that zone's `spiffe_workload_socket`.
+- The plugin manager spawns one process per `(type, realm)`. Each process receives `ConfigureInstances` containing only its realm's instances (for target plugins, its realm's platforms) and that realm's `spiffe_workload_socket`.
 - Crashed processes are restarted with exponential backoff (`plugins.restart_backoff`). Any in-flight RPC fails with a retryable error.
 - **Startup in two passes.** `Describe` takes no input and returns the plugin type's capabilities, independent of its instances, so processes may start in any order. Pass 1 spawns every process and calls `Describe`; the descriptions are then checked against the configuration and against each other (§8.2 rules 3, 8). Pass 2 calls `ConfigureInstances` on every process. No process is configured before every process has described itself.
 - **`Describe` is static.** A plugin MUST return the same `DescribeResponse` for the life of its binary. A restarted process that describes itself differently from its first start is not used: the restart counts as failed and is retried with backoff, like a restart that resolves other SVIDs.
@@ -2253,7 +2258,7 @@ FROM v_active_bindings WHERE id = $1;
 
 ### 5.4 SVID selection (`pkg/pluginsdk`)
 - The expression environment uses the field names below. The expression MUST compile with `expr.Env(SVIDEvalEnv{})` and `expr.AsBool()` when the config is loaded.
-- At `ConfigureInstances`, each instance MUST resolve exactly one X.509-SVID, and its trust domain MUST equal the instance's zone trust domain. `ConfigureInstancesResponse.resolved` reports the resolved SPIFFE IDs.
+- At `ConfigureInstances`, each instance MUST resolve exactly one X.509-SVID, and its trust domain MUST equal the instance's realm trust domain. `ConfigureInstancesResponse.resolved` reports the resolved SPIFFE IDs.
 - The host validates distinctness (ADR-03) and logs the resolved IDs at `INFO`.
 
 **Illustrative.**
@@ -2301,7 +2306,7 @@ func (s *InstanceSVIDSelector) SelectX509SVID(ctx context.Context) (*x509svid.SV
 	if match == nil {
 		return nil, fmt.Errorf("selector for %q matched no SVID", s.instanceName)
 	}
-	if match.ID.TrustDomain().Name() != s.zoneTrustDomain {
+	if match.ID.TrustDomain().Name() != s.realmTrustDomain {
 		return nil, fmt.Errorf("selector for %q resolved to foreign trust domain", s.instanceName)
 	}
 	return match, nil
@@ -2444,7 +2449,7 @@ message SVIDSelectorConfig {
 
 message InstanceDescriptor {
   string name = 1;
-  string zone = 2;
+  string realm = 2;
   string trust_domain = 3;
   string config_json = 4;               // validated against Describe.instance_config_schema_json
   SVIDSelectorConfig svid_selector = 5;
@@ -2464,7 +2469,7 @@ message BindingContext {
   int64 revision = 3;
   int64 attempt = 4;
   Operation operation = 5;
-  string zone = 6;
+  string realm = 6;
   string source_trust_domain = 7;
   string source_svid_regex = 8;          // validated regex of `revision`
   bool rotate_static_secrets = 9;
@@ -2572,7 +2577,7 @@ message SecretStorageStrategy {
 }
 
 message ConfigureInstancesRequest {
-  string zone = 1;
+  string realm = 1;
   string spiffe_workload_socket = 2;
   repeated InstanceDescriptor instances = 3;
 }
@@ -2970,13 +2975,13 @@ An applied change of a source or target that affects provisioning is carried int
 
 **Transport & Composite Trust Bundle Source.**
 - TLS 1.3 minimum. The server certificate comes either from SPIRE (`tls_source: spiffe`, `ligo`'s `core_identity` SVID) or from files (`tls_source: file`).
-- **Composite Bundle Source (Normative):** To verify client X.509-SVIDs and JWT-SVIDs, `ligo` merges the `X509BundleSet` and `JWTBundleSet` streams of **all configured `zones[].spiffe_workload_socket`** into one composite `x509bundle.Source` and `jwtbundle.Source`. It is used by the workload listener and by `client_svid_auth` on the admin listener. Every accepted trust domain has **exactly one authoritative bundle source**:
-  - **Zone trust domains.** The bundle of a configured zone's `trust_domain` is taken **only** from that zone's own socket.
-  - **Federated trust domains.** A trust domain that is not a zone is accepted only if it is listed in `workload_listener.federated_trust_domains` with a `via_zone`. Its bundle is then taken only from that zone's socket, where the SPIRE agent delivers it as a federated bundle.
-  - **Everything else is ignored.** A bundle for a given trust domain arriving from any other socket is discarded and logged at `WARN` (`ligo_bundle_conflicts_total{trust_domain,socket_zone}`). So are bundles for trust domains outside `accepted_trust_domains`.
+- **Composite Bundle Source (Normative):** To verify client X.509-SVIDs and JWT-SVIDs, `ligo` merges the `X509BundleSet` and `JWTBundleSet` streams of **all configured `realms[].spiffe_workload_socket`** into one composite `x509bundle.Source` and `jwtbundle.Source`. It is used by the workload listener and by `client_svid_auth` on the admin listener. Every accepted trust domain has **exactly one authoritative bundle source**:
+  - **Realm trust domains.** The bundle of a configured realm's `trust_domain` is taken **only** from that realm's own socket.
+  - **Federated trust domains.** A trust domain that is not a realm is accepted only if it is listed in `workload_listener.federated_trust_domains` with a `via_realm`. Its bundle is then taken only from that realm's socket, where the SPIRE agent delivers it as a federated bundle.
+  - **Everything else is ignored.** A bundle for a given trust domain arriving from any other socket is discarded and logged at `WARN` (`ligo_bundle_conflicts_total{trust_domain,socket_realm}`). So are bundles for trust domains outside `accepted_trust_domains`.
   - **Fail closed.** If the authoritative stream for a trust domain fails to initialize or becomes unreadable, authentication for that trust domain fails closed (T-21). No other socket is used as a fallback.
   - **Rationale.** Whoever controls the bundle `ligo` trusts for a trust domain controls which callers `ligo` treats as workloads of that domain, and therefore which callers receive its credentials. A SPIRE server's federation configuration decides which foreign bundles its agents deliver. Without a single authoritative source, an administrator of a lower-assurance SPIRE server (e.g. `test.internal`) could publish their own CA as a federated `prod.internal` bundle, and `ligo` would accept prod SVIDs minted by that administrator (T-24).
-  - **SPIRE prerequisite.** A SPIRE agent releases bundles only to callers that hold at least one registration entry on it, unless the agent sets `allow_unauthenticated_verifiers`. It releases federated bundles only to registered callers, and only for the trust domains in their entry's `federatesWith` (EXT-16). `ligo` therefore needs a registration entry on every zone's agent, and federated trust domains MUST appear in the `federatesWith` of the entry on the `via_zone` agent (§10.5).
+  - **SPIRE prerequisite.** A SPIRE agent releases bundles only to callers that hold at least one registration entry on it, unless the agent sets `allow_unauthenticated_verifiers`. It releases federated bundles only to registered callers, and only for the trust domains in their entry's `federatesWith` (EXT-16). `ligo` therefore needs a registration entry on every realm's agent, and federated trust domains MUST appear in the `federatesWith` of the entry on the `via_realm` agent (§10.5).
 - REST and gRPC share the port: after TLS termination, requests with `Content-Type: application/grpc` are routed to the gRPC server (via `grpc.Server.ServeHTTP` or an equivalent). Raw-byte connection multiplexers MUST NOT be used.
 
 **Authentication modes** (`auth_modes`, evaluated in this order):
@@ -3175,7 +3180,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 | `POST` | `/v1/admin/bindings` | operator (source or target scope) | Change request `BINDING`/`CREATE`. If the consent rule is satisfied at creation (ADR-13 rule 6), it is applied immediately; if the apply is then refused (busy binding, revision conflict), the change request is recorded as `FAILED_TO_APPLY` rather than left `PENDING` (§6.2.2). With `inlineSource`, the source's `CREATE` is filed first and the binding's `CREATE` depends on it (§7.2.4). |
 | `PUT` | `/v1/admin/bindings/{name}` | operator (source or target scope; also platform scope if every change removes access) | Change request `BINDING`/`UPDATE` (`expectedRevision` required). Consent `ANY` if every change removes access (§3.7), otherwise `ALL`. |
 | `DELETE` | `/v1/admin/bindings/{name}?expectedRevision=N` | operator (source, target or platform scope) | Change request `BINDING`/`DELETE`, consent `ANY`, with a side for each of the binding's scopes the requester acts for (ADR-13 rule 4). |
-| `GET` | `/v1/admin/bindings` | viewer | Keyset-paginated list (`pageSize` ≤ 200, `pageToken`) of the bindings visible to the caller. Filters: `source`, `target`, `accessLevel`, `platform`, `platformType`, `phase`, `trustDomain`, `zone`, `scope` (a scope pattern matched against any of the three scopes), `expiringBefore`, `propagationPending`. |
+| `GET` | `/v1/admin/bindings` | viewer | Keyset-paginated list (`pageSize` ≤ 200, `pageToken`) of the bindings visible to the caller. Filters: `source`, `target`, `accessLevel`, `platform`, `platformType`, `phase`, `trustDomain`, `realm`, `scope` (a scope pattern matched against any of the three scopes), `expiringBefore`, `propagationPending`. |
 | `GET` | `/v1/admin/bindings/{name}` | viewer | Full admin representation (§3.5) plus stage states (without secrets) plus the last 20 audit entries. |
 | `GET` | `/v1/admin/bindings/{name}/flows` | viewer | Effective network flows (§3.6). |
 | `POST` | `/v1/admin/bindings/{name}/retry` | operator | Allowed in `FAILED`/`DELETE_FAILED`. |
@@ -3185,7 +3190,7 @@ Roles are scoped by governance scope patterns (§3.9). A principal's effective p
 
 | Method | Path | Role | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/v1/admin/change-requests` | viewer | Keyset-paginated list of the change requests visible to the caller. Filters: `status`, `resourceType`, `resourceName`, `zone`, `scope` (matched against every scope of the request), `awaitingMe=true` (requests with a pending side the caller may decide). |
+| `GET` | `/v1/admin/change-requests` | viewer | Keyset-paginated list of the change requests visible to the caller. Filters: `status`, `resourceType`, `resourceName`, `realm`, `scope` (matched against every scope of the request), `awaitingMe=true` (requests with a pending side the caller may decide). |
 | `GET` | `/v1/admin/change-requests/{id}` | viewer | The change request representation below, including `payloadSha256`, its sides, `awaitingApproval` and a diff against the current revision of the resource (for a narrowing, the samples it drops or the privileges it removes). |
 | `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 governance-policy-changed`, `409 dependency-pending`, `422 validation-failed`, `422 account-not-registered`, `409 binding-busy`, `409 change-request-not-pending`. |
 | `POST` | `/v1/admin/change-requests/{id}/decline` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
@@ -3278,7 +3283,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 
 **Validation pipeline at creation** (`TARGET`, `CREATE` and `UPDATE`):
 1. JSON schema; name grammar, prefix and uniqueness among non-retired targets.
-2. The platform exists; `scope` matches its `target_scopes`; derive `platformType`, `platformScope` and `zone`.
+2. The platform exists; `scope` matches its `target_scopes`; derive `platformType`, `platformScope` and `realm`.
 3. Flows: schema, unique names, destinations within the platform's `allowed_endpoints` (§5.7).
 4. RBAC: `operator` (or `trusted_automation`, with `platforms`) on the target's or the platform's scope.
 5. `PlatformProvider.ValidateTarget` (with `check_existence` if `platforms[].check_existence`, default `true`): normalized definition, grants and privileges. `valid = false` is `422 validation-failed` with the plugin's errors; so are `privileges` that are not sorted and free of duplicates (§5.8 rule 9), or levels returned in another order than requested.
@@ -3327,7 +3332,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
   "kind": "STANDARD",
   "consent": "ALL",
   "status": "PENDING",
-  "zone": "prod",
+  "realm": "prod",
   "sourceScope": "cloud/fin-01/payments",
   "targetScope": "dc/corp-prod/ledger",
   "platformScope": "dc/corp-prod",
@@ -3518,7 +3523,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 - **Payload (Normative):**
   ```json
   { "eventId": "<event_id, UUIDv7>", "event": "BREAK_GLASS_USED", "occurredAt": "2026-10-14T21:03:11Z",
-    "zone": "prod", "sourceScope": "dc/corp-prod", "targetScope": "dc/corp-prod", "platformScope": "dc/corp-prod",
+    "realm": "prod", "sourceScope": "dc/corp-prod", "targetScope": "dc/corp-prod", "platformScope": "dc/corp-prod",
     "resource": { "type": "BINDING", "id": "…", "name": "…", "source": "…", "target": "…", "platform": "oracle-prod" },
     "changeRequestId": "…", "actor": "livia", "operation": "CREATE",
     "justification": "…", "incidentReference": "INC0012345", "expiresAt": "2026-10-15T01:03:11Z" }
@@ -3595,7 +3600,7 @@ service:
     port: 8443
     server_name: "ligo.prod.internal"
 
-zones:
+realms:
   - name: prod
     trust_domain: prod.internal
     spiffe_workload_socket: "unix:///run/spire/prod/agent.sock"
@@ -3604,7 +3609,7 @@ zones:
     spiffe_workload_socket: "unix:///run/spire/test/agent.sock"
 
 core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)
-  zone: prod
+  realm: prod
   svid_selector:
     match_expr: 'path == "/ns/sys/sa/ligo"'
     jwt_audience: ["https://vault.prod.internal"]
@@ -3616,7 +3621,7 @@ server:
     auth_modes: [x509_svid, jwt_svid]
     accepted_trust_domains: [prod.internal, test.internal, cloud.internal]
     federated_trust_domains:              # §7.1, §10.5 Topology C
-      - { trust_domain: cloud.internal, via_zone: prod }   # multi-tenant cloud platform, verified through federation
+      - { trust_domain: cloud.internal, via_realm: prod }   # multi-tenant cloud platform, verified through federation
     expected_jwt_audience: "spiffe://prod.internal/ns/sys/sa/ligo"
     max_token_ttl: 15m
     clock_skew: 30s
@@ -3818,22 +3823,22 @@ identity_providers:
   - type: "svid.v1"
     builtin: true
     instances:
-      - { name: "svid-passthrough-prod", zone: prod, config: {} }
+      - { name: "svid-passthrough-prod", realm: prod, config: {} }
   - type: "target-local.v1"
     builtin: true
     instances:
-      - { name: "local-account-prod", zone: prod, config: { password_length: 32 } }
+      - { name: "local-account-prod", realm: prod, config: { password_length: 32 } }
   - type: "delegated-dynamic.v1"
     builtin: true
     instances:
-      - { name: "vault-dynamic-db-test", zone: test, config: {} }
+      - { name: "vault-dynamic-db-test", realm: test, config: {} }
   - type: "openldap.v1"
     builtin: false
     binary: "ligo-plugin-openldap"                 # relative to plugins.directory
     sha256: "<64-hex-sha256-of-ligo-plugin-openldap>"
     instances:
       - name: "ldap-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]
@@ -3855,14 +3860,14 @@ secret_stores:
   - type: "none.v1"
     builtin: true
     instances:
-      - { name: "no-store-prod", zone: prod, config: {} }
+      - { name: "no-store-prod", realm: prod, config: {} }
   - type: "vault.v1"
     builtin: false
     binary: "ligo-plugin-vault"
     sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
     instances:
       - name: "vault-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
           jwt_audience: ["https://vault.prod.internal"]
@@ -3879,7 +3884,7 @@ secret_stores:
         network_flows:                    # ADR-16; added to every binding whose credential is in this store
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }
       - name: "vault-test"
-        zone: test
+        realm: test
         svid_selector:
           match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.test.internal"]
@@ -3900,7 +3905,7 @@ platform_providers:                       # plugin types and the platforms that 
     sha256: "<64-hex-sha256-of-ligo-plugin-oracle>"
     platforms:
       - name: "oracle-prod"
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"            # platform owner scope (§3.9); REQUIRED
         target_scopes: ["dc/corp-prod/*"] # scopes that may own targets here (default: scope and below)
         display_name: "Oracle production cluster"
@@ -3932,7 +3937,7 @@ platform_providers:                       # plugin types and the platforms that 
             jwt_audience: "https://vault.prod.internal"
             db_static_role: "oracle-prod-ligo-admin"
       - name: "oracle-test-dynamic"
-        zone: test
+        realm: test
         scope: "dc/corp-test"
         network_flows:
           - { name: listener, purpose: DATA, protocol: TCP, destination: "ora-test.test.internal", ports: [1521], tls: false }
@@ -3962,23 +3967,23 @@ platform_providers:                       # plugin types and the platforms that 
 ### 8.2 Configuration validation & Daemon Startup/Shutdown Sequence
 
 **Validation rules (at startup; failures are fatal):**
-1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and are unique within each provider kind; platform names are unique across all platform providers. Zone names are unique. The replica's instance ID, the value of `service.instance_id_env`, is set and matches `^[A-Za-z0-9._-]{1,58}$` (§10.2).
-2. Every instance's and platform's `zone` exists. Platform wiring references existing instances **in the same zone**.
+1. A plugin type is declared once, in one of `identity_providers`, `secret_stores` and `platform_providers`: a type has one kind (§5.9). Instance names match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` and are unique within each provider kind; platform names are unique across all platform providers. Realm names are unique. The replica's instance ID, the value of `service.instance_id_env`, is set and matches `^[A-Za-z0-9._-]{1,58}$` (§10.2).
+2. Every instance's and platform's `realm` exists. Platform wiring references existing instances **in the same realm**.
 3. The wiring satisfies the §5.6 matrix and the plugins' Describe capabilities (§5.9: an identity provider produces exactly one mode, a platform provider lists the modes it accepts); the platform's `secret_store.secret_storage_strategy`, explicit or defaulted, is declared by the store for the identity provider's mode (§5.6).
-4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the zone's; SPIFFE IDs are distinct unless `allow_shared_svid`.
+4. Every `match_expr` compiles. At `ConfigureInstances`: exactly one SVID per instance; the trust domain equals the realm's; SPIFFE IDs are distinct unless `allow_shared_svid`.
 5. Every `bootstrap_credential.jwt_audience` appears in the instance's `svid_selector.jwt_audience`.
 6. `allowed_source_trust_domains` ⊆ `workload_listener.accepted_trust_domains`. A platform's `principal_prefix`, if set, matches `^[a-zA-Z][a-zA-Z0-9_]{0,3}$` (Appendix B).
 7. Every `sha256` is 64 lowercase hex characters. Binaries pass the ownership, permission and no-symlink checks (§5.3).
 8. Every `config` validates against `Describe.instance_config_schema_json`, checked after every plugin has described itself and before any `ConfigureInstances` (§5.2). The schema MUST compile as JSON Schema 2020-12: a plugin with an empty or invalid schema is refused. An omitted `config` is validated as `{}`. A failure names the instance and the schema location that failed.
 9. `secret_sealing.provider = local-kek` requires `--insecure-dev` and `secret_sealing.local_kek_file`; with `vault-transit`, `vault_transit.jwt_audience` is one of `core_identity.svid_selector.jwt_audience` (as rule 5 for plugins). `admin_listener.rate_limit.max_tracked_keys` is between 10000 and 10000000. `observability.tracing.ca_cert_file` is not set together with `insecure`. `storage.postgres.max_conns`, if set, is between 1 and 1000, and `app_statement_timeout` and `reader_statement_timeout`, if set, between 100ms and 5m. `service.startup_timeout` is between 5s and 10m; `observability.tracing.sample_ratio` between 0 and 1.
-10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and zone for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
+10. Every platform referenced by a target that is not `RETIRED`, and every `(type, instance)` referenced by an existing binding row (`bindings` wiring columns or `binding_stage_state`), MUST still exist in the configuration, with the same plugin type and realm for a platform; the store of every binding MUST still declare the binding's `secret_storage_strategy`. Otherwise startup fails, unless `--allow-orphaned-bindings` is given (logged at `WARN` and audited as `SYSTEM_ORPHANED_BINDINGS`). The strategy check needs the stores' `Describe` and runs in startup step 5.
 11. Wiring that differs from existing bindings' snapshots is logged at `WARN`. Existing bindings keep their snapshot (INV-08).
-12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one zone or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_zone` is a configured zone. `workload_listener.auth_modes` is not empty and lists only `x509_svid` and `jwt_svid`; `jwt_svid` requires `expected_jwt_audience`.
+12. Every entry of `accepted_trust_domains` (and of `client_svid_auth.accepted_trust_domains`) is either the `trust_domain` of exactly one realm or listed exactly once in `federated_trust_domains`, never both. Every `federated_trust_domains[].via_realm` is a configured realm. `workload_listener.auth_modes` is not empty and lists only `x509_svid` and `jwt_svid`; `jwt_svid` requires `expected_jwt_audience`.
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
 14. Every `break_glass` binding uses `ldap_group_dn` (never `spiffe_id`); every scope pattern it lists appears in the `scopes` of a `break_glass.policies` entry; every policy has `5m ≤ default_ttl ≤ max_ttl ≤ 24h` and `max_open ≥ 1`; `min_justification_length ≥ 20` (the database minimum); `incident_reference_pattern`, if set, is a fully anchored RE2. Every webhook URL is `https://`, every `hmac_secret_env` is set, and every webhook `scopes` entry is a valid scope pattern.
 15. Theme (§7.6): `ui.theme.default_mode` is `system`, `light` or `dark`; every explicitly configured theme file exists; every theme file found has an allowed extension, is within its size limit, matches its type by content, is owned by root and is not writable by the `ligo` user; every key in `ui.theme.colors.light|dark` is a known token name without the `--color-` prefix, and every value is a CSS hex color (`#rgb`, `#rrggbb` or `#rrggbbaa`). A missing optional file or theme directory is not an error.
 16. **Governance (§3.9, ADR-13, ADR-14).**
-    - Every authorization binding has `scopes` (and no `zones`); every entry of `scopes`, `approval.required_scopes`, `interconnects.rules[].from`/`to`, `name_prefixes[].scopes` and `break_glass.policies[].scopes` is a valid scope pattern.
+    - Every authorization binding has `scopes` (and no `realms`); every entry of `scopes`, `approval.required_scopes`, `interconnects.rules[].from`/`to`, `name_prefixes[].scopes` and `break_glass.policies[].scopes` is a valid scope pattern.
     - Every platform has a `scope`, which is a valid scope path (not a pattern), and valid `target_scopes` patterns.
     - `governance.source_scopes` has exactly one entry for each trust domain listed in any `allowed_source_trust_domains`, and no entry for any other trust domain. `static` entries have a valid scope path; `path_template` entries satisfy the rules of §3.9 (verified with the Appendix D code).
     - Interconnection rule names are unique and match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (`default` is reserved); `action` is `allow` or `deny`; `default_cross_scope` is `allow` or `deny`; `additional_approvals` appear only on `allow` rules, with unique names matching `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$` and a valid scope path; `distinct_approvers` is a boolean.
@@ -3992,9 +3997,9 @@ platform_providers:                       # plugin types and the platforms that 
 Because `dbos.Launch()` immediately recovers and executes pending workflows from PostgreSQL (`AC-08`), all dependencies required by workflow steps MUST be initialized **before** DBOS is launched:
 1. Parse CLI flags (`jessevdk/go-flags`), load `server.yaml`, compute and log its SHA-256 checksum, and run static config checks (Rules 1, 2, 5, 6, 7, 9, 12, 13, 14, 15, 16, and the static part of 19).
 2. Steps 3 and 4 (SPIRE and the Sealer) run first, before anything is audited: a missing dependency, such as a sealed OpenBao, fails startup with nothing written, so a supervisor restarting `ligo` in a loop cannot flood the audit log. Both must be ready within `service.startup_timeout` (default 60s): an agent socket that does not answer, or an unreachable OpenBao, ends startup with an error naming the dependency, and the supervisor (systemd, with a back-off) restarts `ligo`. Then connect PostgreSQL pools (`app`, `reader`, `dbos`) and write audit `CONFIG_LOADED` with the configuration SHA-256, the SHA-256 of every theme file in use (§7.6), and the governance policy with its SHA-256 (rule 16, T-22). Compare the policy with the snapshot of the most recent previous `CONFIG_LOADED` entry. If its hash differs, write `CONFIG_GOVERNANCE_POLICY_CHANGED` with the differences. If the change loosens the policy (a pattern removed from `required_scopes`; `require_distinct_approvers_across_scopes` turned off or a rule's `distinct_approvers: false` added; a `deny` rule removed, moved below an `allow` rule that now matches its pairs, or changed to `allow`; an additional party removed; `default_cross_scope` changed to `allow`; a break-glass policy's `max_ttl` or `max_open` raised), log at `WARN` and also write `CONFIG_APPROVAL_POLICY_WEAKENED` listing the loosening changes. Then verify existing platform references and binding wiring (Rules 10, 11), scopes (Rule 17) and interconnections (Rule 18).
-3. Connect to all `zones[].spiffe_workload_socket` endpoints, start the composite bundle source (§7.1), and acquire `core_identity` from its zone's socket.
+3. Connect to all `realms[].spiffe_workload_socket` endpoints, start the composite bundle source (§7.1), and acquire `core_identity` from its realm's socket.
 4. Initialize the **Sealer** (`vault-transit` or `local-kek`) and verify connectivity/key availability.
-5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, zone)` plugin processes and execute `Describe` on each; validate Rules 3 and 8 against the descriptions; then execute `ConfigureInstances` on each (§5.2) and initial `Health` checks, and validate Rule 4 and the plugin part of 19.
+5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, realm)` plugin processes and execute `Describe` on each; validate Rules 3 and 8 against the descriptions; then execute `ConfigureInstances` on each (§5.2) and initial `Health` checks, and validate Rule 4 and the plugin part of 19.
 6. Initialize the **DBOS runtime**, register `ApplyBindingWorkflow` and `DeleteBindingWorkflow`, and call `dbos.Launch()`.
 7. Load the initial **Workload Resolution Cache** (`v_active_bindings`) and start the `LISTEN ligo_bindings_changed` subscriber.
 8. Start the background **Sweeper**, **Reconciler**, **Propagator** and **Notification dispatcher** loops.
@@ -4035,7 +4040,7 @@ ligo/
 │   ├── flows/                           # flow schema, allowlist checks, effective flows (ADR-16)
 │   ├── governance/                      # scopes, source-scope extractors (§3.9, App. D), sides, interconnection policy (ADR-13, ADR-14)
 │   ├── outputvalidation/                # JSON Schema + endpoint allowlist (§5.7)
-│   ├── pluginmgr/                       # go-plugin host, integrity checks, zone processes, retries
+│   ├── pluginmgr/                       # go-plugin host, integrity checks, realm processes, retries
 │   ├── propagation/                     # propagation queue and propagator (§6.8)
 │   ├── reconcile/                       # scheduled reapply/rotation
 │   ├── regexpolicy/                     # Appendix A validator, narrowing check (§3.10, App. D.3)
@@ -4150,7 +4155,7 @@ type GetCommand struct {
 
 type ListCommand struct {
 	ClientOptions
-	Zone        string `short:"z" long:"zone" description:"Filter by zone (targets, bindings)."`
+	Realm        string `short:"z" long:"realm" description:"Filter by realm (targets, bindings)."`
 	Scope       string `long:"scope" description:"Filter by governance scope pattern (any scope of the resource)."`
 	Source      string `long:"source" description:"Bindings of this source."`
 	Target      string `long:"target" description:"Bindings of this target."`
@@ -4206,7 +4211,7 @@ type ChangeRequestCommand struct {
 type CRListCommand struct {
 	ClientOptions
 	Status      string `long:"status" choice:"PENDING" choice:"APPLIED" choice:"REJECTED" choice:"WITHDRAWN" choice:"EXPIRED" choice:"FAILED_TO_APPLY" description:"Filter by status."`
-	Zone        string `short:"z" long:"zone" description:"Filter by zone."`
+	Realm        string `short:"z" long:"realm" description:"Filter by realm."`
 	Scope       string `long:"scope" description:"Filter by governance scope pattern (any scope of the request)."`
 	AwaitingMe  bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
 	Kind        string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
@@ -4264,7 +4269,7 @@ type CRReviewCommand struct {
 	ClientOptions
 	Scope string `long:"scope" description:"Only requests with a scope matching this pattern."`
 	Kind  string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
-	Zone  string `short:"z" long:"zone" description:"Only requests of this zone."`
+	Realm  string `short:"z" long:"realm" description:"Only requests of this realm."`
 }
 
 type CRWithdrawCommand struct {
@@ -4540,7 +4545,7 @@ type GovCheckCommand struct {
 | T-05 | Tampering / XSS | 2/3 | A plugin injects script or htmx attributes through the UI schema or other displayed data. | Declarative `UISchema`; `html/template`; no plugin data in `hx-*`; strict CSP with a per-response nonce, no `unsafe-eval` and Trusted Types; `hx-csp` nonce gating strips htmx attributes from unnonced elements; no `<script>` in fragments; `json_key` grammar. |
 | T-06 | Spoofing (CSRF) | 2 | Cross-site state change, or login CSRF. | `SameSite=Strict` `__Host-` cookies; `X-CSRF-Token`; `Sec-Fetch-Site`/`Origin` checks; pre-login double-submit cleared (`Max-Age=0`) on login; cookies never accepted on `/v1/admin/*`. |
 | T-07 | Info disclosure | 5 | Secrets persisted in DBOS checkpoints, errors or status. | Host-side durable sealing via Vault Transit with `wrappedDek` bound into AES-GCM AAD (ADR-07, Appendix C); error sanitization (§6.1); `dbos` retention; INV-03 tests scan all tables and logs for canary secrets. |
-| T-08 | EoP (SVID confusion) | 3 | An instance authenticates with another instance's or zone's SVID. | Process per (type, zone); exactly-one match; trust-domain equality check; distinctness check; resolved IDs logged. |
+| T-08 | EoP (SVID confusion) | 3 | An instance authenticates with another instance's or realm's SVID. | Process per (type, realm); exactly-one match; trust-domain equality check; distinctness check; resolved IDs logged. |
 | T-09 | Tampering (supply chain) | 3/7 | A plugin binary is replaced. | Root-owned, non-writable directory; no symlinks; SHA-256 verified before every spawn; fd-based exec; SPIRE `unix:sha256` selectors. |
 | T-10 | Tampering / Orphaned access | 4 | Delete leaves live credentials or accounts. | Visibility removed in the start transaction; state-driven reverse-order cleanup; `DELETE_FAILED` plus retry; sweeper; ownership tags. |
 | T-11 | Tampering / EoP (DDL injection) | 4 | Target definitions, grants or binding parameters inject SQL/DDL into target databases, or into Vault statements. | Identifier grammars plus quoting; privilege bounds (`grantable_roles`) enforced in `ValidateTarget`, `ValidateBinding` and `EnsureTarget`; parameters can never add privilege (§5.8 rule 8); restricted password alphabet; Vault template variables only (§5.8). |
@@ -4556,7 +4561,7 @@ type GovCheckCommand struct {
 | T-21 | Spoofing / DoS | 1/3 | SPIRE agent or bundle unavailable or stale. | Fail closed on bundle errors; workload API returns `503`; plugin calls fail retryably; alerting on bundle refresh age. |
 | T-22 | Tampering | 7 | `server.yaml` modified to redirect wiring or relax policy. | Config owned by root and read-only for `ligo`; config SHA-256 logged and audited at startup; per-binding wiring snapshots (INV-08); orphan check (§8.2 rule 10). |
 | T-23 | Info disclosure / Tampering | 4 | Sealing key compromise, or Transit unavailable. | Transit key `ligo-interstage` usable only by `ligo-sealer` (encrypt/decrypt, no export); key rotation via Transit versioning; sealed blobs short-lived (retention); unavailability fails attempts terminally, and a retry rotates. |
-| T-24 | Spoofing / EoP | 1/3 | An administrator of one SPIRE server publishes a forged bundle for another trust domain (e.g. a test server federating a fake `prod.internal` bundle), so that `ligo` accepts SVIDs they mint as that domain's workloads. | Exactly one authoritative bundle source per trust domain (§7.1): a zone's bundle only from its own socket, a federated domain only via its configured `via_zone`; conflicting bundles discarded and counted (`ligo_bundle_conflicts_total`); a trust domain cannot be both a zone and federated (§8.2 rule 12). |
+| T-24 | Spoofing / EoP | 1/3 | An administrator of one SPIRE server publishes a forged bundle for another trust domain (e.g. a test server federating a fake `prod.internal` bundle), so that `ligo` accepts SVIDs they mint as that domain's workloads. | Exactly one authoritative bundle source per trust domain (§7.1): a realm's bundle only from its own socket, a federated domain only via its configured `via_realm`; conflicting bundles discarded and counted (`ligo_bundle_conflicts_total`); a trust domain cannot be both a realm and federated (§8.2 rule 12). |
 | T-25 | EoP / Repudiation | 2/6 | A `trusted_automation` identity is stolen or misused (a compromised runner, a person reaching the automation's execution context, a buggy playbook) to create, change or delete sources, targets or bindings in prod without human review in `ligo`. | SPIFFE principals only (DB-enforced `chk_side_basis`); identity scoped to dedicated, non-interactive execution contexts (§10.6); `scopes` + `platforms`; delegation decides only the sides inside the automation's own scopes, never the other owner's side of a cross-scope binding (ADR-11); mandatory `approvalReference` with optional pattern; all validation controls still apply; per-principal rate limit; `CR_SIDE_APPROVED` audit (basis `DELEGATED`) and `ligo_delegated_approvals_total` metric with alerting on spikes. Residual risk R-06. |
 | T-26 | EoP / Repudiation | 2/6 | Break-glass is misused for non-emergencies, with a stolen session, or to make access permanent without review. | People-only role (DB-enforced) in a small per-scope group, required on every side that needs a decision; fresh LDAP group check and re-authentication at use; mandatory justification and incident reference; TTL with automatic revert unless every break-glass side is ratified by a different approver of that side (DB-enforced); updates blocked while open; `max_open` per policy; immediate audit, SIEM and webhook announcement; `ligo_break_glass_open` gauge. Residual risk R-07. |
 | T-27 | Spoofing / Tampering | 2/7 | A modified theme misleads administrators: hiding the maintenance or break-glass banner, imitating a different system, or running script through an SVG logo. | Theme files root-owned and validated at startup; their hashes audited in `CONFIG_LOADED`; types and sizes restricted; SVG served sandboxed and shown only via `<img>`; CSP limits styles, images and fonts to `ligo` itself; security-relevant UI rendered by the server in every theme. Residual: CSS can still hide elements, so theme changes need the same change control as `server.yaml`. |
@@ -4593,14 +4598,14 @@ type GovCheckCommand struct {
 - **Logs:** structured JSON. Every request and workflow log line carries `request_id`, `binding_id`, `workflow_id`, `attempt` (and `source_id` or `target_id` for changes of those resources). A redacting logger masks `password`, `private_key_pem`, `token`, `Authorization`, and values matching `IDENTIFIED BY \S+`.
 - **Traces:** OpenTelemetry spans for HTTP and gRPC handlers, each workflow, each step and each plugin RPC. Trace context propagates to plugins via gRPC metadata. No secrets in span attributes: a failed span, a plugin RPC's included, carries an error status and code, never the error's text. Spans are exported over OTLP/gRPC to `observability.tracing.otlp_endpoint` (off when empty, the default), over TLS verified against `ca_cert_file` (default the system roots; a change needs a restart) unless `insecure` is set, sampled at `sample_ratio` (default 0.1) for new traces and always when the caller's trace is sampled (W3C `traceparent`). A workflow joins the trace of the request that started it: the `traceparent` travels in its journaled input, so a run recovered after a crash stays in that trace. A workflow started in the background (reconciler, sweeper, propagator) starts a new trace. Workflow spans carry `ligo.binding_id`, `ligo.binding`, `ligo.workflow_id`, `ligo.revision` and `ligo.attempt`; step spans `ligo.stage` and `ligo.provider_type`.
 - **Metrics (Prometheus, Normative names).** No metric carries a scope label, because the number of scopes is unbounded; per-scope views come from the admin API and the audit log. They are served at `GET /metrics` on the metrics listener (`server.metrics_listener.listen_address`, default `127.0.0.1:9090`), in plain HTTP without authentication: it MUST be bound to a loopback or management address. Gauges of the database's state (bindings, change requests and their pending sides, sources, targets, the propagation queue, expiring bindings, open break-glass changes, overdue rotations) are computed from the database at each scrape, so every replica reports the same values; `ligo_db_scrape_success` is `0` when one of those queries failed. `ligo_audit_chain_valid` comes from a verification of the whole chain at startup and then hourly, on each replica.
-  - `ligo_bindings{phase,zone}`
+  - `ligo_bindings{phase,realm}`
   - `ligo_workflow_duration_seconds{op,result}`
   - `ligo_step_duration_seconds{stage,provider_type,result}`
   - `ligo_plugin_rpc_total{provider_type,instance,method,code}`
   - `ligo_workload_requests_total{auth_mode,result}`
   - `ligo_resolution_cache_age_seconds`
   - `ligo_resolution_invalid_regex_total`
-  - `ligo_change_requests{status,zone}`
+  - `ligo_change_requests{status,realm}`
   - `ligo_change_request_sides_pending{resource_type,side_kind}` (`side_kind`: `OWNER`, `PLATFORM`, `SOURCE`, `TARGET`, `PARTY`)
   - `ligo_sources{state}`, `ligo_targets{state}` (gauges)
   - `ligo_propagation_queue_depth{priority}` and `ligo_propagation_oldest_seconds{priority}` (gauges; the latter SHOULD be alerted on for priority 0)
@@ -4611,13 +4616,13 @@ type GovCheckCommand struct {
   - `ligo_interconnect_denied_total{rule}` (rule names are bounded by the configuration)
   - `ligo_interconnect_violations` (gauge: existing bindings the current interconnection policy would deny, §8.2 rule 18; SHOULD be alerted on when non-zero)
   - `ligo_audit_chain_valid` (gauge, from a periodic verification)
-  - `ligo_plugin_process_restarts_total{type,zone}`
-  - `ligo_break_glass_open{zone}` (gauge) and `ligo_break_glass_total{zone,operation,outcome}` (`outcome`: `ratified`, `reverted`, `revert_failed`, `review_overdue`)
+  - `ligo_plugin_process_restarts_total{type,realm}`
+  - `ligo_break_glass_open{realm}` (gauge) and `ligo_break_glass_total{realm,operation,outcome}` (`outcome`: `ratified`, `reverted`, `revert_failed`, `review_overdue`)
   - `ligo_notifications_abandoned_total{webhook}`
-  - `ligo_delegated_approvals_total{principal,zone,operation}` (SHOULD be alerted on for unusual rates)
-  - `ligo_bundle_conflicts_total{trust_domain,socket_zone}` (bundles discarded because they came from a non-authoritative socket, §7.1; SHOULD be alerted on)
+  - `ligo_delegated_approvals_total{principal,realm,operation}` (SHOULD be alerted on for unusual rates)
+  - `ligo_bundle_conflicts_total{trust_domain,socket_realm}` (bundles discarded because they came from a non-authoritative socket, §7.1; SHOULD be alerted on)
   - `ligo_db_scrape_success` (gauge: whether the last scrape's database queries all succeeded)
-  - `ligo_rotation_overdue{zone,platform}` (gauge: `ACTIVE` bindings in a static-secret identity mode whose `last_rotated_at` is `NULL` or older than `rotation_interval` + `reconciliation.interval` + `reconciliation.jitter`; SHOULD be alerted on when non-zero)
+  - `ligo_rotation_overdue{realm,platform}` (gauge: `ACTIVE` bindings in a static-secret identity mode whose `last_rotated_at` is `NULL` or older than `rotation_interval` + `reconciliation.interval` + `reconciliation.jitter`; SHOULD be alerted on when non-zero)
 
 ### 10.2 High availability
 - Multiple replicas are supported. Each replica has a unique DBOS executor ID (`instance_id_env`).
@@ -4662,34 +4667,34 @@ type GovCheckCommand struct {
 
 In SPIRE, a single SPIRE Agent connects to **one** SPIRE Server and issues SVIDs for **one** trust domain (`spiffe://<trust_domain>/...`). Even when SPIRE Federation is configured between two trust domains, federation only exchanges public trust bundles (CA certificates and JWT public keys)—it never allows a `prod` SPIRE Agent to issue a `test.internal` SVID.
 
-`ligo`'s `zones` configuration supports two operational deployment topologies without any code changes:
+`ligo`'s `realms` configuration supports two operational deployment topologies without any code changes:
 
 #### Topology A: Single Central `ligo` Server Managing Multiple SPIRE Trust Domains (`prod.internal` + `test.internal`)
 When a single `ligo` control plane provisions resources across separate SPIRE trust domains (as shown in §8.1 `server.yaml`):
 1. **Two SPIRE Agents on the `ligo` host:** The host runs one SPIRE Agent connected to the `prod.internal` SPIRE Server (listening on `unix:///run/spire/prod/agent.sock`) and a second SPIRE Agent connected to the `test.internal` SPIRE Server (listening on `unix:///run/spire/test/agent.sock`).
-2. **Core Identity:** `ligo` itself acquires its own serving and Vault Transit SVID (`core_identity`) from a single primary zone (`zone: prod`).
-3. **Per-Zone Plugin Subprocesses:** `ligo` spawns one subprocess per `(plugin_type, zone)`. The `(oracle.v1, prod)` process attaches to `/run/spire/prod/agent.sock` and receives `spiffe://prod.internal/...` SVIDs; the `(oracle.v1, test)` process attaches to `/run/spire/test/agent.sock` and receives `spiffe://test.internal/...` SVIDs.
-4. **Composite Workload Verification:** For client workloads calling `:8443`, `ligo` verifies each trust domain against the bundle from that zone's own socket (§7.1). It can therefore verify SVIDs from both `prod.internal` and `test.internal` even if the prod and test SPIRE servers are not federated with each other. This requires a `ligo` registration entry on **both** agents (see the registration rules below). (Note: if workloads in `test.internal` verify `ligo`'s `:8443` server certificate via SPIFFE mTLS, then either `test.internal` needs the `prod.internal` bundle federated, or `:8443` can use `tls_source: file` signed by a shared enterprise PKI CA.)
+2. **Core Identity:** `ligo` itself acquires its own serving and Vault Transit SVID (`core_identity`) from a single primary realm (`realm: prod`).
+3. **Per-Realm Plugin Subprocesses:** `ligo` spawns one subprocess per `(plugin_type, realm)`. The `(oracle.v1, prod)` process attaches to `/run/spire/prod/agent.sock` and receives `spiffe://prod.internal/...` SVIDs; the `(oracle.v1, test)` process attaches to `/run/spire/test/agent.sock` and receives `spiffe://test.internal/...` SVIDs.
+4. **Composite Workload Verification:** For client workloads calling `:8443`, `ligo` verifies each trust domain against the bundle from that realm's own socket (§7.1). It can therefore verify SVIDs from both `prod.internal` and `test.internal` even if the prod and test SPIRE servers are not federated with each other. This requires a `ligo` registration entry on **both** agents (see the registration rules below). (Note: if workloads in `test.internal` verify `ligo`'s `:8443` server certificate via SPIFFE mTLS, then either `test.internal` needs the `prod.internal` bundle federated, or `:8443` can use `tls_source: file` signed by a shared enterprise PKI CA.)
 
 #### Topology B: Single SPIRE Agent per `ligo` Host
 If operators prefer to run only **one** SPIRE Agent on the `ligo` host:
-- **Option B1 (Separate `ligo` deployments per environment):** Deploy one `ligo` cluster in Test (with a single `test` zone in `server.yaml`) and one `ligo` cluster in Prod (with a single `prod` zone in `server.yaml`).
-- **Option B2 (Shared Trust Domain with Multi-Instance SVIDs):** If both `oracle-prod` and `oracle-test` authenticate plugins from a single corporate trust domain (`corp.internal`), configure a single zone (or point multiple logical instances in the same zone to `/run/spire/agent.sock`). Register multiple SPIRE entries for the plugin binary with distinct SPIFFE ID paths or `hint` values (e.g. `hint: "oracle-prod"` vs. `hint: "oracle-test"`), and use `svid_selector.match_expr` to bind each logical instance to its dedicated SVID. **Security trade-off:** with a single zone, prod and test instances of a plugin type run in the **same process**. That gives up the isolation of ADR-03: a compromise of that process, or a bug that confuses instances, exposes the credentials of both environments. Choose B2 only if that is acceptable; otherwise use B1 or Topology A.
+- **Option B1 (Separate `ligo` deployments per environment):** Deploy one `ligo` cluster in Test (with a single `test` realm in `server.yaml`) and one `ligo` cluster in Prod (with a single `prod` realm in `server.yaml`).
+- **Option B2 (Shared Trust Domain with Multi-Instance SVIDs):** If both `oracle-prod` and `oracle-test` authenticate plugins from a single corporate trust domain (`corp.internal`), configure a single realm (or point multiple logical instances in the same realm to `/run/spire/agent.sock`). Register multiple SPIRE entries for the plugin binary with distinct SPIFFE ID paths or `hint` values (e.g. `hint: "oracle-prod"` vs. `hint: "oracle-test"`), and use `svid_selector.match_expr` to bind each logical instance to its dedicated SVID. **Security trade-off:** with a single realm, prod and test instances of a plugin type run in the **same process**. That gives up the isolation of ADR-03: a compromise of that process, or a bug that confuses instances, exposes the credentials of both environments. Choose B2 only if that is acceptable; otherwise use B1 or Topology A.
 
-#### Topology C: Federated verification through a single zone
+#### Topology C: Federated verification through a single realm
 If the SPIRE servers are federated, `ligo` can verify workloads of another trust domain **without connecting to that domain's agent**. The bundle reaches it through federation instead.
 1. Configure the `prod.internal` SPIRE server to federate with the `test.internal` SPIRE server: the prod server's `federation.federates_with` points at the test server's bundle endpoint, so the prod server fetches and keeps the `test.internal` bundle current. The test server must serve its bundle endpoint. Federation in the opposite direction is needed only if test workloads must verify `ligo`'s SPIFFE-issued server certificate.
 2. Add `federatesWith: ["spiffe://test.internal"]` to `ligo`'s core registration entry on the prod SPIRE server. The prod agent then delivers the `test.internal` bundle to `ligo` alongside its own.
-3. In `server.yaml`, add `{ trust_domain: test.internal, via_zone: prod }` to `workload_listener.federated_trust_domains` and `test.internal` to `accepted_trust_domains`. Do **not** also define a `test` zone. A trust domain is either a zone or federated, never both (§8.2 rule 12). If any target accepts the federated trust domain as a source, add an entry for it to `governance.source_scopes` (§3.9, §8.2 rule 16).
+3. In `server.yaml`, add `{ trust_domain: test.internal, via_realm: prod }` to `workload_listener.federated_trust_domains` and `test.internal` to `accepted_trust_domains`. Do **not** also define a `test` realm. A trust domain is either a realm or federated, never both (§8.2 rule 12). If any target accepts the federated trust domain as a source, add an entry for it to `governance.source_scopes` (§3.9, §8.2 rule 16).
 
-What this does **not** cover: plugin processes still need identities that the target systems trust. Test-zone plugins either run in a `test` zone (which needs the test agent after all, and turns this into Topology A), or the test backends (Vault, Oracle bootstrap) are configured to accept prod-issued plugin SVIDs, so the plugins live in the `prod` zone. In the second case, test and prod plugin instances share processes and lose the isolation of ADR-03.
+What this does **not** cover: plugin processes still need identities that the target systems trust. Test-realm plugins either run in a `test` realm (which needs the test agent after all, and turns this into Topology A), or the test backends (Vault, Oracle bootstrap) are configured to accept prod-issued plugin SVIDs, so the plugins live in the `prod` realm. In the second case, test and prod plugin instances share processes and lose the isolation of ADR-03.
 
 Trade-off against Topology A: trust in the `test.internal` bundle now rests on the prod SPIRE server's federation configuration, administered by the prod team. That is the safe direction, because the higher-assurance environment decides what it trusts. It also replaces one agent and one registration entry per extra trust domain with a federation relationship.
 
 #### SPIRE Registration Rules
-- **Plugin entries:** parent = the zone's agent; selectors `unix:uid:<binding uid>`, `unix:sha256:<binary sha256>`; SPIFFE ID path `/ligo/plugin/<binary>` (with optional `hint` when multiple instances in the same zone use distinct SVIDs).
-- **`ligo` core entry:** `/ns/sys/sa/ligo` in `core_identity.zone`, with `federatesWith` listing every `federated_trust_domains[].trust_domain` whose `via_zone` is the core zone.
-- **`ligo` bundle-access entries:** one entry for the `ligo` process (same `unix:uid` and `unix:sha256` selectors) on **every other zone's agent**, with SPIFFE ID path `/ns/sys/sa/ligo-bundles` and `federatesWith` listing the federated trust domains whose `via_zone` is that zone. The SVID issued for this entry exists only so that the agent releases bundles (EXT-16). `ligo` MUST NOT use it to authenticate to anything.
+- **Plugin entries:** parent = the realm's agent; selectors `unix:uid:<binding uid>`, `unix:sha256:<binary sha256>`; SPIFFE ID path `/ligo/plugin/<binary>` (with optional `hint` when multiple instances in the same realm use distinct SVIDs).
+- **`ligo` core entry:** `/ns/sys/sa/ligo` in `core_identity.realm`, with `federatesWith` listing every `federated_trust_domains[].trust_domain` whose `via_realm` is the core realm.
+- **`ligo` bundle-access entries:** one entry for the `ligo` process (same `unix:uid` and `unix:sha256` selectors) on **every other realm's agent**, with SPIFFE ID path `/ns/sys/sa/ligo-bundles` and `federatesWith` listing the federated trust domains whose `via_realm` is that realm. The SVID issued for this entry exists only so that the agent releases bundles (EXT-16). `ligo` MUST NOT use it to authenticate to anything.
 - **Alternative, not recommended:** setting `allow_unauthenticated_verifiers = true` on a non-core agent releases its *own* trust domain's bundle to unregistered callers, but never federated bundles. It is an agent-wide setting that affects every process on the host.
 - The plugin entry's `sha256` selector MUST be updated together with `server.yaml` on every plugin release.
 
@@ -4725,9 +4730,9 @@ All code MUST be tested on a lab that reproduces the production architecture wit
 
 | Component | Count | Purpose |
 | :--- | :--- | :--- |
-| SPIRE server | 2 (trust domains `prod.lab` and `test.lab`) | Two zones, so zone isolation, the authoritative bundle source (§7.1, T-24) and optional federation (Topology C) can be exercised. `prod.lab` models a data centre (`static` source scope); workloads in `test.lab` are registered under `/acct/<account>/tenant/<tenancy>/…` paths by a registrar that tenants cannot influence, so that the multi-tenant extractor (§3.9), the four topologies of ADR-13 and the registration assumption of T-29 are exercised |
+| SPIRE server | 2 (trust domains `prod.lab` and `test.lab`) | Two realms, so realm isolation, the authoritative bundle source (§7.1, T-24) and optional federation (Topology C) can be exercised. `prod.lab` models a data centre (`static` source scope); workloads in `test.lab` are registered under `/acct/<account>/tenant/<tenancy>/…` paths by a registrar that tenants cannot influence, so that the multi-tenant extractor (§3.9), the four topologies of ADR-13 and the registration assumption of T-29 are exercised |
 | SPIRE agent | one per trust domain on the `ligo` host, plus agents on workload and automation hosts | Topology A (§10.5); workload attestation; dedicated-node rules for `trusted_automation` (§10.6) |
-| Vault **or** OpenBao | 1 per zone | Transit sealing (ADR-07), KV v2, Database Secrets Engine, JWT/SPIFFE auth for plugins and workloads (EXT-17) |
+| Vault **or** OpenBao | 1 per realm | Transit sealing (ADR-07), KV v2, Database Secrets Engine, JWT/SPIFFE auth for plugins and workloads (EXT-17) |
 | `ligo` server | 2 replicas | High availability, singletons, cross-replica maintenance mode (AC-26) and concurrency scenarios |
 | PostgreSQL | 1 | `ligo`'s own database (§4), with the three database roles and `sslmode=verify-full` |
 | LDAP directory | 1 | Admin authentication; operator, approver and break-glass groups for several scopes, including at least two tenancies, a data centre and an Information Security party (§7.2.1, ADR-13, ADR-14); and the `openldap.v1` identity provider |
@@ -4755,8 +4760,8 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | ID | Given | When | Then |
 | :--- | :--- | :--- | :--- |
 | AC-01 | A source and a target in `dc/corp-test`, which does not require approval; the operator acts for it | Operator POSTs a valid binding between them | `202`; the binding reaches `ACTIVE`; matching workloads receive it; audit contains `CR_CREATED`, `APPLY_STARTED`, `PROVISION_SUCCESS`. |
-| AC-02 | Any zone | A source is registered with the regex `^spiffe://prod\.internal/ns/a\|.*$` | `422 validation-failed` (top-level alternation). |
-| AC-03 | Any zone | A source regex contains `(?i)`, `(?m)`, `(?s)`, `.`, a character class matching `/`, a `/` inside a repeated or optional group (e.g. `x(?:[a-z]+\|/)+`, `x(/[a-z]+)*`, `x(/[a-z]+)?`), or ends with `\$` | `422 validation-failed`. The full set of reference vectors in Appendix A.5 passes. |
+| AC-02 | Any realm | A source is registered with the regex `^spiffe://prod\.internal/ns/a\|.*$` | `422 validation-failed` (top-level alternation). |
+| AC-03 | Any realm | A source regex contains `(?i)`, `(?m)`, `(?s)`, `.`, a character class matching `/`, a `/` inside a repeated or optional group (e.g. `x(?:[a-z]+\|/)+`, `x(/[a-z]+)*`, `x(/[a-z]+)?`), or ends with `\$` | `422 validation-failed`. The full set of reference vectors in Appendix A.5 passes. |
 | AC-04 | Scope `dc/corp-prod/ledger` requires approval (a source and a target in that scope) | Operator A creates a binding change request, and A tries to approve it | `403 four-eyes-violation`. Approver B approves with the matching `payloadSha256`, and the binding is applied. |
 | AC-05 | Approver B | Approves with a stale `payloadSha256` | `409 payload-mismatch`; nothing applied; the change request stays `PENDING` and approving with the current hash succeeds. |
 | AC-05a | A plugin upgrade changed `ValidateBinding`'s normalized output since the change request was created, or the target was changed (new revision) meanwhile | Approver B approves with the stored hash | `409 normalization-drift`; the change request is `FAILED_TO_APPLY` (`normalization drift`); nothing applied. |
@@ -4788,7 +4793,7 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-28 | Same principal | It omits `approvalReference`, sends `CHG12`, or binds a target on a platform outside `platforms` | `422 validation-failed` for the reference cases and `403 forbidden` for the target case; no change request is stored. |
 | AC-29 | `server.yaml` binds `trusted_automation` to an `ldap_group_dn` | Startup | Fatal configuration error (§8.2 rule 13). Independently, a direct database insert of a `DELEGATED` side for a change request whose `requested_by` is not a `spiffe://` ID is rejected by `chk_side_basis`. |
 | AC-30 | A person runs the same Terraform provider or Ansible module on their own workstation with their LDAP credentials | They submit a `dc/corp-prod/ledger` change | The side is `HUMAN` and the request `PENDING`; it requires an approver. |
-| AC-31 | `livia` is in the `dc/corp-prod/*` break-glass group (same-scope binding in `dc/corp-prod/ledger`) | She submits a break-glass `CREATE` with justification, incident `INC0012345` and TTL 1h, re-entering her password | Applied without approval; basis `BREAK_GLASS`; `BREAK_GLASS_USED` audited and delivered to the webhook; `ligo_break_glass_open{zone="prod"}` = 1. |
+| AC-31 | `livia` is in the `dc/corp-prod/*` break-glass group (same-scope binding in `dc/corp-prod/ledger`) | She submits a break-glass `CREATE` with justification, incident `INC0012345` and TTL 1h, re-entering her password | Applied without approval; basis `BREAK_GLASS`; `BREAK_GLASS_USED` audited and delivered to the webhook; `ligo_break_glass_open{realm="prod"}` = 1. |
 | AC-32 | AC-31, nobody ratifies | The TTL expires | The sweeper reverts it: the binding is deleted by a `SYSTEM_REVERT` `DELETE`; `BREAK_GLASS_REVERTED` is audited and announced, preceded by `BREAK_GLASS_EXPIRING`. |
 | AC-33 | A break-glass `UPDATE` from revision 3 to 4 is open | An approver other than the requester ratifies it | Expiry cleared; revision 4 stays; `BREAK_GLASS_RATIFIED`. If instead the requester tries to ratify, the database rejects it (`chk_side_ratification`). |
 | AC-34 | A break-glass `UPDATE` from revision 3 to 4 expires unratified | Sweeper runs | A `SYSTEM_REVERT` `UPDATE` re-applies revision 3's desired state as revision 5. |
@@ -5716,7 +5721,7 @@ sequenceDiagram
     participant L as ligo (replica)
     participant FS as Config files
     participant PG as PostgreSQL
-    participant SA as SPIRE agents (one per zone)
+    participant SA as SPIRE agents (one per realm)
     participant VT as Vault Transit
     participant P as Plugin processes
     participant D as DBOS runtime
@@ -5729,11 +5734,11 @@ sequenceDiagram
     alt scopes drifted and no --accept-scope-changes
         L-->>L: exit with fatal error
     end
-    L->>SA: open Workload API on every zone socket
+    L->>SA: open Workload API on every realm socket
     SA-->>L: X.509 and JWT bundles, core SVID
     L->>VT: authenticate with JWT-SVID, check transit key
     VT-->>L: key available
-    L->>P: spawn one process per (type, zone), verify binary SHA-256
+    L->>P: spawn one process per (type, realm), verify binary SHA-256
     L->>P: Describe, ConfigureInstances, Health
     P-->>L: capabilities, schemas, resolved SVID per instance and platform
     L->>P: re-check access levels and flows against platform bounds (rule 19)
@@ -6195,7 +6200,7 @@ sequenceDiagram
 
 | Message | Information carried | Protection |
 | :--- | :--- | :--- |
-| Outbox insert | Event ID (UUIDv7), webhook name, event type, payload (event, time, zone, scopes, side, binding, change request, actor, and for break-glass the justification, incident and expiry) | Same transaction as the event: never lost, never announced if rolled back; no secrets or credential locations |
+| Outbox insert | Event ID (UUIDv7), webhook name, event type, payload (event, time, realm, scopes, side, binding, change request, actor, and for break-glass the justification, incident and expiry) | Same transaction as the event: never lost, never announced if rolled back; no secrets or credential locations |
 | Webhook `POST` | Payload, timestamp, HMAC-SHA256 signature over timestamp and body | TLS verified against `ca_cert_file`; receivers check signature and age, and deduplicate on `eventId` |
 
 ### E.13 Maintenance mode and upgrade

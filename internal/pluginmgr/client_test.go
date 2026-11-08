@@ -66,7 +66,7 @@ func TestStart(t *testing.T) {
 	if err != nil || d.GetPluginType() != "test.v1" || d.GetKind() != pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER {
 		t.Fatalf("Describe = (%v, %v)", d, err)
 	}
-	r, err := c.Control.ConfigureInstances(ctx, &pluginv1.ConfigureInstancesRequest{Zone: "prod", Instances: []*pluginv1.InstanceDescriptor{{Name: "pg-prod", TrustDomain: "prod.lab"}}})
+	r, err := c.Control.ConfigureInstances(ctx, &pluginv1.ConfigureInstancesRequest{Realm: "prod", Instances: []*pluginv1.InstanceDescriptor{{Name: "pg-prod", TrustDomain: "prod.lab"}}})
 	if err != nil || len(r.GetResolved()) != 1 || r.GetResolved()[0].GetSpiffeId() != "spiffe://prod.lab/plugin/pg-prod" {
 		t.Errorf("ConfigureInstances = (%v, %v)", r, err)
 	}

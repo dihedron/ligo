@@ -133,11 +133,11 @@ func (s *Server) target(w http.ResponseWriter, r *http.Request) {
 
 // PlatformRow is a configured platform with its plugin's health.
 type PlatformRow struct {
-	Name, Type, Zone, Scope, DisplayName string
-	TargetScopes                         []string
-	IdentityProvider, SecretStore        string
-	Serving                              bool
-	Health                               string
+	Name, Type, Realm, Scope, DisplayName string
+	TargetScopes                          []string
+	IdentityProvider, SecretStore         string
+	Serving                               bool
+	Health                                string
 }
 
 // platforms lists server.yaml's platforms, read-only, with their health
@@ -150,7 +150,7 @@ func (s *Server) platforms(w http.ResponseWriter, r *http.Request) {
 	for _, pp := range s.Config.PlatformProviders {
 		for i := range pp.Platforms {
 			pl := &pp.Platforms[i]
-			row := PlatformRow{Name: pl.Name, Type: pp.Type, Zone: pl.Zone, Scope: pl.Scope, DisplayName: pl.DisplayName, TargetScopes: pl.TargetScopes,
+			row := PlatformRow{Name: pl.Name, Type: pp.Type, Realm: pl.Realm, Scope: pl.Scope, DisplayName: pl.DisplayName, TargetScopes: pl.TargetScopes,
 				IdentityProvider: pl.IdentityProvider.Instance, SecretStore: pl.SecretStore.Instance}
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			h, err := s.Plugins.Health(ctx, pl.Name) // shortcut: one platform after another; call in parallel if lists grow long

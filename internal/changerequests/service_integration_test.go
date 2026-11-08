@@ -245,7 +245,7 @@ func TestApproveFailures(t *testing.T) {
 func newBinding(t *testing.T, s *Service, owner *pgxpool.Pool) *Request {
 	t.Helper()
 	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE",
-		Consent: ConsentAll, Zone: "prod", SourceScope: payments, TargetScope: ledger, PlatformScope: "dc/corp-prod",
+		Consent: ConsentAll, Realm: "prod", SourceScope: payments, TargetScope: ledger, PlatformScope: "dc/corp-prod",
 		InterconnectRule: "cloud-to-dc", DistinctApprovers: false, Payload: json.RawMessage(`{"kind":"Binding"}`)}
 	err := s.Create(context.Background(), alice, r, []Candidate{{Side: "SOURCE", Scope: payments}, {Side: "TARGET", Scope: ledger}}, "")
 	if err != nil {
@@ -331,7 +331,7 @@ func TestPlatformDecision(t *testing.T) {
 	s.Policy = &governance.Policy{RequiredScopes: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
 	ctx := context.Background()
 	const platform = "dc/corp-prod"
-	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE", Consent: ConsentAll, Zone: "prod",
+	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE", Consent: ConsentAll, Realm: "prod",
 		SourceScope: "cloud/acme/app/app01", TargetScope: "cloud/globex/data/db01", PlatformScope: platform, DistinctApprovers: true,
 		Payload: json.RawMessage(`{"kind":"Binding"}`)}
 	filer := Caller{Principal: authz.Principal{Name: "carla"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/acme/*")}}
