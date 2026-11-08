@@ -6,7 +6,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | :-- | :------------------------------------ | :--------- | :---------------- |
 | 1 | Audit pruning | 2026-11-08 | Not started |
 | 2 | Pluggable authentication | 2026-11-08 | Not started |
-| 3 | The fix for GO-2026-5932 | 2026-11-08 | Open: decide |
+| 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists |
 | 4 | Manual test A-1 | 2026-11-07 | Open: in-person session |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Waiting for the lab host |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
@@ -61,7 +61,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 
 **What changed.** On 2026-11-08 `govulncheck` names a fix: `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2`, a pseudo-version, so an untagged commit. The symbol scan still reports that `ligo` is affected by 0 vulnerabilities.
 
-**To decide.** Bump to the pseudo-version now, or wait for a tagged `x/crypto` release and bump then. Either way, the acceptance note goes once the finding is gone.
+**Decided (2026-11-08).** Bump now, before the soak, so the soak runs on it. `ligo` pins the pseudo-version, `make vuln` reports nothing, and the acceptance note is gone from §12. What remains is to move to the first tagged `x/crypto` release that contains the fix, once there is one.
 
 ## 4. Manual test A-1
 
