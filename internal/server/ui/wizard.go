@@ -28,9 +28,9 @@ type Workflows interface {
 
 // SourceChoice is a source the wizard offers, with the policy's outcome.
 type SourceChoice struct {
-	Name, Scope string
-	Allowed     bool
-	Rule        string
+	Name, Jurisdiction string
+	Allowed            bool
+	Rule               string
 }
 
 // Inline is a source the wizard registers with the binding (§7.2.4).
@@ -129,11 +129,11 @@ func (s *Server) wizard(w http.ResponseWriter, r *http.Request) {
 			source = wz.Inline.Name
 		}
 		if wz.Name == "" {
-			scope := ""
+			jurisdiction := ""
 			if v, serr := s.Sources.Get(ctx, c, source); serr == nil {
-				scope = v.Metadata.Scope
+				jurisdiction = v.Metadata.Jurisdiction
 			}
-			prefix, _ := engine.ResolvePrefix(engine.KindBinding, scope, s.Bindings.Rules.NamePrefixes)
+			prefix, _ := engine.ResolvePrefix(engine.KindBinding, jurisdiction, s.Bindings.Rules.NamePrefixes)
 			wz.Name = engine.SuggestName(source, wz.Target.Metadata.Name, prefix)
 		}
 		wz.Flows = s.plannedFlows(wz.Target)
@@ -158,13 +158,13 @@ func (s *Server) sourceChoices(ctx context.Context, c changerequests.Caller, tar
 	if offer {
 		list, err := s.Catalog.Sources(ctx, c, "", 200)
 		for _, src := range list {
-			out = append(out, SourceChoice{Name: src.Name, Scope: src.Scope, Allowed: true})
+			out = append(out, SourceChoice{Name: src.Name, Jurisdiction: src.Jurisdiction, Allowed: true})
 		}
 		return out, err
 	}
 	outcomes, err := s.Catalog.Outcomes(ctx, c, target)
 	for _, o := range outcomes {
-		out = append(out, SourceChoice{Name: o.Source, Scope: o.SourceScope, Allowed: o.Allowed, Rule: o.Rule})
+		out = append(out, SourceChoice{Name: o.Source, Jurisdiction: o.SourceJurisdiction, Allowed: o.Allowed, Rule: o.Rule})
 	}
 	return out, err
 }
@@ -355,7 +355,7 @@ func (s *Server) bindingDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // bindingOperate is POST /ui/bindings/{name}/{retry,rotate}, for an
-// operator of one of the binding's scopes; it answers the status row.
+// operator of one of the binding's jurisdictions; it answers the status row.
 func (s *Server) bindingOperate(w http.ResponseWriter, r *http.Request) {
 	ctx, sess := r.Context(), session(r)
 	c := sess.Caller()
@@ -365,8 +365,8 @@ func (s *Server) bindingOperate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := v.Metadata
-	if !c.Grants.Operator(m.SourceScope) && !c.Grants.Operator(m.TargetScope) && !c.Grants.Operator(m.PlatformScope) {
-		s.alert(w, r, http.StatusForbidden, "An operator role on one of the binding's scopes is required.")
+	if !c.Grants.Operator(m.SourceJurisdiction) && !c.Grants.Operator(m.TargetJurisdiction) && !c.Grants.Operator(m.PlatformJurisdiction) {
+		s.alert(w, r, http.StatusForbidden, "An operator role on one of the binding's jurisdictions is required.")
 		return
 	}
 	act := s.Workflows.Retry
@@ -380,7 +380,7 @@ func (s *Server) bindingOperate(w http.ResponseWriter, r *http.Request) {
 	s.bindingStatus(w, r)
 }
 
-// bindingPreview is POST /ui/bindings/governance-preview: the governance
+// bindingPreview is POST /ui/bindings/charter-preview: the charter
 // outcome of the wizard's values (internal/preview).
 func (s *Server) bindingPreview(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
@@ -396,7 +396,7 @@ func (s *Server) bindingPreview(w http.ResponseWriter, r *http.Request) {
 	if e, err := s.preview().Evaluate(r.Context(), session(r).Caller(), b); err != nil {
 		d.Error = message(err)
 	} else {
-		d.Governance = e
+		d.Charter = e
 	}
 	s.fragment(w, r, http.StatusOK, "binding-check", d)
 }

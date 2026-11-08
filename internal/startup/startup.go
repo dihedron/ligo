@@ -1,7 +1,7 @@
 // Package startup runs the startup checks that need the database (§8.2
-// step 2): the CONFIG_LOADED audit and the governance policy's changes,
+// step 2): the CONFIG_LOADED audit and the charter's changes,
 // references to platforms and plugins that no longer exist (rules 10 and
-// 11), names of existing resources (rule 16), scope drift and re-scoping
+// 11), names of existing resources (rule 16), jurisdiction drift and transfer
 // (rule 17), and interconnection violations (rule 18); after the plugins
 // start (step 5), the store strategies (rule 10) and the platforms' current
 // bounds (rule 19).
@@ -22,10 +22,10 @@ import (
 	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
@@ -41,22 +41,22 @@ type Checks struct {
 	DB           *pgxpool.Pool // the app pool
 	Config       *config.Config
 	ConfigSHA256 string
-	ThemeSHA256  map[string]string                // the theme files in use and tokens.css (theme.Theme.Hashes)
-	Extractors   map[string]*governance.Extractor // the source scope extractors, by trust domain (sources.Rules)
-	// AllowOrphanedBindings and AcceptScopeChanges are the flags of
+	ThemeSHA256  map[string]string             // the theme files in use and tokens.css (theme.Theme.Hashes)
+	Extractors   map[string]*charter.Extractor // the source jurisdiction extractors, by trust domain (sources.Rules)
+	// AllowOrphanedBindings and AcceptJurisdictionChanges are the flags of
 	// ligo serve (§8.2 rules 10 and 17).
-	AllowOrphanedBindings bool
-	AcceptScopeChanges    bool
-	Logger                *slog.Logger
+	AllowOrphanedBindings     bool
+	AcceptJurisdictionChanges bool
+	Logger                    *slog.Logger
 
-	policy *governance.Policy
+	policy *charter.Policy
 }
 
 // Run runs the checks in the order of §8.2 step 2; the first that fails
 // stops startup.
 func (c *Checks) Run(ctx context.Context) error {
 	c.policy = c.Config.Policy()
-	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.scopes, c.interconnects, c.breakGlassParties} {
+	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.jurisdictions, c.interconnects, c.breakGlassParties} {
 		if err := check(ctx); err != nil {
 			return err
 		}
@@ -81,7 +81,7 @@ func snapshot(v any) json.RawMessage {
 }
 
 // configLoaded audits CONFIG_LOADED and, against the previous entry's
-// policy, CONFIG_GOVERNANCE_POLICY_CHANGED and
+// policy, CONFIG_CHARTER_CHANGED and
 // CONFIG_APPROVAL_POLICY_WEAKENED.
 func (c *Checks) configLoaded(ctx context.Context) error {
 	canonical, err := c.policy.Canonical()
@@ -123,14 +123,14 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		entries = append(entries, audit.Entry{Action: "CONFIG_GOVERNANCE_POLICY_CHANGED", Actor: actor,
+		entries = append(entries, audit.Entry{Action: "CONFIG_CHARTER_CHANGED", Actor: actor,
 			Snapshot: snapshot(map[string]any{"previousSha256": previous.PolicySHA256, "policySha256": sha, "changes": changes})})
-		var old governance.Policy
+		var old charter.Policy
 		if err := json.Unmarshal(previous.Policy, &old); err != nil {
 			return fmt.Errorf("startup: the previous policy: %w", err)
 		}
-		if loose := governance.Loosening(&old, c.policy); len(loose) > 0 {
-			c.Logger.Warn("the governance policy is weaker than at the previous start", "changes", loose)
+		if loose := charter.Loosening(&old, c.policy); len(loose) > 0 {
+			c.Logger.Warn("the charter is weaker than at the previous start", "changes", loose)
 			entries = append(entries, audit.Entry{Action: "CONFIG_APPROVAL_POLICY_WEAKENED", Actor: actor,
 				Snapshot: snapshot(map[string]any{"changes": loose})})
 		}
@@ -311,14 +311,14 @@ func (c *Checks) wiring(ctx context.Context) error {
 }
 
 // names is the startup part of rule 16: every name prefix that applies to
-// the scope of an existing resource resolves.
+// the jurisdiction of an existing resource resolves.
 func (c *Checks) names(ctx context.Context) error {
-	rows, err := c.DB.Query(ctx, `SELECT 'source', scope FROM sources WHERE state <> 'RETIRED'
-		UNION SELECT 'target', scope FROM targets WHERE state <> 'RETIRED' UNION SELECT 'binding', source_scope FROM bindings`)
+	rows, err := c.DB.Query(ctx, `SELECT 'source', jurisdiction FROM sources WHERE state <> 'RETIRED'
+		UNION SELECT 'target', jurisdiction FROM targets WHERE state <> 'RETIRED' UNION SELECT 'binding', source_jurisdiction FROM bindings`)
 	if err != nil {
 		return err
 	}
-	scopes, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([2]string, error) {
+	jurisdictions, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([2]string, error) {
 		var v [2]string
 		return v, r.Scan(&v[0], &v[1])
 	})
@@ -326,9 +326,9 @@ func (c *Checks) names(ctx context.Context) error {
 		return err
 	}
 	var errs []error
-	for _, s := range scopes {
-		if _, err := engine.ResolvePrefix(engine.Kind(s[0]), s[1], c.Config.Governance.NamePrefixes); err != nil {
-			errs = append(errs, fmt.Errorf("%s scope %s: %w", s[0], s[1], err))
+	for _, s := range jurisdictions {
+		if _, err := engine.ResolvePrefix(engine.Kind(s[0]), s[1], c.Config.Charter.NamePrefixes); err != nil {
+			errs = append(errs, fmt.Errorf("%s jurisdiction %s: %w", s[0], s[1], err))
 		}
 	}
 	if len(errs) > 0 {
@@ -356,17 +356,17 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 			}
 		}
 	}
-	rows, err := c.DB.Query(ctx, "SELECT name, platform, scope, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err := c.DB.Query(ctx, "SELECT name, platform, jurisdiction, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type target struct {
-		name, platform, scope string
-		definition            []byte
+		name, platform, jurisdiction string
+		definition                   []byte
 	}
 	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
 		var t target
-		return t, r.Scan(&t.name, &t.platform, &t.scope, &t.definition)
+		return t, r.Scan(&t.name, &t.platform, &t.jurisdiction, &t.definition)
 	})
 	if err != nil {
 		return err
@@ -377,7 +377,7 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 			continue
 		}
 		if field := declared(typ); field != "" {
-			if err := targets.CheckNamespace(c.Config.Governance.Accounts, p.NamespaceTemplate, field, t.scope, t.definition); err != nil {
+			if err := targets.CheckNamespace(c.Config.Charter.Accounts, p.NamespaceTemplate, field, t.jurisdiction, t.definition); err != nil {
 				fatal = append(fatal, fmt.Sprintf("target %s: %v", t.name, err))
 			}
 		}
@@ -388,39 +388,39 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 	return nil
 }
 
-// drift is a resource whose stored scope no longer matches the
+// drift is a resource whose stored jurisdiction no longer matches the
 // configuration.
 type drift struct {
-	id         uuid.UUID
-	name       string
-	old, scope string
+	id                uuid.UUID
+	name              string
+	old, jurisdiction string
 }
 
 // accountDrift is a source or target whose account column differs from what
-// its scope gives under the configuration.
+// its jurisdiction gives under the configuration.
 type accountDrift struct {
 	drift
 	typ, table string
 }
 
-// accountOf compares the stored account of a resource with its scope's. A new
+// accountOf compares the stored account of a resource with its jurisdiction's. A new
 // account must be registered: a server that cannot start cannot register it,
 // so the message says how to get there.
-func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, scope, stored string, fatal, drifted *[]string, out *[]accountDrift) error {
-	a := c.Config.Governance.Accounts
-	want, _ := a.AccountOf(scope)
+func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, jurisdiction, stored string, fatal, drifted *[]string, out *[]accountDrift) error {
+	a := c.Config.Charter.Accounts
+	want, _ := a.AccountOf(jurisdiction)
 	if want == stored {
 		return nil
 	}
-	if _, err := accounts.Require(ctx, c.DB, a, scope); err != nil {
+	if _, err := accounts.Require(ctx, c.DB, a, jurisdiction); err != nil {
 		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
-			*fatal = append(*fatal, fmt.Sprintf("%s %s: account %q of scope %s is not registered: restore the configuration, register it, and start again",
-				strings.ToLower(typ), d.name, want, scope))
+			*fatal = append(*fatal, fmt.Sprintf("%s %s: account %q of jurisdiction %s is not registered: restore the configuration, register it, and start again",
+				strings.ToLower(typ), d.name, want, jurisdiction))
 			return nil
 		}
 		return err
 	}
-	d.old, d.scope = stored, want
+	d.old, d.jurisdiction = stored, want
 	*out = append(*out, accountDrift{drift: d, typ: typ, table: table})
 	*drifted = append(*drifted, fmt.Sprintf("%s %s: account %q to %q", strings.ToLower(typ), d.name, stored, want))
 	return nil
@@ -430,28 +430,28 @@ func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, scop
 // no failing, as its approval checks the registry again.
 func (c *Checks) reaccount(ctx context.Context, d accountDrift) error {
 	return pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+		if _, err := tx.Exec(ctx, "SET LOCAL ligo.transfer = 'on'"); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "UPDATE "+d.table+" SET account = nullif($2, '') WHERE id = $1", d.id, d.scope); err != nil {
+		if _, err := tx.Exec(ctx, "UPDATE "+d.table+" SET account = nullif($2, '') WHERE id = $1", d.id, d.jurisdiction); err != nil {
 			return err
 		}
-		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: d.typ, ResourceID: &d.id, ResourceName: d.name, Action: d.typ + "_RESCOPED", Actor: actor,
-			Snapshot: snapshot(map[string]string{"column": "account", "old": d.old, "new": d.scope})})
+		_, err := audit.Append(ctx, tx, audit.Entry{ResourceType: d.typ, ResourceID: &d.id, ResourceName: d.name, Action: d.typ + "_TRANSFERRED", Actor: actor,
+			Snapshot: snapshot(map[string]string{"column": "account", "old": d.old, "new": d.jurisdiction})})
 		if err == nil {
-			c.Logger.Warn("re-scoped", "resource_type", d.typ, "name", d.name, "old_account", d.old, "new_account", d.scope)
+			c.Logger.Warn("transferred", "resource_type", d.typ, "name", d.name, "old_account", d.old, "new_account", d.jurisdiction)
 		}
 		return err
 	})
 }
 
-// scopes is rule 17: sources, targets and bindings whose scopes drifted
-// fail startup, unless --accept-scope-changes re-scopes them.
-func (c *Checks) scopes(ctx context.Context) error {
+// jurisdictions is rule 17: sources, targets and bindings whose jurisdictions drifted
+// fail startup, unless --accept-jurisdiction-changes transfers them.
+func (c *Checks) jurisdictions(ctx context.Context) error {
 	var fatal, drifted []string
 	var sources, targets []drift
 	var reaccounted []accountDrift
-	rows, err := c.DB.Query(ctx, "SELECT id, name, scope, trust_domain, svid_regex, coalesce(account, '') FROM sources WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err := c.DB.Query(ctx, "SELECT id, name, jurisdiction, trust_domain, svid_regex, coalesce(account, '') FROM sources WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
@@ -469,35 +469,35 @@ func (c *Checks) scopes(ctx context.Context) error {
 	for _, s := range all {
 		x, ok := c.Extractors[s.td]
 		if ok {
-			s.scope, err = x.SourceScope(s.regex, s.td)
+			s.jurisdiction, err = x.SourceJurisdiction(s.regex, s.td)
 		}
 		switch {
 		case !ok || err != nil:
-			fatal = append(fatal, fmt.Sprintf("source %s: its regex resolves to no scope", s.name))
-		case s.scope != s.old:
+			fatal = append(fatal, fmt.Sprintf("source %s: its regex resolves to no jurisdiction", s.name))
+		case s.jurisdiction != s.old:
 			sources = append(sources, s.drift)
-			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.scope))
+			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.jurisdiction))
 		}
 		if ok && err == nil {
-			if a := c.Config.Governance.Accounts; !a.SourceConforms(s.scope) {
-				fatal = append(fatal, fmt.Sprintf("source %s: scope %s does not conform to %s", s.name, s.scope, a.SourceScope))
+			if a := c.Config.Charter.Accounts; !a.SourceConforms(s.jurisdiction) {
+				fatal = append(fatal, fmt.Sprintf("source %s: jurisdiction %s does not conform to %s", s.name, s.jurisdiction, a.SourceJurisdiction))
 			}
-			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.scope, s.account, &fatal, &drifted, &reaccounted); err != nil {
+			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.jurisdiction, s.account, &fatal, &drifted, &reaccounted); err != nil {
 				return err
 			}
 		}
 	}
-	rows, err = c.DB.Query(ctx, "SELECT id, name, scope, platform_scope, platform, coalesce(account, '') FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err = c.DB.Query(ctx, "SELECT id, name, jurisdiction, platform_jurisdiction, platform, coalesce(account, '') FROM targets WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
 	type target struct {
 		drift
-		scope, platform, account string
+		jurisdiction, platform, account string
 	}
 	tgts, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
 		var t target
-		return t, r.Scan(&t.id, &t.name, &t.scope, &t.old, &t.platform, &t.account)
+		return t, r.Scan(&t.id, &t.name, &t.jurisdiction, &t.old, &t.platform, &t.account)
 	})
 	if err != nil {
 		return err
@@ -507,18 +507,18 @@ func (c *Checks) scopes(ctx context.Context) error {
 		if p == nil {
 			continue // rule 10
 		}
-		if !slices.ContainsFunc(p.TargetScopes, func(pat string) bool { return governance.ScopeMatches(pat, t.scope) }) {
-			fatal = append(fatal, fmt.Sprintf("target %s: scope %s is not in the target_scopes of %s", t.name, t.scope, p.Name))
+		if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, t.jurisdiction) }) {
+			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s is not in the target_jurisdictions of %s", t.name, t.jurisdiction, p.Name))
 		}
-		if p.Scope != t.old {
-			t.drift.scope = p.Scope
+		if p.Jurisdiction != t.old {
+			t.drift.jurisdiction = p.Jurisdiction
 			targets = append(targets, t.drift)
-			drifted = append(drifted, fmt.Sprintf("target %s: platform scope %s to %s", t.name, t.old, p.Scope))
+			drifted = append(drifted, fmt.Sprintf("target %s: platform jurisdiction %s to %s", t.name, t.old, p.Jurisdiction))
 		}
-		if a := c.Config.Governance.Accounts; !a.TargetConforms(t.scope) {
-			fatal = append(fatal, fmt.Sprintf("target %s: scope %s does not conform to %s", t.name, t.scope, a.TargetScope))
+		if a := c.Config.Charter.Accounts; !a.TargetConforms(t.jurisdiction) {
+			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s does not conform to %s", t.name, t.jurisdiction, a.TargetJurisdiction))
 		}
-		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.scope, t.account, &fatal, &drifted, &reaccounted); err != nil {
+		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.jurisdiction, t.account, &fatal, &drifted, &reaccounted); err != nil {
 			return err
 		}
 	}
@@ -527,27 +527,27 @@ func (c *Checks) scopes(ctx context.Context) error {
 		return err
 	}
 	if stale > 0 {
-		drifted = append(drifted, fmt.Sprintf("%d bindings whose scopes differ from their source's or target's", stale))
+		drifted = append(drifted, fmt.Sprintf("%d bindings whose jurisdictions differ from their source's or target's", stale))
 	}
 	if len(fatal) > 0 {
-		return fmt.Errorf("startup: scopes that no re-scoping can fix (§8.2 rule 17): retire the resources or correct the configuration: %s",
+		return fmt.Errorf("startup: jurisdictions that no transfer can fix (§8.2 rule 17): retire the resources or correct the configuration: %s",
 			strings.Join(fatal, "; "))
 	}
 	if len(drifted) == 0 {
 		return nil
 	}
-	if !c.AcceptScopeChanges {
-		return fmt.Errorf("startup: scopes changed (§8.2 rule 17; --accept-scope-changes re-scopes): %s", strings.Join(drifted, "; "))
+	if !c.AcceptJurisdictionChanges {
+		return fmt.Errorf("startup: jurisdictions changed (§8.2 rule 17; --accept-jurisdiction-changes transfers): %s", strings.Join(drifted, "; "))
 	}
 	for _, s := range sources {
-		if err := c.rescope(ctx, "SOURCE", s, "UPDATE sources SET scope = $2 WHERE id = $1",
-			"source_id = $1", "source_scope", "payload->>'source' = $2"); err != nil {
+		if err := c.transfer(ctx, "SOURCE", s, "UPDATE sources SET jurisdiction = $2 WHERE id = $1",
+			"source_id = $1", "source_jurisdiction", "payload->>'source' = $2"); err != nil {
 			return err
 		}
 	}
 	for _, t := range targets {
-		if err := c.rescope(ctx, "TARGET", t, "UPDATE targets SET platform_scope = $2 WHERE id = $1",
-			"target_id = $1", "platform_scope", "payload->>'target' = $2"); err != nil {
+		if err := c.transfer(ctx, "TARGET", t, "UPDATE targets SET platform_jurisdiction = $2 WHERE id = $1",
+			"target_id = $1", "platform_jurisdiction", "payload->>'target' = $2"); err != nil {
 			return err
 		}
 	}
@@ -559,27 +559,27 @@ func (c *Checks) scopes(ctx context.Context) error {
 	return c.restale(ctx)
 }
 
-// staleBindings selects cols of the bindings whose scopes differ from their
+// staleBindings selects cols of the bindings whose jurisdictions differ from their
 // source's and target's.
 func staleBindings(cols string) string {
 	return "SELECT " + cols + ` FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
-		WHERE b.source_scope <> s.scope OR b.target_scope <> t.scope OR b.platform_scope <> t.platform_scope`
+		WHERE b.source_jurisdiction <> s.jurisdiction OR b.target_jurisdiction <> t.jurisdiction OR b.platform_jurisdiction <> t.platform_jurisdiction`
 }
 
-// rescope changes the scope of one source or target and its bindings in
+// transfer changes the jurisdiction of one source or target and its bindings in
 // one transaction, failing their pending change requests (§8.2 rule 17).
 // The queries are fixed by the callers: the resource update ($1 id, $2
-// scope), the bindings' condition ($1 resource id), the binding column, and
+// jurisdiction), the bindings' condition ($1 resource id), the binding column, and
 // the condition on pending binding CREATE payloads ($2 resource name).
-func (c *Checks) rescope(ctx context.Context, typ string, d drift, update, bindingsOf, column, creates string) error {
+func (c *Checks) transfer(ctx context.Context, typ string, d drift, update, bindingsOf, column, creates string) error {
 	return pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+		if _, err := tx.Exec(ctx, "SET LOCAL ligo.transfer = 'on'"); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, update, d.id, d.scope); err != nil {
+		if _, err := tx.Exec(ctx, update, d.id, d.jurisdiction); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "UPDATE bindings b SET "+column+" = $2 WHERE "+bindingsOf+" RETURNING b.id, b.name", d.id, d.scope)
+		rows, err := tx.Query(ctx, "UPDATE bindings b SET "+column+" = $2 WHERE "+bindingsOf+" RETURNING b.id, b.name", d.id, d.jurisdiction)
 		if err != nil {
 			return err
 		}
@@ -591,12 +591,12 @@ func (c *Checks) rescope(ctx context.Context, typ string, d drift, update, bindi
 			return err
 		}
 		ids := []uuid.UUID{d.id}
-		entries := []audit.Entry{{ResourceType: typ, ResourceID: &d.id, ResourceName: d.name, Action: typ + "_RESCOPED", Actor: actor,
-			Snapshot: snapshot(map[string]string{"old": d.old, "new": d.scope})}}
+		entries := []audit.Entry{{ResourceType: typ, ResourceID: &d.id, ResourceName: d.name, Action: typ + "_TRANSFERRED", Actor: actor,
+			Snapshot: snapshot(map[string]string{"old": d.old, "new": d.jurisdiction})}}
 		for _, b := range bound {
 			ids = append(ids, b.id)
-			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &b.id, ResourceName: b.name, Action: "BINDING_RESCOPED",
-				Actor: actor, Snapshot: snapshot(map[string]string{"column": column, "old": d.old, "new": d.scope})})
+			entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &b.id, ResourceName: b.name, Action: "BINDING_TRANSFERRED",
+				Actor: actor, Snapshot: snapshot(map[string]string{"column": column, "old": d.old, "new": d.jurisdiction})})
 		}
 		failed, err := failPending(ctx, tx, `SELECT id, resource_type, resource_name FROM change_requests WHERE status = 'PENDING'
 			AND (resource_id = ANY($1) OR resource_type = 'BINDING' AND operation = 'CREATE' AND `+creates+`)`, ids, d.name)
@@ -608,13 +608,13 @@ func (c *Checks) rescope(ctx context.Context, typ string, d drift, update, bindi
 				return err
 			}
 		}
-		c.Logger.Warn("re-scoped", "resource_type", typ, "name", d.name, "old", d.old, "new", d.scope, "bindings", len(bound),
+		c.Logger.Warn("transferred", "resource_type", typ, "name", d.name, "old", d.old, "new", d.jurisdiction, "bindings", len(bound),
 			"failed_requests", len(failed))
 		return nil
 	})
 }
 
-// restale re-scopes, each in its own transaction, the bindings whose copies
+// restale transfers, each in its own transaction, the bindings whose copies
 // still differ from their source's and target's.
 func (c *Checks) restale(ctx context.Context) error {
 	rows, err := c.DB.Query(ctx, staleBindings("b.id"))
@@ -627,15 +627,15 @@ func (c *Checks) restale(ctx context.Context) error {
 	}
 	for _, id := range ids {
 		err := pgx.BeginFunc(ctx, c.DB, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, "SET LOCAL ligo.rescope = 'on'"); err != nil {
+			if _, err := tx.Exec(ctx, "SET LOCAL ligo.transfer = 'on'"); err != nil {
 				return err
 			}
 			var name string
-			var old, scopes []string
-			err := tx.QueryRow(ctx, `UPDATE bindings b SET source_scope = s.scope, target_scope = t.scope, platform_scope = t.platform_scope
+			var old, jurisdictions []string
+			err := tx.QueryRow(ctx, `UPDATE bindings b SET source_jurisdiction = s.jurisdiction, target_jurisdiction = t.jurisdiction, platform_jurisdiction = t.platform_jurisdiction
 				FROM sources s, targets t, bindings o WHERE b.id = $1 AND o.id = b.id AND s.id = b.source_id AND t.id = b.target_id
-				RETURNING b.name, ARRAY[o.source_scope, o.target_scope, o.platform_scope]::text[], ARRAY[b.source_scope, b.target_scope, b.platform_scope]::text[]`,
-				id).Scan(&name, &old, &scopes)
+				RETURNING b.name, ARRAY[o.source_jurisdiction, o.target_jurisdiction, o.platform_jurisdiction]::text[], ARRAY[b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction]::text[]`,
+				id).Scan(&name, &old, &jurisdictions)
 			if err != nil {
 				return err
 			}
@@ -643,14 +643,14 @@ func (c *Checks) restale(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			entries := append([]audit.Entry{{ResourceType: "BINDING", ResourceID: &id, ResourceName: name, Action: "BINDING_RESCOPED", Actor: actor,
-				Snapshot: snapshot(map[string][]string{"old": old, "new": scopes})}}, failed...)
+			entries := append([]audit.Entry{{ResourceType: "BINDING", ResourceID: &id, ResourceName: name, Action: "BINDING_TRANSFERRED", Actor: actor,
+				Snapshot: snapshot(map[string][]string{"old": old, "new": jurisdictions})}}, failed...)
 			for _, e := range entries {
 				if _, err := audit.Append(ctx, tx, e); err != nil {
 					return err
 				}
 			}
-			c.Logger.Warn("re-scoped", "resource_type", "BINDING", "name", name, "old", old, "new", scopes)
+			c.Logger.Warn("transferred", "resource_type", "BINDING", "name", name, "old", old, "new", jurisdictions)
 			return nil
 		})
 		if err != nil {
@@ -661,7 +661,7 @@ func (c *Checks) restale(ctx context.Context) error {
 }
 
 // failPending moves the pending requests the query selects (id,
-// resource_type, resource_name) to FAILED_TO_APPLY, "re-scoped", and returns
+// resource_type, resource_name) to FAILED_TO_APPLY, "transferred", and returns
 // their audit entries.
 func failPending(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]audit.Entry, error) {
 	rows, err := tx.Query(ctx, query, args...)
@@ -681,20 +681,20 @@ func failPending(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]a
 	}
 	var entries []audit.Entry
 	for _, q := range pending {
-		if err := store.CloseRequest(ctx, tx, q.id, "FAILED_TO_APPLY", actor, "", "re-scoped"); err != nil {
+		if err := store.CloseRequest(ctx, tx, q.id, "FAILED_TO_APPLY", actor, "", "transferred"); err != nil {
 			return nil, err
 		}
 		entries = append(entries, audit.Entry{ResourceType: q.typ, ResourceName: q.name, ChangeRequestID: &q.id, Action: "CR_APPLY_FAILED",
-			Actor: actor, Snapshot: snapshot(map[string]string{"error": "re-scoped"})})
+			Actor: actor, Snapshot: snapshot(map[string]string{"error": "transferred"})})
 	}
 	return entries, nil
 }
 
-// interconnects is rule 18: cross-scope bindings that the current policy
+// interconnects is rule 18: cross-jurisdiction bindings that the current policy
 // would deny are logged and audited, never changed (ADR-14 rule 6). It
 // returns nothing to stop startup.
 func (c *Checks) interconnects(ctx context.Context) error {
-	rows, err := c.DB.Query(ctx, "SELECT name, source_scope, target_scope FROM bindings WHERE source_scope <> target_scope ORDER BY name")
+	rows, err := c.DB.Query(ctx, "SELECT name, source_jurisdiction, target_jurisdiction FROM bindings WHERE source_jurisdiction <> target_jurisdiction ORDER BY name")
 	if err != nil {
 		return err
 	}
@@ -706,15 +706,15 @@ func (c *Checks) interconnects(ctx context.Context) error {
 		return err
 	}
 	type violation struct {
-		Binding     string `json:"binding"`
-		SourceScope string `json:"sourceScope"`
-		TargetScope string `json:"targetScope"`
-		Rule        string `json:"rule"`
+		Binding            string `json:"binding"`
+		SourceJurisdiction string `json:"sourceJurisdiction"`
+		TargetJurisdiction string `json:"targetJurisdiction"`
+		Rule               string `json:"rule"`
 	}
 	var found []violation
 	for _, p := range pairs {
 		if d := c.policy.Evaluate(p[1], p[2]); !d.Allowed {
-			c.Logger.Warn("the interconnection policy would deny a binding", "binding", p[0], "source_scope", p[1], "target_scope", p[2], "rule", d.Rule)
+			c.Logger.Warn("the interconnection policy would deny a binding", "binding", p[0], "source_jurisdiction", p[1], "target_jurisdiction", p[2], "rule", d.Rule)
 			found = append(found, violation{p[0], p[1], p[2], d.Rule})
 		}
 	}
@@ -733,7 +733,7 @@ func (c *Checks) breakGlassParties(ctx context.Context) error {
 		return nil
 	}
 	for _, f := range found {
-		c.Logger.Warn("no break-glass policy covers an additional party: break-glass under this rule is always refused", "rule", f.Rule, "party", f.Party, "scope", f.Scope)
+		c.Logger.Warn("no break-glass policy covers an additional party: break-glass under this rule is always refused", "rule", f.Rule, "party", f.Party, "jurisdiction", f.Jurisdiction)
 	}
 	return appendTx(ctx, c.DB, audit.Entry{Action: "SYSTEM_BREAK_GLASS_PARTY_UNCOVERED", Actor: actor, Snapshot: snapshot(map[string]any{"parties": found})})
 }

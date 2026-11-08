@@ -71,18 +71,18 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 	if err := s.Rules.validate(ctx, s.Validate, &t, nil, authorize(c)); err != nil {
 		return nil, err
 	}
-	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Scope); err != nil {
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Jurisdiction); err != nil {
 		return nil, err
 	}
 	return s.file(ctx, c, "CREATE", nil, &t, &req.Common, true)
 }
 
-// authorize is RBAC on a target: operator of its scope or of its platform's
+// authorize is RBAC on a target: operator of its jurisdiction or of its platform's
 // (§7.2.3 step 4).
 func authorize(c changerequests.Caller) func(*Target) error {
 	return func(t *Target) error {
-		if m := t.Metadata; !c.Grants.ActsFor(m.Scope, m.Platform) && !c.Grants.ActsFor(m.PlatformScope, m.Platform) {
-			return refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), m.Scope, m.PlatformScope)
+		if m := t.Metadata; !c.Grants.ActsFor(m.Jurisdiction, m.Platform) && !c.Grants.ActsFor(m.PlatformJurisdiction, m.Platform) {
+			return refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), m.Jurisdiction, m.PlatformJurisdiction)
 		}
 		return nil
 	}
@@ -192,14 +192,14 @@ func retirable(ctx context.Context, q store.Querier, cur *stored, t *Target) err
 // current reads a target the caller can see by name (404 otherwise).
 func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := load(ctx, s.DB, "name = $1 AND state <> 'RETIRED'", name, false)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.Metadata.Scope, cur.Metadata.PlatformScope) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.Metadata.Jurisdiction, cur.Metadata.PlatformJurisdiction) {
 		return nil, refuse(404, "not-found", "target %q", name)
 	}
 	return cur, err
 }
 
 // file files the change request of a validated target change: an OWNER
-// side, and a PLATFORM side for a material change unless the two scopes
+// side, and a PLATFORM side for a material change unless the two jurisdictions
 // are equal (§3.7).
 func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, cur *stored, t *Target, common *changerequests.Common, material bool) (*changerequests.Request, error) {
 	payload, err := json.Marshal(t)
@@ -208,14 +208,14 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 	}
 	m := t.Metadata
 	r := &changerequests.Request{ResourceType: "TARGET", ResourceName: m.Name, Operation: op, Consent: changerequests.ConsentAll,
-		Realm: m.Realm, OwnerScope: m.Scope, PlatformScope: m.PlatformScope, ExpectedRevision: common.ExpectedRevision,
+		Realm: m.Realm, OwnerJurisdiction: m.Jurisdiction, PlatformJurisdiction: m.PlatformJurisdiction, ExpectedRevision: common.ExpectedRevision,
 		Payload: payload, AutomationContext: common.AutomationContext}
 	if cur != nil {
 		r.ResourceID = &cur.ID
 	}
-	sides := []changerequests.Candidate{{Side: "OWNER", Scope: m.Scope, Platform: m.Platform}}
-	if material && m.PlatformScope != m.Scope {
-		sides = append(sides, changerequests.Candidate{Side: "PLATFORM", Scope: m.PlatformScope, Platform: m.Platform})
+	sides := []changerequests.Candidate{{Side: "OWNER", Jurisdiction: m.Jurisdiction, Platform: m.Platform}}
+	if material && m.PlatformJurisdiction != m.Jurisdiction {
+		sides = append(sides, changerequests.Candidate{Side: "PLATFORM", Jurisdiction: m.PlatformJurisdiction, Platform: m.Platform})
 	}
 	err = s.Requests.Create(ctx, c, r, sides, common.ApprovalReference)
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_cr_one_pending_per_resource" {
@@ -236,7 +236,7 @@ func payload(r *changerequests.Request) (*Target, error) {
 	}
 	if r.Operation == "CREATE" { // derived again
 		m := &t.Metadata
-		m.PlatformType, m.PlatformScope, m.Realm, m.State = "", "", "", ""
+		m.PlatformType, m.PlatformJurisdiction, m.Realm, m.State = "", "", "", ""
 		for i := range t.AccessLevels {
 			t.AccessLevels[i].State = ""
 		}
@@ -263,7 +263,7 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 		return nil, err
 	}
 	if cur == nil { // TN-5: an existing target cannot be on a retired account
-		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Scope); err != nil {
+		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, t.Metadata.Jurisdiction); err != nil {
 			return nil, err
 		}
 	}
@@ -280,7 +280,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		return s.applyUpdate(ctx, tx, r, &t)
 	}
 	id := uuid.NewV7()
-	account, err := accounts.Require(ctx, tx, s.Rules.Accounts, t.Metadata.Scope)
+	account, err := accounts.Require(ctx, tx, s.Rules.Accounts, t.Metadata.Jurisdiction)
 	if err != nil {
 		return nil, err
 	}
@@ -324,10 +324,10 @@ func multirange(f *pluginv1.NetworkFlow) string {
 
 func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, account, actor string) error {
 	m := t.Metadata
-	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, realm, scope, platform_scope, definition,
+	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition,
 		display_name, description, labels, documentation_url, contacts, visibility, visible_to, account, state, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15::jsonb, $17, 'ACTIVE', $16, $16)`,
-		id, m.Name, m.Platform, m.PlatformType, m.Realm, m.Scope, m.PlatformScope, string(t.Definition), null(t.DisplayName),
+		id, m.Name, m.Platform, m.PlatformType, m.Realm, m.Jurisdiction, m.PlatformJurisdiction, string(t.Definition), null(t.DisplayName),
 		null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
 		jsonb(t.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_targets_name" {
@@ -379,13 +379,13 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	t := &st.Target
 	m := &t.Metadata
 	t.Kind = "Target"
-	sql := `SELECT id, revision, name, scope, platform, platform_type, platform_scope, realm, state, definition,
+	sql := `SELECT id, revision, name, jurisdiction, platform, platform_type, platform_jurisdiction, realm, state, definition,
 		coalesce(display_name, ''), coalesce(description, ''), labels, coalesce(documentation_url, ''), contacts, visibility, visible_to
 		FROM targets WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE"
 	}
-	err := q.QueryRow(ctx, sql, arg).Scan(&st.ID, &st.Revision, &m.Name, &m.Scope, &m.Platform, &m.PlatformType, &m.PlatformScope,
+	err := q.QueryRow(ctx, sql, arg).Scan(&st.ID, &st.Revision, &m.Name, &m.Jurisdiction, &m.Platform, &m.PlatformType, &m.PlatformJurisdiction,
 		&m.Realm, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Labels, &t.DocumentationURL, &t.Contacts,
 		&t.Visibility.Mode, &t.Visibility.VisibleTo)
 	if err != nil {

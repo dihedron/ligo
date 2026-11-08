@@ -11,7 +11,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -121,7 +121,7 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 	b := &Binding{Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel, Parameters: cur.parameters,
 		Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
 	// no caller: the change was approved on the source or target (§6.8)
-	if _, err := s.resolve(ctx, nil, b, cur, &governance.Policy{}, "", nil); err != nil {
+	if _, err := s.resolve(ctx, nil, b, cur, &charter.Policy{}, "", nil); err != nil {
 		if e := (*changerequests.Error)(nil); errors.As(err, &e) {
 			return false, s.failPropagation(ctx, id, e)
 		}

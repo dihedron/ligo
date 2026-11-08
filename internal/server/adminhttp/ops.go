@@ -20,7 +20,7 @@ func (s *Server) opsRoutes(mux *router) {
 	mux.HandleFunc("GET /v1/admin/audit/verify", s.verifyAudit)
 	mux.HandleFunc("GET /v1/admin/executors", s.listExecutors)
 	mux.HandleFunc("POST /v1/admin/executors/{id}/recover", s.recoverExecutor)
-	for kind := range scopeQueries { // one route each: a {kind} wildcard would overlap /v1/admin/catalog/targets/{name}
+	for kind := range jurisdictionQueries { // one route each: a {kind} wildcard would overlap /v1/admin/catalog/targets/{name}
 		mux.HandleFunc("GET /v1/admin/"+kind+"/{name}/audit", s.resourceAudit)
 	}
 }
@@ -95,13 +95,13 @@ func (s *Server) verifyAudit(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// id and scopes of a resource, by its kind in the path; only existing
-// resources have an audit visible through the API. A binding's scopes include
+// id and jurisdictions of a resource, by its kind in the path; only existing
+// resources have an audit visible through the API. A binding's jurisdictions include
 // those of its additional parties (§7.2.4).
-var scopeQueries = map[string]string{
-	"sources": "SELECT id, ARRAY[scope] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
-	"targets": "SELECT id, ARRAY[scope, platform_scope] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
-	"bindings": `SELECT b.id, ARRAY[b.source_scope, b.target_scope, b.platform_scope] || coalesce((SELECT array_agg(DISTINCT sd.scope)
+var jurisdictionQueries = map[string]string{
+	"sources": "SELECT id, ARRAY[jurisdiction] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+	"targets": "SELECT id, ARRAY[jurisdiction, platform_jurisdiction] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+	"bindings": `SELECT b.id, ARRAY[b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction] || coalesce((SELECT array_agg(DISTINCT sd.jurisdiction)
 		FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
 		WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}') FROM bindings b WHERE b.name = $1`,
 }
@@ -121,14 +121,14 @@ type auditDTO struct {
 }
 
 // resourceAudit lists a resource's audit entries, newest first, for a
-// caller who sees its scopes (keyset on id).
+// caller who sees its jurisdictions (keyset on id).
 func (s *Server) resourceAudit(w http.ResponseWriter, r *http.Request) {
 	kind := strings.Split(r.Pattern, "/")[3] // GET /v1/admin/<kind>/{name}/audit
 	name := r.PathValue("name")
 	var id uuid.UUID
-	var scopes []string
-	err := s.DB.QueryRow(r.Context(), scopeQueries[kind], name).Scan(&id, &scopes)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !caller(r).Grants.Sees(scopes...) {
+	var jurisdictions []string
+	err := s.DB.QueryRow(r.Context(), jurisdictionQueries[kind], name).Scan(&id, &jurisdictions)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !caller(r).Grants.Sees(jurisdictions...) {
 		problem(w, http.StatusNotFound, "not-found", kind+" "+name)
 		return
 	}

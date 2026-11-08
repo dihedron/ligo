@@ -18,7 +18,7 @@ import (
 // unaudited are the state-changing methods' routes that change no state of
 // their own: read-only checks, or a workflow that audits itself.
 var unaudited = map[string]string{
-	"POST /v1/admin/governance/evaluate":    "a read-only evaluation",
+	"POST /v1/admin/charter/evaluate":       "a read-only evaluation",
 	"POST /v1/admin/sources/test":           "a read-only check",
 	"POST /v1/admin/bindings/{name}/retry":  "audited by the workflow: TestAC09",
 	"POST /v1/admin/bindings/{name}/rotate": "audited by the workflow: TestRotate",
@@ -99,7 +99,7 @@ func TestINV11Routes(t *testing.T) {
 	// targets
 	target := "inv-tgt-" + x
 	body := func(revision int, description string) map[string]any {
-		b := map[string]any{"metadata": map[string]string{"name": target, "platform": "oracle-prod", "scope": "dc/corp-prod/ledger"},
+		b := map[string]any{"metadata": map[string]string{"name": target, "platform": "oracle-prod", "jurisdiction": "dc/corp-prod/ledger"},
 			"description": description, "definition": map[string]string{"schema": "LEDGER_APP"}, "networkFlows": []any{},
 			"accessLevels": []map[string]any{
 				{"name": "read", "grants": map[string][]string{"roles": {"LEDGER_RO_ROLE"}}},
@@ -121,7 +121,7 @@ func TestINV11Routes(t *testing.T) {
 	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", v.name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), "src2-"+x, `^spiffe://prod\.internal/ns/inv2/sa/`+x+`$`); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestINV11Routes(t *testing.T) {
 	r = v.do(t, olga, "PUT", "/v1/admin/bindings/"+v.name, update)
 	act(decline, "CR_SIDE_DECLINED", dora, base+id(r)+"/decline", map[string]string{"comment": "not now"})
 	revoked := act("POST /v1/admin/targets/{name}/bindings/revoke", "CR_CREATED", olga, "/v1/admin/targets/tgt-"+x+"/bindings/revoke",
-		map[string]string{"sourceScope": "dc/*", "comment": "compromised workload"})
+		map[string]string{"sourceJurisdiction": "dc/*", "comment": "compromised workload"})
 	crs, _ := revoked.body["changeRequests"].([]any)
 	if len(crs) != 1 {
 		t.Fatalf("revoke: %+v", revoked)
@@ -147,11 +147,11 @@ func TestINV11Routes(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc-" + x, `^spiffe://prod\.internal/ns/ledger/sa/` + x + `$`}},
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc2-" + x, `^spiffe://prod\.internal/ns/ledger2/sa/` + x + `$`}},
-		{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+		{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{ledger, "ltgt-" + x}},
 		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}', '["role:LEDGER_RO_ROLE"]')`, []any{ledger}},
 	} {
@@ -205,8 +205,8 @@ func TestINV11Routes(t *testing.T) {
 	}
 }
 
-// TestINV17: a source's one scope comes from its regex, whose fixed beginning
-// must identify exactly one; a binding's three scopes are those of its source,
+// TestINV17: a source's one jurisdiction comes from its regex, whose fixed beginning
+// must identify exactly one; a binding's three jurisdictions are those of its source,
 // its target and the target's platform, here all different.
 func TestINV17(t *testing.T) {
 	v := setup(t, config.AdminListener{})
@@ -238,19 +238,19 @@ func TestINV17(t *testing.T) {
 	}
 	name := "fin-01-payments-inv17-" + x
 	approve(v.do(t, admin, "POST", "/v1/admin/sources", source(name, `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/ns/`+x+`/sa/w$`)))
-	var scope string
-	if err := v.owner.QueryRow(ctx, "select scope from sources where name = $1", name).Scan(&scope); err != nil {
+	var jurisdiction string
+	if err := v.owner.QueryRow(ctx, "select jurisdiction from sources where name = $1", name).Scan(&jurisdiction); err != nil {
 		t.Fatal(err)
 	}
-	if scope != "cloud/fin-01/payments" {
-		t.Errorf("scope %q", scope)
+	if jurisdiction != "cloud/fin-01/payments" {
+		t.Errorf("jurisdiction %q", jurisdiction)
 	}
-	if r := v.do(t, admin, "POST", "/v1/admin/sources", source("fin-01-inv17b-"+x, `^spiffe://cloud\.internal/acct/fin-01/tenant/[a-z]+/ns/`+x+`$`)); r.code != 422 || r.slug() != "urn:ligo:problem:scope-unresolvable" {
+	if r := v.do(t, admin, "POST", "/v1/admin/sources", source("fin-01-inv17b-"+x, `^spiffe://cloud\.internal/acct/fin-01/tenant/[a-z]+/ns/`+x+`$`)); r.code != 422 || r.slug() != "urn:ligo:problem:jurisdiction-unresolvable" {
 		t.Errorf("a regex across tenancies: %d %s", r.code, r.slug())
 	}
 
 	target := uuid.NewV7()
-	if _, err := v.owner.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(ctx, `insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 		values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, target, "ltgt-"+x); err != nil {
 		t.Fatal(err)
 	}
@@ -260,12 +260,12 @@ func TestINV17(t *testing.T) {
 	}
 	binding := "fin-01-payments-inv17-b-" + x
 	approve(v.do(t, admin, "POST", "/v1/admin/bindings", map[string]string{"name": binding, "source": name, "target": "ltgt-" + x, "accessLevel": "read"}))
-	var sourceScope, targetScope, platformScope string
-	if err := v.owner.QueryRow(ctx, "select source_scope, target_scope, platform_scope from bindings where name = $1", binding).
-		Scan(&sourceScope, &targetScope, &platformScope); err != nil {
+	var sourceJurisdiction, targetJurisdiction, platformJurisdiction string
+	if err := v.owner.QueryRow(ctx, "select source_jurisdiction, target_jurisdiction, platform_jurisdiction from bindings where name = $1", binding).
+		Scan(&sourceJurisdiction, &targetJurisdiction, &platformJurisdiction); err != nil {
 		t.Fatal(err)
 	}
-	if sourceScope != "cloud/fin-01/payments" || targetScope != "dc/corp-prod/ledger" || platformScope != "dc/corp-prod" {
-		t.Errorf("the binding's scopes: %s, %s, %s", sourceScope, targetScope, platformScope)
+	if sourceJurisdiction != "cloud/fin-01/payments" || targetJurisdiction != "dc/corp-prod/ledger" || platformJurisdiction != "dc/corp-prod" {
+		t.Errorf("the binding's jurisdictions: %s, %s, %s", sourceJurisdiction, targetJurisdiction, platformJurisdiction)
 	}
 }

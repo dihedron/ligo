@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"errors"
@@ -57,7 +57,7 @@ func TestAppendixD2Extraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []struct{ regex, scope string }{
+	for _, v := range []struct{ regex, jurisdiction string }{
 		{c + `payments/sa/worker-[0-9]+$`, "cloud/fin-01/payments"},
 		{c + `payments/sa/(?:api|web)-[0-9]+$`, "cloud/fin-01/payments"},
 		{c + `payments/sa/x$`, "cloud/fin-01/payments"},
@@ -71,19 +71,19 @@ func TestAppendixD2Extraction(t *testing.T) {
 		if _, err := regexpolicy.ValidateSVIDRegex(v.regex, "cloud.internal", policyD2); err != nil {
 			t.Errorf("%q does not pass Appendix A: %v", v.regex, err)
 		}
-		checkScope(t, e, v.regex, "cloud.internal", v.scope)
+		checkJurisdiction(t, e, v.regex, "cloud.internal", v.jurisdiction)
 	}
 }
 
 // TestAC45 is acceptance scenario AC-45: a regex covering two tenancies
-// has no scope.
+// has no jurisdiction.
 func TestAC45(t *testing.T) {
 	e, err := NewPathTemplateExtractor(tenancyRegex, tenancyTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkScope(t, e, c+`(payments|hr)/sa/x$`, "cloud.internal", "")
-	checkScope(t, e, c+`pay(?:ments|roll)/sa/x$`, "cloud.internal", "")
+	checkJurisdiction(t, e, c+`(payments|hr)/sa/x$`, "cloud.internal", "")
+	checkJurisdiction(t, e, c+`pay(?:ments|roll)/sa/x$`, "cloud.internal", "")
 }
 
 func TestAppendixD2Static(t *testing.T) {
@@ -91,16 +91,16 @@ func TestAppendixD2Static(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkScope(t, e, `^spiffe://prod\.internal/ns/checkout/sa/x$`, "prod.internal", "dc/corp-prod")
+	checkJurisdiction(t, e, `^spiffe://prod\.internal/ns/checkout/sa/x$`, "prod.internal", "dc/corp-prod")
 	if _, err := NewStaticExtractor("DC/x"); err == nil {
-		t.Error("static extractor accepted an invalid scope")
+		t.Error("static extractor accepted an invalid jurisdiction")
 	}
 }
 
 func TestAppendixD2Patterns(t *testing.T) {
 	for _, v := range []struct {
-		pattern, scope string
-		match          bool
+		pattern, jurisdiction string
+		match                 bool
 	}{
 		{"*", "dc/corp-prod", true},
 		{"cloud/fin-01/*", "cloud/fin-01", true},
@@ -109,16 +109,16 @@ func TestAppendixD2Patterns(t *testing.T) {
 		{"cloud/fin-01", "cloud/fin-01/payments", false},
 		{"dc/corp-prod", "dc/corp-prod", true},
 	} {
-		if got := ScopeMatches(v.pattern, v.scope); got != v.match {
-			t.Errorf("ScopeMatches(%q, %q) = %v, want %v", v.pattern, v.scope, got, v.match)
+		if got := JurisdictionMatches(v.pattern, v.jurisdiction); got != v.match {
+			t.Errorf("JurisdictionMatches(%q, %q) = %v, want %v", v.pattern, v.jurisdiction, got, v.match)
 		}
 	}
 	for p, want := range map[string]bool{
 		"*": true, "cloud/fin-01": true, "cloud/fin-01/*": true,
 		"": false, "*/x": false, "cloud/*/x": false, "cloud/": false,
 	} {
-		if got := ValidScopePattern(p); got != want {
-			t.Errorf("ValidScopePattern(%q) = %v, want %v", p, got, want)
+		if got := ValidJurisdictionPattern(p); got != want {
+			t.Errorf("ValidJurisdictionPattern(%q) = %v, want %v", p, got, want)
 		}
 	}
 }
@@ -130,8 +130,8 @@ func TestAppendixD2Paths(t *testing.T) {
 		"-a": false, "a-": false, strings.Repeat("a/", 8) + "a": false,
 		strings.Repeat("a/", 7) + "a": true, strings.Repeat("a", 129): false,
 	} {
-		if got := ValidScopePath(p); got != want {
-			t.Errorf("ValidScopePath(%q) = %v, want %v", p, got, want)
+		if got := ValidJurisdictionPath(p); got != want {
+			t.Errorf("ValidJurisdictionPath(%q) = %v, want %v", p, got, want)
 		}
 	}
 }
@@ -156,12 +156,12 @@ func TestEXT18(t *testing.T) {
 
 var policyD2 = regexpolicy.Policy{MaxLength: 512, MinLiteralPathSegments: 2}
 
-func checkScope(t *testing.T, e *Extractor, regex, td, want string) {
+func checkJurisdiction(t *testing.T, e *Extractor, regex, td, want string) {
 	t.Helper()
-	got, err := e.SourceScope(regex, td)
+	got, err := e.SourceJurisdiction(regex, td)
 	switch {
-	case want == "" && !errors.Is(err, ErrScopeUnresolvable):
-		t.Errorf("%q: got (%q, %v), want scope-unresolvable", regex, got, err)
+	case want == "" && !errors.Is(err, ErrJurisdictionUnresolvable):
+		t.Errorf("%q: got (%q, %v), want jurisdiction-unresolvable", regex, got, err)
 	case want != "" && (err != nil || got != want):
 		t.Errorf("%q: got (%q, %v), want %q", regex, got, err, want)
 	}

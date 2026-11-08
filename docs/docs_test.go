@@ -172,3 +172,24 @@ func TestTablesSetColumnWidths(t *testing.T) {
 		}
 	}
 }
+
+// charterDefinition is the first sentence of the charter's definition, which
+// every released guide must carry, so that the term never surprises a
+// reader (.specs/ligo_specification.md §3.9).
+const charterDefinition = "The **charter** is the set of rules every jurisdiction must comply with"
+
+func TestCharterIsDefined(t *testing.T) {
+	for _, dir := range []string{"setup-guide", "architecture", "operators-guide"} {
+		files, err := filepath.Glob(dir + "/[0-9][0-9]-*.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range files {
+			found = found || strings.Contains(read(t, f), charterDefinition)
+		}
+		if !found {
+			t.Errorf("%s: no chapter defines the charter (%q)", dir, charterDefinition)
+		}
+	}
+}

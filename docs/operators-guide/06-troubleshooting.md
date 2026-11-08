@@ -12,7 +12,7 @@
 | A plugin's config fails its schema | The instance and field it names |
 | `instance "...": SVID` matched none or several | The plugin's SPIRE entry; run the binary with `-svids`, as the user `ligo` |
 | A binding references a removed instance | Restore it, or give `--allow-orphaned-bindings` on purpose |
-| Stored scopes differ from the configuration | Restore the mapping, or give `--accept-scope-changes` on purpose |
+| Stored jurisdictions differ from the configuration | Restore the mapping, or give `--accept-jurisdiction-changes` on purpose |
 
 ## A plugin does not get its SVID
 
@@ -41,7 +41,7 @@ The API answers within `full_reload_interval` at worst, normally at once.
 
 ## A change is refused
 
-Run `ligo governance check -f <manifest>`: it shows the scopes, the name prefix, the consent rule, the interconnection rule and the sides, without filing anything. Then see the *Error reference*.
+Run `ligo charter check -f <manifest>`: it shows the jurisdictions, the name prefix, the consent rule, the interconnection rule and the sides, without filing anything. Then see the *Error reference*.
 
 ## A binding is stuck
 

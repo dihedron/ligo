@@ -51,7 +51,7 @@ platform_providers:
     platforms:
       - name: pg-ledger
         realm: prod
-        scope: "dc/corp-prod"
+        jurisdiction: "dc/corp-prod"
         display_name: "Ledger database"
         allowed_source_trust_domains: [prod.internal]
         network_flows:

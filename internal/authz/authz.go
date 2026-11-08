@@ -1,5 +1,5 @@
 // Package authz maps principals to the roles of their authorization
-// bindings, on governance scopes (§7.2.2).
+// bindings, on jurisdictions (§7.2.2).
 package authz
 
 import (
@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 // Principal is an authenticated caller: a SPIFFE ID (mTLS) or an LDAP user
@@ -27,16 +27,16 @@ type Principal struct {
 
 // Grant is an authorization binding that applies to a principal.
 type Grant struct {
-	Role      string
-	Scopes    []string
-	Platforms []string
+	Role          string
+	Jurisdictions []string
+	Platforms     []string
 	// ApprovalReference is the compiled approval_reference_pattern, or nil.
 	ApprovalReference *regexp.Regexp
 	RateLimit         *config.APIRateLimit
 }
 
-func (g *Grant) covers(scope string) bool {
-	return slices.ContainsFunc(g.Scopes, func(p string) bool { return governance.ScopeMatches(p, scope) })
+func (g *Grant) covers(jurisdiction string) bool {
+	return slices.ContainsFunc(g.Jurisdictions, func(p string) bool { return charter.JurisdictionMatches(p, jurisdiction) })
 }
 
 // coversPlatform reports whether a trusted_automation grant extends to
@@ -49,7 +49,7 @@ func (g *Grant) coversPlatform(platform string) bool {
 // Authorizer holds the authorization bindings of the configuration.
 type Authorizer struct {
 	bindings []binding
-	rules    *governance.GroupRules
+	rules    *charter.GroupRules
 	active   func(account string) bool
 }
 
@@ -63,7 +63,7 @@ type binding struct {
 func New(bindings []config.RoleBinding) (*Authorizer, error) {
 	a := &Authorizer{}
 	for _, b := range bindings {
-		g := Grant{Role: b.Role, Scopes: b.Scopes, Platforms: b.Platforms, RateLimit: b.RateLimit}
+		g := Grant{Role: b.Role, Jurisdictions: b.Jurisdictions, Platforms: b.Platforms, RateLimit: b.RateLimit}
 		if b.ApprovalReferencePattern != "" {
 			re, err := regexp.Compile(b.ApprovalReferencePattern)
 			if err != nil {
@@ -79,7 +79,7 @@ func New(bindings []config.RoleBinding) (*Authorizer, error) {
 // UseAccounts adds the roles derived from directory groups, while active says
 // their account is registered and ACTIVE (.specs/ligo-tenancy.md §8). Call it
 // before serving.
-func (a *Authorizer) UseAccounts(rules *governance.GroupRules, active func(account string) bool) {
+func (a *Authorizer) UseAccounts(rules *charter.GroupRules, active func(account string) bool) {
 	a.rules, a.active = rules, active
 }
 
@@ -104,7 +104,7 @@ func (a *Authorizer) For(p Principal) Grants {
 	for _, dn := range p.AccountGroups {
 		for _, m := range a.rules.Match(dn) {
 			if a.active(m.Account) {
-				out = append(out, Grant{Role: m.Role, Scopes: []string{m.Scope}})
+				out = append(out, Grant{Role: m.Role, Jurisdictions: []string{m.Jurisdiction}})
 			}
 		}
 	}
@@ -145,79 +145,79 @@ func (gs Grants) AccountAdmin() bool {
 	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleAccountAdmin })
 }
 
-// InScopes reports whether a role that reads reaches anywhere in pattern.
-func (gs Grants) InScopes(pattern string) bool {
+// InJurisdictions reports whether a role that reads reaches anywhere in pattern.
+func (gs Grants) InJurisdictions(pattern string) bool {
 	return gs.FullAccess() || gs.has(func(g *Grant) bool {
-		return g.reads() && slices.ContainsFunc(g.Scopes, func(s string) bool { return governance.PatternsOverlap(s, pattern) })
+		return g.reads() && slices.ContainsFunc(g.Jurisdictions, func(s string) bool { return charter.PatternsOverlap(s, pattern) })
 	})
 }
 
 // Sees reports whether any role other than break_glass covers one of the
-// scopes of a resource (its scope; a target's platform scope; a binding's
-// three scopes and its parties').
-func (gs Grants) Sees(scopes ...string) bool {
+// jurisdictions of a resource (its jurisdiction; a target's platform jurisdiction; a binding's
+// three jurisdictions and its parties').
+func (gs Grants) Sees(jurisdictions ...string) bool {
 	return gs.FullAccess() || gs.has(func(g *Grant) bool {
-		return g.Role != config.RoleBreakGlass && slices.ContainsFunc(scopes, g.covers)
+		return g.Role != config.RoleBreakGlass && slices.ContainsFunc(jurisdictions, g.covers)
 	})
 }
 
-// ActsFor reports whether the principal holds operator rights on scope: as
-// operator, or as trusted_automation covering scope and platform.
-func (gs Grants) ActsFor(scope, platform string) bool {
+// ActsFor reports whether the principal holds operator rights on jurisdiction: as
+// operator, or as trusted_automation covering jurisdiction and platform.
+func (gs Grants) ActsFor(jurisdiction, platform string) bool {
 	return gs.FullAccess() || gs.has(func(g *Grant) bool {
 		switch g.Role {
 		case config.RoleOperator:
-			return g.covers(scope)
+			return g.covers(jurisdiction)
 		case config.RoleTrustedAutomation:
-			return g.covers(scope) && g.coversPlatform(platform)
+			return g.covers(jurisdiction) && g.coversPlatform(platform)
 		}
 		return false
 	})
 }
 
-// Visible reports whether a source or target with these scopes (a
+// Visible reports whether a source or target with these jurisdictions (a
 // target's: its own and its platform's) and visibility is visible: through
-// a role on its scopes or, beyond them, LISTED to roles on a scope matching
+// a role on its jurisdictions or, beyond them, LISTED to roles on a jurisdiction matching
 // visibleTo and PUBLIC to any role (§7.2.4).
-func (gs Grants) Visible(scopes []string, mode string, visibleTo []string) bool {
-	if gs.Sees(scopes...) {
+func (gs Grants) Visible(jurisdictions []string, mode string, visibleTo []string) bool {
+	if gs.Sees(jurisdictions...) {
 		return true
 	}
 	return gs.has(func(g *Grant) bool {
 		if !g.reads() {
 			return false
 		}
-		return mode == "PUBLIC" || mode == "LISTED" && slices.ContainsFunc(g.Scopes, func(s string) bool {
-			return slices.ContainsFunc(visibleTo, func(v string) bool { return governance.PatternsOverlap(s, v) })
+		return mode == "PUBLIC" || mode == "LISTED" && slices.ContainsFunc(g.Jurisdictions, func(s string) bool {
+			return slices.ContainsFunc(visibleTo, func(v string) bool { return charter.PatternsOverlap(s, v) })
 		})
 	})
 }
 
-// Operator reports the operator role on scope, which lets its holder consent
+// Operator reports the operator role on jurisdiction, which lets its holder consent
 // to a side that needs a decision only because the requester does not act
 // for it (ADR-13 rule 6).
-func (gs Grants) Operator(scope string) bool {
-	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleOperator && g.covers(scope) })
+func (gs Grants) Operator(jurisdiction string) bool {
+	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleOperator && g.covers(jurisdiction) })
 }
 
-// CanApprove reports whether the principal is an approver of scope. Four-eyes
+// CanApprove reports whether the principal is an approver of jurisdiction. Four-eyes
 // and distinct approvers are checked by the change requests.
-func (gs Grants) CanApprove(scope string) bool {
-	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleApprover && g.covers(scope) })
+func (gs Grants) CanApprove(jurisdiction string) bool {
+	return gs.FullAccess() || gs.has(func(g *Grant) bool { return g.Role == config.RoleApprover && g.covers(jurisdiction) })
 }
 
-// Delegates returns the trusted_automation grant that decides sides in scope
+// Delegates returns the trusted_automation grant that decides sides in jurisdiction
 // for platform by delegation (ADR-11), or nil.
-func (gs Grants) Delegates(scope, platform string) *Grant {
+func (gs Grants) Delegates(jurisdiction, platform string) *Grant {
 	for i := range gs {
-		if g := &gs[i]; g.Role == config.RoleTrustedAutomation && g.covers(scope) && g.coversPlatform(platform) {
+		if g := &gs[i]; g.Role == config.RoleTrustedAutomation && g.covers(jurisdiction) && g.coversPlatform(platform) {
 			return g
 		}
 	}
 	return nil
 }
 
-// BreakGlass reports the break_glass role on scope (ADR-12).
-func (gs Grants) BreakGlass(scope string) bool {
-	return gs.has(func(g *Grant) bool { return g.Role == config.RoleBreakGlass && g.covers(scope) })
+// BreakGlass reports the break_glass role on jurisdiction (ADR-12).
+func (gs Grants) BreakGlass(jurisdiction string) bool {
+	return gs.has(func(g *Grant) bool { return g.Role == config.RoleBreakGlass && g.covers(jurisdiction) })
 }

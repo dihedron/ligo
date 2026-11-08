@@ -153,7 +153,7 @@ func (s *Server) bindingList(w http.ResponseWriter, r *http.Request, f bindings.
 	}
 	for key, field := range map[string]*string{"source": &f.Source, "target": &f.Target, "accessLevel": &f.AccessLevel,
 		"platform": &f.Platform, "platformType": &f.PlatformType, "phase": &f.Phase, "trustDomain": &f.TrustDomain, "realm": &f.Realm,
-		"scope": &f.Scope} {
+		"jurisdiction": &f.Jurisdiction} {
 		if v := q.Get(key); v != "" && *field == "" {
 			*field = v
 		}
@@ -209,7 +209,7 @@ func (s *Server) bindingFlows(w http.ResponseWriter, r *http.Request) {
 }
 
 // operate retries or rotates a binding, for an operator of one of its
-// scopes; maintenance mode refuses both (§10.3).
+// jurisdictions; maintenance mode refuses both (§10.3).
 func (s *Server) operate(w http.ResponseWriter, r *http.Request) {
 	c := caller(r)
 	v, err := s.Bindings.Get(r.Context(), c, r.PathValue("name"))
@@ -218,8 +218,8 @@ func (s *Server) operate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := v.Metadata
-	if !c.Grants.Operator(m.SourceScope) && !c.Grants.Operator(m.TargetScope) && !c.Grants.Operator(m.PlatformScope) {
-		problem(w, http.StatusForbidden, "forbidden", "operator role on one of the binding's scopes required")
+	if !c.Grants.Operator(m.SourceJurisdiction) && !c.Grants.Operator(m.TargetJurisdiction) && !c.Grants.Operator(m.PlatformJurisdiction) {
+		problem(w, http.StatusForbidden, "forbidden", "operator role on one of the binding's jurisdictions required")
 		return
 	}
 	act := s.Workflows.Retry

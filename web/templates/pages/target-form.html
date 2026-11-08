@@ -10,10 +10,10 @@
     {{if .Edit}}<input id="t-platform" name="platform" value="{{.Target.Metadata.Platform}}" readonly>
     {{else}}<select id="t-platform" name="platform" required hx-get="/ui/platforms/fields" hx-trigger="change" hx-target="#platform-fields" hx-swap="outerHTML" {{hxnonce}}>
       <option value="">choose a platform</option>{{range .Platforms}}<option>{{.}}</option>{{end}}</select>{{end}}</div>
-  <div class="field"><label for="t-scope">Owner scope</label>
-    <input id="t-scope" name="scope" value="{{.Target.Metadata.Scope}}" required{{if .Edit}} readonly{{else}}
+  <div class="field"><label for="t-jurisdiction">Owner jurisdiction</label>
+    <input id="t-jurisdiction" name="jurisdiction" value="{{.Target.Metadata.Jurisdiction}}" required{{if .Edit}} readonly{{else}}
       hx-post="/ui/targets/preview" hx-trigger="input changed delay:500ms" hx-target="#target-check" hx-swap="outerHTML" hx-include="#target" {{hxnonce}}{{end}}>
-    <span class="hint">Within the platform's target scopes.</span></div>
+    <span class="hint">Within the platform's target jurisdictions.</span></div>
   <div id="target-check"></div>
   {{with .Fields}}{{template "platform-fields" .}}{{else}}<div id="platform-fields"></div>{{end}}
   <div class="field"><label for="t-flows">Network flows (JSON array, §3.3)</label><textarea id="t-flows" name="networkFlows" class="mono">{{.Flows}}</textarea></div>
@@ -22,7 +22,7 @@
   <div class="field"><label for="t-doc">Documentation URL</label><input id="t-doc" name="documentationUrl" type="url" value="{{.Target.DocumentationURL}}"></div>
   <div class="field"><label for="t-vis">Visibility</label><select id="t-vis" name="visibility">
     {{range $m := list "PRIVATE" "LISTED" "PUBLIC"}}<option{{if eq $m $.Content.Target.Visibility.Mode}} selected{{end}}>{{$m}}</option>{{end}}</select></div>
-  <div class="field"><label for="t-visto">Visible to scopes (one per line)</label><textarea id="t-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
+  <div class="field"><label for="t-visto">Visible to jurisdictions (one per line)</label><textarea id="t-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
   <div class="field"><label for="t-labels">Labels (key=value per line)</label><textarea id="t-labels" name="labels">{{.Labels}}</textarea></div>
   <div class="field"><label for="t-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="t-contacts" name="contacts">{{.Contacts}}</textarea></div>
   {{if .Edit}}<section class="card"><h3>Bindings this change re-applies</h3>

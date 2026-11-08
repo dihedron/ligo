@@ -47,7 +47,7 @@ func TestInlineSource(t *testing.T) {
 	}
 
 	// both complete at creation: the source first, then the binding, at once
-	s.Requests.Policy.RequiredScopes = nil
+	s.Requests.Policy.RequiredJurisdictions = nil
 	src2, name2 := "dc-inl2-src-"+w.suffix, "dc-inl2-"+w.suffix
 	r, err = s.Create(ctx, dcOp, body(name2, src2, w.dcShared, "read", inline(src2, w.suffix+"b")))
 	if err != nil || r.Status != "APPLIED" || status(t, o, *r.DependsOn) != "APPLIED" {

@@ -20,7 +20,7 @@ If a revert fails, the emergency state stays served until you retry it: `BREAK_G
 
 ## A compromised workload
 
-1. Revoke it: `ligo break-glass delete <name> ...`, or with one owner's approval through `ligo delete`. To contain a whole source or scope on a target, use `ligo target revoke-bindings`.
+1. Revoke it: `ligo break-glass delete <name> ...`, or with one owner's approval through `ligo delete`. To contain a whole source or jurisdiction on a target, use `ligo target revoke-bindings`.
 2. The API stops serving it at once. The workflow then removes its credential and role, and ends the role's sessions on PostgreSQL.
 3. Check it reached the end: `ligo get binding <name>` answers `404`, and the audit shows `DELETE_COMPLETED`.
 4. If you need the workload's SPIRE entry gone too, that is SPIRE's: `ligo` does not manage it.

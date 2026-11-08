@@ -34,7 +34,7 @@ The regex is checked strictly: anchored, with no `.`, no alternation at the top,
 ```yaml
 # target.yaml
 kind: Target
-metadata: { name: ledger, platform: pg-ledger, scope: dc/corp-prod/ledger }
+metadata: { name: ledger, platform: pg-ledger, jurisdiction: dc/corp-prod/ledger }
 definition: { database: ledger, schema: ledger }
 accessLevels:
   - { name: read, grants: { roles: [LEDGER_RO_ROLE] } }
@@ -43,7 +43,7 @@ networkFlows:
 visibility: { mode: PRIVATE }
 ```
 
-`ligo apply -f target.yaml`. A target needs its owner's and its platform's consent, two sides when the scopes differ.
+`ligo apply -f target.yaml`. A target needs its owner's and its platform's consent, two sides when the jurisdictions differ.
 
 ## Bind them
 
@@ -57,7 +57,7 @@ accessLevel: read
 ```
 
 ```bash
-ligo governance check -f binding.yaml   # the scopes, the rule and the sides it will need
+ligo charter check -f binding.yaml   # the jurisdictions, the rule and the sides it will need
 ligo apply -f binding.yaml --wait
 ligo get binding payments-ledger
 ```

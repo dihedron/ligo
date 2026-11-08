@@ -55,14 +55,14 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	src := req.Source
-	scope, err := s.Rules.validate(&src, nil)
+	jurisdiction, err := s.Rules.validate(&src, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !c.Grants.ActsFor(scope, "") {
-		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), scope)
+	if !c.Grants.ActsFor(jurisdiction, "") {
+		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), jurisdiction)
 	}
-	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, jurisdiction); err != nil {
 		return nil, err
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
@@ -119,8 +119,8 @@ func (s *Service) update(ctx context.Context, c changerequests.Caller, cur *stor
 	if _, err := s.Rules.validate(src, &cur.Source); err != nil {
 		return nil, err
 	}
-	if !c.Grants.ActsFor(cur.Metadata.Scope, "") {
-		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), cur.Metadata.Scope)
+	if !c.Grants.ActsFor(cur.Metadata.Jurisdiction, "") {
+		return nil, refuse(403, "forbidden", "%s is no operator of %s", c.ID(), cur.Metadata.Jurisdiction)
 	}
 	if src.Metadata.State == "RETIRED" {
 		if err := inUse(ctx, s.DB, cur.ID); err != nil {
@@ -136,7 +136,7 @@ func (s *Service) update(ctx context.Context, c changerequests.Caller, cur *stor
 // current reads a source the caller can see by name (404 otherwise).
 func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := s.load(ctx, s.DB, name, false)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.Metadata.Scope) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.Metadata.Jurisdiction) {
 		return nil, refuse(404, "not-found", "source %q", name)
 	}
 	return cur, err
@@ -154,11 +154,11 @@ func (s *Service) Inline(ctx context.Context, body []byte) (*changerequests.Requ
 		return nil, nil, nil, invalid("expectedRevision is only for updates")
 	}
 	src := req.Source
-	scope, err := s.Rules.validate(&src, nil)
+	jurisdiction, err := s.Rules.validate(&src, nil)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
+	if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, jurisdiction); err != nil {
 		return nil, nil, nil, err
 	}
 	if _, err := s.load(ctx, s.DB, src.Metadata.Name, false); err == nil {
@@ -191,12 +191,12 @@ func compose(op string, cur *stored, src *Source, req *request) (*changerequests
 		return nil, nil, err
 	}
 	r := &changerequests.Request{ResourceType: "SOURCE", ResourceName: src.Metadata.Name, Operation: op,
-		Consent: changerequests.ConsentAll, OwnerScope: src.Metadata.Scope, ExpectedRevision: req.ExpectedRevision,
+		Consent: changerequests.ConsentAll, OwnerJurisdiction: src.Metadata.Jurisdiction, ExpectedRevision: req.ExpectedRevision,
 		Payload: payload, AutomationContext: req.AutomationContext}
 	if cur != nil {
 		r.ResourceID = &cur.ID
 	}
-	return r, []changerequests.Candidate{{Side: "OWNER", Scope: src.Metadata.Scope}}, nil
+	return r, []changerequests.Candidate{{Side: "OWNER", Jurisdiction: src.Metadata.Jurisdiction}}, nil
 }
 
 // file files the change request of a validated source change.
@@ -221,7 +221,7 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 	}
 	var cur *Source
 	if r.Operation == "CREATE" {
-		src.Metadata.Scope, src.Metadata.State = "", "" // derived again
+		src.Metadata.Jurisdiction, src.Metadata.State = "", "" // derived again
 	} else {
 		st, err := s.loadID(ctx, s.DB, *r.ResourceID, false)
 		if err != nil {
@@ -229,12 +229,12 @@ func (s *Service) Revalidate(ctx context.Context, r *changerequests.Request) (js
 		}
 		cur = &st.Source
 	}
-	scope, err := s.Rules.validate(&src, cur)
+	jurisdiction, err := s.Rules.validate(&src, cur)
 	if err != nil {
 		return nil, err
 	}
 	if cur == nil { // TN-5: an existing source cannot be on a retired account
-		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, scope); err != nil {
+		if _, err := accounts.Require(ctx, s.DB, s.Rules.Accounts, jurisdiction); err != nil {
 			return nil, err
 		}
 	}
@@ -249,7 +249,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	}
 	if r.Operation == "CREATE" {
 		id := uuid.NewV7()
-		account, err := accounts.Require(ctx, tx, s.Rules.Accounts, src.Metadata.Scope)
+		account, err := accounts.Require(ctx, tx, s.Rules.Accounts, src.Metadata.Jurisdiction)
 		if err != nil {
 			return nil, err
 		}
@@ -342,13 +342,13 @@ func inUse(ctx context.Context, q store.Querier, id uuid.UUID) error {
 	return nil
 }
 
-const columns = `id, revision, name, scope, state, trust_domain, svid_regex, sample_spiffe_ids, coalesce(display_name, ''),
+const columns = `id, revision, name, jurisdiction, state, trust_domain, svid_regex, sample_spiffe_ids, coalesce(display_name, ''),
 	coalesce(description, ''), labels, external_refs, contacts, visibility, visible_to`
 
 func scan(row pgx.Row) (*stored, error) {
 	var st stored
 	st.Kind = "Source"
-	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Scope, &st.Metadata.State, &st.Identity.TrustDomain,
+	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
 		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
 		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo)
 	if len(st.Visibility.VisibleTo) == 0 {
@@ -383,10 +383,10 @@ func jsonb(v any, empty string) string {
 }
 
 func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, account, actor string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO sources (id, name, scope, trust_domain, svid_regex, sample_spiffe_ids, display_name,
+	_, err := tx.Exec(ctx, `INSERT INTO sources (id, name, jurisdiction, trust_domain, svid_regex, sample_spiffe_ids, display_name,
 		description, labels, external_refs, contacts, visibility, visible_to, account, state, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13::jsonb, $15, 'ACTIVE', $14, $14)`,
-		id, s.Metadata.Name, s.Metadata.Scope, s.Identity.TrustDomain, s.Identity.SVIDRegex, jsonb(s.Identity.SampleSPIFFEIDs, "[]"),
+		id, s.Metadata.Name, s.Metadata.Jurisdiction, s.Identity.TrustDomain, s.Identity.SVIDRegex, jsonb(s.Identity.SampleSPIFFEIDs, "[]"),
 		null(s.DisplayName), null(s.Description), jsonb(s.Labels, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"),
 		s.Visibility.Mode, jsonb(s.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_sources_name" {

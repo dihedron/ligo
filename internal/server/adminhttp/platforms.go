@@ -64,8 +64,8 @@ type platformDTO struct {
 	Name                      string            `json:"name"`
 	Type                      string            `json:"type"`
 	Realm                     string            `json:"realm"`
-	Scope                     string            `json:"scope"`
-	TargetScopes              []string          `json:"targetScopes"`
+	Jurisdiction              string            `json:"jurisdiction"`
+	TargetJurisdictions       []string          `json:"targetJurisdictions"`
 	DisplayName               string            `json:"displayName,omitempty"`
 	Description               string            `json:"description,omitempty"`
 	Contacts                  []sources.Contact `json:"contacts,omitempty"`
@@ -79,8 +79,8 @@ type platformDTO struct {
 }
 
 func platformOf(typ string, p *config.Platform) platformDTO {
-	d := platformDTO{APIVersion: sources.APIVersion, Kind: "Platform", Name: p.Name, Type: typ, Realm: p.Realm, Scope: p.Scope,
-		TargetScopes: p.TargetScopes, DisplayName: p.DisplayName, Description: p.Description,
+	d := platformDTO{APIVersion: sources.APIVersion, Kind: "Platform", Name: p.Name, Type: typ, Realm: p.Realm, Jurisdiction: p.Jurisdiction,
+		TargetJurisdictions: p.TargetJurisdictions, DisplayName: p.DisplayName, Description: p.Description,
 		AllowedSourceTrustDomains: p.AllowedSourceTrustDomains, NetworkFlows: p.NetworkFlows,
 		IdentityProvider: wiringDTO{p.IdentityProvider.Type, p.IdentityProvider.Instance},
 		SecretStore:      wiringDTO{p.SecretStore.Type, p.SecretStore.Instance}}

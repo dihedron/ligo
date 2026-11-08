@@ -16,10 +16,10 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/sources"
 	"google.golang.org/protobuf/proto"
@@ -42,14 +42,14 @@ type Target struct {
 }
 
 type Metadata struct {
-	Name     string `json:"name"`
-	Scope    string `json:"scope"`
-	Platform string `json:"platform"`
+	Name         string `json:"name"`
+	Jurisdiction string `json:"jurisdiction"`
+	Platform     string `json:"platform"`
 	// copied from the platform
-	PlatformType  string `json:"platformType,omitempty"`
-	PlatformScope string `json:"platformScope,omitempty"`
-	Realm         string `json:"realm,omitempty"`
-	State         string `json:"state,omitempty"`
+	PlatformType         string `json:"platformType,omitempty"`
+	PlatformJurisdiction string `json:"platformJurisdiction,omitempty"`
+	Realm                string `json:"realm,omitempty"`
+	State                string `json:"state,omitempty"`
 }
 
 type AccessLevel struct {
@@ -66,18 +66,18 @@ type ValidateTarget func(ctx context.Context, req *pluginv1.ValidateTargetReques
 
 // Platform is what targets need of a configured platform (§8.1).
 type Platform struct {
-	Name, Type, Realm, Scope string
-	TargetScopes             []string
-	NamespaceTemplate        string
-	CheckExistence           bool
-	Allow                    flows.Allowlist
+	Name, Type, Realm, Jurisdiction string
+	TargetJurisdictions             []string
+	NamespaceTemplate               string
+	CheckExistence                  bool
+	Allow                           flows.Allowlist
 }
 
 // Rules are the parts of the configuration that validate targets.
 type Rules struct {
 	Platforms    map[string]Platform
-	NamePrefixes []governance.NamePrefix
-	Accounts     *governance.Accounts // nil: no accounts
+	NamePrefixes []charter.NamePrefix
+	Accounts     *charter.Accounts // nil: no accounts
 	// NamespaceField is the definition field a platform type declares for
 	// its namespace (pluginmgr.Manager.NamespaceField).
 	NamespaceField func(platformType string) string
@@ -85,7 +85,7 @@ type Rules struct {
 
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Accounts: cfg.Governance.Accounts}
+	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Charter.NamePrefixes, Accounts: cfg.Charter.Accounts}
 	for _, pp := range cfg.PlatformProviders {
 		for _, p := range pp.Platforms {
 			var pc struct {
@@ -98,10 +98,10 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 			if err != nil {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
-			pl := Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Scope: p.Scope, TargetScopes: p.TargetScopes, NamespaceTemplate: p.NamespaceTemplate,
+			pl := Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Jurisdiction: p.Jurisdiction, TargetJurisdictions: p.TargetJurisdictions, NamespaceTemplate: p.NamespaceTemplate,
 				CheckExistence: p.CheckExistence == nil || *p.CheckExistence, Allow: allow}
-			if len(pl.TargetScopes) == 0 {
-				pl.TargetScopes = []string{p.Scope + "/*"} // the platform's scope and below
+			if len(pl.TargetJurisdictions) == 0 {
+				pl.TargetJurisdictions = []string{p.Jurisdiction + "/*"} // the platform's jurisdiction and below
 			}
 			r.Platforms[p.Name] = pl
 		}
@@ -129,13 +129,13 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	t.Kind = "Target"
 	m := &t.Metadata
 	if cur == nil {
-		if m.PlatformType != "" || m.PlatformScope != "" || m.Realm != "" || m.State != "" {
-			return invalid("metadata.platformType, platformScope, realm and state are set by ligo")
+		if m.PlatformType != "" || m.PlatformJurisdiction != "" || m.Realm != "" || m.State != "" {
+			return invalid("metadata.platformType, platformJurisdiction, realm and state are set by ligo")
 		}
-		if !governance.ValidScopePath(m.Scope) {
-			return invalid("metadata.scope %q is not a scope", m.Scope)
+		if !charter.ValidJurisdictionPath(m.Jurisdiction) {
+			return invalid("metadata.jurisdiction %q is not a jurisdiction", m.Jurisdiction)
 		}
-		if err := engine.CheckName(engine.KindTarget, m.Name, m.Scope, r.NamePrefixes); err != nil {
+		if err := engine.CheckName(engine.KindTarget, m.Name, m.Jurisdiction, r.NamePrefixes); err != nil {
 			return invalid("metadata.name: %v", err)
 		}
 	} else if err := immutable(m, &cur.Metadata); err != nil {
@@ -145,13 +145,13 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	if !ok {
 		return invalid("metadata.platform %q is not a configured platform", m.Platform)
 	}
-	if cur == nil && !slices.ContainsFunc(p.TargetScopes, func(pat string) bool { return governance.ScopeMatches(pat, m.Scope) }) {
-		return invalid("metadata.scope %s is not in the target_scopes of %s", m.Scope, p.Name)
+	if cur == nil && !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, m.Jurisdiction) }) {
+		return invalid("metadata.jurisdiction %s is not in the target_jurisdictions of %s", m.Jurisdiction, p.Name)
 	}
-	if !r.Accounts.TargetConforms(m.Scope) {
-		return refuse(422, "account-scope-mismatch", "metadata.scope %s does not have the form %s", m.Scope, r.Accounts.TargetScope)
+	if !r.Accounts.TargetConforms(m.Jurisdiction) {
+		return refuse(422, "account-jurisdiction-mismatch", "metadata.jurisdiction %s does not have the form %s", m.Jurisdiction, r.Accounts.TargetJurisdiction)
 	}
-	m.PlatformType, m.PlatformScope, m.Realm = p.Type, p.Scope, p.Realm
+	m.PlatformType, m.PlatformJurisdiction, m.Realm = p.Type, p.Jurisdiction, p.Realm
 	if cur == nil {
 		m.State = "ACTIVE"
 	}
@@ -185,7 +185,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 		if r.NamespaceField != nil {
 			field = r.NamespaceField(p.Type)
 		}
-		if err := CheckNamespace(r.Accounts, p.NamespaceTemplate, field, m.Scope, t.Definition); err != nil {
+		if err := CheckNamespace(r.Accounts, p.NamespaceTemplate, field, m.Jurisdiction, t.Definition); err != nil {
 			return err
 		}
 	}
@@ -201,19 +201,19 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 }
 
 // CheckNamespace compares the namespace in a normalized definition with what
-// the target's scope gives (.specs/ligo-tenancy.md §5). ligo does it, not each
+// the target's jurisdiction gives (.specs/ligo-tenancy.md §5). ligo does it, not each
 // plugin, so that a plugin cannot get it wrong or forget it.
-func CheckNamespace(a *governance.Accounts, template, field, scope string, definition []byte) error {
-	want, ok := a.NamespaceOf(template, scope)
+func CheckNamespace(a *charter.Accounts, template, field, jurisdiction string, definition []byte) error {
+	want, ok := a.NamespaceOf(template, jurisdiction)
 	if !ok {
-		return refuse(422, "namespace-scope-mismatch", "scope %s has no namespace: a namespaced platform holds only tenancies", scope)
+		return refuse(422, "namespace-jurisdiction-mismatch", "jurisdiction %s has no namespace: a namespaced platform holds only tenancies", jurisdiction)
 	}
 	var def map[string]any
 	if err := json.Unmarshal(definition, &def); err != nil {
 		return invalid("definition: %v", err)
 	}
 	if got, _ := def[field].(string); got != want {
-		return refuse(422, "namespace-mismatch", "definition.%s must be %q in scope %s", field, want, scope)
+		return refuse(422, "namespace-mismatch", "definition.%s must be %q in jurisdiction %s", field, want, jurisdiction)
 	}
 	return nil
 }
@@ -222,11 +222,11 @@ func CheckNamespace(a *governance.Accounts, template, field, scope string, defin
 // cur when the update gives none.
 func immutable(m, cur *Metadata) error {
 	for _, f := range []struct{ name, got, want string }{
-		{"name", m.Name, cur.Name}, {"platform", m.Platform, cur.Platform}, {"scope", m.Scope, cur.Scope},
-		{"platformType", m.PlatformType, cur.PlatformType}, {"platformScope", m.PlatformScope, cur.PlatformScope},
+		{"name", m.Name, cur.Name}, {"platform", m.Platform, cur.Platform}, {"jurisdiction", m.Jurisdiction, cur.Jurisdiction},
+		{"platformType", m.PlatformType, cur.PlatformType}, {"platformJurisdiction", m.PlatformJurisdiction, cur.PlatformJurisdiction},
 		{"realm", m.Realm, cur.Realm},
 	} {
-		if f.got != f.want && (f.got != "" || f.name == "name" || f.name == "platform" || f.name == "scope") {
+		if f.got != f.want && (f.got != "" || f.name == "name" || f.name == "platform" || f.name == "jurisdiction") {
 			return refuse(422, "immutable-field", "metadata.%s cannot change", f.name)
 		}
 	}

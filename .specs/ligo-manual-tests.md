@@ -79,7 +79,7 @@ Follow the guide in `.specs/ligo-echo-target.md` (on `feature/echo`): steps 1, 2
 ### U-4: header logo and user menu
 
 1. Every page's header shows the ligo symbol (no wordmark), and so does the sign-in card, left of "Sign in to ligo". The symbol has no background of its own: it blends into the page under **Appearance** light and dark alike.
-2. Click the head icon at the top right. The menu shows the username, the full name from LDAP (`cn` in the lab: e.g. "Dave Approver"), the roles with their scopes, **Appearance** and **Sign out**.
+2. Click the head icon at the top right. The menu shows the username, the full name from LDAP (`cn` in the lab: e.g. "Dave Approver"), the roles with their jurisdictions, **Appearance** and **Sign out**.
 3. The menu closes when you click outside it or press Escape. **Sign out** returns you to the login page.
 4. Sign in as `livia`: the roles include `break_glass on dc/corp-prod/*`.
 
@@ -118,7 +118,7 @@ As `livia`, each of these must show an error in the form, and the change must no
 
 ### A-1: the Accounts page
 
-Prerequisite: `test/lab/lab.sh serve test-accounts`, which leaves `ligo` installed with `governance.accounts`. Afterwards, run `reset` and `serve install` before any other scenario. Users: `kim` is the account administrator, `alan` an approver of `acme`.
+Prerequisite: `test/lab/lab.sh serve test-accounts`, which leaves `ligo` installed with `charter.accounts`. Afterwards, run `reset` and `serve install` before any other scenario. Users: `kim` is the account administrator, `alan` an approver of `acme`.
 
 1. As `alan`, open **Accounts**: `acme` only, and no register form. Its page shows the counts and no Retire.
 2. As `kim`, register `umbrella`. The browser goes to its page.

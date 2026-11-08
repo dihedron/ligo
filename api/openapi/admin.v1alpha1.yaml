@@ -33,8 +33,8 @@ tags:
     description: "Bindings of a source to a target at one access level (§3.5)."
   - name: change-requests
     description: "Change requests and their sides (§7.2.3)."
-  - name: governance
-    description: "The governance policy and its dry run (ADR-13, ADR-14)."
+  - name: charter
+    description: "The charter and its dry run (ADR-13, ADR-14)."
   - name: break-glass
     description: "Break-glass changes of bindings (ADR-12)."
   - name: operations
@@ -54,7 +54,7 @@ paths:
       operationId: listSources
       summary: The sources visible to the caller.
       parameters:
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - { name: trustDomain, in: query, schema: { type: string } }
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/label"
@@ -130,7 +130,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - $ref: "#/components/parameters/label"
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/pageSize"
@@ -190,7 +190,7 @@ paths:
               required: [comment]
               properties:
                 source: { type: string }
-                sourceScope: { type: string, description: "A scope pattern." }
+                sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
                 comment: { type: string }
                 approvalReference: { type: string }
       responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
@@ -221,7 +221,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
-        - $ref: "#/components/parameters/scope"
+        - $ref: "#/components/parameters/jurisdiction"
         - $ref: "#/components/parameters/label"
         - { name: state, in: query, description: "ACTIVE (default), or DEPRECATED to include deprecated targets.", schema: { type: string, enum: [ACTIVE, DEPRECATED] } }
         - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
@@ -233,7 +233,7 @@ paths:
     get:
       tags: [catalog]
       operationId: getCatalogTarget
-      summary: A target's card with the governance outcome for each of the caller's sources.
+      summary: A target's card with the charter outcome for each of the caller's sources.
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
@@ -277,7 +277,7 @@ paths:
         - { name: phase, in: query, schema: { type: string } }
         - { name: trustDomain, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
-        - { name: scope, in: query, description: "A scope pattern matched against any of the three scopes.", schema: { type: string } }
+        - { name: jurisdiction, in: query, description: "A jurisdiction pattern matched against any of the three jurisdictions.", schema: { type: string } }
         - { name: expiringBefore, in: query, schema: { type: string, format: date-time } }
         - { name: propagationPending, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
@@ -336,7 +336,7 @@ paths:
         - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
         - { name: resourceName, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string } }
+        - { name: jurisdiction, in: query, schema: { type: string } }
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
@@ -375,12 +375,12 @@ paths:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now; comment (why) is required., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
-  # --- governance --------------------------------------------------------------
-  /v1/admin/governance:
+  # --- charter --------------------------------------------------------------
+  /v1/admin/charter:
     get:
-      tags: [governance]
-      operationId: getGovernance
-      summary: The governance policy in force, as the canonical JSON its SHA-256 is computed over (§8.2).
+      tags: [charter]
+      operationId: getCharter
+      summary: The charter in force, as the canonical JSON its SHA-256 is computed over (§8.2).
       responses:
         "200":
           description: The policy and its hash.
@@ -394,10 +394,10 @@ paths:
                   sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
-  /v1/admin/governance/evaluate:
+  /v1/admin/charter/evaluate:
     post:
-      tags: [governance]
-      operationId: evaluateGovernance
+      tags: [charter]
+      operationId: evaluateCharter
       summary: Dry run of a planned creation; stores nothing and calls no plugin.
       requestBody:
         required: true
@@ -420,7 +420,7 @@ paths:
                 - { type: object, required: [kind], properties: { kind: { enum: [Source, Target] } } }
       responses:
         "200":
-          description: The governance outcome.
+          description: The charter outcome.
           content:
             application/json:
               schema:
@@ -428,7 +428,7 @@ paths:
                 properties:
                   resourceType: { enum: [BINDING, SOURCE, TARGET] }
                   name: { type: string }
-                  scopes: { type: object, additionalProperties: { type: string } }
+                  jurisdictions: { type: object, additionalProperties: { type: string } }
                   namePrefix: { type: object, properties: { valid: { type: boolean }, detail: { type: string } } }
                   consent: { enum: [ALL, ANY] }
                   interconnect:
@@ -594,7 +594,7 @@ components:
     pageSize: { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
     pageToken: { name: pageToken, in: query, schema: { type: string } }
     q: { name: q, in: query, description: "Matched in names, display names and descriptions.", schema: { type: string } }
-    scope: { name: scope, in: query, description: "A scope pattern.", schema: { type: string } }
+    jurisdiction: { name: jurisdiction, in: query, description: "A jurisdiction pattern.", schema: { type: string } }
     state: { name: state, in: query, schema: { type: string, enum: [ACTIVE, DEPRECATED, RETIRED] } }
     label: { name: label, in: query, description: "key=value", schema: { type: string } }
     platform: { name: platform, in: query, schema: { type: string } }
@@ -638,7 +638,7 @@ components:
       type: object
       properties:
         side: { type: string, examples: [TARGET, SOURCE, OWNER, PLATFORM, "PARTY:security"] }
-        scope: { type: string }
+        jurisdiction: { type: string }
         basis: { enum: [AUTO, DELEGATED, HUMAN] }
         decision: { type: [string, "null"] }
         decidedBy: { type: string }

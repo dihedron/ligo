@@ -199,7 +199,7 @@ func TestReviewDetail(t *testing.T) {
 		"GET /v1/admin/change-requests": func(url.Values, map[string]any) (string, error) { return queuePage2, nil },
 		"GET /v1/admin/change-requests/cr-older-0000": func(url.Values, map[string]any) (string, error) {
 			return `{"id":"cr-older-0000","resourceType":"TARGET","operation":"UPDATE","resourceName":"t1","kind":"STANDARD","consent":"ALL",
-				"ownerScope":"dc/x/ledger","payloadSha256":"aaaa","sides":[{"side":"OWNER","scope":"dc/x/ledger","basis":"HUMAN","decision":null}],
+				"ownerJurisdiction":"dc/x/ledger","payloadSha256":"aaaa","sides":[{"side":"OWNER","jurisdiction":"dc/x/ledger","basis":"HUMAN","decision":null}],
 				"diff":{"changes":[{"field":"description","old":"a","new":"b"}]}}`, nil
 		},
 	}}
@@ -208,7 +208,7 @@ func TestReviewDetail(t *testing.T) {
 	drive(m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	drive(m, key("enter"))
 	if v := view(m); m.mode != detailMode || !strings.Contains(v, "payloadSha256: aaaa") || !strings.Contains(v, `"field": "description"`) ||
-		!strings.Contains(v, "OWNER") || !strings.Contains(v, "ownerScope: dc/x/ledger") {
+		!strings.Contains(v, "OWNER") || !strings.Contains(v, "ownerJurisdiction: dc/x/ledger") {
 		t.Fatalf("detail:\n%s", v)
 	}
 	drive(m, key("down"))

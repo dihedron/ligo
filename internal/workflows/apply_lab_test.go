@@ -24,8 +24,8 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sealing"
@@ -117,7 +117,7 @@ type lab struct {
 }
 
 // labBinding files a binding for a fresh source and target on pg-ledger as
-// an operator (a self-service scope, applied at once) and waits for its
+// an operator (a self-service jurisdiction, applied at once) and waits for its
 // workflow to make it ACTIVE; everything is removed at the end of the test.
 func labBinding(t *testing.T) *lab {
 	t.Helper()
@@ -169,9 +169,9 @@ func labBinding(t *testing.T) *lab {
 			sql  string
 			args []any
 		}{
-			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'dc/corp-prod', 'prod.lab', $3, 't', 't')`,
+			{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'dc/corp-prod', 'prod.lab', $3, 't', 't')`,
 				[]any{uuid.NewV7(), source, `^spiffe://prod\.lab/ns/e2e/sa/` + x + `$`}},
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 				values ($1, $2, 'pg-ledger', 'postgres.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{"database":"ledger","schema":"ledger"}', 't', 't')`, []any{targetID, target}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}', '["role:LEDGER_RO_ROLE"]')`, []any{targetID}},
 		} {
@@ -187,13 +187,13 @@ func labBinding(t *testing.T) *lab {
 
 	bs := &bindings.Service{DB: pools.App, Validate: bindings.Plugins(m),
 		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Platforms: map[string]bindings.Platform{"pg-ledger": {
-			Name: "pg-ledger", Type: "postgres.v1", Realm: "prod", Scope: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
+			Name: "pg-ledger", Type: "postgres.v1", Realm: "prod", Jurisdiction: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
 			IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod",
 			SecretStorageStrategy: "vault-static"}}},
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
-	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &governance.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
+	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &charter.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
 		Resources: map[string]changerequests.Resource{"BINDING": bs}}
-	operator := changerequests.Caller{Principal: authz.Principal{Name: "olga"}, Grants: authz.Grants{{Role: config.RoleOperator, Scopes: []string{"dc/*"}}}}
+	operator := changerequests.Caller{Principal: authz.Principal{Name: "olga"}, Grants: authz.Grants{{Role: config.RoleOperator, Jurisdictions: []string{"dc/*"}}}}
 	name := "e2e-" + x
 	r, err := bs.Create(ctx, operator, []byte(fmt.Sprintf(`{"name":%q,"source":%q,"target":%q,"accessLevel":"read"}`, name, source, target)))
 	if err != nil {
@@ -247,7 +247,7 @@ func labBinding(t *testing.T) *lab {
 }
 
 // TestLabApply: a binding filed through the bindings service is applied at
-// once (a self-service scope), its workflow starts after the commit and
+// once (a self-service jurisdiction), its workflow starts after the commit and
 // provisions the three stages with the lab's plugins, sealing with Transit;
 // the stored secret opens the ledger database (§6.2.2, §6.4, AC-01).
 func TestLabApply(t *testing.T) {
@@ -344,10 +344,10 @@ func TestLabBreakGlass(t *testing.T) {
 	ctx := context.Background()
 	l := labBinding(t)
 	p := l.bs.Requests.Policy
-	p.RequiredScopes = []string{"dc/corp-prod"}
-	p.BreakGlassPolicies = []governance.BreakGlassPolicy{{Scopes: []string{"dc/*"}, DefaultTTL: time.Hour, MaxTTL: 2 * time.Hour, MaxOpen: 100,
+	p.RequiredJurisdictions = []string{"dc/corp-prod"}
+	p.BreakGlassPolicies = []charter.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}, DefaultTTL: time.Hour, MaxTTL: 2 * time.Hour, MaxOpen: 100,
 		WarnBefore: 10 * time.Minute}}
-	livia := changerequests.Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{{Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}}}}
+	livia := changerequests.Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{{Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/*"}}}}
 	binding := fmt.Sprintf(`{"name":%q,"source":%q,"target":%q,"accessLevel":"read","purpose":"incident INC0012345","expectedRevision":1}`,
 		l.name, l.source, l.target)
 	r, err := l.bs.BreakGlass(ctx, livia, []byte(`{"operation":"UPDATE","binding":`+binding+

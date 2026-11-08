@@ -11,8 +11,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -33,8 +33,8 @@ func dsn(t *testing.T, role string) string {
 	return v
 }
 
-func caller(name, role string, scopes ...string) changerequests.Caller {
-	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Scopes: scopes}}}
+func caller(name, role string, jurisdictions ...string) changerequests.Caller {
+	return changerequests.Caller{Principal: authz.Principal{Name: name}, Grants: authz.Grants{{Role: role, Jurisdictions: jurisdictions}}}
 }
 
 var (
@@ -121,7 +121,7 @@ func row(t *testing.T, owner *pgxpool.Pool, name string) (id uuid.UUID, state, r
 }
 
 // TestAC60: a sample the regex does not match is refused; a valid source
-// waits for the approver of its scope, then is ACTIVE.
+// waits for the approver of its jurisdiction, then is ACTIVE.
 func TestAC60(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
@@ -137,13 +137,13 @@ func TestAC60(t *testing.T) {
 		_, _ = owner.Exec(context.Background(), "delete from sources where name = $1", src.Metadata.Name)
 	})
 	if _, err := s.Create(ctx, eve, body(t, src, nil)); slug(err) != "forbidden" {
-		t.Errorf("operator of another scope: %v", err)
+		t.Errorf("operator of another jurisdiction: %v", err)
 	}
 	r, err := s.Create(ctx, alice, body(t, src, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Status != "PENDING" || len(r.Sides) != 1 || r.Sides[0].Name != "OWNER" || r.Sides[0].Scope != "cloud/fin-01/payments" || r.Sides[0].Basis != changerequests.BasisHuman {
+	if r.Status != "PENDING" || len(r.Sides) != 1 || r.Sides[0].Name != "OWNER" || r.Sides[0].Jurisdiction != "cloud/fin-01/payments" || r.Sides[0].Basis != changerequests.BasisHuman {
 		t.Fatalf("request %+v", r)
 	}
 	if _, err := s.Create(ctx, alice, body(t, src, nil)); slug(err) != "change-request-pending" {
@@ -223,7 +223,7 @@ func TestStates(t *testing.T) {
 	src := registered(t, s, owner)
 	retired, _, _, _ := row(t, owner, src.Metadata.Name)
 	if _, err := s.SetState(ctx, eve, src.Metadata.Name, "deprecate", 1, "", nil); slug(err) != "not-found" {
-		t.Errorf("caller without a role on the scope: %v", err)
+		t.Errorf("caller without a role on the jurisdiction: %v", err)
 	}
 	if _, err := s.SetState(ctx, alice, src.Metadata.Name, "reactivate", 1, "", nil); slug(err) != "invalid-transition" {
 		t.Errorf("reactivate ACTIVE: %v", err)
@@ -278,12 +278,12 @@ func insertBinding(t *testing.T, o *pgxpool.Pool, source uuid.UUID) uuid.UUID {
 			sql  string
 			args []any
 		}{
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + suffix}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+				source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),
 				'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal', $6, '{}', 't', 't')`,
@@ -314,14 +314,14 @@ func TestAccountRequired(t *testing.T) {
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
 	account := "t" + x
-	static, err := governance.NewStaticExtractor("cloud/" + account + "/app/p1")
+	static, err := charter.NewStaticExtractor("cloud/" + account + "/app/p1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Rules.Extractors["cloud.internal"] = static
-	s.Rules.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}"}
+	s.Rules.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}"}
 	cfg := example(t)
-	cfg.Authorization.Approval.RequiredScopes = append(cfg.Authorization.Approval.RequiredScopes, "cloud/*")
+	cfg.Authorization.Approval.RequiredJurisdictions = append(cfg.Authorization.Approval.RequiredJurisdictions, "cloud/*")
 	s.Requests.Policy = cfg.Policy() // or the requests would apply at once
 	src := source()
 	src.Metadata.Name = account + "-app-first"

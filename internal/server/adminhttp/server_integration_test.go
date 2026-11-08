@@ -255,17 +255,17 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	ts := &targets.Service{DB: pools.App, Rules: tgtRules, Requests: bs.Requests, Validate: validateTarget}
 	bs.Requests.Resources["TARGET"] = ts
 	az, err := authz.New([]config.RoleBinding{
-		{SPIFFEID: opID, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
-		{SPIFFEID: appID, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
-		{SPIFFEID: adminID, Role: config.RoleFullAccess, Scopes: []string{"*"}},
-		{SPIFFEID: admin2ID, Role: config.RoleFullAccess, Scopes: []string{"*"}},
-		{SPIFFEID: secID, Role: config.RoleApprover, Scopes: []string{"sec/*"}},
-		{SPIFFEID: viewerID, Role: config.RoleViewer, Scopes: []string{"*"}},
+		{SPIFFEID: opID, Role: config.RoleOperator, Jurisdictions: []string{"dc/corp-prod"}},
+		{SPIFFEID: appID, Role: config.RoleApprover, Jurisdictions: []string{"dc/*"}},
+		{SPIFFEID: adminID, Role: config.RoleFullAccess, Jurisdictions: []string{"*"}},
+		{SPIFFEID: admin2ID, Role: config.RoleFullAccess, Jurisdictions: []string{"*"}},
+		{SPIFFEID: secID, Role: config.RoleApprover, Jurisdictions: []string{"sec/*"}},
+		{SPIFFEID: viewerID, Role: config.RoleViewer, Jurisdictions: []string{"*"}},
 		{SPIFFEID: regID, Role: config.RoleAccountAdmin},
-		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Scopes: []string{"dc/*"}},
-		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Scopes: []string{"*"}},
-		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
-		{LDAPGroupDN: "cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleApprover, Scopes: []string{"dc/*"}},
+		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/*"}},
+		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Jurisdictions: []string{"*"}},
+		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/corp-prod/*"}},
+		{LDAPGroupDN: "cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleApprover, Jurisdictions: []string{"dc/*"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -293,9 +293,9 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 			sql  string
 			args []any
 		}{
-			{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
+			{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
 				'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/api/sa/` + x + `$`}},
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{targetID, "tgt-" + x}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{"roles":["LEDGER_RO_ROLE"]}',
 				'["role:LEDGER_RO_ROLE"]')`, []any{targetID}},
@@ -429,8 +429,8 @@ func TestViewerRequired(t *testing.T) {
 		{"GET", "/v1/admin/bindings"},
 		{"GET", "/v1/admin/catalog/targets"},
 		{"GET", "/v1/admin/catalog/sources"},
-		{"GET", "/v1/admin/governance"},
-		{"POST", "/v1/admin/governance/evaluate"},
+		{"GET", "/v1/admin/charter"},
+		{"POST", "/v1/admin/charter/evaluate"},
 		{"GET", "/v1/admin/maintenance"},
 		{"GET", "/v1/admin/audit/verify"},
 		{"GET", "/v1/admin/platforms/oracle-prod"},
@@ -655,7 +655,7 @@ func TestSourcesAPI(t *testing.T) {
 	}
 	got := v.do(t, viewer, "GET", "/v1/admin/sources/"+name, nil)
 	md, _ := got.body["metadata"].(map[string]any)
-	if got.code != 200 || got.body["apiVersion"] != sources.APIVersion || md["scope"] != "dc/corp-prod" || md["revision"] != 1.0 ||
+	if got.code != 200 || got.body["apiVersion"] != sources.APIVersion || md["jurisdiction"] != "dc/corp-prod" || md["revision"] != 1.0 ||
 		md["pendingChangeRequestId"] != nil || len(got.body["audit"].([]any)) == 0 {
 		t.Fatalf("get: %+v", got)
 	}
@@ -693,7 +693,7 @@ func TestSourcesAPI(t *testing.T) {
 	tested := v.do(t, viewer, "POST", "/v1/admin/sources/test", map[string]any{"trustDomain": "prod.internal",
 		"svidRegex": `^spiffe://prod\.internal/ns/api/sa/w-1[0-9]$`, "spiffeIds": []string{sample("12"), sample("3")}, "currentSource": name})
 	n, _ := tested.body["narrowing"].(map[string]any)
-	if tested.code != 200 || tested.body["valid"] != true || tested.body["scope"] != "dc/corp-prod" ||
+	if tested.code != 200 || tested.body["valid"] != true || tested.body["jurisdiction"] != "dc/corp-prod" ||
 		fmt.Sprint(tested.body["matches"]) != fmt.Sprintf("map[%s:true %s:false]", sample("12"), sample("3")) ||
 		n["narrower"] != true || fmt.Sprint(n["droppedSamples"]) != "["+sample("1")+"]" {
 		t.Errorf("test: %+v", tested.body)
@@ -729,7 +729,7 @@ func TestTargetsAPI(t *testing.T) {
 		return map[string]any{"name": n, "grants": map[string][]string{"roles": roles}}
 	}
 	target := func(levels ...map[string]any) map[string]any {
-		return map[string]any{"metadata": map[string]string{"name": name, "platform": "oracle-prod", "scope": "dc/corp-prod/ledger"},
+		return map[string]any{"metadata": map[string]string{"name": name, "platform": "oracle-prod", "jurisdiction": "dc/corp-prod/ledger"},
 			"definition": map[string]string{"schema": "LEDGER_APP"}, "accessLevels": levels, "networkFlows": []any{},
 			"visibility": map[string]string{"mode": "PRIVATE"}}
 	}
@@ -746,7 +746,7 @@ func TestTargetsAPI(t *testing.T) {
 	}
 	got := v.do(t, viewer, "GET", "/v1/admin/targets/"+name, nil)
 	md, _ := got.body["metadata"].(map[string]any)
-	if got.code != 200 || md["platformScope"] != "dc/corp-prod" || md["revision"] != 1.0 || len(got.body["accessLevels"].([]any)) != 2 ||
+	if got.code != 200 || md["platformJurisdiction"] != "dc/corp-prod" || md["revision"] != 1.0 || len(got.body["accessLevels"].([]any)) != 2 ||
 		len(got.body["audit"].([]any)) == 0 {
 		t.Fatalf("get: %+v", got)
 	}
@@ -797,14 +797,14 @@ func TestTargetsAPI(t *testing.T) {
 		code int
 	}{
 		{olga, map[string]string{"source": "src-" + v.suffix}, 422},
-		{olga, map[string]string{"source": "src-" + v.suffix, "sourceScope": "dc/*", "comment": "x"}, 422},
-		{viewer, map[string]string{"sourceScope": "dc/*", "comment": "contain"}, 403},
+		{olga, map[string]string{"source": "src-" + v.suffix, "sourceJurisdiction": "dc/*", "comment": "x"}, 422},
+		{viewer, map[string]string{"sourceJurisdiction": "dc/*", "comment": "contain"}, 403},
 	} {
 		if r := v.do(t, tc.c, "POST", revoke, tc.body); r.code != tc.code {
 			t.Errorf("%v: %d %v", tc.body, r.code, r.body)
 		}
 	}
-	r := v.do(t, olga, "POST", revoke, map[string]string{"sourceScope": "dc/*", "comment": "compromised workload"})
+	r := v.do(t, olga, "POST", revoke, map[string]string{"sourceJurisdiction": "dc/*", "comment": "compromised workload"})
 	crs, _ := r.body["changeRequests"].([]any)
 	if r.code != 202 || len(crs) != 1 || len(r.body["errors"].([]any)) != 0 {
 		t.Fatalf("revoke: %+v", r)
@@ -814,7 +814,7 @@ func TestTargetsAPI(t *testing.T) {
 		t.Errorf("revocation: %v", c)
 	}
 	// awaitingMe lists only PENDING requests. This is a guard only: the bug it covers (consent ANY leaving an
-	// undecided side on an applied request) needs two human sides with different scopes, which this fixture
+	// undecided side on an applied request) needs two human sides with different jurisdictions, which this fixture
 	// does not have; the lab's `cr list --awaiting-me` shows it
 	awaiting := func() bool {
 		t.Helper()
@@ -873,7 +873,7 @@ func TestBindingsAPI(t *testing.T) {
 		t.Errorf("stages: %v", got.body["stages"])
 	}
 	for path, n := range map[string]int{"/v1/admin/bindings?source=src-" + x: 1, "/v1/admin/bindings?source=src-" + x + "&phase=ACTIVE": 0,
-		"/v1/admin/bindings?scope=dc/*&target=tgt-" + x: 1, "/v1/admin/sources/src-" + x + "/bindings": 1, "/v1/admin/targets/tgt-" + x + "/bindings": 1,
+		"/v1/admin/bindings?jurisdiction=dc/*&target=tgt-" + x: 1, "/v1/admin/sources/src-" + x + "/bindings": 1, "/v1/admin/targets/tgt-" + x + "/bindings": 1,
 		"/v1/admin/bindings?propagationPending=true&source=src-" + x: 0} {
 		if r := v.do(t, viewer, "GET", path, nil); r.code != 200 || len(r.body["items"].([]any)) != n {
 			t.Errorf("%s: %d %v", path, r.code, r.body)
@@ -923,12 +923,12 @@ func TestBindingsAPI(t *testing.T) {
 	}
 
 	// ?wait=true: a change complete at creation answers once the binding settled
-	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), "src2-"+x,
 		`^spiffe://prod\.internal/ns/api2/sa/`+x+`$`); err != nil {
 		t.Fatal(err)
 	}
-	v.bs.Requests.Policy.RequiredScopes = nil
+	v.bs.Requests.Policy.RequiredJurisdictions = nil
 	v.bs.Start = func(ctx context.Context, id uuid.UUID) error {
 		_, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where id = $1", id)
 		return err
@@ -940,7 +940,7 @@ func TestBindingsAPI(t *testing.T) {
 	}
 
 	// break-glass: Basic credentials on the request, never an SVID
-	v.bs.Requests.Policy.RequiredScopes = []string{"dc/corp-prod/*"}
+	v.bs.Requests.Policy.RequiredJurisdictions = []string{"dc/corp-prod/*"}
 	bg := map[string]any{"operation": "DELETE", "name": "api2-" + x, "expectedRevision": 1, "justification": "the workload is compromised, cut it",
 		"incidentReference": "INC0012345"}
 	if r := v.do(t, olga, "POST", "/v1/admin/break-glass", bg); r.code != 403 {
@@ -976,7 +976,7 @@ func TestPlatformsAPI(t *testing.T) {
 		byName[p["name"].(string)] = p
 	}
 	prod, test := byName["oracle-prod"], byName["oracle-test-dynamic"]
-	if list.code != 200 || prod == nil || test == nil || prod["kind"] != "Platform" || prod["scope"] != "dc/corp-prod" ||
+	if list.code != 200 || prod == nil || test == nil || prod["kind"] != "Platform" || prod["jurisdiction"] != "dc/corp-prod" ||
 		prod["health"].(map[string]any)["serving"] != true || test["health"].(map[string]any)["serving"] != false ||
 		fmt.Sprint(prod["privilegeBounds"]) != "map[grantableRoles:[ORDERS_RO_ROLE ORDERS_RW_ROLE LEDGER_RO_ROLE LEDGER_RW_ROLE]]" ||
 		prod["config"] != nil || prod["uiSchemas"] != nil {
@@ -1006,13 +1006,13 @@ func TestCatalogAPI(t *testing.T) {
 	ctx := context.Background()
 	olga, viewer := v.client(t, opID), v.client(t, viewerID)
 	x := v.suffix
-	for _, q := range []struct{ name, scope, td, vis string }{
+	for _, q := range []struct{ name, jurisdiction, td, vis string }{
 		{"cloud-" + x, "cloud/fin-01/payments", "cloud.internal", "PUBLIC"},
 		{"test-" + x, "dc/corp-test", "test.internal", "PUBLIC"},
 		{"hidden-" + x, "dc/corp-test", "test.internal", "PRIVATE"},
 	} {
-		if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
-			values ($1, $2, $3, $4, $5, $6, 't', 't')`, uuid.NewV7(), q.name, q.scope, q.td, `^spiffe://`+q.td+`/x/`+q.name+`$`, q.vis); err != nil {
+		if _, err := v.owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
+			values ($1, $2, $3, $4, $5, $6, 't', 't')`, uuid.NewV7(), q.name, q.jurisdiction, q.td, `^spiffe://`+q.td+`/x/`+q.name+`$`, q.vis); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1032,7 +1032,7 @@ func TestCatalogAPI(t *testing.T) {
 		"?q=" + x:                                  "tgt-" + x + "<nil>",
 		"?q=" + x + "&platform=oracle-test":        "",
 		"?q=" + x + "&platformType=oracle.v1":      "tgt-" + x + "<nil>",
-		"?q=" + x + "&scope=cloud/*":               "",
+		"?q=" + x + "&jurisdiction=cloud/*":        "",
 		"?q=" + x + "&forSource=src-" + x:          "tgt-" + x + "true",
 		"?q=" + x + "&forSource=cloud-" + x:        "tgt-" + x + "<nil>",
 		"?q=" + x + "&forSource=test-" + x:         "", // no-test-to-prod
@@ -1095,22 +1095,22 @@ func TestCatalogAPI(t *testing.T) {
 	}
 }
 
-// TestGovernanceAPI: the policy in force with its SHA-256, and the dry run
-// of a binding, a source and a target: scopes, name prefix, interconnection
+// TestCharterAPI: the policy in force with its SHA-256, and the dry run
+// of a binding, a source and a target: jurisdictions, name prefix, interconnection
 // rule and sides with their basis, storing nothing.
-func TestGovernanceAPI(t *testing.T) {
+func TestCharterAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	ctx := context.Background()
 	olga, viewer := v.client(t, opID), v.client(t, viewerID)
 	x := v.suffix
-	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-test', 'test.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), "test-"+x, `^spiffe://test\.internal/x/`+x+`$`); err != nil {
 		t.Fatal(err)
 	}
 
-	g := v.do(t, viewer, "GET", "/v1/admin/governance", nil)
+	g := v.do(t, viewer, "GET", "/v1/admin/charter", nil)
 	if p, _ := g.body["policy"].(map[string]any); g.code != 200 || g.body["sha256"] != v.bs.Requests.Policy.SHA256() || p["interconnects"] == nil {
-		t.Fatalf("governance: %d %v", g.code, g.body["sha256"])
+		t.Fatalf("charter: %d %v", g.code, g.body["sha256"])
 	}
 
 	var before int64
@@ -1131,7 +1131,7 @@ func TestGovernanceAPI(t *testing.T) {
 		body               map[string]any
 		sides, rule, valid string
 	}{
-		{"same scope", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"},
+		{"same jurisdiction", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"},
 			"TARGET:HUMAN", "<nil>", "true"},
 		{"inline cloud source", map[string]any{"resourceType": "BINDING", "name": "eval-" + x, "source": cloud, "target": "tgt-" + x, "accessLevel": "read"},
 			"TARGET:HUMAN,SOURCE:HUMAN,PARTY:security:HUMAN", "map[action:allow rule:cloud-to-dc]", "false"},
@@ -1139,24 +1139,24 @@ func TestGovernanceAPI(t *testing.T) {
 			"", "map[action:deny rule:no-test-to-prod]", "true"},
 		{"source", map[string]any{"kind": "Source", "metadata": map[string]string{"name": "fin-01-payments-" + x}, "identity": cloud},
 			"OWNER:HUMAN", "<nil>", "true"},
-		{"target", map[string]any{"kind": "Target", "metadata": map[string]string{"name": "ledger-" + x, "platform": "oracle-prod", "scope": "dc/corp-prod/ledger"}},
+		{"target", map[string]any{"kind": "Target", "metadata": map[string]string{"name": "ledger-" + x, "platform": "oracle-prod", "jurisdiction": "dc/corp-prod/ledger"}},
 			"OWNER:HUMAN,PLATFORM:HUMAN", "<nil>", "true"},
 	} {
-		r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", tc.body)
+		r := v.do(t, olga, "POST", "/v1/admin/charter/evaluate", tc.body)
 		if r.code != 200 || sides(r) != tc.sides || fmt.Sprint(r.body["interconnect"]) != tc.rule ||
 			fmt.Sprint(r.body["namePrefix"].(map[string]any)["valid"]) != tc.valid {
 			t.Errorf("%s: %d %+v", tc.name, r.code, r.body)
 		}
 	}
-	v.bs.Requests.Policy.RequiredScopes = nil
-	if r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", map[string]any{"resourceType": "BINDING", "name": "eval-" + x,
+	v.bs.Requests.Policy.RequiredJurisdictions = nil
+	if r := v.do(t, olga, "POST", "/v1/admin/charter/evaluate", map[string]any{"resourceType": "BINDING", "name": "eval-" + x,
 		"source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"}); sides(r) != "TARGET:AUTO" {
 		t.Errorf("no approval required: %+v", r.body)
 	}
 	for body, code := range map[string]int{`{"resourceType":"BINDING","source":"src-` + x + `","target":"nope-` + x + `","accessLevel":"read"}`: 404,
 		`{"resourceType":"BINDING","source":"src-` + x + `","target":"tgt-` + x + `","accessLevel":"admin"}`: 422,
 		`{"kind":"Other"}`: 422, `[]`: 422} {
-		req, _ := http.NewRequest("POST", v.srv.URL+"/v1/admin/governance/evaluate", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", v.srv.URL+"/v1/admin/charter/evaluate", strings.NewReader(body))
 		resp, err := olga.Do(req)
 		if err != nil || resp.StatusCode != code {
 			t.Errorf("%s: %v %v, want %d", body, err, resp.StatusCode, code)
@@ -1248,7 +1248,7 @@ func TestAccountsAPI(t *testing.T) {
 	if items, _ := r.body["items"].([]any); r.code != 200 || len(items) == 0 {
 		t.Errorf("list: %+v", r)
 	}
-	// the example configuration has no accounts: a role on a scope reaches none
+	// the example configuration has no accounts: a role on a jurisdiction reaches none
 	if r := v.do(t, viewer, "GET", base+"/"+name, nil); r.code != 404 {
 		t.Errorf("a viewer's get: %d", r.code)
 	}

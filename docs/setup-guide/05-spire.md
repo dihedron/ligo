@@ -41,6 +41,6 @@ Run as the user `ligo`, a plugin's binary prints the SPIFFE IDs its agent issues
 sudo -u ligo /usr/lib/ligo/plugins/ligo-plugin-postgres -svids /run/spire/prod/agent.sock
 ```
 
-## Workloads, and scopes
+## Workloads, and jurisdictions
 
-A governance scope derived from a SPIFFE path is only as trustworthy as who can assign that path. If someone able to create entries registers a workload under another tenancy's path, bindings approved for that tenancy reach it, and `ligo` cannot detect it. Let a registrar that tenants cannot influence create tenants' entries.
+A jurisdiction derived from a SPIFFE path is only as trustworthy as who can assign that path. If someone able to create entries registers a workload under another tenancy's path, bindings approved for that tenancy reach it, and `ligo` cannot detect it. Let a registrar that tenants cannot influence create tenants' entries.

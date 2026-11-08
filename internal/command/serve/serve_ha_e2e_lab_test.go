@@ -94,7 +94,7 @@ func haFixture(t *testing.T, olga, dora *admin, tag string) (source, target stri
 // grants roles.
 func haTarget(name string, roles ...string) map[string]any {
 	return map[string]any{"kind": "Target",
-		"metadata":     map[string]string{"name": name, "platform": "pg-ledger", "scope": "dc/corp-prod/ledger"},
+		"metadata":     map[string]string{"name": name, "platform": "pg-ledger", "jurisdiction": "dc/corp-prod/ledger"},
 		"definition":   map[string]string{"database": "ledger", "schema": "ledger"},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": roles}}},
 		"visibility":   map[string]string{"mode": "PRIVATE"}}

@@ -10,7 +10,7 @@ Two organisations make it harder. In a multi-tenant cloud, each team is autonomo
 
 ## The solution
 
-`ligo` makes that connection a first-class, governed resource:
+`ligo` makes that connection a first-class resource, decided by the people responsible for each end:
 
 - A **source** is a group of workloads, defined by a SPIFFE ID regex in one trust domain.
 - A **target** is one resource on a **platform**, with named access levels and the network flows needed to reach it.

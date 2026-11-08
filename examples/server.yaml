@@ -67,49 +67,49 @@ admin_auth:
     group_membership_filter: "(member=%s)"
     nested_groups: false
 
-authorization:                            # roles are granted on governance scope patterns (§3.9, §7.2.2)
+authorization:                            # roles are granted on jurisdiction patterns (§3.9, §7.2.2)
   bindings:
-    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",          role: viewer,      scopes: ["*"] }
-    # Central data centre teams: own the platforms (platform scope dc/corp-prod)
-    - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,dc=corp,dc=internal",   role: operator,    scopes: ["dc/corp-prod"] }
-    - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,dc=corp,dc=internal",   role: approver,    scopes: ["dc/corp-prod"] }
-    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass, scopes: ["dc/corp-prod/*"] }
-    # An application team owning targets on the shared platforms (target scope dc/corp-prod/ledger)
-    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,dc=corp,dc=internal",           role: operator,    scopes: ["dc/corp-prod/ledger"] }
-    - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal",          role: approver,    scopes: ["dc/corp-prod/ledger"] }
-    - { ldap_group_dn: "cn=ligo-operators-test,ou=groups,dc=corp,dc=internal",   role: operator,    scopes: ["dc/corp-test"] }
-    - { spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer",              role: operator,    scopes: ["dc/corp-test"] }
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",          role: viewer,      jurisdictions: ["*"] }
+    # Central data centre teams: own the platforms (platform jurisdiction dc/corp-prod)
+    - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,dc=corp,dc=internal",   role: operator,    jurisdictions: ["dc/corp-prod"] }
+    - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,dc=corp,dc=internal",   role: approver,    jurisdictions: ["dc/corp-prod"] }
+    - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass, jurisdictions: ["dc/corp-prod/*"] }
+    # An application team owning targets on the shared platforms (target jurisdiction dc/corp-prod/ledger)
+    - { ldap_group_dn: "cn=ledger-dbas,ou=groups,dc=corp,dc=internal",           role: operator,    jurisdictions: ["dc/corp-prod/ledger"] }
+    - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal",          role: approver,    jurisdictions: ["dc/corp-prod/ledger"] }
+    - { ldap_group_dn: "cn=ligo-operators-test,ou=groups,dc=corp,dc=internal",   role: operator,    jurisdictions: ["dc/corp-test"] }
+    - { spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer",              role: operator,    jurisdictions: ["dc/corp-test"] }
     # A cloud tenancy: self-service developers and their leads
-    - { ldap_group_dn: "cn=cloud-fin01-payments-devs,ou=groups,dc=corp,dc=internal",  role: operator,    scopes: ["cloud/fin-01/payments"] }
-    - { ldap_group_dn: "cn=cloud-fin01-payments-leads,ou=groups,dc=corp,dc=internal", role: approver,    scopes: ["cloud/fin-01/payments"] }
-    - { ldap_group_dn: "cn=cloud-fin01-breakglass,ou=groups,dc=corp,dc=internal",     role: break_glass, scopes: ["cloud/fin-01/*"] }
-    - { ldap_group_dn: "cn=infosec-breakglass,ou=groups,dc=corp,dc=internal",         role: break_glass, scopes: ["sec/infosec"] }
+    - { ldap_group_dn: "cn=cloud-fin01-payments-devs,ou=groups,dc=corp,dc=internal",  role: operator,    jurisdictions: ["cloud/fin-01/payments"] }
+    - { ldap_group_dn: "cn=cloud-fin01-payments-leads,ou=groups,dc=corp,dc=internal", role: approver,    jurisdictions: ["cloud/fin-01/payments"] }
+    - { ldap_group_dn: "cn=cloud-fin01-breakglass,ou=groups,dc=corp,dc=internal",     role: break_glass, jurisdictions: ["cloud/fin-01/*"] }
+    - { ldap_group_dn: "cn=infosec-breakglass,ou=groups,dc=corp,dc=internal",         role: break_glass, jurisdictions: ["sec/infosec"] }
     # Information Security, an additional party for cloud-to-data-centre connections (ADR-14)
-    - { ldap_group_dn: "cn=infosec-approvers,ou=groups,dc=corp,dc=internal",     role: approver,    scopes: ["sec/infosec"] }
+    - { ldap_group_dn: "cn=infosec-approvers,ou=groups,dc=corp,dc=internal",     role: approver,    jurisdictions: ["sec/infosec"] }
     # Delegated approval (ADR-11): SPIFFE principals only; see §10.6 for identity requirements.
     - spiffe_id: "spiffe://prod.internal/ns/automation-prod/sa/awx-runner-db-team"
       role: trusted_automation
-      scopes: ["dc/corp-prod/*"]
-      platforms: ["oracle-prod"]                   # optional; omit to cover every platform in the scopes
+      jurisdictions: ["dc/corp-prod/*"]
+      platforms: ["oracle-prod"]                   # optional; omit to cover every platform in the jurisdictions
       approval_reference_pattern: '^CHG[0-9]{7}$'  # optional; RE2, fully anchored
       rate_limit: { api_rps: 50, burst: 200 }      # optional; overrides admin_listener.rate_limit.api_per_principal_rps
   approval:
-    required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"] # scopes whose sides need an approver (ADR-09)
-    require_distinct_approvers_across_scopes: true        # ADR-13 rule 7 (default true)
+    required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"] # jurisdictions whose sides need an approver (ADR-09)
+    require_distinct_approvers_across_jurisdictions: true        # ADR-13 rule 7 (default true)
     change_request_ttl: 72h
 
-governance:                               # ADR-13, ADR-14, §3.9
-  source_scopes:                          # exactly one entry per trust domain listed in any allowed_source_trust_domains
-    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
-    - { trust_domain: test.internal, mode: static, scope: "dc/corp-test" }
+charter:                               # ADR-13, ADR-14, §3.9
+  source_jurisdictions:                          # exactly one entry per trust domain listed in any allowed_source_trust_domains
+    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
+    - { trust_domain: test.internal, mode: static, jurisdiction: "dc/corp-test" }
     - trust_domain: cloud.internal
       mode: path_template
       path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/'   # matched against the regex's fixed prefix only
-      scope_template: 'cloud/${1}/${2}'
-  name_prefixes:                          # §3.8; first matching entry wins; {n} = n-th segment of the owner scope
-    - { scopes: ["cloud/*"], prefix: "{2}-{3}-", resources: [source, target, binding] }  # cloud/fin-01/payments -> "fin-01-payments-"
-  interconnects:                          # ADR-14; evaluated in order for binding changes with consent ALL across scopes
-    default_cross_scope: deny             # deny | allow, for cross-scope pairs no rule matches
+      jurisdiction_template: 'cloud/${1}/${2}'
+  name_prefixes:                          # §3.8; first matching entry wins; {n} = n-th segment of the owner jurisdiction
+    - { jurisdictions: ["cloud/*"], prefix: "{2}-{3}-", resources: [source, target, binding] }  # cloud/fin-01/payments -> "fin-01-payments-"
+  interconnects:                          # ADR-14; evaluated in order for binding changes with consent ALL across jurisdictions
+    default_cross_jurisdiction: deny             # deny | allow, for cross-jurisdiction pairs no rule matches
     rules:
       - name: no-test-to-prod
         from: ["dc/corp-test/*", "cloud/fin-01-test/*"]   # patterns match whole segments only (§3.9)
@@ -124,7 +124,7 @@ governance:                               # ADR-13, ADR-14, §3.9
         to:   ["dc/corp-prod/*"]
         action: allow
         additional_approvals:
-          - { name: security, scope: "sec/infosec" }
+          - { name: security, jurisdiction: "sec/infosec" }
       - name: dc-to-cloud
         from: ["dc/corp-prod/*"]
         to:   ["cloud/*"]
@@ -197,10 +197,10 @@ ui:                                       # §7.6
 break_glass:                              # ADR-12; role holders are set in authorization.bindings (role: break_glass)
   min_justification_length: 20
   incident_reference_pattern: '^INC[0-9]{7}$'   # optional; RE2, fully anchored
-  policies:                               # first entry whose pattern matches a side's scope applies to that side
-    - { scopes: ["dc/corp-prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
-    - { scopes: ["cloud/fin-01/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
-    - { scopes: ["sec/infosec"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+  policies:                               # first entry whose pattern matches a side's jurisdiction applies to that side
+    - { jurisdictions: ["dc/corp-prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
+    - { jurisdictions: ["cloud/fin-01/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+    - { jurisdictions: ["sec/infosec"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
 
 notifications:                            # §7.5
   webhooks:
@@ -211,13 +211,13 @@ notifications:                            # §7.5
       timeout: 5s
       events: [BREAK_GLASS_USED, BREAK_GLASS_EXPIRING, BREAK_GLASS_REVERTED, BREAK_GLASS_REVERT_FAILED,
                BREAK_GLASS_RATIFIED, BREAK_GLASS_REVIEW_OVERDUE, CONFIG_APPROVAL_POLICY_WEAKENED,
-               CONFIG_GOVERNANCE_POLICY_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
+               CONFIG_CHARTER_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
     - name: dba-queue                     # the data centre DBAs' ticket queue: only their own decisions
       url: "https://tickets.corp.internal/hooks/ligo-dba"
       ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
       hmac_secret_env: "LIGO_WEBHOOK_DBA_SECRET"
       timeout: 5s
-      scopes: ["dc/corp-prod/*"]          # §7.5 scope filter
+      jurisdictions: ["dc/corp-prod/*"]          # §7.5 jurisdiction filter
       events: [CR_AWAITING_APPROVAL]
 
 reconciliation:
@@ -313,8 +313,8 @@ platform_providers:                       # plugin types and the platforms that 
     platforms:
       - name: "oracle-prod"
         realm: prod
-        scope: "dc/corp-prod"            # platform owner scope (§3.9); REQUIRED
-        target_scopes: ["dc/corp-prod/*"] # scopes that may own targets here (default: scope and below)
+        jurisdiction: "dc/corp-prod"            # platform owner jurisdiction (§3.9); REQUIRED
+        target_jurisdictions: ["dc/corp-prod/*"] # jurisdictions that may own targets here (default: jurisdiction and below)
         display_name: "Oracle production cluster"
         description: "Shared RAC cluster for production schemas."
         contacts: [ { name: "DBA on call", email: "dba@example.org" } ]
@@ -345,7 +345,7 @@ platform_providers:                       # plugin types and the platforms that 
             db_static_role: "oracle-prod-ligo-admin"
       - name: "oracle-test-dynamic"
         realm: test
-        scope: "dc/corp-test"
+        jurisdiction: "dc/corp-test"
         network_flows:
           - { name: listener, purpose: DATA, protocol: TCP, destination: "ora-test.test.internal", ports: [1521], tls: false }
         identity_provider: { type: "delegated-dynamic.v1", instance: "vault-dynamic-db-test" }

@@ -21,9 +21,9 @@ import (
 // "Output").
 type Review struct {
 	Base
-	Scope string `long:"scope" description:"Only requests with a scope matching this pattern."`
-	Kind  string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
-	Realm string `long:"realm" description:"Only requests of this realm."`
+	Jurisdiction string `long:"jurisdiction" description:"Only requests with a jurisdiction matching this pattern."`
+	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
+	Realm        string `long:"realm" description:"Only requests of this realm."`
 }
 
 func (cmd *Review) Execute([]string) error {
@@ -34,7 +34,7 @@ func (cmd *Review) Execute([]string) error {
 	}
 	return cmd.connected(func(ctx context.Context, c *client.Client) error {
 		q := url.Values{"awaitingMe": {"true"}}
-		for k, v := range map[string]string{"scope": cmd.Scope, "resourceType": strings.ToUpper(cmd.Kind), "realm": cmd.Realm} {
+		for k, v := range map[string]string{"jurisdiction": cmd.Jurisdiction, "resourceType": strings.ToUpper(cmd.Kind), "realm": cmd.Realm} {
 			if v != "" {
 				q.Set(k, v)
 			}
@@ -244,7 +244,7 @@ func (m *review) show(crID string) tea.Cmd {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%v %v %v (%v, consent %v)\n", cr["resourceType"], cr["operation"], cr["resourceName"], cr["kind"], cr["consent"])
 		fmt.Fprintf(&b, "requested by %v at %v; expires %v\n", cr["requestedBy"], cr["requestedAt"], cr["expiresAt"])
-		for _, k := range []string{"ownerScope", "sourceScope", "targetScope", "platformScope", "interconnectRule", "dependsOn"} {
+		for _, k := range []string{"ownerJurisdiction", "sourceJurisdiction", "targetJurisdiction", "platformJurisdiction", "interconnectRule", "dependsOn"} {
 			if v := cr[k]; v != nil && v != "" {
 				fmt.Fprintf(&b, "%s: %v\n", k, v)
 			}
@@ -252,7 +252,7 @@ func (m *review) show(crID string) tea.Cmd {
 		fmt.Fprintf(&b, "payloadSha256: %v\n\nsides:\n", cr["payloadSha256"])
 		for _, s := range cr["sides"].([]any) {
 			sd := s.(map[string]any)
-			fmt.Fprintf(&b, "  %-16v %-28v %-9v %v\n", sd["side"], sd["scope"], sd["basis"], cell(sd["decision"], "pending"))
+			fmt.Fprintf(&b, "  %-16v %-28v %-9v %v\n", sd["side"], sd["jurisdiction"], sd["basis"], cell(sd["decision"], "pending"))
 		}
 		for _, k := range []string{"diff", "payload"} {
 			if v, ok := cr[k]; ok && v != nil {

@@ -1,5 +1,5 @@
-// Package accounts is the registry of tenants: an account-managed scope
-// (governance.Accounts) is usable only while its account is registered and
+// Package accounts is the registry of tenants: an account-managed jurisdiction
+// (charter.Accounts) is usable only while its account is registered and
 // ACTIVE (.specs/ligo-tenancy.md §7).
 package accounts
 
@@ -12,7 +12,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -86,7 +86,7 @@ func Register(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, na
 	if !c.Grants.AccountAdmin() {
 		return nil, refuse(403, "forbidden", "%s is no account_admin", c.ID())
 	}
-	if !governance.ValidAccountValue(name) || len(name) > maxName {
+	if !charter.ValidAccountValue(name) || len(name) > maxName {
 		return nil, refuse(422, "validation-failed", "name: lower case letters and digits, starting with a letter, at most %d characters", maxName)
 	}
 	if len(displayName) > maxDisplayName {
@@ -131,19 +131,19 @@ func Retire(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, name
 
 // sees reports whether the caller may read an account: account_admin, or a
 // role anywhere in it, a project's included.
-func sees(c changerequests.Caller, cfg *governance.Accounts, name string) bool {
+func sees(c changerequests.Caller, cfg *charter.Accounts, name string) bool {
 	if c.Grants.AccountAdmin() {
 		return true
 	}
 	if cfg == nil {
 		return false
 	}
-	return c.Grants.InScopes(governance.ExpandTemplate(cfg.Scope, map[string]string{"{account}": name}) + "/*")
+	return c.Grants.InJurisdictions(charter.ExpandTemplate(cfg.Jurisdiction, map[string]string{"{account}": name}) + "/*")
 }
 
 // Get returns an account the caller may read, with its counts (404
 // otherwise).
-func Get(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *governance.Accounts, name string) (*Account, error) {
+func Get(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *charter.Accounts, name string) (*Account, error) {
 	a, err := scan(db.QueryRow(ctx, "SELECT "+columns+" FROM accounts WHERE name = $1", name))
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !sees(c, cfg, name) {
 		return nil, refuse(404, "not-found", "account %q", name)
@@ -161,7 +161,7 @@ func Get(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *go
 
 // List returns up to limit accounts after the name after that the caller may
 // read, and whether there are more.
-func List(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *governance.Accounts, after string, limit int) ([]*Account, bool, error) {
+func List(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *charter.Accounts, after string, limit int) ([]*Account, bool, error) {
 	var out []*Account
 	for {
 		rows, err := db.Query(ctx, "SELECT "+columns+" FROM accounts WHERE name > $1 ORDER BY name LIMIT $2", after, 2*limit)
@@ -188,12 +188,12 @@ func List(ctx context.Context, db *pgxpool.Pool, c changerequests.Caller, cfg *g
 	}
 }
 
-// Require returns the account of scope, which is "" outside account-managed
-// scopes; an account-managed scope whose account is not registered and ACTIVE
+// Require returns the account of jurisdiction, which is "" outside account-managed
+// jurisdictions; an account-managed jurisdiction whose account is not registered and ACTIVE
 // is refused. A segment outside the account grammar is refused too: no such
 // account can exist.
-func Require(ctx context.Context, q store.Querier, cfg *governance.Accounts, scope string) (string, error) {
-	name, managed := cfg.AccountOf(scope)
+func Require(ctx context.Context, q store.Querier, cfg *charter.Accounts, jurisdiction string) (string, error) {
+	name, managed := cfg.AccountOf(jurisdiction)
 	if !managed {
 		return "", nil
 	}
@@ -203,7 +203,7 @@ func Require(ctx context.Context, q store.Querier, cfg *governance.Accounts, sco
 		return "", err
 	}
 	if !active {
-		return "", refuse(422, "account-not-registered", "account %q of scope %s is not registered, or is retired", name, scope)
+		return "", refuse(422, "account-not-registered", "account %q of jurisdiction %s is not registered, or is retired", name, jurisdiction)
 	}
 	return name, nil
 }

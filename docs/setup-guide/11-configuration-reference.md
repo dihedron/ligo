@@ -105,57 +105,57 @@
 | Key | Meaning | Default and rules |
 | :------------------------- | :------------------------------- | :------------------ |
 | `authorization` | Who may do what. | |
-| `authorization.bindings` | Grants of a role, on scope patterns. | |
+| `authorization.bindings` | Grants of a role, on jurisdiction patterns. | |
 | `authorization.bindings.ldap_group_dn` | The group holding it. | Required for `break_glass` |
 | `authorization.bindings.spiffe_id` | Or the SPIFFE principal holding it. | Required for `trusted_automation` |
 | `authorization.bindings.role` | `viewer`, `operator`, `approver`, `break_glass`, `trusted_automation`, `admin.full_access`. | |
-| `authorization.bindings.scopes` | The scope patterns. | |
-| `authorization.bindings.platforms` | `trusted_automation` only: limits it to these platforms. | All in its scopes |
+| `authorization.bindings.jurisdictions` | The jurisdiction patterns. | |
+| `authorization.bindings.platforms` | `trusted_automation` only: limits it to these platforms. | All in its jurisdictions |
 | `authorization.bindings.approval_reference_pattern` | `trusted_automation` only: the form of the upstream approval's reference. | Anchored RE2 |
 | `authorization.bindings.rate_limit` | Overrides the API limit for this principal. | |
 | `authorization.bindings.rate_limit.api_rps` | Requests per second. | |
 | `authorization.bindings.rate_limit.burst` | Burst. | |
 | `authorization.approval` | The maker-checker rules. | |
-| `authorization.approval.required_scopes` | Scopes whose sides need an approver. Elsewhere, a requester acting for a side approves it automatically. | |
-| `authorization.approval.require_distinct_approvers_across_scopes` | A different person per side. | On |
+| `authorization.approval.required_jurisdictions` | Jurisdictions whose sides need an approver. Elsewhere, a requester acting for a side approves it automatically. | |
+| `authorization.approval.require_distinct_approvers_across_jurisdictions` | A different person per side. | On |
 | `authorization.approval.change_request_ttl` | When a pending request expires. | |
 
-## `governance`, `regex_policy`, `bindings`, `propagation`
+## `charter`, `regex_policy`, `bindings`, `propagation`
 
 | Key | Meaning | Default and rules |
 | :------------------------- | :------------------------------- | :------------------ |
-| `governance` | How scopes are derived, and which may connect. | |
-| `governance.source_scopes` | One entry per trust domain any platform accepts. | Exactly one each |
-| `governance.source_scopes.trust_domain` | The domain. | |
-| `governance.source_scopes.mode` | `static`, one scope; `path_template`, from the path. | |
-| `governance.source_scopes.scope` | With `static`. | A scope path |
-| `governance.source_scopes.path_regex` | With `path_template`: starts with `^/`, ends with a literal `/`. Matched against the regex's fixed prefix only. | |
-| `governance.source_scopes.scope_template` | With `path_template`, such as `cloud/${1}/${2}`. | |
-| `governance.name_prefixes` | Gives each owner its own name range. First match wins. | |
-| `governance.name_prefixes.scopes` | The scope patterns it applies to. | |
-| `governance.name_prefixes.prefix` | `{n}` is the scope's n-th segment. | |
-| `governance.name_prefixes.resources` | `source`, `target`, `binding`. | |
-| `governance.interconnects` | Which cross-scope pairs may bind. | |
-| `governance.interconnects.default_cross_scope` | When no rule matches: `deny` or `allow`. | Use `deny` |
-| `governance.interconnects.rules` | Evaluated in order. | |
-| `governance.interconnects.rules.name` | Unique; `default` is reserved. | |
-| `governance.interconnects.rules.from` | Source scope patterns. | |
-| `governance.interconnects.rules.to` | Target scope patterns. | |
-| `governance.interconnects.rules.action` | `allow`, or `deny`. | |
-| `governance.interconnects.rules.additional_approvals` | Further parties who must approve, on `allow` rules. | |
-| `governance.interconnects.rules.additional_approvals.name` | The party; its side is `PARTY:<name>`. | |
-| `governance.interconnects.rules.additional_approvals.scope` | Its scope, whose approvers decide. | A scope path |
-| `governance.interconnects.rules.distinct_approvers` | `false` lets one person approve both sides for these pairs. | Audited risk |
-| `governance.accounts` | The structure of account-managed scopes. Absent: no accounts. | Optional |
-| `governance.accounts.scope` | An account's root, such as `cloud/{account}`. `approval.required_scopes` must cover it. | Contains `{account}` |
-| `governance.accounts.source_scope` | A project's scope, such as `cloud/{account}/app/{project}`. | Below `scope`, not overlapping `target_scope` |
-| `governance.accounts.target_scope` | A tenancy's scope, such as `cloud/{account}/data/{tenancy}`. | Below `scope` |
-| `governance.accounts.ldap_groups` | Roles from the directory, one rule for all accounts. | |
-| `governance.accounts.ldap_groups.search_base` | The DN every group lies below. | |
-| `governance.accounts.ldap_groups.roles` | The rules. | |
-| `governance.accounts.ldap_groups.roles.group_dn` | A DN with `{account}`, optionally `{project}`, each one whole value. | The same depth in every rule |
-| `governance.accounts.ldap_groups.roles.role` | `viewer`, `operator`, `approver` or `break_glass`. | |
-| `governance.accounts.ldap_groups.roles.scope` | The scope it gives, at or below `scope`. May end in `/*`. | Only placeholders of its `group_dn` |
+| `charter` | The charter: the rules every jurisdiction complies with. How jurisdictions are derived, their name prefixes, which may connect, and accounts. | One per installation |
+| `charter.source_jurisdictions` | One entry per trust domain any platform accepts. | Exactly one each |
+| `charter.source_jurisdictions.trust_domain` | The domain. | |
+| `charter.source_jurisdictions.mode` | `static`, one jurisdiction; `path_template`, from the path. | |
+| `charter.source_jurisdictions.jurisdiction` | With `static`. | A jurisdiction path |
+| `charter.source_jurisdictions.path_regex` | With `path_template`: starts with `^/`, ends with a literal `/`. Matched against the regex's fixed prefix only. | |
+| `charter.source_jurisdictions.jurisdiction_template` | With `path_template`, such as `cloud/${1}/${2}`. | |
+| `charter.name_prefixes` | Gives each owner its own name range. First match wins. | |
+| `charter.name_prefixes.jurisdictions` | The jurisdiction patterns it applies to. | |
+| `charter.name_prefixes.prefix` | `{n}` is the jurisdiction's n-th segment. | |
+| `charter.name_prefixes.resources` | `source`, `target`, `binding`. | |
+| `charter.interconnects` | Which cross-jurisdiction pairs may bind. | |
+| `charter.interconnects.default_cross_jurisdiction` | When no rule matches: `deny` or `allow`. | Use `deny` |
+| `charter.interconnects.rules` | Evaluated in order. | |
+| `charter.interconnects.rules.name` | Unique; `default` is reserved. | |
+| `charter.interconnects.rules.from` | Source jurisdiction patterns. | |
+| `charter.interconnects.rules.to` | Target jurisdiction patterns. | |
+| `charter.interconnects.rules.action` | `allow`, or `deny`. | |
+| `charter.interconnects.rules.additional_approvals` | Further parties who must approve, on `allow` rules. | |
+| `charter.interconnects.rules.additional_approvals.name` | The party; its side is `PARTY:<name>`. | |
+| `charter.interconnects.rules.additional_approvals.jurisdiction` | Its jurisdiction, whose approvers decide. | A jurisdiction path |
+| `charter.interconnects.rules.distinct_approvers` | `false` lets one person approve both sides for these pairs. | Audited risk |
+| `charter.accounts` | The structure of account-managed jurisdictions. Absent: no accounts. | Optional |
+| `charter.accounts.jurisdiction` | An account's root, such as `cloud/{account}`. `approval.required_jurisdictions` must cover it. | Contains `{account}` |
+| `charter.accounts.source_jurisdiction` | A project's jurisdiction, such as `cloud/{account}/app/{project}`. | Below `jurisdiction`, not overlapping `target_jurisdiction` |
+| `charter.accounts.target_jurisdiction` | A tenancy's jurisdiction, such as `cloud/{account}/data/{tenancy}`. | Below `jurisdiction` |
+| `charter.accounts.ldap_groups` | Roles from the directory, one rule for all accounts. | |
+| `charter.accounts.ldap_groups.search_base` | The DN every group lies below. | |
+| `charter.accounts.ldap_groups.roles` | The rules. | |
+| `charter.accounts.ldap_groups.roles.group_dn` | A DN with `{account}`, optionally `{project}`, each one whole value. | The same depth in every rule |
+| `charter.accounts.ldap_groups.roles.role` | `viewer`, `operator`, `approver` or `break_glass`. | |
+| `charter.accounts.ldap_groups.roles.jurisdiction` | The jurisdiction it gives, at or below `jurisdiction`. May end in `/*`. | Only placeholders of its `group_dn` |
 | `regex_policy` | Limits on source regexes. | |
 | `regex_policy.max_length` | Longest regex. | |
 | `regex_policy.min_literal_path_segments` | Fixed path segments a regex must begin with. | |
@@ -223,8 +223,8 @@
 | `break_glass` | Emergency changes. | |
 | `break_glass.min_justification_length` | Shortest justification. | At least 20 |
 | `break_glass.incident_reference_pattern` | The form of an incident reference. | Anchored RE2 |
-| `break_glass.policies` | The first entry matching a side's scope applies. | |
-| `break_glass.policies.scopes` | Its scope patterns. Each `break_glass` grant's scopes must appear here. | |
+| `break_glass.policies` | The first entry matching a side's jurisdiction applies. | |
+| `break_glass.policies.jurisdictions` | Its jurisdiction patterns. Each `break_glass` grant's jurisdictions must appear here. | |
 | `break_glass.policies.default_ttl` | Until the change is reverted, unless ratified. | 5 min to 24 h |
 | `break_glass.policies.max_ttl` | The longest allowed. | At most 24 h |
 | `break_glass.policies.max_open` | How many may be open. | At least 1 |
@@ -236,7 +236,7 @@
 | `notifications.webhooks.ca_cert_file` | Roots for the URL. | |
 | `notifications.webhooks.hmac_secret_env` | The variable holding its signing secret. | Must be set |
 | `notifications.webhooks.timeout` | Each delivery's deadline. | |
-| `notifications.webhooks.scopes` | Only events about these scope patterns. | All |
+| `notifications.webhooks.jurisdictions` | Only events about these jurisdiction patterns. | All |
 | `notifications.webhooks.events` | The events. | |
 | `reconciliation` | Repairs drift and rotates static secrets. | |
 | `reconciliation.enabled` | On or off. | |
@@ -300,9 +300,9 @@
 | `platform_providers.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
 | `platform_providers.platforms.name` | Its name, unique within its kind. | |
 | `platform_providers.platforms.realm` | Its realm. Wiring must stay within one realm. | |
-| `platform_providers.platforms.scope` | Its owner scope: the team that runs it. A scope path. | |
-| `platform_providers.platforms.target_scopes` | Scope patterns that may own targets here. By default its scope and below. | |
-| `platform_providers.platforms.namespace_template` | What a target's namespace must be, from the placeholders of `governance.accounts.target_scope`, such as `{account}_{tenancy}`. Needs a plugin that declares a namespace field. | |
+| `platform_providers.platforms.jurisdiction` | Its owner jurisdiction: the team that runs it. A jurisdiction path. | |
+| `platform_providers.platforms.target_jurisdictions` | Jurisdiction patterns that may own targets here. By default its jurisdiction and below. | |
+| `platform_providers.platforms.namespace_template` | What a target's namespace must be, from the placeholders of `charter.accounts.target_jurisdiction`, such as `{account}_{tenancy}`. Needs a plugin that declares a namespace field. | |
 | `platform_providers.platforms.display_name` | Its name, for readers. | |
 | `platform_providers.platforms.description` | What it is, for readers. | |
 | `platform_providers.platforms.contacts` | Who to ask. | |

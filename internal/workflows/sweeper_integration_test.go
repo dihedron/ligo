@@ -14,7 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -111,7 +111,7 @@ func (v *env) request(t *testing.T, sql string, args []any, sides ...string) {
 			return err
 		}
 		for _, s := range sides {
-			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind)
+			if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
 				values ($1, $2, 'dc/corp-prod', true, 'HUMAN', 'alice', 'STANDARD')`, args[0], s); err != nil {
 				return err
 			}
@@ -142,16 +142,16 @@ func TestSweepRequests(t *testing.T) {
 	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
 	expired, source, dependent := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	x := expired.String()[24:]
-	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_scope, policy_sha256,
+	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_jurisdiction, policy_sha256,
 		distinct_approvers_required, payload, payload_sha256, requested_by, expires_at)
 		values ($1, 'SOURCE', $2, 'CREATE', 'STANDARD', 'ALL', 'dc/corp-prod', repeat('a', 64), true, '{}', repeat('b', 64), 'alice', now() - interval '1 hour')`,
 		[]any{expired, "x-" + x}, "OWNER")
-	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_scope, policy_sha256,
+	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_jurisdiction, policy_sha256,
 		distinct_approvers_required, payload, payload_sha256, status, requested_by, expires_at)
 		values ($1, 'SOURCE', $2, 'CREATE', 'STANDARD', 'ALL', 'dc/corp-prod', repeat('a', 64), true, '{}', repeat('b', 64), 'WITHDRAWN', 'alice', now() + interval '1 day')`,
 		[]any{source, "s-" + x}, "OWNER")
-	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm, source_scope, target_scope,
-		platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, depends_on_cr_id, requested_by, expires_at)
+	v.request(t, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, realm, source_jurisdiction, target_jurisdiction,
+		platform_jurisdiction, policy_sha256, distinct_approvers_required, payload, payload_sha256, depends_on_cr_id, requested_by, expires_at)
 		values ($1, 'BINDING', $2, 'CREATE', 'STANDARD', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64), true,
 		'{}', repeat('b', 64), $3, 'alice', now() + interval '1 day')`, []any{dependent, "b-" + x, source}, "TARGET")
 	v.sweep(t)
@@ -193,7 +193,7 @@ func TestSweepSingleton(t *testing.T) {
 // bindings service.
 func TestRunLoops(t *testing.T) {
 	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
-	bs := &bindings.Service{DB: v.engine.DB, Requests: &changerequests.Service{DB: v.engine.DB, Policy: &governance.Policy{}}}
+	bs := &bindings.Service{DB: v.engine.DB, Requests: &changerequests.Service{DB: v.engine.DB, Policy: &charter.Policy{}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	done := make(chan struct{}, 2)
@@ -232,7 +232,7 @@ func TestRevertOutcome(t *testing.T) {
 	bg, revert := uuid.NewV7(), uuid.NewV7()
 	err := pgx.BeginFunc(ctx, v.owner, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
-			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
+			source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, payload, payload_sha256, external_approval_ref,
 			break_glass_justification, break_glass_ttl_seconds, status, requested_by, decided_by, decided_at, expires_at)
 			values ($1, 'BINDING', $2, $3, 'CREATE', 'BREAK_GLASS', 'ALL', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
 			true, '{}', repeat('b', 64), 'INC0012345', 'an incident needed this binding at once', 3600, 'APPLIED', 'livia',
@@ -240,13 +240,13 @@ func TestRevertOutcome(t *testing.T) {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
-			source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256,
+			source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, expected_revision, payload, payload_sha256,
 			reverts_cr_id, requested_by, expires_at)
 			values ($1, 'BINDING', $2, $3, 'UPDATE', 'SYSTEM_REVERT', 'ANY', 'prod', 'dc/corp-prod', 'dc/corp-prod', 'dc/corp-prod', repeat('a', 64),
 			false, 1, '{}', repeat('b', 64), $4, 'system:break-glass-expiry', now() + interval '1 day')`, revert, name, id, bg); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind,
+		if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind,
 			decision, decided_by, decided_at) values ($1, 'TARGET', 'dc/corp-prod', true, 'BREAK_GLASS', 'livia', 'BREAK_GLASS', 'APPROVED',
 			'system:break-glass', now()), ($2, 'TARGET', 'dc/corp-prod', false, 'SYSTEM_REVERT', 'system:break-glass-expiry', 'SYSTEM_REVERT',
 			'APPROVED', 'system:break-glass-revert', now())`, bg, revert); err != nil {

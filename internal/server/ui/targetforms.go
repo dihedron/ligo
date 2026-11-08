@@ -350,7 +350,7 @@ func (s *Server) targetOf(r *http.Request, name string) (*targets.Target, error)
 	if err := r.ParseForm(); err != nil {
 		return nil, invalidForm("the form cannot be read")
 	}
-	t := &targets.Target{Kind: "Target", Metadata: targets.Metadata{Name: name, Scope: strings.TrimSpace(r.PostFormValue("scope")),
+	t := &targets.Target{Kind: "Target", Metadata: targets.Metadata{Name: name, Jurisdiction: strings.TrimSpace(r.PostFormValue("jurisdiction")),
 		Platform: r.PostFormValue("platform")}, DisplayName: strings.TrimSpace(r.PostFormValue("displayName")),
 		Description: strings.TrimSpace(r.PostFormValue("description")), DocumentationURL: strings.TrimSpace(r.PostFormValue("documentationUrl")),
 		Contacts:   contacts(r.PostFormValue("contacts")),
@@ -414,26 +414,26 @@ func (s *Server) targetOf(r *http.Request, name string) (*targets.Target, error)
 	return t, nil
 }
 
-// TargetCheck is the governance outcome of the target form.
+// TargetCheck is the charter outcome of the target form.
 type TargetCheck struct {
-	Governance any
-	Error      string
+	Charter any
+	Error   string
 }
 
-// targetPreview is POST /ui/targets/preview: the governance outcome of the
-// target's name, platform and scope (internal/preview).
+// targetPreview is POST /ui/targets/preview: the charter outcome of the
+// target's name, platform and jurisdiction (internal/preview).
 func (s *Server) targetPreview(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
 		return
 	}
 	body, _ := json.Marshal(targets.Target{Kind: "Target", Metadata: targets.Metadata{Name: strings.TrimSpace(r.PostFormValue("name")),
-		Scope: strings.TrimSpace(r.PostFormValue("scope")), Platform: r.PostFormValue("platform")}})
+		Jurisdiction: strings.TrimSpace(r.PostFormValue("jurisdiction")), Platform: r.PostFormValue("platform")}})
 	var d TargetCheck
 	e, err := s.preview().Evaluate(r.Context(), session(r).Caller(), body)
 	if err != nil {
 		d.Error = message(err)
 	} else {
-		d.Governance = e
+		d.Charter = e
 	}
 	s.fragment(w, r, http.StatusOK, "target-check", d)
 }
@@ -495,13 +495,13 @@ func (s *Server) targetState(w http.ResponseWriter, r *http.Request) {
 }
 
 // revokeOn is POST /ui/targets/{name}/bindings/revoke: one revocation per
-// binding of a source, or of a source scope (containment, AC-79); the
+// binding of a source, or of a source jurisdiction (containment, AC-79); the
 // queue then shows the requests.
 // shortcut: a binding whose revocation failed is reported only in the log; show the failures on the target page if operators need them.
 func (s *Server) revokeOn(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	out, err := s.Bindings.RevokeOn(r.Context(), session(r).Caller(), name, strings.TrimSpace(r.PostFormValue("source")),
-		strings.TrimSpace(r.PostFormValue("sourceScope")), strings.TrimSpace(r.PostFormValue("comment")), "")
+		strings.TrimSpace(r.PostFormValue("sourceJurisdiction")), strings.TrimSpace(r.PostFormValue("comment")), "")
 	if err == nil && len(out) == 0 {
 		err = invalidForm("No binding of " + name + " matches.")
 	}

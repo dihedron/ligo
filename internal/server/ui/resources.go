@@ -25,7 +25,7 @@ func (s *Server) sourceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := sources.Filter{Q: q.Get("q"), Scope: q.Get("scope"), State: q.Get("state"), TrustDomain: q.Get("trustDomain"), After: q.Get("after"),
+	f := sources.Filter{Q: q.Get("q"), Jurisdiction: q.Get("jurisdiction"), State: q.Get("state"), TrustDomain: q.Get("trustDomain"), After: q.Get("after"),
 		Limit: pageSize}
 	list, more, err := s.Sources.List(r.Context(), session(r).Caller(), f)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *Server) targetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := targets.Filter{Q: q.Get("q"), Platform: q.Get("platform"), Scope: q.Get("scope"), State: q.Get("state"), After: q.Get("after"),
+	f := targets.Filter{Q: q.Get("q"), Platform: q.Get("platform"), Jurisdiction: q.Get("jurisdiction"), State: q.Get("state"), After: q.Get("after"),
 		Limit: pageSize}
 	list, more, err := s.Targets.List(r.Context(), session(r).Caller(), f)
 	if err != nil {
@@ -133,11 +133,11 @@ func (s *Server) target(w http.ResponseWriter, r *http.Request) {
 
 // PlatformRow is a configured platform with its plugin's health.
 type PlatformRow struct {
-	Name, Type, Realm, Scope, DisplayName string
-	TargetScopes                          []string
-	IdentityProvider, SecretStore         string
-	Serving                               bool
-	Health                                string
+	Name, Type, Realm, Jurisdiction, DisplayName string
+	TargetJurisdictions                          []string
+	IdentityProvider, SecretStore                string
+	Serving                                      bool
+	Health                                       string
 }
 
 // platforms lists server.yaml's platforms, read-only, with their health
@@ -150,7 +150,7 @@ func (s *Server) platforms(w http.ResponseWriter, r *http.Request) {
 	for _, pp := range s.Config.PlatformProviders {
 		for i := range pp.Platforms {
 			pl := &pp.Platforms[i]
-			row := PlatformRow{Name: pl.Name, Type: pp.Type, Realm: pl.Realm, Scope: pl.Scope, DisplayName: pl.DisplayName, TargetScopes: pl.TargetScopes,
+			row := PlatformRow{Name: pl.Name, Type: pp.Type, Realm: pl.Realm, Jurisdiction: pl.Jurisdiction, DisplayName: pl.DisplayName, TargetJurisdictions: pl.TargetJurisdictions,
 				IdentityProvider: pl.IdentityProvider.Instance, SecretStore: pl.SecretStore.Instance}
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			h, err := s.Plugins.Health(ctx, pl.Name) // shortcut: one platform after another; call in parallel if lists grow long
@@ -184,7 +184,7 @@ func (s *Server) catalogSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	cq := catalog.Query{Q: q.Get("q"), PlatformType: q.Get("platformType"), Platform: q.Get("platform"), Scope: q.Get("scope"),
+	cq := catalog.Query{Q: q.Get("q"), PlatformType: q.Get("platformType"), Platform: q.Get("platform"), Jurisdiction: q.Get("jurisdiction"),
 		Label: q.Get("label"), Deprecated: q.Get("deprecated") == "on", AfterName: q.Get("after"), Limit: pageSize + 1}
 	list, err := s.Catalog.Targets(r.Context(), session(r).Caller(), cq)
 	if err != nil {
@@ -209,7 +209,7 @@ func (s *Server) catalogSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // CardPage is a catalog target card: the target, its flows before any
-// binding (no secret store), the same as JSON to copy, and the governance
+// binding (no secret store), the same as JSON to copy, and the charter
 // outcome for each of the user's sources.
 type CardPage struct {
 	Target    *targets.View

@@ -11,9 +11,9 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 func example(t *testing.T) *config.Config {
@@ -77,7 +77,7 @@ func (p *plugin) validate(_ context.Context, req *pluginv1.ValidateTargetRequest
 
 func ledger() Target {
 	return Target{
-		Metadata:   Metadata{Name: "ledger-schema", Platform: "oracle-prod", Scope: "dc/corp-prod/ledger"},
+		Metadata:   Metadata{Name: "ledger-schema", Platform: "oracle-prod", Jurisdiction: "dc/corp-prod/ledger"},
 		Definition: json.RawMessage(`{"schema":"LEDGER_APP","serviceName":"LEDGER.prod.internal"}`),
 		AccessLevels: []AccessLevel{
 			{Name: "read", Grants: json.RawMessage(`{"roles":["LEDGER_RO_ROLE"]}`)},
@@ -118,22 +118,22 @@ func TestValidate(t *testing.T) {
 		twist func(*pluginv1.ValidateTargetResponse)
 		want  string
 	}{
-		"valid":                               {func(*Target) {}, nil, ""},
-		"unknown platform":                    {func(t *Target) { t.Metadata.Platform = "db2-prod" }, nil, "validation-failed"},
-		"scope outside target_scopes (AC-63)": {func(t *Target) { t.Metadata.Scope = "cloud/fin-01/payments" }, nil, "validation-failed"},
-		"resource missing (AC-63)":            {func(t *Target) { t.Definition = json.RawMessage(`{"schema":"LEDGER_MISSING"}`) }, nil, "validation-failed"},
+		"valid":            {func(*Target) {}, nil, ""},
+		"unknown platform": {func(t *Target) { t.Metadata.Platform = "db2-prod" }, nil, "validation-failed"},
+		"jurisdiction outside target_jurisdictions (AC-63)": {func(t *Target) { t.Metadata.Jurisdiction = "cloud/fin-01/payments" }, nil, "validation-failed"},
+		"resource missing (AC-63)":                          {func(t *Target) { t.Definition = json.RawMessage(`{"schema":"LEDGER_MISSING"}`) }, nil, "validation-failed"},
 		"flow to another host (AC-64)": {func(t *Target) {
 			t.NetworkFlows = flowsOf(`[{"name":"f","purpose":"DATA","protocol":"TCP","destination":"evil.example.org","ports":[443],"tls":true}]`)
 		}, nil, "flow-destination-not-allowed"},
 		"flow to another port (AC-64)": {func(t *Target) {
 			t.NetworkFlows = flowsOf(`[{"name":"f","purpose":"DATA","protocol":"TCP","destination":"ledger-db.prod.internal","ports":[1600],"tls":true}]`)
 		}, nil, "flow-destination-not-allowed"},
-		"flow schema":             {func(t *Target) { t.NetworkFlows = flow("ledger-db.prod.internal") }, nil, "validation-failed"},
-		"no access level":         {func(t *Target) { t.AccessLevels = nil }, nil, "validation-failed"},
-		"duplicate level":         {func(t *Target) { t.AccessLevels[1].Name = "read" }, nil, "validation-failed"},
-		"level name":              {func(t *Target) { t.AccessLevels[0].Name = "Read" }, nil, "validation-failed"},
-		"privileges are output":   {func(t *Target) { t.AccessLevels[0].Privileges = []string{"role:X"} }, nil, "validation-failed"},
-		"scope and state are set": {func(t *Target) { t.Metadata.State = "ACTIVE" }, nil, "validation-failed"},
+		"flow schema":                    {func(t *Target) { t.NetworkFlows = flow("ledger-db.prod.internal") }, nil, "validation-failed"},
+		"no access level":                {func(t *Target) { t.AccessLevels = nil }, nil, "validation-failed"},
+		"duplicate level":                {func(t *Target) { t.AccessLevels[1].Name = "read" }, nil, "validation-failed"},
+		"level name":                     {func(t *Target) { t.AccessLevels[0].Name = "Read" }, nil, "validation-failed"},
+		"privileges are output":          {func(t *Target) { t.AccessLevels[0].Privileges = []string{"role:X"} }, nil, "validation-failed"},
+		"jurisdiction and state are set": {func(t *Target) { t.Metadata.State = "ACTIVE" }, nil, "validation-failed"},
 		"plugin: unsorted privileges": {func(*Target) {}, func(r *pluginv1.ValidateTargetResponse) {
 			r.AccessLevels[1].Privileges = []string{"role:LEDGER_RW_ROLE", "role:LEDGER_RO_ROLE"}
 		}, "validation-failed"},
@@ -153,7 +153,7 @@ func TestValidate(t *testing.T) {
 				return
 			}
 			m := tg.Metadata
-			if tg.Kind != "Target" || m.State != "ACTIVE" || m.PlatformType != "oracle.v1" || m.PlatformScope != "dc/corp-prod" || m.Realm != "prod" ||
+			if tg.Kind != "Target" || m.State != "ACTIVE" || m.PlatformType != "oracle.v1" || m.PlatformJurisdiction != "dc/corp-prod" || m.Realm != "prod" ||
 				tg.Visibility.Mode != "PRIVATE" || tg.AccessLevels[0].State != "ACTIVE" {
 				t.Errorf("not normalized: %+v", tg)
 			}
@@ -205,9 +205,9 @@ func TestValidateUpdate(t *testing.T) {
 		"new level not ACTIVE": {func(t *Target) {
 			t.AccessLevels = append(t.AccessLevels, AccessLevel{Name: "admin", Grants: json.RawMessage(`{}`), State: "DEPRECATED"})
 		}, "validation-failed", false},
-		"platform changed": {func(t *Target) { t.Metadata.Platform = "oracle-test-dynamic" }, "immutable-field", false},
-		"scope changed":    {func(t *Target) { t.Metadata.Scope = "dc/corp-prod/orders" }, "immutable-field", false},
-		"target state":     {func(t *Target) { t.Metadata.State = "BOGUS" }, "invalid-transition", false},
+		"platform changed":     {func(t *Target) { t.Metadata.Platform = "oracle-test-dynamic" }, "immutable-field", false},
+		"jurisdiction changed": {func(t *Target) { t.Metadata.Jurisdiction = "dc/corp-prod/orders" }, "immutable-field", false},
+		"target state":         {func(t *Target) { t.Metadata.State = "BOGUS" }, "invalid-transition", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cur := published(t)
@@ -289,22 +289,22 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
-// TN-1 and the form of a target's scope, in the pipeline itself.
+// TN-1 and the form of a target's jurisdiction, in the pipeline itself.
 func TestNamespace(t *testing.T) {
 	r := rules(t)
-	r.Accounts = &governance.Accounts{Scope: "cloud/{account}", SourceScope: "cloud/{account}/app/{project}", TargetScope: "cloud/{account}/data/{tenancy}"}
+	r.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 	r.NamespaceField = func(typ string) string { return "schema" }
 	p := r.Platforms["oracle-prod"]
-	p.TargetScopes, p.NamespaceTemplate = []string{"cloud/*", "dc/corp-prod/*"}, "{account}_{tenancy}"
+	p.TargetJurisdictions, p.NamespaceTemplate = []string{"cloud/*", "dc/corp-prod/*"}, "{account}_{tenancy}"
 	r.Platforms["oracle-prod"] = p
 	r.NamePrefixes = nil
-	run := func(scope, definition string) error {
+	run := func(jurisdiction, definition string) error {
 		tg := ledger()
-		tg.Metadata.Scope, tg.Definition = scope, json.RawMessage(definition)
+		tg.Metadata.Jurisdiction, tg.Definition = jurisdiction, json.RawMessage(definition)
 		return r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil)
 	}
 	for _, c := range []struct {
-		description, scope, definition, slug string
+		description, jurisdiction, definition, slug string
 	}{
 		{"its namespace", "cloud/acme/data/db01", `{"schema":"acme_db01"}`, ""},
 		{"TN-1: another tenant's", "cloud/acme/data/db01", `{"schema":"globex_db02"}`, "namespace-mismatch"},
@@ -312,22 +312,22 @@ func TestNamespace(t *testing.T) {
 		{"no field", "cloud/acme/data/db01", `{}`, "namespace-mismatch"},
 		{"not a string", "cloud/acme/data/db01", `{"schema":["acme_db01"]}`, "namespace-mismatch"},
 		{"a nested field does not count", "cloud/acme/data/db01", `{"x":{"schema":"acme_db01"}}`, "namespace-mismatch"},
-		{"a project's scope", "cloud/acme/app/db01", `{"schema":"acme_db01"}`, "account-scope-mismatch"},
-		{"the account's root", "cloud/acme", `{"schema":"acme_db01"}`, "account-scope-mismatch"},
-		{"outside the grammar", "cloud/a-b/data/c", `{"schema":"a-b_c"}`, "account-scope-mismatch"},
-		{"a namespaced platform outside accounts", "dc/corp-prod/ledger", `{"schema":"x"}`, "namespace-scope-mismatch"},
+		{"a project's jurisdiction", "cloud/acme/app/db01", `{"schema":"acme_db01"}`, "account-jurisdiction-mismatch"},
+		{"the account's root", "cloud/acme", `{"schema":"acme_db01"}`, "account-jurisdiction-mismatch"},
+		{"outside the grammar", "cloud/a-b/data/c", `{"schema":"a-b_c"}`, "account-jurisdiction-mismatch"},
+		{"a namespaced platform outside accounts", "dc/corp-prod/ledger", `{"schema":"x"}`, "namespace-jurisdiction-mismatch"},
 	} {
-		if err := run(c.scope, c.definition); slug(err) != c.slug {
+		if err := run(c.jurisdiction, c.definition); slug(err) != c.slug {
 			t.Errorf("%s: %v", c.description, err)
 		}
 	}
-	// a platform without a template: only the scope's form applies
+	// a platform without a template: only the jurisdiction's form applies
 	p.NamespaceTemplate = ""
 	r.Platforms["oracle-prod"] = p
 	if err := run("cloud/acme/data/db01", `{"schema":"anything"}`); err != nil {
 		t.Errorf("no template: %v", err)
 	}
-	if err := run("cloud/acme/app/db01", `{"schema":"anything"}`); slug(err) != "account-scope-mismatch" {
-		t.Errorf("no template, a project's scope: %v", err)
+	if err := run("cloud/acme/app/db01", `{"schema":"anything"}`); slug(err) != "account-jurisdiction-mismatch" {
+		t.Errorf("no template, a project's jurisdiction: %v", err)
 	}
 }

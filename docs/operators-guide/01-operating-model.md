@@ -22,6 +22,10 @@ Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It sta
 | Account operators and approvers | Everything above, inside their own account, through their directory groups |
 | On call | Break-glass, incidents, this guide |
 
+## Jurisdictions and the charter
+
+A **jurisdiction**, such as `dc/corp-prod` or `cloud/acme/app/payments`, is who decides about a source, a target, a platform or one side of a change. The **charter** is the set of rules every jurisdiction must comply with: how a workload's jurisdiction follows from its SPIFFE path, each jurisdiction's name prefix, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed. There is one charter per installation, in `server.yaml` under `charter:`. Jurisdictions say who decides; the charter says how jurisdictions are formed and how they may deal with each other. Every change request records the charter in force by its hash, and a change decided under a charter that has since changed is refused. Changing it in `server.yaml` raises `CONFIG_CHARTER_CHANGED`.
+
 ## A binding's phases
 
 | Phase | Meaning | Workloads get |

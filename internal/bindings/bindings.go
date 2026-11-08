@@ -13,9 +13,9 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 )
@@ -54,7 +54,7 @@ func Plugins(m *pluginmgr.Manager) ValidateBinding {
 
 // Platform is what bindings need of a configured platform (§8.1).
 type Platform struct {
-	Name, Type, Realm, Scope                       string
+	Name, Type, Realm, Jurisdiction                string
 	AllowedTrustDomains                            []string
 	IdentityProviderType, IdentityProviderInstance string
 	SecretStoreType, SecretStoreInstance           string
@@ -65,7 +65,7 @@ type Platform struct {
 // Rules are the parts of the configuration that validate bindings.
 type Rules struct {
 	Platforms    map[string]Platform
-	NamePrefixes []governance.NamePrefix
+	NamePrefixes []charter.NamePrefix
 	Regex        regexpolicy.Policy
 	MaxExpiry    time.Duration
 	// the flows declared by platforms and secret store instances, and
@@ -80,7 +80,7 @@ type Rules struct {
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
 	wa := cfg.Service.WorkloadAdvertise
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy,
+	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy,
 		MaxExpiry: cfg.Bindings.MaxExpiry, PlatformFlows: map[string][]flows.Flow{}, StoreFlows: map[string][]flows.Flow{},
 		Ligo: flows.LigoFlow(wa.Destination, wa.Port, wa.ServerName), Allow: map[string]flows.Allowlist{}}
 	for _, ss := range cfg.SecretStores {
@@ -96,7 +96,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
 			r.Allow[p.Name] = allow
-			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Scope: p.Scope,
+			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Jurisdiction: p.Jurisdiction,
 				AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix,
 				IdentityProviderType: p.IdentityProvider.Type, IdentityProviderInstance: p.IdentityProvider.Instance,
 				SecretStoreType: p.SecretStore.Type, SecretStoreInstance: p.SecretStore.Instance,
@@ -123,21 +123,21 @@ func (r *Rules) checkExpiry(e *time.Time, now time.Time) error {
 	return nil
 }
 
-// Recheck fails a cross-scope request with consent ALL that the policy now
+// Recheck fails a cross-jurisdiction request with consent ALL that the policy now
 // in force denies, or that lacks a party it now requires (ADR-14 rule 5).
 // Parties the policy no longer requires do not let it pass more easily:
 // their sides were stored and still need their decisions.
-func (s *Service) Recheck(r *changerequests.Request, p *governance.Policy) error {
-	if r.Consent != changerequests.ConsentAll || r.SourceScope == r.TargetScope {
+func (s *Service) Recheck(r *changerequests.Request, p *charter.Policy) error {
+	if r.Consent != changerequests.ConsentAll || r.SourceJurisdiction == r.TargetJurisdiction {
 		return nil
 	}
-	d := p.Evaluate(r.SourceScope, r.TargetScope)
+	d := p.Evaluate(r.SourceJurisdiction, r.TargetJurisdiction)
 	if !d.Allowed {
-		return refuse(409, "governance-policy-changed", "the interconnection policy now denies this pair (%s): file the change again", d.Rule)
+		return refuse(409, "charter-changed", "the interconnection policy now denies this pair (%s): file the change again", d.Rule)
 	}
 	for _, a := range d.AdditionalApprovals {
 		if !slices.ContainsFunc(r.Sides, func(sd changerequests.Side) bool { return sd.Name == "PARTY:"+a.Name }) {
-			return refuse(409, "governance-policy-changed", "the policy now requires the party %s: file the change again", a.Name)
+			return refuse(409, "charter-changed", "the policy now requires the party %s: file the change again", a.Name)
 		}
 	}
 	return nil

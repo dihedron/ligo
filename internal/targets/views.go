@@ -10,7 +10,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 )
@@ -28,10 +28,10 @@ type View struct {
 type ViewMetadata struct {
 	ID                     uuid.UUID  `json:"id"`
 	Name                   string     `json:"name"`
-	Scope                  string     `json:"scope"`
+	Jurisdiction           string     `json:"jurisdiction"`
 	Platform               string     `json:"platform"`
 	PlatformType           string     `json:"platformType"`
-	PlatformScope          string     `json:"platformScope"`
+	PlatformJurisdiction   string     `json:"platformJurisdiction"`
 	Realm                  string     `json:"realm"`
 	State                  string     `json:"state"`
 	Revision               int64      `json:"revision"`
@@ -46,8 +46,8 @@ type ViewMetadata struct {
 // caller sees.
 func (s *Service) view(ctx context.Context, c changerequests.Caller, st *stored) (*View, error) {
 	m := st.Metadata
-	v := &View{APIVersion: sources.APIVersion, Target: st.Target, Metadata: ViewMetadata{ID: st.ID, Name: m.Name, Scope: m.Scope,
-		Platform: m.Platform, PlatformType: m.PlatformType, PlatformScope: m.PlatformScope, Realm: m.Realm, State: m.State, Revision: st.Revision}}
+	v := &View{APIVersion: sources.APIVersion, Target: st.Target, Metadata: ViewMetadata{ID: st.ID, Name: m.Name, Jurisdiction: m.Jurisdiction,
+		Platform: m.Platform, PlatformType: m.PlatformType, PlatformJurisdiction: m.PlatformJurisdiction, Realm: m.Realm, State: m.State, Revision: st.Revision}}
 	vm := &v.Metadata
 	err := s.DB.QueryRow(ctx, `SELECT created_at, updated_at, created_by, updated_by, (SELECT c.id FROM change_requests c
 		WHERE c.resource_type = 'TARGET' AND c.resource_name = t.name AND c.status = 'PENDING') FROM targets t WHERE id = $1`,
@@ -55,12 +55,12 @@ func (s *Service) view(ctx context.Context, c changerequests.Caller, st *stored)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, "SELECT ARRAY[source_scope, target_scope, platform_scope] FROM bindings WHERE target_id = $1", st.ID)
+	rows, err := s.DB.Query(ctx, "SELECT ARRAY[source_jurisdiction, target_jurisdiction, platform_jurisdiction] FROM bindings WHERE target_id = $1", st.ID)
 	if err != nil {
 		return nil, err
 	}
-	scopes, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
-	for _, sc := range scopes {
+	jurisdictions, err := pgx.CollectRows(rows, pgx.RowTo[[]string])
+	for _, sc := range jurisdictions {
 		if c.Grants.Sees(sc...) {
 			v.Status.Bindings++
 		}
@@ -72,8 +72,8 @@ func (s *Service) view(ctx context.Context, c changerequests.Caller, st *stored)
 // by its visibility, and always for the platform's owners (§3.3).
 func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string) (*View, error) {
 	st, err := load(ctx, s.DB, "name = $1 AND state <> 'RETIRED'", name, false)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(st.Metadata.PlatformScope) &&
-		!c.Grants.Visible([]string{st.Metadata.Scope}, st.Visibility.Mode, st.Visibility.VisibleTo) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(st.Metadata.PlatformJurisdiction) &&
+		!c.Grants.Visible([]string{st.Metadata.Jurisdiction}, st.Visibility.Mode, st.Visibility.VisibleTo) {
 		return nil, refuse(404, "not-found", "target %q", name)
 	}
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string)
 // Filter selects targets (GET /v1/admin/targets).
 type Filter struct {
 	Q, Platform, PlatformType string
-	Scope                     string // a scope pattern
+	Jurisdiction              string // a jurisdiction pattern
 	Label                     string // key=value
 	State                     string // default: every state but RETIRED
 	After                     string
@@ -93,7 +93,7 @@ type Filter struct {
 }
 
 // List returns the targets the caller owns or administers (a role on the
-// target's or the platform's scope) that f selects, by name, at most
+// target's or the platform's jurisdiction) that f selects, by name, at most
 // f.Limit, and whether more follow (keyset on name, §7.2.3).
 // shortcut: a target is read with its levels, flows and metadata (five queries), fine for admin pages of ≤ 200; join in SQL if lists get hot.
 func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) ([]*View, bool, error) {
@@ -118,7 +118,7 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 				return nil, false, err
 			}
 			after = st.Metadata.Name
-			if !c.Grants.Sees(st.Metadata.Scope, st.Metadata.PlatformScope) || f.Scope != "" && !governance.ScopeMatches(f.Scope, st.Metadata.Scope) {
+			if !c.Grants.Sees(st.Metadata.Jurisdiction, st.Metadata.PlatformJurisdiction) || f.Jurisdiction != "" && !charter.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction) {
 				continue
 			}
 			if len(out) == f.Limit {

@@ -333,7 +333,7 @@ func (s *Server) frame(r *http.Request, title, current string) Page {
 	sess := session(r)
 	p := Page{Title: title, CSRF: sess.CSRF, User: sess.Username, FullName: sess.DisplayName}
 	for _, g := range sess.Grants {
-		p.Roles = append(p.Roles, g.Role+" on "+strings.Join(g.Scopes, ", "))
+		p.Roles = append(p.Roles, g.Role+" on "+strings.Join(g.Jurisdictions, ", "))
 	}
 	for _, n := range []NavItem{{Path: "/ui/bindings", Label: "Bindings"}, {Path: "/ui/catalog", Label: "Catalog"},
 		{Path: "/ui/sources", Label: "Sources"}, {Path: "/ui/targets", Label: "Targets"}, {Path: "/ui/change-requests", Label: "Change requests"},

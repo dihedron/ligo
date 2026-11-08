@@ -109,15 +109,15 @@ func sourceOf(r *http.Request) (sources.Source, error) {
 }
 
 // SourceCheck is the regex tester's fragment: the tester's result and the
-// governance outcome of the source (§7.4).
+// charter outcome of the source (§7.4).
 type SourceCheck struct {
-	Test       *sources.TestResult
-	Governance *preview.Evaluation
-	Error      string // why the governance outcome is missing
+	Test    *sources.TestResult
+	Charter *preview.Evaluation
+	Error   string // why the charter outcome is missing
 }
 
 // sourceTest is POST /ui/sources/test: the same tester and dry run as the
-// API (Appendix A, scope, samples, overlaps, narrowing with a witness).
+// API (Appendix A, jurisdiction, samples, overlaps, narrowing with a witness).
 func (s *Server) sourceTest(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
 		return
@@ -136,7 +136,7 @@ func (s *Server) sourceTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.Test.Valid {
 		body, _ := json.Marshal(src)
-		if d.Governance, err = s.preview().Evaluate(ctx, c, body); err != nil {
+		if d.Charter, err = s.preview().Evaluate(ctx, c, body); err != nil {
 			d.Error = message(err)
 		}
 	}

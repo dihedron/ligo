@@ -74,13 +74,13 @@ func TestExample(t *testing.T) {
 	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.SecretStore.SecretStorageStrategy != "vault-static" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
 		t.Errorf("platform not decoded: %+v", p)
 	}
-	if got := cfg.PlatformProviders[0].Platforms[1].TargetScopes; len(got) != 1 || got[0] != "dc/corp-test/*" {
-		t.Errorf("default target_scopes = %v", got)
+	if got := cfg.PlatformProviders[0].Platforms[1].TargetJurisdictions; len(got) != 1 || got[0] != "dc/corp-test/*" {
+		t.Errorf("default target_jurisdictions = %v", got)
 	}
-	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
+	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
 		t.Error("defaults not applied")
 	}
-	if cfg.Governance.NamePrefixes[0].Prefix != "{2}-{3}-" || cfg.SecretSealing.VaultTransit.KeyName != "ligo-interstage" {
+	if cfg.Charter.NamePrefixes[0].Prefix != "{2}-{3}-" || cfg.SecretSealing.VaultTransit.KeyName != "ligo-interstage" {
 		t.Error("nested types not decoded")
 	}
 }
@@ -91,6 +91,8 @@ func TestStrict(t *testing.T) {
 		"unknown nested key":                strings.Replace(example(t), "  max_length: 512", "  max_length: 512\n  max_lenght: 1", 1),
 		"two documents":                     example(t) + "\n---\nservice: {}\n",
 		"zones, renamed to realms in 4.0.3": strings.Replace(example(t), "\nrealms:", "\nzones:", 1),
+		"source_scopes, renamed to source_jurisdictions in 4.0.4": strings.Replace(example(t), "  source_jurisdictions:", "  source_scopes:", 1),
+		"governance, renamed to charter in 4.0.5":                 strings.Replace(example(t), "\ncharter:", "\ngovernance:", 1),
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -131,17 +133,17 @@ func TestRules(t *testing.T) {
 		{"unanchored reference", `approval_reference_pattern: '^CHG[0-9]{7}$'`, `approval_reference_pattern: 'CHG[0-9]{7}'`, 13, nil},
 		{"unknown automation platform", `platforms: ["oracle-prod"]`, `platforms: ["oracle-nope"]`, 13, nil},
 		{"break_glass on a SPIFFE ID", `{ ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass`, `{ spiffe_id: "spiffe://prod.internal/x",  role: break_glass`, 14, nil},
-		{"break_glass scope without policy", `role: break_glass, scopes: ["dc/corp-prod/*"]`, `role: break_glass, scopes: ["dc/corp-prod"]`, 14, nil},
+		{"break_glass jurisdiction without policy", `role: break_glass, jurisdictions: ["dc/corp-prod/*"]`, `role: break_glass, jurisdictions: ["dc/corp-prod"]`, 14, nil},
 		{"ttl above 24h", "default_ttl: 4h, max_ttl: 8h", "default_ttl: 4h, max_ttl: 25h", 14, nil},
 		{"short justification", "min_justification_length: 20", "min_justification_length: 10", 14, nil},
 		{"http webhook", `url: "https://oncall.corp.internal/hooks/ligo"`, `url: "http://oncall.corp.internal/hooks/ligo"`, 14, nil},
 		{"unset webhook secret", "LIGO_WEBHOOK_DBA_SECRET", "LIGO_WEBHOOK_UNSET", 14, nil},
-		{"bad scope pattern", `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_scopes: ["dc/*/x"]`, 16, nil},
-		{"platform scope is a pattern", `scope: "dc/corp-prod"            #`, `scope: "dc/corp-prod/*"            #`, 16, nil},
-		{"source scope missing", "    - { trust_domain: test.internal, mode: static, scope: \"dc/corp-test\" }\n", "", 16, nil},
+		{"bad jurisdiction pattern", `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["dc/*/x"]`, 16, nil},
+		{"platform jurisdiction is a pattern", `jurisdiction: "dc/corp-prod"            #`, `jurisdiction: "dc/corp-prod/*"            #`, 16, nil},
+		{"source jurisdiction missing", "    - { trust_domain: test.internal, mode: static, jurisdiction: \"dc/corp-test\" }\n", "", 16, nil},
 		{"bad path_template", `path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/'`, `path_regex: '^/acct/(.+)/'`, 16, nil},
 		{"reserved rule name", "name: no-test-to-prod", "name: default", 16, nil},
-		{"party on a deny rule", "        action: deny\n", "        action: deny\n        additional_approvals: [ { name: x, scope: \"a\" } ]\n", 16, nil},
+		{"party on a deny rule", "        action: deny\n", "        action: deny\n        additional_approvals: [ { name: x, jurisdiction: \"a\" } ]\n", 16, nil},
 		{"unknown name prefix resource", "resources: [source, target, binding]", "resources: [source, platform]", 16, nil},
 		{"unknown default mode", "default_mode: system", "default_mode: sepia", 15, nil},
 		{"unknown color token", "light: { primary: ", "light: { accent: ", 15, nil},
@@ -188,7 +190,7 @@ func TestInsecureDev(t *testing.T) {
 	}
 }
 
-// TestPolicy checks the governance policy built from the §8.1 example.
+// TestPolicy checks the charter built from the §8.1 example.
 func TestPolicy(t *testing.T) {
 	p := parse(t, example(t)).Policy()
 	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
@@ -225,10 +227,10 @@ func TestLoad(t *testing.T) {
 
 // TestDefaults checks the defaults of an almost empty file.
 func TestDefaults(t *testing.T) {
-	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, scope: dc/x } ] } ]\n")
-	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossScopes || cfg.Governance.Interconnects.DefaultCrossScope != "deny" ||
+	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, jurisdiction: dc/x } ] } ]\n")
+	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Charter.Interconnects.DefaultCrossJurisdiction != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
-		cfg.PlatformProviders[0].Platforms[0].TargetScopes[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
+		cfg.PlatformProviders[0].Platforms[0].TargetJurisdictions[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
 		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute {
 		t.Errorf("defaults: %+v", cfg)
 	}
@@ -257,8 +259,8 @@ func TestPluginRules(t *testing.T) {
 		{"bad spiffe_id", `spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer"`, `spiffe_id: "http://x"`},
 		{"unknown role", `role: viewer,`, `role: superuser,`},
 		{"two principals", `- { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`, `- { spiffe_id: "spiffe://prod.internal/v", ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`},
-		{"platforms on an operator", `role: operator,    scopes: ["dc/corp-test"] }`, `role: operator,    scopes: ["dc/corp-test"], platforms: ["oracle-prod"] }`},
-		{"no scopes", `role: viewer,      scopes: ["*"]`, `role: viewer,      scopes: []`},
+		{"platforms on an operator", `role: operator,    jurisdictions: ["dc/corp-test"] }`, `role: operator,    jurisdictions: ["dc/corp-test"], platforms: ["oracle-prod"] }`},
+		{"no jurisdictions", `role: viewer,      jurisdictions: ["*"]`, `role: viewer,      jurisdictions: []`},
 		{"bad incident pattern", `incident_reference_pattern: '^INC[0-9]{7}$'`, `incident_reference_pattern: 'INC['`},
 		{"bad sealing provider", "provider: vault-transit", "provider: kms"},
 		{"startup_timeout too short", `  application_version: "4.0.1"`, "  startup_timeout: 1s\n  application_version: \"4.0.1\""},
@@ -271,15 +273,15 @@ func TestPluginRules(t *testing.T) {
 		{"app_statement_timeout too long", "app_statement_timeout: 5s", "app_statement_timeout: 10m"},
 		{"reader_statement_timeout too short", "reader_statement_timeout: 500ms", "reader_statement_timeout: 10ms"},
 		{"startup_timeout too long", `  application_version: "4.0.1"`, "  startup_timeout: 1h\n  application_version: \"4.0.1\""},
-		{"bad default_cross_scope", "default_cross_scope: deny", "default_cross_scope: maybe"},
+		{"bad default_cross_jurisdiction", "default_cross_jurisdiction: deny", "default_cross_jurisdiction: maybe"},
 		{"bad action", "        action: deny\n", "        action: drop\n"},
-		{"duplicate party", `- { name: security, scope: "sec/infosec" }`, `- { name: security, scope: "sec/infosec" }
-          - { name: security, scope: "sec/other" }`},
+		{"duplicate party", `- { name: security, jurisdiction: "sec/infosec" }`, `- { name: security, jurisdiction: "sec/infosec" }
+          - { name: security, jurisdiction: "sec/other" }`},
 		{"unknown core realm", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  realm: prod", "core_identity:\n  realm: nowhere"},
 		{"bad realm trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
-		{"source scope for an unused trust domain", `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }`, `    - { trust_domain: prod.internal, mode: static, scope: "dc/corp-prod" }
-    - { trust_domain: other.internal, mode: static, scope: "dc/other" }`},
-		{"bad source scope mode", `mode: static, scope: "dc/corp-test"`, `mode: dynamic, scope: "dc/corp-test"`},
+		{"source jurisdiction for an unused trust domain", `    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }`, `    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
+    - { trust_domain: other.internal, mode: static, jurisdiction: "dc/other" }`},
+		{"bad source jurisdiction mode", `mode: static, jurisdiction: "dc/corp-test"`, `mode: dynamic, jurisdiction: "dc/corp-test"`},
 	} {
 		doc := example(t)
 		if !strings.Contains(doc, v.old) {
@@ -297,24 +299,24 @@ func TestPluginRules(t *testing.T) {
 }
 
 func TestAccounts(t *testing.T) {
-	const block = `governance:
+	const block = `charter:
   accounts:
-    scope: "cloud/{account}"
-    source_scope: "cloud/{account}/app/{project}"
-    target_scope: "cloud/{account}/data/{tenancy}"
+    jurisdiction: "cloud/{account}"
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
     ldap_groups:
       search_base: "ou=accounts,dc=corp,dc=internal"
       roles:
-        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
 `
-	const required = `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`
+	const required = `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`
 	load := func(t *testing.T, replacements ...string) error {
 		t.Helper()
 		doc := strings.NewReplacer(replacements...).Replace(example(t))
 		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
 	}
-	head := "governance:                               # ADR-13, ADR-14, §3.9\n"
-	if err := load(t, head, block, required, `required_scopes: ["cloud/*"]`); err != nil {
+	head := "charter:                               # ADR-13, ADR-14, §3.9\n"
+	if err := load(t, head, block, required, `required_jurisdictions: ["cloud/*"]`); err != nil {
 		t.Fatal(err)
 	}
 	if err := load(t); err != nil { // absent: as v0.1.0
@@ -322,8 +324,8 @@ func TestAccounts(t *testing.T) {
 	}
 	for name, r := range map[string][]string{
 		"approval not required on accounts": {head, block},
-		"role not for groups":               {head, strings.Replace(block, "role: approver", "role: admin.full_access", 1), required, `required_scopes: ["cloud/*"]`},
-		"bad structure":                     {head, strings.Replace(block, "cloud/{account}/data", "cloud/{account}/app", 1), required, `required_scopes: ["cloud/*"]`},
+		"role not for groups":               {head, strings.Replace(block, "role: approver", "role: admin.full_access", 1), required, `required_jurisdictions: ["cloud/*"]`},
+		"bad structure":                     {head, strings.Replace(block, "cloud/{account}/data", "cloud/{account}/app", 1), required, `required_jurisdictions: ["cloud/*"]`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := load(t, r...); err == nil || !strings.Contains(err.Error(), "rule 16") {
@@ -333,45 +335,45 @@ func TestAccounts(t *testing.T) {
 	}
 }
 
-// account_admin is global: it takes no scopes; every other role needs them.
+// account_admin is global: it takes no jurisdictions; every other role needs them.
 func TestAccountAdminBinding(t *testing.T) {
-	load := func(role, scopes string) error {
-		doc := strings.Replace(example(t), "  bindings:\n", "  bindings:\n    - { spiffe_id: \"spiffe://prod.internal/ops/reg\", role: "+role+scopes+" }\n", 1)
+	load := func(role, jurisdictions string) error {
+		doc := strings.Replace(example(t), "  bindings:\n", "  bindings:\n    - { spiffe_id: \"spiffe://prod.internal/ops/reg\", role: "+role+jurisdictions+" }\n", 1)
 		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
 	}
 	if err := load(RoleAccountAdmin, ""); err != nil {
-		t.Errorf("no scopes: %v", err)
+		t.Errorf("no jurisdictions: %v", err)
 	}
-	if err := load(RoleAccountAdmin, `, scopes: ["*"]`); err == nil || !strings.Contains(err.Error(), "takes no scopes") {
-		t.Errorf("with scopes: %v", err)
+	if err := load(RoleAccountAdmin, `, jurisdictions: ["*"]`); err == nil || !strings.Contains(err.Error(), "takes no jurisdictions") {
+		t.Errorf("with jurisdictions: %v", err)
 	}
-	if err := load(RoleViewer, ""); err == nil || !strings.Contains(err.Error(), "scopes is required") {
-		t.Errorf("a viewer without scopes: %v", err)
+	if err := load(RoleViewer, ""); err == nil || !strings.Contains(err.Error(), "jurisdictions is required") {
+		t.Errorf("a viewer without jurisdictions: %v", err)
 	}
 }
 
 func TestNamespaceTemplate(t *testing.T) {
-	const accounts = `governance:
+	const accounts = `charter:
   accounts:
-    scope: "cloud/{account}"
-    source_scope: "cloud/{account}/app/{project}"
-    target_scope: "cloud/{account}/data/{tenancy}"
+    jurisdiction: "cloud/{account}"
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
     ldap_groups:
       search_base: "ou=accounts,dc=corp,dc=internal"
       roles:
-        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
 `
 	load := func(template string, withAccounts bool) error {
-		r := []string{`        target_scopes: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_scopes: ["dc/corp-prod/*"]`}
+		r := []string{`        target_jurisdictions: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_jurisdictions: ["dc/corp-prod/*"]`}
 		if withAccounts {
-			r = append(r, "governance:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_scopes: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_scopes: ["cloud/*"]`)
+			r = append(r, "charter:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["cloud/*"]`)
 		}
 		return Validate(parse(t, strings.NewReplacer(r...).Replace(example(t))), Options{LookupEnv: lookupEnv})
 	}
 	if err := load("{account}_{tenancy}", true); err != nil {
 		t.Errorf("accepted form: %v", err)
 	}
-	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "governance.accounts") {
+	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "charter.accounts") {
 		t.Errorf("without accounts: %v", err)
 	}
 	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {

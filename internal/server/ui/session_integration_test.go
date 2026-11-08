@@ -28,8 +28,8 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -166,12 +166,12 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	t.Cleanup(func() {
 		_, _ = owner.Exec(context.Background(), "DELETE FROM admin_sessions WHERE username = $1", user)
 	})
-	az, err := authz.New([]config.RoleBinding{{LDAPGroupDN: viewers, Role: config.RoleViewer, Scopes: []string{"*"}},
-		{LDAPGroupDN: operators, Role: config.RoleOperator, Scopes: []string{"dc/corp-prod"}},
-		{LDAPGroupDN: approvers, Role: config.RoleApprover, Scopes: []string{"dc/*"}},
-		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Scopes: []string{"dc/corp-prod/*"}},
+	az, err := authz.New([]config.RoleBinding{{LDAPGroupDN: viewers, Role: config.RoleViewer, Jurisdictions: []string{"*"}},
+		{LDAPGroupDN: operators, Role: config.RoleOperator, Jurisdictions: []string{"dc/corp-prod"}},
+		{LDAPGroupDN: approvers, Role: config.RoleApprover, Jurisdictions: []string{"dc/*"}},
+		{LDAPGroupDN: glass, Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: accountAdmins, Role: config.RoleAccountAdmin},
-		{LDAPGroupDN: "cn=ligo-full,ou=groups,dc=ligo,dc=lab", Role: config.RoleFullAccess, Scopes: []string{"*"}}})
+		{LDAPGroupDN: "cn=ligo-full,ou=groups,dc=ligo,dc=lab", Role: config.RoleFullAccess, Jurisdictions: []string{"*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,8 +432,8 @@ func TestSessionCSRF(t *testing.T) {
 // unchanged: the next re-check removes the only grant, so the session ends.
 func TestSessionAccountRetired(t *testing.T) {
 	v := sessionSetup(t)
-	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=ligo,dc=lab", Roles: []governance.AccountRole{
-		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=ligo,dc=lab", Role: config.RoleApprover, Scope: "cloud/{account}/*"}}}).Compile()
+	rules, err := (&charter.AccountGroups{SearchBase: "ou=accounts,dc=ligo,dc=lab", Roles: []charter.AccountRole{
+		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=ligo,dc=lab", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/*"}}}).Compile()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,9 +651,9 @@ func fixture(t *testing.T, v *sessionEnv) string {
 		sql  string
 		args []any
 	}{
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "src-" + x, `^spiffe://prod\.internal/ns/ui/sa/` + x + `$`}},
-		{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+		{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "tgt-" + x}},
 		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 	} {
@@ -677,7 +677,7 @@ func fixture(t *testing.T, v *sessionEnv) string {
 func (v *sessionEnv) file(t *testing.T, user string, n int, x string) *changerequests.Request {
 	t.Helper()
 	src, name := fmt.Sprintf("src%d-%s", n, x), fmt.Sprintf("ui%d-%s", n, x)
-	if _, err := v.owner.Exec(context.Background(), `insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by)
+	if _, err := v.owner.Exec(context.Background(), `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)
 		values ($1, $2, 'dc/corp-prod', 'prod.internal', $3, 'PUBLIC', 't', 't')`, uuid.NewV7(), src,
 		fmt.Sprintf(`^spiffe://prod\.internal/ns/ui%d/sa/%s$`, n, x)); err != nil {
 		t.Fatal(err)
@@ -710,7 +710,7 @@ func TestDecisions(t *testing.T) {
 		t.Error("the requester's page: withdraw, and no approval")
 	}
 	_, page := approver.do("GET", "/ui/change-requests/"+cr.ID.String(), nil, "HX-Request", "")
-	// one human side: the requester acts for the source's scope, so the source side was approved automatically
+	// one human side: the requester acts for the source's jurisdiction, so the source side was approved automatically
 	if !strings.Contains(page, ">Approve<") || !strings.Contains(page, `name="side" value="TARGET"`) || strings.Contains(page, "Withdraw my request") {
 		t.Fatal("the approver's page: approve the TARGET side")
 	}
@@ -750,7 +750,7 @@ func TestDecisions(t *testing.T) {
 	}
 }
 
-// TestSourceForms: the regex tester with the governance outcome, then a
+// TestSourceForms: the regex tester with the charter outcome, then a
 // source registered, changed, deprecated and retired from the UI, each
 // navigation an HX-Redirect and each refusal a 409 or 422 in the form.
 func TestSourceForms(t *testing.T) {
@@ -775,7 +775,7 @@ func TestSourceForms(t *testing.T) {
 		"samples": {"spiffe://prod.internal/ns/uis/sa/" + x + "\nspiffe://prod.internal/ns/other/sa/x"}, "labels": {"team=ledger"}}
 	resp, check := b.do("POST", "/ui/sources/test", form)
 	if resp.StatusCode != 200 || !strings.Contains(check, "dc/corp-prod") || !strings.Contains(check, ">matches<") ||
-		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Governance") || !strings.Contains(check, "OWNER") {
+		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Charter") || !strings.Contains(check, "OWNER") {
 		t.Errorf("tester: %d %s", resp.StatusCode, check)
 	}
 	form.Set("samples", "spiffe://prod.internal/ns/uis/sa/"+x) // the service requires every sample to match
@@ -786,7 +786,7 @@ func TestSourceForms(t *testing.T) {
 	if resp, _ := b.do("POST", "/ui/sources", url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "labels": {"nokey"}}); resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("bad labels: %d", resp.StatusCode)
 	}
-	// dc/corp-prod needs an approver (required_scopes dc/corp-prod/*): each change redirects to its request
+	// dc/corp-prod needs an approver (required_jurisdictions dc/corp-prod/*): each change redirects to its request
 	filed := func(resp *http.Response, body, what string) {
 		t.Helper()
 		target := resp.Header.Get("HX-Redirect")
@@ -828,7 +828,7 @@ func TestSourceForms(t *testing.T) {
 }
 
 // approve approves every pending side of a request, each by another
-// approver of dc/* (distinct approvers across scopes).
+// approver of dc/* (distinct approvers across jurisdictions).
 func (v *sessionEnv) approve(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -892,7 +892,7 @@ func TestTargetForms(t *testing.T) {
 	if resp, _ := b.do("GET", "/ui/platforms/nope/fields", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown platform: %d", resp.StatusCode)
 	}
-	form := url.Values{"name": {name}, "platform": {"oracle-prod"}, "scope": {"dc/corp-prod/ledger"}, "def.schema": {"LEDGER"},
+	form := url.Values{"name": {name}, "platform": {"oracle-prod"}, "jurisdiction": {"dc/corp-prod/ledger"}, "def.schema": {"LEDGER"},
 		"level.0.name": {"read"}, "level.0.grant.roles": {"LEDGER_RO_ROLE"}, "level.1.name": {"write"},
 		"level.1.grant.roles": {"LEDGER_RO_ROLE", "LEDGER_RW_ROLE"}, "visibility": {"PUBLIC"}, "networkFlows": {"[]"}}
 	if _, check := b.do("POST", "/ui/targets/preview", form); !strings.Contains(check, "OWNER") || !strings.Contains(check, "PLATFORM") ||
@@ -935,7 +935,7 @@ func TestTargetForms(t *testing.T) {
 	}
 }
 
-// TestWizard: the binding wizard step by step, its governance preview and
+// TestWizard: the binding wizard step by step, its charter preview and
 // submission; an inline source the binding depends on (AC-74); then the
 // binding edited, retried, rotated and revoked from its page.
 func TestWizard(t *testing.T) {
@@ -977,12 +977,12 @@ func TestWizard(t *testing.T) {
 	}
 	review := step(5, url.Values{"accessLevel": {"read"}, "source": {"src-" + x}})
 	name := "src-" + x + "-tgt-" + x
-	if !strings.Contains(review, `name="name" value="`+name+`"`) || !strings.Contains(review, "/ui/bindings/governance-preview") ||
+	if !strings.Contains(review, `name="name" value="`+name+`"`) || !strings.Contains(review, "/ui/bindings/charter-preview") ||
 		!strings.Contains(review, "ligo-workload-api") {
 		t.Errorf("review: %s", review)
 	}
 	form := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "source": {"src-" + x}, "name": {name}, "purpose": {"reporting"}}
-	if _, check := b.do("POST", "/ui/bindings/governance-preview", form); !strings.Contains(check, "TARGET") {
+	if _, check := b.do("POST", "/ui/bindings/charter-preview", form); !strings.Contains(check, "TARGET") {
 		t.Errorf("preview: %s", check)
 	}
 	resp, body := b.do("POST", "/ui/bindings", form)
@@ -1073,11 +1073,11 @@ func TestBreakGlass(t *testing.T) {
 		sql  string
 		args []any
 	}{ // a source and a target in dc/corp-prod/ledger, where the role dc/corp-prod/* applies: one TARGET side
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc-" + x, `^spiffe://prod\.internal/ns/ledger/sa/` + x + `$`}},
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc2-" + x, `^spiffe://prod\.internal/ns/ledger2/sa/` + x + `$`}},
-		{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+		{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{target, "ltgt-" + x}},
 		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 	} {

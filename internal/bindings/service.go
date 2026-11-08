@@ -13,8 +13,8 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/engine"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
@@ -91,7 +91,7 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 }
 
 // createInline files the CREATE of a new source and the binding's CREATE
-// that depends on it, with the sides the new source's scope gives
+// that depends on it, with the sides the new source's jurisdiction gives
 // (§7.2.4); the caller must be able to register the source.
 func (s *Service) createInline(ctx context.Context, c changerequests.Caller, req *request) (*changerequests.Request, error) {
 	var source changerequests.Filing
@@ -104,8 +104,8 @@ func (s *Service) createInline(ctx context.Context, c changerequests.Caller, req
 	if b.Source != inline.Metadata.Name {
 		return nil, invalid("source %q is not the inline source %q", b.Source, inline.Metadata.Name)
 	}
-	if !c.Grants.ActsFor(inline.Metadata.Scope, "") {
-		return nil, refuse(403, "forbidden", "%s is no operator of %s, the inline source's scope", c.ID(), inline.Metadata.Scope)
+	if !c.Grants.ActsFor(inline.Metadata.Jurisdiction, "") {
+		return nil, refuse(403, "forbidden", "%s is no operator of %s, the inline source's jurisdiction", c.ID(), inline.Metadata.Jurisdiction)
 	}
 	res, err := s.resolve(ctx, &c, &b, nil, s.Requests.Policy, changerequests.ConsentAll, inline)
 	if err != nil {
@@ -159,7 +159,7 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 }
 
 // Delete files the revocation of a binding (DELETE /v1/admin/bindings/{name}):
-// consent ANY, decided by any one of the scopes the requester acts for.
+// consent ANY, decided by any one of the jurisdictions the requester acts for.
 func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, approvalReference string, automationContext json.RawMessage) (*changerequests.Request, error) {
 	common := &changerequests.Common{ExpectedRevision: &expectedRevision, ApprovalReference: approvalReference, AutomationContext: automationContext}
 	if err := changerequests.Decode([]byte("{}"), &struct{}{}, common); err != nil {
@@ -170,7 +170,7 @@ func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name stri
 		return nil, err
 	}
 	pl := s.Rules.Platforms[cur.platform]
-	res := &resolved{platform: pl, sourceScope: cur.sourceScope, targetScope: cur.targetScope, platformScope: cur.platformScope}
+	res := &resolved{platform: pl, sourceJurisdiction: cur.sourceJurisdiction, targetJurisdiction: cur.targetJurisdiction, platformJurisdiction: cur.platformJurisdiction}
 	if err := res.actsFor(c); err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name stri
 // current reads a binding the caller can see by name (404 otherwise).
 func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := load(ctx, s.DB, "b.name = $1", name, false)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.sourceScope, cur.targetScope, cur.platformScope) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(cur.sourceJurisdiction, cur.targetJurisdiction, cur.platformJurisdiction) {
 		return nil, refuse(404, "not-found", "binding %q", name)
 	}
 	return cur, err
@@ -221,38 +221,38 @@ func orEmpty(j json.RawMessage) json.RawMessage {
 
 // stored is the part of a binding row its changes need.
 type stored struct {
-	id, targetID                            uuid.UUID
-	name, source, target, accessLevel       string
-	sourceScope, targetScope, platformScope string
-	platform, phase, purpose, realm         string
-	revision, attempt                       int64
-	parameters                              json.RawMessage
-	labels                                  map[string]string
-	expiresAt                               *time.Time
-	privileges                              []string   // of the current level
-	breakGlassCR                            *uuid.UUID // the open break-glass change (ADR-12)
+	id, targetID                                                 uuid.UUID
+	name, source, target, accessLevel                            string
+	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
+	platform, phase, purpose, realm                              string
+	revision, attempt                                            int64
+	parameters                                                   json.RawMessage
+	labels                                                       map[string]string
+	expiresAt                                                    *time.Time
+	privileges                                                   []string   // of the current level
+	breakGlassCR                                                 *uuid.UUID // the open break-glass change (ADR-12)
 }
 
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
-	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_scope, b.target_scope, b.platform_scope,
+	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction,
 		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE OF b"
 	}
-	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceScope,
-		&st.targetScope, &st.platformScope, &st.platform, &st.phase, &st.purpose, &st.realm, &st.revision, &st.attempt, &st.parameters,
+	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceJurisdiction,
+		&st.targetJurisdiction, &st.platformJurisdiction, &st.platform, &st.phase, &st.purpose, &st.realm, &st.revision, &st.attempt, &st.parameters,
 		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR)
 	return st, err
 }
 
 // resolved is what the pipeline found for a binding change.
 type resolved struct {
-	platform                                Platform
-	sourceScope, targetScope, platformScope string
-	decision                                governance.Decision
+	platform                                                     Platform
+	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
+	decision                                                     charter.Decision
 }
 
 // resolve runs the pipeline (§7.2.3 steps 1 to 10) on b, a new binding if
@@ -261,7 +261,7 @@ type resolved struct {
 // checked by the approval itself (Recheck). A change with consent ANY only
 // removes access: it needs no ACTIVE resources and no policy, and the
 // platform's owner may file it too.
-func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy, consent string, inline *sources.Source) (*resolved, error) {
+func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *charter.Policy, consent string, inline *sources.Source) (*resolved, error) {
 	b.Kind = "Binding"
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
@@ -270,19 +270,19 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		return nil, refuse(422, "immutable-field", "the name, source and target of a binding cannot change")
 	}
 	var src struct {
-		id                      uuid.UUID
-		revision                int64
-		scope, state, td, regex string
-		visibility              string
-		visibleTo               []string
+		id                             uuid.UUID
+		revision                       int64
+		jurisdiction, state, td, regex string
+		visibility                     string
+		visibleTo                      []string
 	}
 	if inline != nil { // registered in the same transaction, at revision 1
-		src.revision, src.scope, src.state, src.td, src.regex = 1, inline.Metadata.Scope, "ACTIVE", inline.Identity.TrustDomain, inline.Identity.SVIDRegex
+		src.revision, src.jurisdiction, src.state, src.td, src.regex = 1, inline.Metadata.Jurisdiction, "ACTIVE", inline.Identity.TrustDomain, inline.Identity.SVIDRegex
 	} else {
-		err := s.DB.QueryRow(ctx, `SELECT id, revision, scope, state, trust_domain, svid_regex, visibility, visible_to FROM sources
-			WHERE name = $1 AND state <> 'RETIRED'`, b.Source).Scan(&src.id, &src.revision, &src.scope, &src.state, &src.td, &src.regex,
+		err := s.DB.QueryRow(ctx, `SELECT id, revision, jurisdiction, state, trust_domain, svid_regex, visibility, visible_to FROM sources
+			WHERE name = $1 AND state <> 'RETIRED'`, b.Source).Scan(&src.id, &src.revision, &src.jurisdiction, &src.state, &src.td, &src.regex,
 			&src.visibility, &src.visibleTo)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{src.scope}, src.visibility, src.visibleTo) {
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{src.jurisdiction}, src.visibility, src.visibleTo) {
 			return nil, refuse(404, "not-found", "source %q", b.Source)
 		}
 		if err != nil {
@@ -290,17 +290,17 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		}
 	}
 	var tgt struct {
-		id                             uuid.UUID
-		revision                       int64
-		scope, platformScope, platform string
-		state, visibility              string
-		visibleTo                      []string
-		definition                     json.RawMessage
+		id                                           uuid.UUID
+		revision                                     int64
+		jurisdiction, platformJurisdiction, platform string
+		state, visibility                            string
+		visibleTo                                    []string
+		definition                                   json.RawMessage
 	}
-	err := s.DB.QueryRow(ctx, `SELECT id, revision, scope, platform_scope, platform, state, visibility, visible_to, definition FROM targets
-		WHERE name = $1 AND state <> 'RETIRED'`, b.Target).Scan(&tgt.id, &tgt.revision, &tgt.scope, &tgt.platformScope, &tgt.platform,
+	err := s.DB.QueryRow(ctx, `SELECT id, revision, jurisdiction, platform_jurisdiction, platform, state, visibility, visible_to, definition FROM targets
+		WHERE name = $1 AND state <> 'RETIRED'`, b.Target).Scan(&tgt.id, &tgt.revision, &tgt.jurisdiction, &tgt.platformJurisdiction, &tgt.platform,
 		&tgt.state, &tgt.visibility, &tgt.visibleTo, &tgt.definition)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{tgt.scope, tgt.platformScope}, tgt.visibility, tgt.visibleTo) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && c != nil && !c.Grants.Visible([]string{tgt.jurisdiction, tgt.platformJurisdiction}, tgt.visibility, tgt.visibleTo) {
 		return nil, refuse(404, "not-found", "target %q", b.Target)
 	}
 	if err != nil {
@@ -330,7 +330,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		if n > 0 {
 			return nil, refuse(409, "binding-exists", "%s and %s are already bound", b.Source, b.Target)
 		}
-		if err := engine.CheckName(engine.KindBinding, b.Name, src.scope, s.Rules.NamePrefixes); err != nil {
+		if err := engine.CheckName(engine.KindBinding, b.Name, src.jurisdiction, s.Rules.NamePrefixes); err != nil {
 			return nil, invalid("name: %v", err)
 		}
 	}
@@ -344,18 +344,18 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	if _, err := regexpolicy.ValidateSVIDRegex(src.regex, src.td, s.Rules.Regex); err != nil {
 		return nil, invalid("the regex of %s: %v", b.Source, err)
 	}
-	res := &resolved{platform: pl, sourceScope: src.scope, targetScope: tgt.scope, platformScope: tgt.platformScope,
-		decision: governance.Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}}
+	res := &resolved{platform: pl, sourceJurisdiction: src.jurisdiction, targetJurisdiction: tgt.jurisdiction, platformJurisdiction: tgt.platformJurisdiction,
+		decision: charter.Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}}
 	switch {
 	case c != nil && consent == changerequests.ConsentAny:
 		if err := res.actsFor(*c); err != nil {
 			return nil, err
 		}
 	case c != nil:
-		if !c.Grants.ActsFor(src.scope, pl.Name) && !c.Grants.ActsFor(tgt.scope, pl.Name) {
-			return nil, refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), src.scope, tgt.scope)
+		if !c.Grants.ActsFor(src.jurisdiction, pl.Name) && !c.Grants.ActsFor(tgt.jurisdiction, pl.Name) {
+			return nil, refuse(403, "forbidden", "%s is no operator of %s or %s", c.ID(), src.jurisdiction, tgt.jurisdiction)
 		}
-		if res.decision = p.Evaluate(src.scope, tgt.scope); !res.decision.Allowed {
+		if res.decision = p.Evaluate(src.jurisdiction, tgt.jurisdiction); !res.decision.Allowed {
 			return nil, s.denied(ctx, *c, b, cur, res)
 		}
 		if err := s.Rules.checkExpiry(b.ExpiresAt, time.Now()); err != nil {
@@ -388,24 +388,24 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 }
 
 // anySides are the sides of a change that only removes access: one for
-// each of the source, target and platform scopes the requester acts for;
-// equal scopes give one side, named after the first (§7.2.3).
+// each of the source, target and platform jurisdictions the requester acts for;
+// equal jurisdictions give one side, named after the first (§7.2.3).
 func (res *resolved) anySides(c changerequests.Caller, breakGlass bool) []changerequests.Candidate {
 	var out []changerequests.Candidate
-	for _, sd := range []struct{ name, scope string }{{"SOURCE", res.sourceScope}, {"TARGET", res.targetScope}, {"PLATFORM", res.platformScope}} {
-		acts := c.Grants.ActsFor(sd.scope, res.platform.Name) || breakGlass && c.Grants.BreakGlass(sd.scope)
-		if acts && !slices.ContainsFunc(out, func(o changerequests.Candidate) bool { return o.Scope == sd.scope }) {
-			out = append(out, changerequests.Candidate{Side: sd.name, Scope: sd.scope, Platform: res.platform.Name})
+	for _, sd := range []struct{ name, jurisdiction string }{{"SOURCE", res.sourceJurisdiction}, {"TARGET", res.targetJurisdiction}, {"PLATFORM", res.platformJurisdiction}} {
+		acts := c.Grants.ActsFor(sd.jurisdiction, res.platform.Name) || breakGlass && c.Grants.BreakGlass(sd.jurisdiction)
+		if acts && !slices.ContainsFunc(out, func(o changerequests.Candidate) bool { return o.Jurisdiction == sd.jurisdiction }) {
+			out = append(out, changerequests.Candidate{Side: sd.name, Jurisdiction: sd.jurisdiction, Platform: res.platform.Name})
 		}
 	}
 	return out
 }
 
 // actsFor is RBAC for a change that only removes access: operator of the
-// source, target or platform scope.
+// source, target or platform jurisdiction.
 func (res *resolved) actsFor(c changerequests.Caller) error {
 	if len(res.anySides(c, false)) == 0 {
-		return refuse(403, "forbidden", "%s is no operator of %s, %s or %s", c.ID(), res.sourceScope, res.targetScope, res.platformScope)
+		return refuse(403, "forbidden", "%s is no operator of %s, %s or %s", c.ID(), res.sourceJurisdiction, res.targetJurisdiction, res.platformJurisdiction)
 	}
 	return nil
 }
@@ -413,7 +413,7 @@ func (res *resolved) actsFor(c changerequests.Caller) error {
 // denied audits a binding the interconnection policy refuses; nothing else
 // is stored (ADR-14 rule 3). cur, the binding changed, is nil for a create.
 func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Binding, cur *stored, res *resolved) error {
-	snap, _ := json.Marshal(map[string]string{"sourceScope": res.sourceScope, "targetScope": res.targetScope, "rule": res.decision.Rule})
+	snap, _ := json.Marshal(map[string]string{"sourceJurisdiction": res.sourceJurisdiction, "targetJurisdiction": res.targetJurisdiction, "rule": res.decision.Rule})
 	var id *uuid.UUID
 	if cur != nil {
 		id = &cur.id
@@ -427,11 +427,11 @@ func (s *Service) denied(ctx context.Context, c changerequests.Caller, b *Bindin
 		return err
 	}
 	metrics.InterconnectDenied.WithLabelValues(res.decision.Rule).Inc()
-	return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceScope, res.targetScope, res.decision.Rule)
+	return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceJurisdiction, res.targetJurisdiction, res.decision.Rule)
 }
 
 // file files the change request of a validated binding change with its
-// sides: TARGET, SOURCE when the scopes differ, and the policy's parties
+// sides: TARGET, SOURCE when the jurisdictions differ, and the policy's parties
 // (§7.2.3 "Sides at creation").
 func (s *Service) file(ctx context.Context, c changerequests.Caller, op, consent string, cur *stored, b *Binding, res *resolved, common *changerequests.Common) (*changerequests.Request, error) {
 	r, sides, err := compose(op, consent, cur, b, res, common, res.anySides(c, false))
@@ -450,7 +450,7 @@ func pendingError(err error, name string) error {
 
 // compose builds the change request of a validated binding change and the
 // sides it needs: anySides with consent ANY; with ALL, TARGET, SOURCE when
-// the scopes differ, and the policy's parties (§7.2.3 "Sides at creation").
+// the jurisdictions differ, and the policy's parties (§7.2.3 "Sides at creation").
 func compose(op, consent string, cur *stored, b *Binding, res *resolved, common *changerequests.Common, anySides []changerequests.Candidate) (*changerequests.Request, []changerequests.Candidate, error) {
 	payload, err := json.Marshal(b)
 	if op == "DELETE" {
@@ -460,7 +460,7 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 		return nil, nil, err
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
-		Realm: res.platform.Realm, SourceScope: res.sourceScope, TargetScope: res.targetScope, PlatformScope: res.platformScope,
+		Realm: res.platform.Realm, SourceJurisdiction: res.sourceJurisdiction, TargetJurisdiction: res.targetJurisdiction, PlatformJurisdiction: res.platformJurisdiction,
 		InterconnectRule: res.decision.Rule, DistinctApprovers: res.decision.DistinctApprovers, ExpectedRevision: common.ExpectedRevision,
 		Payload: payload, AutomationContext: common.AutomationContext}
 	if cur != nil {
@@ -468,20 +468,20 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	}
 	sides := anySides
 	if consent == changerequests.ConsentAll {
-		sides = Candidates(res.sourceScope, res.targetScope, res.platform.Name, res.decision)
+		sides = Candidates(res.sourceJurisdiction, res.targetJurisdiction, res.platform.Name, res.decision)
 	}
 	return r, sides, nil
 }
 
 // Candidates are the sides of a binding change with consent ALL: TARGET,
-// SOURCE when the scopes differ, and the parties of the deciding rule.
-func Candidates(sourceScope, targetScope, platform string, d governance.Decision) []changerequests.Candidate {
-	sides := []changerequests.Candidate{{Side: "TARGET", Scope: targetScope, Platform: platform}}
-	if sourceScope != targetScope {
-		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Scope: sourceScope, Platform: platform})
+// SOURCE when the jurisdictions differ, and the parties of the deciding rule.
+func Candidates(sourceJurisdiction, targetJurisdiction, platform string, d charter.Decision) []changerequests.Candidate {
+	sides := []changerequests.Candidate{{Side: "TARGET", Jurisdiction: targetJurisdiction, Platform: platform}}
+	if sourceJurisdiction != targetJurisdiction {
+		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Jurisdiction: sourceJurisdiction, Platform: platform})
 	}
 	for _, a := range d.AdditionalApprovals {
-		sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Scope: a.Scope, Platform: platform})
+		sides = append(sides, changerequests.Candidate{Side: "PARTY:" + a.Name, Jurisdiction: a.Jurisdiction, Platform: platform})
 	}
 	return sides
 }
@@ -574,12 +574,12 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy,
-			derived_principal_name, source_scope, target_scope, platform_scope, parameters, purpose, labels, expires_at, workflow_id,
+			derived_principal_name, source_jurisdiction, target_jurisdiction, platform_jurisdiction, parameters, purpose, labels, expires_at, workflow_id,
 			source_revision, target_revision, source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20::jsonb, $21, $22,
 			$23, $24, $25, $26, $27::jsonb, $28, $28)`,
 			id, b.Name, snap.sourceID, snap.targetID, b.AccessLevel, pl.Realm, pl.Type, pl.Name, pl.IdentityProviderType, pl.IdentityProviderInstance,
-			pl.SecretStoreType, pl.SecretStoreInstance, pl.SecretStorageStrategy, principal, r.SourceScope, r.TargetScope, r.PlatformScope,
+			pl.SecretStoreType, pl.SecretStoreInstance, pl.SecretStorageStrategy, principal, r.SourceJurisdiction, r.TargetJurisdiction, r.PlatformJurisdiction,
 			string(b.Parameters), null(b.Purpose), labels, b.ExpiresAt, workflowID(id, revision, attempt), snap.srcRev, snap.tgtRev, snap.td,
 			snap.regex, string(b.RequestedSpec), r.RequestedBy)
 		if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) {

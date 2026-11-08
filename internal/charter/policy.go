@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"crypto/sha256"
@@ -12,38 +12,38 @@ import (
 	"github.com/dihedron/ligo/internal/jcs"
 )
 
-// SourceScope is the scope extractor of one trust domain
-// (governance.source_scopes, §3.9).
-type SourceScope struct {
-	TrustDomain   string `yaml:"trust_domain" json:"trustDomain"`
-	Mode          string `yaml:"mode" json:"mode"`
-	Scope         string `yaml:"scope" json:"scope,omitempty"`
-	PathRegex     string `yaml:"path_regex" json:"pathRegex,omitempty"`
-	ScopeTemplate string `yaml:"scope_template" json:"scopeTemplate,omitempty"`
+// SourceJurisdiction is the jurisdiction extractor of one trust domain
+// (charter.source_jurisdictions, §3.9).
+type SourceJurisdiction struct {
+	TrustDomain          string `yaml:"trust_domain" json:"trustDomain"`
+	Mode                 string `yaml:"mode" json:"mode"`
+	Jurisdiction         string `yaml:"jurisdiction" json:"jurisdiction,omitempty"`
+	PathRegex            string `yaml:"path_regex" json:"pathRegex,omitempty"`
+	JurisdictionTemplate string `yaml:"jurisdiction_template" json:"jurisdictionTemplate,omitempty"`
 }
 
 // Extractor returns the extractor the entry describes.
-func (s SourceScope) Extractor() (*Extractor, error) {
+func (s SourceJurisdiction) Extractor() (*Extractor, error) {
 	switch s.Mode {
 	case "static":
-		return NewStaticExtractor(s.Scope)
+		return NewStaticExtractor(s.Jurisdiction)
 	case "path_template":
-		return NewPathTemplateExtractor(s.PathRegex, s.ScopeTemplate)
+		return NewPathTemplateExtractor(s.PathRegex, s.JurisdictionTemplate)
 	}
 	return nil, fmt.Errorf("mode must be static or path_template, not %q", s.Mode)
 }
 
-// NamePrefix is an entry of governance.name_prefixes (§3.8).
+// NamePrefix is an entry of charter.name_prefixes (§3.8).
 type NamePrefix struct {
-	Scopes    []string `yaml:"scopes" json:"scopes"`
-	Prefix    string   `yaml:"prefix" json:"prefix"`
-	Resources []string `yaml:"resources" json:"resources,omitempty"` // empty means all kinds
+	Jurisdictions []string `yaml:"jurisdictions" json:"jurisdictions"`
+	Prefix        string   `yaml:"prefix" json:"prefix"`
+	Resources     []string `yaml:"resources" json:"resources,omitempty"` // empty means all kinds
 }
 
-// Interconnects is governance.interconnects (ADR-14).
+// Interconnects is charter.interconnects (ADR-14).
 type Interconnects struct {
-	DefaultCrossScope string             `yaml:"default_cross_scope" json:"defaultCrossScope"`
-	Rules             []InterconnectRule `yaml:"rules" json:"rules"`
+	DefaultCrossJurisdiction string             `yaml:"default_cross_jurisdiction" json:"defaultCrossJurisdiction"`
+	Rules                    []InterconnectRule `yaml:"rules" json:"rules"`
 }
 
 type InterconnectRule struct {
@@ -57,86 +57,86 @@ type InterconnectRule struct {
 
 // AdditionalApproval is a party whose approvers decide a side of their own.
 type AdditionalApproval struct {
-	Name  string `yaml:"name" json:"name"`
-	Scope string `yaml:"scope" json:"scope"`
+	Name         string `yaml:"name" json:"name"`
+	Jurisdiction string `yaml:"jurisdiction" json:"jurisdiction"`
 }
 
 // BreakGlassPolicy is an entry of break_glass.policies (ADR-12).
 type BreakGlassPolicy struct {
-	Scopes     []string      `yaml:"scopes"`
-	DefaultTTL time.Duration `yaml:"default_ttl"`
-	MaxTTL     time.Duration `yaml:"max_ttl"`
-	MaxOpen    int           `yaml:"max_open"`
-	WarnBefore time.Duration `yaml:"warn_before"`
+	Jurisdictions []string      `yaml:"jurisdictions"`
+	DefaultTTL    time.Duration `yaml:"default_ttl"`
+	MaxTTL        time.Duration `yaml:"max_ttl"`
+	MaxOpen       int           `yaml:"max_open"`
+	WarnBefore    time.Duration `yaml:"warn_before"`
 }
 
 // MarshalJSON writes durations as whole seconds, in the canonical policy.
 func (b BreakGlassPolicy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Scopes     []string `json:"scopes"`
-		DefaultTTL int64    `json:"defaultTtlSeconds"`
-		MaxTTL     int64    `json:"maxTtlSeconds"`
-		MaxOpen    int      `json:"maxOpen"`
-		WarnBefore int64    `json:"warnBeforeSeconds"`
-	}{b.Scopes, int64(b.DefaultTTL.Seconds()), int64(b.MaxTTL.Seconds()), b.MaxOpen, int64(b.WarnBefore.Seconds())})
+		Jurisdictions []string `json:"jurisdictions"`
+		DefaultTTL    int64    `json:"defaultTtlSeconds"`
+		MaxTTL        int64    `json:"maxTtlSeconds"`
+		MaxOpen       int      `json:"maxOpen"`
+		WarnBefore    int64    `json:"warnBeforeSeconds"`
+	}{b.Jurisdictions, int64(b.DefaultTTL.Seconds()), int64(b.MaxTTL.Seconds()), b.MaxOpen, int64(b.WarnBefore.Seconds())})
 }
 
 // UnmarshalJSON reads the canonical form back, for the policy of a previous
 // CONFIG_LOADED entry.
 func (b *BreakGlassPolicy) UnmarshalJSON(data []byte) error {
 	var v struct {
-		Scopes     []string `json:"scopes"`
-		DefaultTTL int64    `json:"defaultTtlSeconds"`
-		MaxTTL     int64    `json:"maxTtlSeconds"`
-		MaxOpen    int      `json:"maxOpen"`
-		WarnBefore int64    `json:"warnBeforeSeconds"`
+		Jurisdictions []string `json:"jurisdictions"`
+		DefaultTTL    int64    `json:"defaultTtlSeconds"`
+		MaxTTL        int64    `json:"maxTtlSeconds"`
+		MaxOpen       int      `json:"maxOpen"`
+		WarnBefore    int64    `json:"warnBeforeSeconds"`
 	}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	*b = BreakGlassPolicy{Scopes: v.Scopes, DefaultTTL: time.Duration(v.DefaultTTL) * time.Second, MaxTTL: time.Duration(v.MaxTTL) * time.Second,
+	*b = BreakGlassPolicy{Jurisdictions: v.Jurisdictions, DefaultTTL: time.Duration(v.DefaultTTL) * time.Second, MaxTTL: time.Duration(v.MaxTTL) * time.Second,
 		MaxOpen: v.MaxOpen, WarnBefore: time.Duration(v.WarnBefore) * time.Second}
 	return nil
 }
 
-// PlatformScopes is the governance part of a platform.
-type PlatformScopes struct {
-	Platform     string   `json:"platform"`
-	Scope        string   `json:"scope"`
-	TargetScopes []string `json:"targetScopes"`
+// PlatformJurisdictions is the charter part of a platform.
+type PlatformJurisdictions struct {
+	Platform            string   `json:"platform"`
+	Jurisdiction        string   `json:"jurisdiction"`
+	TargetJurisdictions []string `json:"targetJurisdictions"`
 }
 
-// Policy is the governance policy (§8.2 rule 16): its SHA-256 is stored on
+// Policy is the charter (§8.2 rule 16): its SHA-256 is stored on
 // every change request.
 type Policy struct {
-	RequiredScopes           []string           `json:"requiredScopes"`
-	RequireDistinctApprovers bool               `json:"requireDistinctApproversAcrossScopes"`
-	SourceScopes             []SourceScope      `json:"sourceScopes"`
-	NamePrefixes             []NamePrefix       `json:"namePrefixes"`
-	Interconnects            Interconnects      `json:"interconnects"`
-	BreakGlassPolicies       []BreakGlassPolicy `json:"breakGlassPolicies"`
-	Platforms                []PlatformScopes   `json:"platforms"` // sorted by Canonical
+	RequiredJurisdictions    []string                `json:"requiredJurisdictions"`
+	RequireDistinctApprovers bool                    `json:"requireDistinctApproversAcrossJurisdictions"`
+	SourceJurisdictions      []SourceJurisdiction    `json:"sourceJurisdictions"`
+	NamePrefixes             []NamePrefix            `json:"namePrefixes"`
+	Interconnects            Interconnects           `json:"interconnects"`
+	BreakGlassPolicies       []BreakGlassPolicy      `json:"breakGlassPolicies"`
+	Platforms                []PlatformJurisdictions `json:"platforms"` // sorted by Canonical
 }
 
-// Decision is the outcome of the interconnection policy for a scope pair.
+// Decision is the outcome of the interconnection policy for a jurisdiction pair.
 type Decision struct {
 	Allowed bool
 	// Rule is the deciding rule, "default" if none matched, or "" for a
-	// same-scope pair, which never consults the policy.
+	// same-jurisdiction pair, which never consults the policy.
 	Rule                string
 	AdditionalApprovals []AdditionalApproval
 	DistinctApprovers   bool
 }
 
-// Evaluate applies the interconnection policy to a binding from sourceScope
-// to targetScope (ADR-14 rules 2 to 4).
-func (p *Policy) Evaluate(sourceScope, targetScope string) Decision {
+// Evaluate applies the interconnection policy to a binding from sourceJurisdiction
+// to targetJurisdiction (ADR-14 rules 2 to 4).
+func (p *Policy) Evaluate(sourceJurisdiction, targetJurisdiction string) Decision {
 	d := Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}
-	if sourceScope == targetScope {
+	if sourceJurisdiction == targetJurisdiction {
 		return d
 	}
 	for _, r := range p.Interconnects.Rules {
-		if matchesAny(r.From, sourceScope) && matchesAny(r.To, targetScope) {
+		if matchesAny(r.From, sourceJurisdiction) && matchesAny(r.To, targetJurisdiction) {
 			d.Rule, d.Allowed = r.Name, r.Action == "allow"
 			if d.Allowed {
 				d.AdditionalApprovals = r.AdditionalApprovals
@@ -147,18 +147,20 @@ func (p *Policy) Evaluate(sourceScope, targetScope string) Decision {
 			return d
 		}
 	}
-	d.Rule, d.Allowed = "default", p.Interconnects.DefaultCrossScope == "allow"
+	d.Rule, d.Allowed = "default", p.Interconnects.DefaultCrossJurisdiction == "allow"
 	return d
 }
 
-// ApprovalRequired reports whether sides in scope need an approver (ADR-09).
-func (p *Policy) ApprovalRequired(scope string) bool { return matchesAny(p.RequiredScopes, scope) }
+// ApprovalRequired reports whether sides in jurisdiction need an approver (ADR-09).
+func (p *Policy) ApprovalRequired(jurisdiction string) bool {
+	return matchesAny(p.RequiredJurisdictions, jurisdiction)
+}
 
-// BreakGlassPolicyFor returns the first break-glass policy covering scope,
+// BreakGlassPolicyFor returns the first break-glass policy covering jurisdiction,
 // or nil.
-func (p *Policy) BreakGlassPolicyFor(scope string) *BreakGlassPolicy {
+func (p *Policy) BreakGlassPolicyFor(jurisdiction string) *BreakGlassPolicy {
 	for i := range p.BreakGlassPolicies {
-		if matchesAny(p.BreakGlassPolicies[i].Scopes, scope) {
+		if matchesAny(p.BreakGlassPolicies[i].Jurisdictions, jurisdiction) {
 			return &p.BreakGlassPolicies[i]
 		}
 	}
@@ -166,11 +168,11 @@ func (p *Policy) BreakGlassPolicyFor(scope string) *BreakGlassPolicy {
 }
 
 // UncoveredParty is an additional party of an interconnection rule whose
-// scope no break-glass policy covers.
+// jurisdiction no break-glass policy covers.
 type UncoveredParty struct {
-	Rule  string `json:"rule"`
-	Party string `json:"party"`
-	Scope string `json:"scope"`
+	Rule         string `json:"rule"`
+	Party        string `json:"party"`
+	Jurisdiction string `json:"jurisdiction"`
 }
 
 // PartiesWithoutBreakGlass lists the parties that make every break-glass
@@ -183,8 +185,8 @@ func (p *Policy) PartiesWithoutBreakGlass() []UncoveredParty {
 	var found []UncoveredParty
 	for _, r := range p.Interconnects.Rules {
 		for _, a := range r.AdditionalApprovals {
-			if p.BreakGlassPolicyFor(a.Scope) == nil {
-				found = append(found, UncoveredParty{r.Name, a.Name, a.Scope})
+			if p.BreakGlassPolicyFor(a.Jurisdiction) == nil {
+				found = append(found, UncoveredParty{r.Name, a.Name, a.Jurisdiction})
 			}
 		}
 	}
@@ -196,7 +198,7 @@ func (p *Policy) PartiesWithoutBreakGlass() []UncoveredParty {
 func (p *Policy) Canonical() ([]byte, error) {
 	c := *p
 	c.Platforms = slices.Clone(p.Platforms)
-	slices.SortFunc(c.Platforms, func(a, b PlatformScopes) int { return strings.Compare(a.Platform, b.Platform) })
+	slices.SortFunc(c.Platforms, func(a, b PlatformJurisdictions) int { return strings.Compare(a.Platform, b.Platform) })
 	return jcs.Canonicalize(c)
 }
 
@@ -204,7 +206,7 @@ func (p *Policy) Canonical() ([]byte, error) {
 func (p *Policy) SHA256() string {
 	data, err := p.Canonical()
 	if err != nil {
-		panic(fmt.Sprintf("governance: canonical policy: %v", err)) // only plain types: cannot fail
+		panic(fmt.Sprintf("charter: canonical policy: %v", err)) // only plain types: cannot fail
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -215,16 +217,16 @@ func (p *Policy) SHA256() string {
 // CONFIG_APPROVAL_POLICY_WEAKENED.
 func Loosening(current, proposed *Policy) []string {
 	var out []string
-	for _, s := range current.RequiredScopes {
-		if !slices.Contains(proposed.RequiredScopes, s) {
-			out = append(out, fmt.Sprintf("%q removed from required_scopes", s))
+	for _, s := range current.RequiredJurisdictions {
+		if !slices.Contains(proposed.RequiredJurisdictions, s) {
+			out = append(out, fmt.Sprintf("%q removed from required_jurisdictions", s))
 		}
 	}
 	if current.RequireDistinctApprovers && !proposed.RequireDistinctApprovers {
-		out = append(out, "require_distinct_approvers_across_scopes turned off")
+		out = append(out, "require_distinct_approvers_across_jurisdictions turned off")
 	}
-	if current.Interconnects.DefaultCrossScope != "allow" && proposed.Interconnects.DefaultCrossScope == "allow" {
-		out = append(out, "default_cross_scope changed to allow")
+	if current.Interconnects.DefaultCrossJurisdiction != "allow" && proposed.Interconnects.DefaultCrossJurisdiction == "allow" {
+		out = append(out, "default_cross_jurisdiction changed to allow")
 	}
 	out = append(out, looserRules(current.Interconnects.Rules, proposed.Interconnects.Rules)...)
 	out = append(out, removedRules(current.Interconnects.Rules, proposed.Interconnects.Rules)...)
@@ -304,22 +306,22 @@ func removedRules(current, proposed []InterconnectRule) []string {
 	return out
 }
 
-// raisedBreakGlass reports break-glass policies, matched by their scopes,
+// raisedBreakGlass reports break-glass policies, matched by their jurisdictions,
 // whose max_ttl or max_open was raised.
 func raisedBreakGlass(current, proposed []BreakGlassPolicy) []string {
 	var out []string
 	for _, o := range current {
-		key := strings.Join(o.Scopes, ",")
-		i := slices.IndexFunc(proposed, func(b BreakGlassPolicy) bool { return strings.Join(b.Scopes, ",") == key })
+		key := strings.Join(o.Jurisdictions, ",")
+		i := slices.IndexFunc(proposed, func(b BreakGlassPolicy) bool { return strings.Join(b.Jurisdictions, ",") == key })
 		if i < 0 {
 			continue
 		}
 		n := proposed[i]
 		if n.MaxTTL > o.MaxTTL {
-			out = append(out, fmt.Sprintf("break-glass policy %v: max_ttl raised from %v to %v", o.Scopes, o.MaxTTL, n.MaxTTL))
+			out = append(out, fmt.Sprintf("break-glass policy %v: max_ttl raised from %v to %v", o.Jurisdictions, o.MaxTTL, n.MaxTTL))
 		}
 		if n.MaxOpen > o.MaxOpen {
-			out = append(out, fmt.Sprintf("break-glass policy %v: max_open raised from %d to %d", o.Scopes, o.MaxOpen, n.MaxOpen))
+			out = append(out, fmt.Sprintf("break-glass policy %v: max_open raised from %d to %d", o.Jurisdictions, o.MaxOpen, n.MaxOpen))
 		}
 	}
 	return out
@@ -338,11 +340,11 @@ func rulesByName(rules []InterconnectRule) map[string]indexedRule {
 	return m
 }
 
-func matchesAny(patterns []string, scope string) bool {
-	return slices.ContainsFunc(patterns, func(p string) bool { return ScopeMatches(p, scope) })
+func matchesAny(patterns []string, jurisdiction string) bool {
+	return slices.ContainsFunc(patterns, func(p string) bool { return JurisdictionMatches(p, jurisdiction) })
 }
 
-// overlap reports whether some scope matches a pattern of each list.
+// overlap reports whether some jurisdiction matches a pattern of each list.
 func overlap(a, b []string) bool {
 	for _, p := range a {
 		if slices.ContainsFunc(b, func(q string) bool { return PatternsOverlap(p, q) }) {
@@ -352,7 +354,7 @@ func overlap(a, b []string) bool {
 	return false
 }
 
-// PatternsOverlap reports whether some scope matches both patterns.
+// PatternsOverlap reports whether some jurisdiction matches both patterns.
 func PatternsOverlap(a, b string) bool {
 	if a == "*" || b == "*" {
 		return true

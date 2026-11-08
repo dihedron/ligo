@@ -44,14 +44,14 @@ func fixture(t *testing.T, owner *pgxpool.Pool, suffix, regex string) (source, b
 			sql  string
 			args []any
 		}{
-			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by)
+			{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)
 				values ($1, $2, 'cloud/fin-01/payments', 'cloud.internal', $3, 't', 't')`, []any{source, "s-" + suffix, regex}},
-			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{target, "t-" + suffix}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{target}},
 			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
-				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
+				source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
 				source_trust_domain, source_svid_regex, requested_spec, phase,
 				active_revision, active_source_svid_regex, active_auth_config, active_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static', 'bnd_' || left(md5($1::uuid::text), 16),

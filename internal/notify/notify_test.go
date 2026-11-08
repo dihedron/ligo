@@ -28,24 +28,24 @@ func TestSign(t *testing.T) {
 	}
 }
 
-// TestWants: a webhook receives the events it subscribes to; its scope
+// TestWants: a webhook receives the events it subscribes to; its jurisdiction
 // filter applies to all but configuration and system events.
 func TestWants(t *testing.T) {
-	dba := config.Webhook{Events: []string{"CR_AWAITING_APPROVAL", "CONFIG_PLATFORM_CHANGED"}, Scopes: []string{"dc/corp-prod/*"}}
+	dba := config.Webhook{Events: []string{"CR_AWAITING_APPROVAL", "CONFIG_PLATFORM_CHANGED"}, Jurisdictions: []string{"dc/corp-prod/*"}}
 	all := config.Webhook{Events: []string{"CR_AWAITING_APPROVAL"}}
 	for _, tc := range []struct {
 		w    config.Webhook
 		e    Event
 		want bool
 	}{
-		{dba, Event{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"dc/corp-prod/ledger"}}, true},
-		{dba, Event{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"cloud/fin-01/payments"}}, false},
+		{dba, Event{Name: "CR_AWAITING_APPROVAL", Jurisdictions: []string{"dc/corp-prod/ledger"}}, true},
+		{dba, Event{Name: "CR_AWAITING_APPROVAL", Jurisdictions: []string{"cloud/fin-01/payments"}}, false},
 		{dba, Event{Name: "CONFIG_PLATFORM_CHANGED"}, true},
-		{dba, Event{Name: "BREAK_GLASS_USED", Scopes: []string{"dc/corp-prod"}}, false},
-		{all, Event{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"anything"}}, true},
+		{dba, Event{Name: "BREAK_GLASS_USED", Jurisdictions: []string{"dc/corp-prod"}}, false},
+		{all, Event{Name: "CR_AWAITING_APPROVAL", Jurisdictions: []string{"anything"}}, true},
 	} {
 		if got := wants(tc.w, tc.e); got != tc.want {
-			t.Errorf("wants(%v, %v) = %v", tc.w.Scopes, tc.e, got)
+			t.Errorf("wants(%v, %v) = %v", tc.w.Jurisdictions, tc.e, got)
 		}
 	}
 }

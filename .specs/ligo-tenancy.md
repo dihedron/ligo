@@ -1,6 +1,6 @@
 # Accounts and tenancies
 
-This file specifies multitenancy for ligo v0.2.0: hundreds of accounts, each managed by its own people, on shared platforms. It extends ADR-13 (governance scopes), ADR-14 (interconnection) and ADR-15 (first-class resources). Where it differs from `ligo_specification.md`, this file is the proposal and the main specification changes when it is implemented.
+This file specifies multitenancy for ligo v0.2.0: hundreds of accounts, each managed by its own people, on shared platforms. It extends ADR-13 (jurisdictions), ADR-14 (interconnection) and ADR-15 (first-class resources). Where it differs from `ligo_specification.md`, this file is the proposal and the main specification changes when it is implemented.
 
 Status: draft, 2026-11-06, for review.
 
@@ -16,69 +16,69 @@ v0.1.0 ships without this.
 
 ## 2. What does not change
 
-A namespace is a governance scope (§3.9), so the terms Source, Binding, Target, Platform and scope stay, and these rules keep working as they are:
+A namespace is a jurisdiction (§3.9), so the terms Source, Binding, Target, Platform and jurisdiction stay, and these rules keep working as they are:
 
-- role grants on scope patterns, so `*` is the whole domain and `cloud/acme/*` one account;
-- the `path_template` extractor (requirement 2), which already refuses a regex whose fixed prefix identifies no single scope (`422 scope-unresolvable`);
+- role grants on jurisdiction patterns, so `*` is the whole domain and `cloud/acme/*` one account;
+- the `path_template` extractor (requirement 2), which already refuses a regex whose fixed prefix identifies no single jurisdiction (`422 jurisdiction-unresolvable`);
 - two-sided consent, distinct approvers, visibility, break-glass and the interconnection policy;
 - targets are register-only: FW-3 stays future work, and no `Tenancy` entity is added, because a tenancy is a target.
 
 ## 3. Terms
 
 - **Account**: a registered tenant, with a name and an LDAP organizational unit. New.
-- **Project**: the part of an account's workloads below its account, in SPIFFE paths and source scopes. A source scope, not an entity.
-- **Tenancy**: a target on a namespaced platform. A target scope, not an entity.
-- **Namespace**: the name of a tenancy's resource on the platform, computed from its scope (§5).
+- **Project**: the part of an account's workloads below its account, in SPIFFE paths and source jurisdictions. A source jurisdiction, not an entity.
+- **Tenancy**: a target on a namespaced platform. A target jurisdiction, not an entity.
+- **Namespace**: the name of a tenancy's resource on the platform, computed from its jurisdiction (§5).
 
-## 4. The structure of scopes
+## 4. The structure of jurisdictions
 
-`governance.accounts` in `server.yaml` declares the structure once:
+`charter.accounts` in `server.yaml` declares the structure once:
 
 ```yaml
-governance:
+charter:
   accounts:
-    scope: "cloud/{account}"                  # the account's root
-    source_scope: "cloud/{account}/app/{project}"
-    target_scope: "cloud/{account}/data/{tenancy}"
+    jurisdiction: "cloud/{account}"                  # the account's root
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
     ldap_groups:                              # §8
       search_base: "ou=accounts,dc=corp,dc=internal"
       roles:
-        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=corp,dc=internal",  role: operator,    scope: "cloud/{account}/*" }
-        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal",  role: approver,    scope: "cloud/{account}/*" }
-        - { group_dn: "cn=breakglass,ou={account},ou=accounts,dc=corp,dc=internal", role: break_glass, scope: "cloud/{account}/*" }
-        - { group_dn: "cn=operators,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: operator, scope: "cloud/{account}/app/{project}" }
-        - { group_dn: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: approver, scope: "cloud/{account}/app/{project}" }
-  source_scopes:
+        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=corp,dc=internal",  role: operator,    jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal",  role: approver,    jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=breakglass,ou={account},ou=accounts,dc=corp,dc=internal", role: break_glass, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=operators,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: operator, jurisdiction: "cloud/{account}/app/{project}" }
+        - { group_dn: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/app/{project}" }
+  source_jurisdictions:
     - trust_domain: cloud.internal
       mode: path_template
       path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/'
-      scope_template: 'cloud/${1}/app/${2}'
+      jurisdiction_template: 'cloud/${1}/app/${2}'
 ```
 
-A `path_regex` group must be one character class repeated with `+`, so it cannot state the account grammar exactly: `1abc` passes the regex, and is then refused as a scope no account can have.
+A `path_regex` group must be one character class repeated with `+`, so it cannot state the account grammar exactly: `1abc` passes the regex, and is then refused as a jurisdiction no account can have.
 
-Sources and targets sit on separate branches, `app` and `data`, because a project and a tenancy with the same name would otherwise be one scope, with the same people deciding for both sides of their binding.
+Sources and targets sit on separate branches, `app` and `data`, because a project and a tenancy with the same name would otherwise be one jurisdiction, with the same people deciding for both sides of their binding.
 
 Rules, checked at startup (§8.2):
 
-1. `{account}`, `{project}` and `{tenancy}` each match one whole segment, and each value MUST match `^[a-z][a-z0-9]*$`. This is narrower than a scope segment on purpose: see §5.
-2. A scope is **account-managed** when it matches the form of `scope` or lies below it. All others, such as `dc/corp-prod`, need no account and behave as in v0.1.0. `source_scope` and `target_scope` MUST lie below `scope`. They MUST NOT overlap, so that a project and a tenancy of one name can never be one scope.
-3. `ldap_groups` patterns may use `{account}` and `{project}`, and every placeholder of a rule's `scope` MUST appear in its `group_dn`. A rule's role is `viewer`, `operator`, `approver` or `break_glass`: never `trusted_automation`, which is for machines, or a global role. Tenancies have no groups of their own: the account's approvers and the platform's decide for them.
-4. **Form.** A source on an account-managed scope MUST have the form of `source_scope`, and a target the form of `target_scope`: `422 account-scope-mismatch`, when filed, at approval, and fatal at startup for what already exists. So a source of `cloud/acme/data/db01` is refused, though the account is registered.
+1. `{account}`, `{project}` and `{tenancy}` each match one whole segment, and each value MUST match `^[a-z][a-z0-9]*$`. This is narrower than a jurisdiction segment on purpose: see §5.
+2. A jurisdiction is **account-managed** when it matches the form of `jurisdiction` or lies below it. All others, such as `dc/corp-prod`, need no account and behave as in v0.1.0. `source_jurisdiction` and `target_jurisdiction` MUST lie below `jurisdiction`. They MUST NOT overlap, so that a project and a tenancy of one name can never be one jurisdiction.
+3. `ldap_groups` patterns may use `{account}` and `{project}`, and every placeholder of a rule's `jurisdiction` MUST appear in its `group_dn`. A rule's role is `viewer`, `operator`, `approver` or `break_glass`: never `trusted_automation`, which is for machines, or a global role. Tenancies have no groups of their own: the account's approvers and the platform's decide for them.
+4. **Form.** A source on an account-managed jurisdiction MUST have the form of `source_jurisdiction`, and a target the form of `target_jurisdiction`: `422 account-jurisdiction-mismatch`, when filed, at approval, and fatal at startup for what already exists. So a source of `cloud/acme/data/db01` is refused, though the account is registered.
 5. The whole section is optional. Without it, ligo behaves as v0.1.0.
 
 Static role bindings keep working and add to these grants. People with `*` or `cloud/*` are the domain-wide operators and approvers of requirement 1.
 
 ## 5. Namespaces (gap 1)
 
-**Problem.** A target's scope and its definition are unrelated today: `ValidateTargetRequest` carries no scope, so an operator of `cloud/acme/data/db01` can publish `{"schema": "globex_db02"}`, and only the platform owner's approval stops it.
+**Problem.** A target's jurisdiction and its definition are unrelated today: `ValidateTargetRequest` carries no jurisdiction, so an operator of `cloud/acme/data/db01` can publish `{"schema": "globex_db02"}`, and only the platform owner's approval stops it.
 
 **Decision.** A platform declares its namespace in `server.yaml`:
 
 ```yaml
 platforms:
   - name: pg-shared
-    target_scopes: ["cloud/*"]
+    target_jurisdictions: ["cloud/*"]
     namespace_template: "{account}_{tenancy}"
 ```
 
@@ -96,15 +96,15 @@ message PlatformProviderCapabilities {
 
 **Check.** On publishing a target or changing its definition, and again when a change request is re-validated at approval, the engine:
 
-1. matches the target's scope against `target_scope`; no match: `422 namespace-scope-mismatch`;
+1. matches the target's jurisdiction against `target_jurisdiction`; no match: `422 namespace-jurisdiction-mismatch`;
 2. expands the template with the values matched;
 3. compares the result, exactly, with `namespace_field` of the **normalized** definition the plugin returned; a difference: `422 namespace-mismatch`, naming the expected value.
 
-The engine does the comparison, not each plugin, so a plugin cannot get it wrong or forget it, and a plugin needs no knowledge of scopes. At startup, every existing target of a namespaced platform is checked; a mismatch is a fatal error naming it.
+The engine does the comparison, not each plugin, so a plugin cannot get it wrong or forget it, and a plugin needs no knowledge of jurisdictions. At startup, every existing target of a namespaced platform is checked; a mismatch is a fatal error naming it.
 
 **No character mapping.** Values are never transformed. Mapping `-` to `_` would make two tenants collide: account `a-b` with tenancy `c`, and account `a` with tenancy `b-c`, would both give `a_b_c`. Because values cannot contain `_`, and a template's literal separators are checked at startup to contain a character the values cannot hold, the expansion is injective: two tenancies never share a namespace.
 
-**Case.** Scopes are lower case, so schemas and SPIFFE paths are too. SPIFFE IDs are case-sensitive, so `/acct/ACME/` is refused. LDAP names are not, so `ou=ACME` in a DN reads as `acme` (§8).
+**Case.** Jurisdictions are lower case, so schemas and SPIFFE paths are too. SPIFFE IDs are case-sensitive, so `/acct/ACME/` is refused. LDAP names are not, so `ou=ACME` in a DN reads as `acme` (§8).
 
 ## 6. Tenant roles (gap 2)
 
@@ -142,7 +142,7 @@ CREATE TABLE accounts (
 );
 ```
 
-`sources` and `targets` gain `account VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT`, computed from the scope, and NULL outside account-managed scopes. A trigger refuses a new source or target on a `RETIRED` account, and refuses retiring an account while it has one that is not `RETIRED`. This goes into `001`, edited in place: no deployment of v0.1.0 exists, so there is no migration or backfill.
+`sources` and `targets` gain `account VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT`, computed from the jurisdiction, and NULL outside account-managed jurisdictions. A trigger refuses a new source or target on a `RETIRED` account, and refuses retiring an account while it has one that is not `RETIRED`. This goes into `001`, edited in place: no deployment of v0.1.0 exists, so there is no migration or backfill.
 
 The 30-character limit keeps `{account}_{tenancy}` within PostgreSQL's 63 characters together with a tenancy of up to 32; a longer result fails the plugin's identifier grammar and is refused.
 
@@ -150,14 +150,14 @@ The 30-character limit keeps `{account}_{tenancy}` within PostgreSQL's 63 charac
 
 - **Registering applies at once**, with no change request, and is audited (`SYSTEM_ACCOUNT_REGISTERED`). It grants nothing by itself: no source or target exists yet, and those still need consent.
 - **Retiring** needs no active resources (`409 account-in-use`) and is audited (`SYSTEM_ACCOUNT_RETIRED`). A retired account's name is never reused, because audit entries and SPIFFE paths refer to it.
-- **An unregistered or retired account is refused** on an account-managed scope: `422 account-not-registered`, when a source is registered and a target published, and again when a change request is re-validated at approval. A segment in the account's place that is outside the grammar, such as `cloud/a-b`, is such a scope: no account can have that name, so it is refused and does not count as needing no account.
-- **The structure can change.** Startup compares each resource's stored account with its scope's (§8.2 rule 17) and, with `--accept-scope-changes`, corrects it and audits `SOURCE_RESCOPED` or `TARGET_RESCOPED` with `column: account`. A resource cannot move into an account that is not registered, even with the flag: restore the configuration, register the account, and start again.
+- **An unregistered or retired account is refused** on an account-managed jurisdiction: `422 account-not-registered`, when a source is registered and a target published, and again when a change request is re-validated at approval. A segment in the account's place that is outside the grammar, such as `cloud/a-b`, is such a jurisdiction: no account can have that name, so it is refused and does not count as needing no account.
+- **The structure can change.** Startup compares each resource's stored account with its jurisdiction's (§8.2 rule 17) and, with `--accept-jurisdiction-changes`, corrects it and audits `SOURCE_TRANSFERRED` or `TARGET_TRANSFERRED` with `column: account`. A resource cannot move into an account that is not registered, even with the flag: restore the configuration, register the account, and start again.
 - **Maintenance mode** refuses registering and retiring with `503 maintenance`, like every other change.
 - Replicas learn of changes through `LISTEN`/`NOTIFY`, as the resolution cache does (§4.5), with its periodic full reload.
 
 ### 7.3 Who may do it
 
-A new role, `account_admin`, bound in `server.yaml`, global, with no scope. It may register, retire and list accounts, and nothing else: it decides no change request and does not see resources. `admin.full_access` includes it.
+A new role, `account_admin`, bound in `server.yaml`, global, with no jurisdiction. It may register, retire and list accounts, and nothing else: it decides no change request and does not see resources. `admin.full_access` includes it.
 
 ### 7.4 API, CLI and UI
 
@@ -172,7 +172,7 @@ CLI: `ligo account list|get|register|retire`. UI: an **Accounts** page, shown to
 
 ### 7.5 What stays in `server.yaml`
 
-Platforms (plugin wiring, bootstrap credentials, privilege bounds), the interconnection policy, approval requirements, extractors, and `governance.accounts` itself. ADR-14 rule 8 and T-22 keep guardrails out of the API so that ligo's administrators cannot weaken rules they are subject to. Only data about tenants moves to the database.
+Platforms (plugin wiring, bootstrap credentials, privilege bounds), the interconnection policy, approval requirements, extractors, and `charter.accounts` itself. ADR-14 rule 8 and T-22 keep guardrails out of the API so that ligo's administrators cannot weaken rules they are subject to. Only data about tenants moves to the database.
 
 ## 8. Roles from LDAP
 
@@ -182,7 +182,7 @@ Platforms (plugin wiring, bootstrap credentials, privilege bounds), the intercon
 
 1. At login and at each session recheck (`Lookup`), one subtree search under `search_base` finds the user's groups, with the existing `group_membership_filter`.
 2. Each DN is parsed with `ldap.ParseDN`, never matched as text, and compared with each `group_dn`, RDN by RDN, ignoring the case of A to Z alone: Unicode folding would read the Kelvin sign as `k`, so a look-alike name would stand for another account. It MUST have the same number of RDNs as the rule. A placeholder must be one whole attribute value and, lower-cased, match `^[a-z][a-z0-9]*$`. A DN that does not fit is ignored.
-3. A match gives the rule's role on the rule's scope, **only if the account is registered and `ACTIVE`**. Projects are not registered: the group's existence under the account's OU is enough.
+3. A match gives the rule's role on the rule's jurisdiction, **only if the account is registered and `ACTIVE`**. Projects are not registered: the group's existence under the account's OU is enough.
 
 The DNs are sorted, as a session keeps its token only while its grants compare equal. A failed search fails the login or the recheck: it never reads as no groups, except a `search_base` the directory does not have, which grants nothing.
 
@@ -197,17 +197,17 @@ The DNs are sorted, as a session keeps its token only while its grants compare e
 ### 9.1 Configuration
 
 ```yaml
-governance:
+charter:
   interconnects:
-    default_cross_scope: deny
+    default_cross_jurisdiction: deny
     rules:
       - { name: accounts, from: ["cloud/*"], to: ["cloud/*"], action: allow }
 authorization:
   approval:
-    required_scopes: ["cloud/*"]
+    required_jurisdictions: ["cloud/*"]
 ```
 
-Without `required_scopes`, an account operator's own sides would be approved automatically (`AUTO`), and nobody would approve a binding inside the account. Startup refuses `governance.accounts` when `required_scopes` does not cover `scope`.
+Without `required_jurisdictions`, an account operator's own sides would be approved automatically (`AUTO`), and nobody would approve a binding inside the account. Startup refuses `charter.accounts` when `required_jurisdictions` does not cover `jurisdiction`.
 
 ### 9.2 Who decides a binding
 
@@ -216,14 +216,14 @@ Without `required_scopes`, an account operator's own sides would be approved aut
 | Same account | An approver of the account | An approver of the account, or of the platform |
 | Across accounts | An approver of the source's account | An approver of the target's account, or of the platform |
 
-Both of the existing rules apply: the requester never decides, and `require_distinct_approvers_across_scopes` still asks for two different people. `app` and `data` are separate branches, so a binding inside an account always has two sides and needs two people: a project's approver can decide `SOURCE`, and an account's approver either side. An account with one approver cannot approve its own bindings; a waiver will be added only if that proves necessary, and it needs a new "same account" form of rule, as patterns cannot express it.
+Both of the existing rules apply: the requester never decides, and `require_distinct_approvers_across_jurisdictions` still asks for two different people. `app` and `data` are separate branches, so a binding inside an account always has two sides and needs two people: a project's approver can decide `SOURCE`, and an account's approver either side. An account with one approver cannot approve its own bindings; a waiver will be added only if that proves necessary, and it needs a new "same account" form of rule, as patterns cannot express it.
 
 ### 9.3 The platform approver (new)
 
-An approver of a binding's **platform scope** also qualifies for its `TARGET` side, for create, raising a level and changing parameters, and for ratifying a `BREAK_GLASS` `TARGET` side.
+An approver of a binding's **platform jurisdiction** also qualifies for its `TARGET` side, for create, raising a level and changing parameters, and for ratifying a `BREAK_GLASS` `TARGET` side.
 
-- The check moves from `CanApprove(side.Scope)` to one function taking the request and the side, `Caller.Decides`, called from `RatifiableSides`, `SelectSides` (so also from the `--awaiting-me` query), `RevertNow` and the web UI's `CanRevert` and `CanAct`. The `TARGET` side's `scope` stays the target's, and no new side or basis is added, so the database triggers of ADR-13 rule 9 hold as they are.
-- The audit entry and the side show who decided, and the entry adds `decidedAs: PLATFORM`. An approver who also holds the target's own scope decides as that, without the mark. A decline and a ratification are marked and announced like an approval.
+- The check moves from `CanApprove(side.Jurisdiction)` to one function taking the request and the side, `Caller.Decides`, called from `RatifiableSides`, `SelectSides` (so also from the `--awaiting-me` query), `RevertNow` and the web UI's `CanRevert` and `CanAct`. The `TARGET` side's `jurisdiction` stays the target's, and no new side or basis is added, so the database triggers of ADR-13 rule 9 hold as they are.
+- The audit entry and the side show who decided, and the entry adds `decidedAs: PLATFORM`. An approver who also holds the target's own jurisdiction decides as that, without the mark. A decline and a ratification are marked and announced like an approval.
 - A delete is not covered, except to ratify a `BREAK_GLASS` side: a platform approver who revokes has a `PLATFORM` side of their own.
 - It never applies to `SOURCE`, `OWNER`, `PARTY:` or any other side.
 - `AUTO` is not extended: a platform operator filing a binding gets no automatic `TARGET` side.
@@ -261,7 +261,7 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 
 | ID | Given | When | Then | Level |
 |---|---|---|---|---|
-| TN-1 | Template `{account}_{tenancy}` | Scope `cloud/acme/data/db01`, schema `globex_db02` | `422 namespace-mismatch`, also at approval | I |
+| TN-1 | Template `{account}_{tenancy}` | Jurisdiction `cloud/acme/data/db01`, schema `globex_db02` | `422 namespace-mismatch`, also at approval | I |
 | TN-2 | A role of another namespace | A level grants `globex_db02_read` on `acme_db01` | Refused by `ValidateTarget` | U, L |
 | TN-2a | A template with no `{namespace}`, or a second placeholder | `ConfigureInstances` | `INVALID_CONFIG` naming `grantable_role_templates` | U |
 | TN-3 | Values `a-b`, `c` and `a`, `b-c` | Registering; expanding | Refused by the grammar | U |
@@ -284,7 +284,7 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 
 **Chunks**, each its own commit, on one branch per PR:
 
-1. `governance.accounts`, its startup rules, template expansion (U).
+1. `charter.accounts`, its startup rules, template expansion (U).
 2. The registry in `001`, its API, CLI and triggers.
 3. Namespaces: capability, engine check, startup check, `ligo-plugin-postgres` `namespace_field`.
 4. `grantable_role_templates`.

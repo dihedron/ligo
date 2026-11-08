@@ -279,14 +279,14 @@ func samples() map[string]any {
 	v.Active = &bindings.ViewActive{SVIDRegex: "^x$", Since: now}
 	row := StatusRow{Name: "b", Phase: "PROVISIONING", Polling: true, Steps: []Step{{Number: 1, Name: "Identity", State: "done"}}}
 	cr := &changerequests.Request{ID: id, ResourceType: "BINDING", ResourceName: "b", Operation: "UPDATE", Status: "PENDING", Payload: []byte(`{}`),
-		Sides: []changerequests.Side{{Name: "SOURCE", Scope: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
+		Sides: []changerequests.Side{{Name: "SOURCE", Jurisdiction: "dc/x"}, {Name: "TARGET", Decision: "APPROVED", DecidedAt: &now}}}
 	trail := []Entry{{Action: "BINDING_CREATED", Actor: "olga", Revision: new(int64), OccurredAt: now}}
 	fields := []Field{{Name: "def.a", Type: "text", Pattern: "^x$"}, {Name: "def.b", Type: "checkbox", Checked: true},
 		{Name: "def.c", Type: "select", Options: []Option{{Value: "1", Selected: true}}}, {Name: "def.d", Type: "multiselect", Options: []Option{{Value: "1"}}},
 		{Name: "def.e", Type: "textarea", Help: "h"}, {Name: "def.f", Type: "number", Required: true}}
 	approved := "APPROVED"
-	gov := &preview.Evaluation{Scopes: map[string]string{"owner": "dc/x"}, NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL",
-		Interconnect: &preview.Interconnect{Rule: "r", Action: "allow"}, Sides: []preview.Side{{Side: "OWNER", Scope: "dc/x", Decision: &approved}}}
+	gov := &preview.Evaluation{Jurisdictions: map[string]string{"owner": "dc/x"}, NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL",
+		Interconnect: &preview.Interconnect{Rule: "r", Action: "allow"}, Sides: []preview.Side{{Side: "OWNER", Jurisdiction: "dc/x", Decision: &approved}}}
 	src := &sources.View{Source: sources.Source{DisplayName: "d", Labels: map[string]string{"k": "v"}, Contacts: []sources.Contact{{Name: "n", Email: "e"}},
 		Identity: sources.Identity{SampleSPIFFEIDs: []string{"spiffe://x/y"}}}}
 	src.Metadata.Name, src.Metadata.State, src.Metadata.PendingChangeRequestID = "s", "ACTIVE", &id
@@ -309,15 +309,15 @@ func samples() map[string]any {
 		"bg-error":        fieldError{Errors: map[string]string{"ttl": "t"}, Field: "ttl"},
 		"error":           Alert{Message: "m"},
 		"alert":           Alert{Message: "m"},
-		"governance":      gov,
-		"source-check":    SourceCheck{Test: &sources.TestResult{Valid: true, Matches: map[string]bool{"spiffe://x/y": true}, Narrowing: &sources.TestNarrowing{Narrower: true, Witness: "w"}, Overlaps: []sources.TestOverlap{{Source: "o"}}}, Governance: gov, Error: "e"},
+		"charter":         gov,
+		"source-check":    SourceCheck{Test: &sources.TestResult{Valid: true, Matches: map[string]bool{"spiffe://x/y": true}, Narrowing: &sources.TestNarrowing{Narrower: true, Witness: "w"}, Overlaps: []sources.TestOverlap{{Source: "o"}}}, Charter: gov, Error: "e"},
 		"source-form":     SourceForm{Edit: true, Revision: 2, Source: src.Source, TrustDomains: []string{"prod.internal"}, Samples: "spiffe://x/y"},
 		"ui-field":        fields[0],
 		"level-block":     LevelBlock{Platform: "p", Index: 1, Name: "read", Grants: fields, Next: 2},
 		"platform-fields": PlatformFields{Platform: "p", Definition: fields, Levels: []LevelBlock{{Platform: "p", Grants: fields}}, Next: 1},
-		"target-check":    TargetCheck{Governance: gov, Error: "e"},
+		"target-check":    TargetCheck{Charter: gov, Error: "e"},
 		"target-form":     TargetForm{Edit: true, Target: tgt.Target, Fields: &PlatformFields{Platform: "p", Definition: fields, Next: 1}, Reapplied: []*bindings.View{v}},
-		"binding-check":   TargetCheck{Governance: gov},
+		"binding-check":   TargetCheck{Charter: gov},
 		"wizard-form":     wz,
 		"wizard":          wz,
 		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Labels: "a=b"},
@@ -332,7 +332,7 @@ func samples() map[string]any {
 		"target":          TargetPage{Target: tgt, Bindings: []*bindings.View{v}, Audit: trail},
 		"accounts":        AccountsPage{Accounts: []*accounts.Account{{Name: "a", DisplayName: "d", Status: "ACTIVE", RegisteredBy: "r", RegisteredAt: now}}, Next: "a", CanChange: true},
 		"account":         AccountPage{Account: &accounts.Account{Name: "a", DisplayName: "d", Status: "ACTIVE", RegisteredBy: "r", RegisteredAt: now, RetiredBy: "r", RetiredAt: &now, Counts: &accounts.Counts{}}, CanChange: true},
-		"platforms":       []PlatformRow{{Name: "p", Serving: true, Health: "serving", TargetScopes: []string{"dc/x/*"}}},
+		"platforms":       []PlatformRow{{Name: "p", Serving: true, Health: "serving", TargetJurisdictions: []string{"dc/x/*"}}},
 		"catalog":         CatalogPage{Types: []string{"oracle.v1"}, Targets: []catalog.Target{{Name: "t", State: "DEPRECATED"}}, Next: "t"},
 		"catalog-card":    CardPage{Target: tgt, Flows: []flows.Flow{{Name: "f"}}, FlowsJSON: "{}", Outcomes: []catalog.Outcome{{Source: "s", Allowed: true, Sides: []string{"TARGET"}}}},
 	}

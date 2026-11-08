@@ -1,7 +1,7 @@
 {{define "content"}}{{with .Content}}{{with .Target}}<h1>{{.Metadata.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</h1>
 {{if eq .Metadata.State "DEPRECATED"}}<div class="alert alert-warning" role="status">This target is deprecated: no new bindings.</div>{{end}}
 <section class="card"><dl class="fields">
-  <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}})</dd><dt>Scope</dt><dd>{{.Metadata.Scope}}</dd>
+  <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}})</dd><dt>Jurisdiction</dt><dd>{{.Metadata.Jurisdiction}}</dd>
   {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
   {{with .DocumentationURL}}<dt>Documentation</dt><dd><a href="{{.}}" rel="noopener noreferrer">{{.}}</a></dd>{{end}}
   {{with .Contacts}}<dt>Contacts</dt><dd>{{range .}}<div>{{.Name}} &lt;{{.Email}}&gt;</div>{{end}}</dd>{{end}}
@@ -17,10 +17,10 @@
 <pre id="flows-json" hidden>{{.FlowsJSON}}</pre>
 <h2>For my sources</h2>
 <div class="table-wrap"><table>
-  <thead><tr><th>Source</th><th>Scope</th><th>Outcome</th><th>Sides a binding needs</th></tr></thead>
-  <tbody>{{range .Outcomes}}<tr><td>{{.Source}}</td><td>{{.SourceScope}}</td>
+  <thead><tr><th>Source</th><th>Jurisdiction</th><th>Outcome</th><th>Sides a binding needs</th></tr></thead>
+  <tbody>{{range .Outcomes}}<tr><td>{{.Source}}</td><td>{{.SourceJurisdiction}}</td>
     <td>{{if .Allowed}}<span class="badge badge-success">allowed</span>{{else}}<span class="badge badge-danger">denied</span>{{end}}{{with .Rule}} <span class="muted">rule {{.}}</span>{{end}}</td>
     <td>{{range .Sides}}<span class="badge">{{.}}</span> {{end}}</td></tr>
-  {{else}}<tr><td colspan="4" class="muted">You act for no source scope.</td></tr>{{end}}</tbody>
+  {{else}}<tr><td colspan="4" class="muted">You act for no source jurisdiction.</td></tr>{{end}}</tbody>
 </table></div>
 {{end}}{{end}}

@@ -69,8 +69,8 @@ hooks_env() {
 }
 
 # hooks_notifications: server.yaml's webhooks: oncall has no filter; dba is
-# filtered on the ledger's scope, which the tests' changes match; elsewhere on
-# a scope nothing in the lab has, so it receives system events only.
+# filtered on the ledger's jurisdiction, which the tests' changes match; elsewhere on
+# a jurisdiction nothing in the lab has, so it receives system events only.
 hooks_notifications() {
 	inner_exists hooks || return 0
 	local events='[BREAK_GLASS_USED, CR_AWAITING_APPROVAL, BINDING_REVOKED, SYSTEM_MAINTENANCE_ENABLED, SYSTEM_MAINTENANCE_DISABLED, SYSTEM_EXECUTOR_RECOVERED]'
@@ -83,8 +83,8 @@ hooks_notifications() {
 notifications:
   webhooks:
     - { name: oncall, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/oncall", hmac_secret_env: LIGO_WEBHOOK_ONCALL_SECRET, $common }
-    - { name: dba, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/dba", hmac_secret_env: LIGO_WEBHOOK_DBA_SECRET, scopes: ["$dba"], $common }
-    - { name: elsewhere, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/elsewhere", hmac_secret_env: LIGO_WEBHOOK_ELSEWHERE_SECRET, scopes: ["$elsewhere"], $common }
+    - { name: dba, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/dba", hmac_secret_env: LIGO_WEBHOOK_DBA_SECRET, jurisdictions: ["$dba"], $common }
+    - { name: elsewhere, url: "https://hooks.ligo.lab:$HOOKS_PORT/hooks/elsewhere", hmac_secret_env: LIGO_WEBHOOK_ELSEWHERE_SECRET, jurisdictions: ["$elsewhere"], $common }
 YAML
 }
 
@@ -119,7 +119,7 @@ hooks_abandoned() {
 }
 
 # serve_test_webhook: the receiver's scenarios (§7.5, AC-31, AC-37, AC-70):
-# delivery and scope filters; the receiver down, then back; a row abandoned
+# delivery and jurisdiction filters; the receiver down, then back; a row abandoned
 # after 24h; each replica alone delivering. Finally TestServeWebhookFile checks
 # everything the receiver recorded.
 serve_test_webhook() {

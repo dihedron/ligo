@@ -12,8 +12,8 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -149,7 +149,7 @@ func TestAC23(t *testing.T) {
 	}
 }
 
-// TestAC54: a delegated request across scopes decides only the delegated
+// TestAC54: a delegated request across jurisdictions decides only the delegated
 // side; nothing is provisioned until the people of the others approve.
 func TestAC54(t *testing.T) {
 	s, o, w, _ := setup(t)
@@ -189,14 +189,14 @@ func TestAC55(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
 	s.Requests.Policy.BreakGlassPolicies = append(s.Requests.Policy.BreakGlassPolicies,
-		governance.BreakGlassPolicy{Scopes: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
+		charter.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
 	rescuer := caller("rita", role(config.RoleBreakGlass, "cloud/fin-01/*", "dc/corp-prod/*", "sec/infosec"))
 	name := "fin-01-payments-p-" + w.suffix
 	create := func(n string) []byte {
 		return emergency("CREATE", `"binding":`+string(body(n, w.cloudSrc, w.ledger, "read"))+`,`, "")
 	}
 	if _, err := s.BreakGlass(ctx, livia, create(name)); slug(err) != "forbidden" {
-		t.Errorf("break_glass on one scope: %v", err)
+		t.Errorf("break_glass on one jurisdiction: %v", err)
 	}
 
 	bg, err := s.BreakGlass(ctx, rescuer, create(name))
@@ -427,7 +427,7 @@ func TestAC05c(t *testing.T) {
 }
 
 // TestAC25: a side filed under a stricter policy still needs an approver
-// other than the requester once the scope stops requiring approval.
+// other than the requester once the jurisdiction stops requiring approval.
 func TestAC25(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
@@ -440,7 +440,7 @@ func TestAC25(t *testing.T) {
 		t.Fatalf("request %s %s", r.Status, sides(r))
 	}
 	cfg := example(t)
-	cfg.Authorization.Approval.RequiredScopes = nil
+	cfg.Authorization.Approval.RequiredJurisdictions = nil
 	s.Requests.Policy = cfg.Policy() // the restart with the weaker policy
 	if s.Requests.Policy.ApprovalRequired("dc/corp-prod") {
 		t.Fatal("the policy still requires approval")

@@ -17,12 +17,12 @@ import (
 // a preference in the browser's cookie, read-only checks, or a workflow that
 // audits itself.
 var unaudited = map[string]string{
-	"POST /ui/preferences/theme":           "a cookie in the browser",
-	"POST /ui/sources/test":                "a read-only check",
-	"POST /ui/targets/preview":             "a read-only check",
-	"POST /ui/bindings/governance-preview": "a read-only check",
-	"POST /ui/bindings/{name}/retry":       "audited by the workflow: TestAC09",
-	"POST /ui/bindings/{name}/rotate":      "audited by the workflow: TestRotate",
+	"POST /ui/preferences/theme":        "a cookie in the browser",
+	"POST /ui/sources/test":             "a read-only check",
+	"POST /ui/targets/preview":          "a read-only check",
+	"POST /ui/bindings/charter-preview": "a read-only check",
+	"POST /ui/bindings/{name}/retry":    "audited by the workflow: TestAC09",
+	"POST /ui/bindings/{name}/rotate":   "audited by the workflow: TestRotate",
 }
 
 var uiRoute = regexp.MustCompile(`mux\.HandleFunc\("((?:POST|PUT|PATCH|DELETE) [^"]+)"`)
@@ -112,7 +112,7 @@ func TestINV11Routes(t *testing.T) {
 	act(b, "POST /ui/sources/{name}/{op}", "CR_CREATED", "/ui/sources/"+source+"/deprecate", url.Values{"expectedRevision": {"2"}})
 
 	// targets
-	tgt := url.Values{"name": {target}, "platform": {"oracle-prod"}, "scope": {"dc/corp-prod/ledger"}, "def.schema": {"LEDGER"},
+	tgt := url.Values{"name": {target}, "platform": {"oracle-prod"}, "jurisdiction": {"dc/corp-prod/ledger"}, "def.schema": {"LEDGER"},
 		"level.0.name": {"read"}, "level.0.grant.roles": {"LEDGER_RO_ROLE"}, "level.1.name": {"write"},
 		"level.1.grant.roles": {"LEDGER_RO_ROLE", "LEDGER_RW_ROLE"}, "visibility": {"PUBLIC"}, "networkFlows": {"[]"}}
 	filed(act(b, "POST /ui/targets", "CR_CREATED", "/ui/targets", tgt))
@@ -139,7 +139,7 @@ func TestINV11Routes(t *testing.T) {
 	}
 	id := act(b, "PUT /ui/bindings/{name}", "CR_CREATED", "/ui/bindings/"+name, url.Values{"accessLevel": {"read"}, "purpose": {"audits"}, "expectedRevision": {"1"}})
 	act(b, decide, "CR_WITHDRAWN", "/ui/change-requests/"+id+"/withdraw", url.Values{})
-	act(b, "POST /ui/targets/{name}/bindings/revoke", "CR_CREATED", "/ui/targets/tgt-"+x+"/bindings/revoke", url.Values{"sourceScope": {"dc/*"}, "comment": {"incident"}})
+	act(b, "POST /ui/targets/{name}/bindings/revoke", "CR_CREATED", "/ui/targets/tgt-"+x+"/bindings/revoke", url.Values{"sourceJurisdiction": {"dc/*"}, "comment": {"incident"}})
 	if err := v.owner.QueryRow(ctx, "select id::text from change_requests where resource_name = $1 and status = 'PENDING'", name).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,11 @@ func TestINV11Routes(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc-" + x, `^spiffe://prod\.internal/ns/ledger/sa/` + x + `$`}},
-		{`insert into sources (id, name, scope, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+		{`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
 			'prod.internal', $3, 'PUBLIC', 't', 't')`, []any{uuid.NewV7(), "lsrc2-" + x, `^spiffe://prod\.internal/ns/ledger2/sa/` + x + `$`}},
-		{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, created_by, updated_by)
+		{`insert into targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition, visibility, created_by, updated_by)
 			values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 'PUBLIC', 't', 't')`, []any{ledger, "ltgt-" + x}},
 		{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{ledger}},
 	} {

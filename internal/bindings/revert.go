@@ -23,21 +23,21 @@ const actorRevert = "system:break-glass-expiry"
 // shortest warn_before of their sides' policies, once each, and audits
 // BREAK_GLASS_EXPIRING (§6.3).
 func (s *Service) WarnBreakGlass(ctx context.Context) error {
-	rows, err := s.DB.Query(ctx, `SELECT b.id, b.name, b.break_glass_cr_id, b.break_glass_expires_at, array_agg(sd.scope)
+	rows, err := s.DB.Query(ctx, `SELECT b.id, b.name, b.break_glass_cr_id, b.break_glass_expires_at, array_agg(sd.jurisdiction)
 		FROM bindings b JOIN change_request_sides sd ON sd.change_request_id = b.break_glass_cr_id AND sd.basis = 'BREAK_GLASS'
 		WHERE b.break_glass_cr_id IS NOT NULL AND b.break_glass_warned_at IS NULL GROUP BY b.id`)
 	if err != nil {
 		return err
 	}
 	type open struct {
-		id, cr    uuid.UUID
-		name      string
-		expiresAt time.Time
-		scopes    []string
+		id, cr        uuid.UUID
+		name          string
+		expiresAt     time.Time
+		jurisdictions []string
 	}
 	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (open, error) {
 		var o open
-		return o, r.Scan(&o.id, &o.name, &o.cr, &o.expiresAt, &o.scopes)
+		return o, r.Scan(&o.id, &o.name, &o.cr, &o.expiresAt, &o.jurisdictions)
 	})
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func (s *Service) WarnBreakGlass(ctx context.Context) error {
 	var errs []error
 	for _, o := range list {
 		warn := time.Duration(0)
-		for _, sc := range o.scopes {
+		for _, sc := range o.jurisdictions {
 			if p := s.Requests.Policy.BreakGlassPolicyFor(sc); p != nil && (warn == 0 || p.WarnBefore < warn) {
 				warn = p.WarnBefore
 			}
@@ -139,14 +139,14 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 		return nil, refuse(409, "break-glass-not-open", "the break-glass change %s was ratified, reverted or closed", bg.ID)
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE",
-		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Realm: cur.realm, SourceScope: cur.sourceScope,
-		TargetScope: cur.targetScope, PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),
+		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Realm: cur.realm, SourceJurisdiction: cur.sourceJurisdiction,
+		TargetJurisdiction: cur.targetJurisdiction, PlatformJurisdiction: cur.platformJurisdiction, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),
 		RequestedBy: actor, RevertsID: &bg.ID}
 	for _, sd := range bg.Sides {
 		if strings.HasPrefix(sd.Name, "PARTY:") {
 			continue // a revocation has no additional parties (change_request_check)
 		}
-		r.Sides = append(r.Sides, changerequests.Side{Name: sd.Name, Scope: sd.Scope, Basis: changerequests.KindSystemRevert,
+		r.Sides = append(r.Sides, changerequests.Side{Name: sd.Name, Jurisdiction: sd.Jurisdiction, Basis: changerequests.KindSystemRevert,
 			Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: comment})
 	}
 	if bg.Operation == "UPDATE" {
@@ -178,8 +178,8 @@ func (s *Service) revalidate(ctx context.Context, b *Binding, cur *stored) error
 	if err != nil {
 		return err
 	}
-	if d := p.Evaluate(res.sourceScope, res.targetScope); !d.Allowed {
-		return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceScope, res.targetScope, d.Rule)
+	if d := p.Evaluate(res.sourceJurisdiction, res.targetJurisdiction); !d.Allowed {
+		return refuse(403, "interconnect-denied", "the interconnection policy denies %s to %s (rule %s)", res.sourceJurisdiction, res.targetJurisdiction, d.Rule)
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func (s *Service) RetireInlineSources(ctx context.Context) error {
 		r, err := s.Sources.Retirement(ctx, i.source)
 		if err == nil {
 			r.Kind, r.Consent, r.RequestedBy, r.RevertsID = changerequests.KindSystemRevert, changerequests.ConsentAny, i.by, &i.cr
-			r.Sides = []changerequests.Side{{Name: "OWNER", Scope: r.OwnerScope, Basis: changerequests.KindSystemRevert,
+			r.Sides = []changerequests.Side{{Name: "OWNER", Jurisdiction: r.OwnerJurisdiction, Basis: changerequests.KindSystemRevert,
 				Decision: changerequests.Approved, DecidedBy: changerequests.RevertApprover, Comment: "inline source of a reverted break-glass binding"}}
 			err = s.Requests.System(ctx, r)
 		}

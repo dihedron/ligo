@@ -5,7 +5,7 @@
     <dt>Samples</dt><dd>{{range .Identity.SampleSPIFFEIDs}}<div class="mono">{{.}}</div>{{end}}</dd>
   </dl></section>
   <section class="card"><h2>Source</h2><dl class="fields">
-    <dt>Scope</dt><dd>{{.Metadata.Scope}}</dd><dt>State</dt><dd><span class="{{badge .Metadata.State}}">{{.Metadata.State}}</span></dd>
+    <dt>Jurisdiction</dt><dd>{{.Metadata.Jurisdiction}}</dd><dt>State</dt><dd><span class="{{badge .Metadata.State}}">{{.Metadata.State}}</span></dd>
     <dt>Revision</dt><dd>{{.Metadata.Revision}}</dd><dt>Visibility</dt><dd>{{.Visibility.Mode}}</dd>
     {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
     {{with .Contacts}}<dt>Contacts</dt><dd>{{range .}}<div>{{.Name}} &lt;{{.Email}}&gt;</div>{{end}}</dd>{{end}}

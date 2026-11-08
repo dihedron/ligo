@@ -77,15 +77,15 @@ func TestReadCommands(t *testing.T) {
 		"/v1/admin/bindings/b1":              {binding},
 		"/v1/admin/bindings":                 {`{"items":[` + binding + `],"nextPageToken":null}`},
 		"/v1/admin/bindings/b1/flows":        {`{"binding":"b1","networkFlows":[{"name":"db","purpose":"DATA","protocol":"TCP","destination":"pg","ports":[5432],"tls":true,"declaredBy":"target:t1"}]}`},
-		"/v1/admin/platforms":                {`{"items":[{"name":"pg-ledger","type":"postgres.v1","realm":"prod","scope":"dc/x","health":{"serving":true}}]}`},
+		"/v1/admin/platforms":                {`{"items":[{"name":"pg-ledger","type":"postgres.v1","realm":"prod","jurisdiction":"dc/x","health":{"serving":true}}]}`},
 		"/v1/admin/platforms/pg-ledger":      {`{"name":"pg-ledger","uiSchemas":{"targetDefinition":{"fields":[]}}}`},
-		"/v1/admin/catalog/targets":          {`{"items":[{"name":"t1","platform":"pg-ledger","platformType":"postgres.v1","scope":"dc/x","state":"ACTIVE","bound":true}]}`},
+		"/v1/admin/catalog/targets":          {`{"items":[{"name":"t1","platform":"pg-ledger","platformType":"postgres.v1","jurisdiction":"dc/x","state":"ACTIVE","bound":true}]}`},
 		"/v1/admin/catalog/targets/t1":       {`{"metadata":{"name":"t1"},"outcomes":[]}`},
 		"/v1/admin/catalog/targets/t1/flows": {`{"target":"t1","networkFlows":[]}`},
 		"/v1/admin/bindings/b1/audit":        {`{"items":[{"id":7,"occurredAt":"2026-10-30T10:00:00Z","action":"CR_APPLIED","actor":"dora"}]}`},
 		"/v1/admin/audit/verify":             {`{"valid":true,"entries":12}`},
 		"/v1/admin/maintenance":              {`{"maintenanceMode":true,"inFlight":1}`, `{"maintenanceMode":true,"inFlight":0}`},
-		"/v1/admin/governance":               {`{"policy":{"requiredScopes":[]},"sha256":"ab"}`},
+		"/v1/admin/charter":                  {`{"policy":{"requiredJurisdictions":[]},"sha256":"ab"}`},
 		"/v1/admin/change-requests":          {`{"items":[{"id":"c1","resourceType":"BINDING","resourceName":"b1","operation":"CREATE","kind":"STANDARD","status":"PENDING","awaitingApproval":["TARGET"],"requestedBy":"olga"}]}`},
 		"/v1/admin/change-requests/c1":       {`{"id":"c1","payloadSha256":"ff"}`},
 		"/v1/admin/break-glass":              {`{"items":[{"id":"open","status":"APPLIED","breakGlass":{"expiresAt":"2999-01-01T00:00:00Z"},"sides":[{"basis":"BREAK_GLASS"}]},{"id":"ratified","status":"APPLIED","breakGlass":{"expiresAt":"2999-01-01T00:00:00Z"},"sides":[{"basis":"BREAK_GLASS","ratifiedBy":"dora"}]}]}`},
@@ -100,9 +100,9 @@ func TestReadCommands(t *testing.T) {
 		output  []string
 	}{
 		{"get", (&Get{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1", []string{"b1 s1 t1 read ACTIVE 3 -"}},
-		{"list", (&List{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Scope: "dc/*", Args: struct {
+		{"list", (&List{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Jurisdiction: "dc/*", Args: struct {
 			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" description:"Resource kind."`
-		}{"bindings"}}).Execute, "GET /v1/admin/bindings?pageSize=10&phase=ACTIVE&scope=dc%2F%2A", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
+		}{"bindings"}}).Execute, "GET /v1/admin/bindings?jurisdiction=dc%2F%2A&pageSize=10&phase=ACTIVE", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
 		{"flows", (&Flows{Base: b, Args: struct {
 			Binding string `positional-arg-name:"binding" description:"Binding name."`
 		}{"b1"}}).Execute, "GET /v1/admin/bindings/b1/flows", []string{"db DATA TCP pg 5432 true target:t1"}},
@@ -115,7 +115,7 @@ func TestReadCommands(t *testing.T) {
 		{"audit list", (&AuditList{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1/audit", []string{"7 2026-10-30T10:00:00Z CR_APPLIED dora -"}},
 		{"audit verify", (&AuditVerify{Base: b}).Execute, "GET /v1/admin/audit/verify", []string{"true 12 -"}},
 		{"maintenance status --wait-drained", (&MaintenanceStatus{Base: b, WaitDrained: true}).Execute, "GET /v1/admin/maintenance", []string{"true - - - 0 -"}},
-		{"governance show", (&GovernanceShow{Base: b}).Execute, "GET /v1/admin/governance", []string{"sha256: ab"}},
+		{"charter show", (&CharterShow{Base: b}).Execute, "GET /v1/admin/charter", []string{"sha256: ab"}},
 		{"cr list", (&ChangeRequestList{Base: b, AwaitingMe: true, Kind: "binding"}).Execute,
 			"GET /v1/admin/change-requests?awaitingMe=true&resourceType=BINDING", []string{"c1 BINDING b1 CREATE STANDARD PENDING TARGET olga"}},
 		{"cr get", (&ChangeRequestGet{Base: b, Args: struct {
