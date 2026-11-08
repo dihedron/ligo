@@ -14,6 +14,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
+| 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 
 ## 1. Audit pruning
 
@@ -150,4 +151,49 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - **References.** Removing an instance still referenced by a binding is refused, as at startup today; changing an instance's wiring affects only new bindings (INV-08).
 - **What stays in `server.yaml`.** Plugin types: binary, SHA-256, kind, and whether they are built in. Realms, probably, since they need SPIRE agents on the hosts.
 - **Migration of the configuration.** Instances already in `server.yaml` at upgrade: imported once, or both sources allowed for a while (AGENTS rule 8 prefers no compatibility before a release).
+
+## 11. An MCP server for the admin API
+
+**Why.** People increasingly work through an LLM assistant. An MCP server lets one read `ligo` first ("which bindings does this workload have, and why is this one `FAILED`?"), and later drive it ("request read access to the ledger for my payments project"), through the same admin API and the same rules as the CLI and the web UI.
+
+**What exists.** The admin API (`api/openapi/admin.v1alpha1.yaml`, 48 paths), with authentication by SVID or LDAP, roles on jurisdictions, and visibility that answers `404` for what a caller may not see. The CLI is a client of the same API. The user's `nexus-iq-mcp` project is an MCP server in Go (`mcp-go`) that can serve as a pattern.
+
+**Principles.**
+
+- **The MCP server acts as the person using it**, with their own credentials, never a shared service account: every call is authorised, filtered and audited as theirs, and the LLM can see and do only what that person can.
+- **Proposing, never deciding.** The LLM may file change requests on the person's behalf. It never approves, declines, ratifies or reverts a side, and never uses break-glass: maker-checker and the emergency path exist so that a person decides, and an LLM that decides would empty them. Those endpoints are not offered as tools at all.
+- **Read first, write later**, as two releases. Every write tool shows the change request it filed and its `payloadSha256`, so the person can review and the approvers decide in the UI or CLI as today.
+- **No secrets**: the admin API returns none, and the tools add none (no credentials, no bootstrap references beyond what `getPlatform` shows).
+
+**Proposed tools, phase 1 (read).**
+
+| Tool | API | Answers |
+| :---------------------------- | :---------------------------------------- | :---------------------------------------- |
+| `search_catalog` | `searchCatalog`, `getCatalogTarget`, `getCatalogTargetFlows` | Which targets exist that I can request, what levels they offer, what flows they need |
+| `list_sources`, `get_source` | `listSources`, `getSource`, `listSourceBindings` | My workloads' sources and what they are bound to |
+| `test_source_regex` | `testSourceRegex` | Does this regex cover these SPIFFE IDs, and which jurisdiction would it get |
+| `list_targets`, `get_target` | `listTargets`, `getTarget`, `listTargetBindings` | My targets, their levels and who uses them |
+| `list_bindings`, `get_binding` | `listBindings`, `getBinding`, `getBindingFlows` | Bindings by source, target, phase or expiry; one binding's state, revision and flows |
+| `explain_binding` | `getBinding`, `bindingAudit`, `getChangeRequest` | Why a binding is in its phase: its last change requests, decisions and errors, in order |
+| `list_change_requests`, `get_change_request` | `listChangeRequests`, `getChangeRequest` | What is pending, what awaits me, who still has to decide |
+| `get_audit` | `sourceAudit`, `targetAudit`, `bindingAudit` | The history of one resource |
+| `list_platforms`, `get_platform` | `listPlatforms`, `getPlatform` | Platforms, their realms, jurisdictions and health |
+| `get_charter`, `check_change` | `getCharter`, `evaluateCharter` | The charter in force; for a planned binding, the jurisdictions, rule, parties and sides, without filing anything |
+| `list_accounts` | `listAccounts`, `getAccount` | Registered accounts (for `account_admin` and viewers) |
+| `get_maintenance` | `getMaintenance` | Whether changes are accepted now |
+
+**Proposed tools, phase 2 (propose).**
+
+| Tool | API | Does |
+| :---------------------------- | :---------------------------------------- | :---------------------------------------- |
+| `request_binding` | `evaluateCharter` then `createBinding` | Checks the charter first, then files the request; returns the request and who must decide |
+| `change_binding`, `revoke_binding` | `updateBinding`, `deleteBinding` | Files the change; a revocation by an owner applies alone, as today |
+| `register_source`, `change_source`, `retire_source` | `createSource`, `updateSource`, `retireSource` | Files the change request |
+| `publish_target`, `change_target` | `createTarget`, `updateTarget` | Files the change request |
+| `withdraw_change_request` | `withdrawChangeRequest` | Withdraws the person's own pending request |
+| `retry_binding`, `rotate_binding` | `retryBinding`, `rotateBinding` | Operational actions the person may already take |
+
+**Never offered.** `approveChangeRequest`, `declineChangeRequest`, `ratifyChangeRequest`, `revertChangeRequest`, `breakGlass`, `putMaintenance`, `recoverExecutor`, `registerAccount`, `retireAccount`, `revokeTargetBindings`.
+
+**To decide.** How the server gets the person's identity (their CLI login or an SVID on their machine, never a stored password); whether it runs locally beside the assistant (stdio) or as a service; prompts or resources that explain jurisdictions and the charter to the model; rate limits; and how a person confirms each write tool before it is sent.
 
