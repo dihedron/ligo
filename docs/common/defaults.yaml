@@ -46,3 +46,5 @@ variables:
     \newif\iflandscapepage
     \AddToHook{shipout/background}{\iflandscapepage\put(0,0){\special{pdf: put @thispage <</Rotate 90>>}}\fi}
     \setlist[description]{style=nextline, leftmargin=1.5em}
+    % appendices (the planning guide): no trailing dot on section numbers once one has a letter
+    \KOMAoptions{numbers=noenddot}

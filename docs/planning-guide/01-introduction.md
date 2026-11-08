@@ -18,7 +18,7 @@ Products appear only as examples of a role: HAProxy as a load balancer, Patroni 
 
 ## Two layers: network zones and realms
 
-The word "zone" means different things to different people, so this guide never uses it alone.
+The word "zone" means different things to different people. In this guide it always means a network zone: `ligo` calls its own configuration unit a realm.
 
 - A **network zone** is the architect's starting point: a segment with its own security level and reachability, such as a data centre segment, a DMZ, or a cloud region or VPC. It decides who can reach whom.
 - A **realm** is `ligo`'s configuration term (`realms` in `server.yaml`): one SPIFFE trust domain, the SPIRE agent socket on the `ligo` host that serves it, and the plugin processes attached to it. It decides which identities `ligo` and its plugins hold, and which workloads it can verify.
