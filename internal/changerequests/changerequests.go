@@ -18,7 +18,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/authz"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/jcs"
 )
 
@@ -191,7 +191,7 @@ type Candidate struct {
 // whose jurisdiction does not require approval, DELEGATED when a trusted_automation
 // SPIFFE principal covers it, HUMAN otherwise. A delegated side needs the
 // approval reference, matching the delegation's pattern if it has one.
-func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approvalReference string) ([]Side, error) {
+func BuildSides(candidates []Candidate, c Caller, p *charter.Policy, approvalReference string) ([]Side, error) {
 	var sides []Side
 	for _, cand := range candidates {
 		s, g := side(cand, c, p)
@@ -209,8 +209,8 @@ func BuildSides(candidates []Candidate, c Caller, p *governance.Policy, approval
 }
 
 // PreviewSides are the sides BuildSides would build, without checking the
-// approval reference (POST /v1/admin/governance/evaluate).
-func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side {
+// approval reference (POST /v1/admin/charter/evaluate).
+func PreviewSides(candidates []Candidate, c Caller, p *charter.Policy) []Side {
 	sides := []Side{}
 	for _, cand := range candidates {
 		s, _ := side(cand, c, p)
@@ -221,7 +221,7 @@ func PreviewSides(candidates []Candidate, c Caller, p *governance.Policy) []Side
 
 // side decides how cand is decided; g is the delegating grant of a
 // DELEGATED side.
-func side(cand Candidate, c Caller, p *governance.Policy) (s Side, g *authz.Grant) {
+func side(cand Candidate, c Caller, p *charter.Policy) (s Side, g *authz.Grant) {
 	s = Side{Name: cand.Side, Jurisdiction: cand.Jurisdiction, Basis: BasisHuman, ApprovalRequired: true}
 	if !strings.HasPrefix(cand.Side, "PARTY:") && c.Grants.ActsFor(cand.Jurisdiction, cand.Platform) && !p.ApprovalRequired(cand.Jurisdiction) {
 		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover // a party's approvers always decide (ADR-13 rule 6)
@@ -279,7 +279,7 @@ func orNull(v json.RawMessage) json.RawMessage {
 // the caller acts for that needs no approval is AUTO, every other side is
 // BREAK_GLASS, approved at once, and needs the break_glass role on its
 // jurisdiction.
-func BreakGlassSides(candidates []Candidate, c Caller, p *governance.Policy) ([]Side, error) {
+func BreakGlassSides(candidates []Candidate, c Caller, p *charter.Policy) ([]Side, error) {
 	if c.Principal.SPIFFEID != "" {
 		return nil, refuse(403, "forbidden", "break-glass is for people only")
 	}
@@ -362,7 +362,7 @@ func count(sides []Side, decision string) int {
 // sides", rules 1 to 3): the pending HUMAN sides it is an approver for, or
 // an operator for where approval is not required (never a party's), never
 // as the requester; one per person when distinct approvers are required.
-func SelectSides(r *Request, c Caller, p *governance.Policy, approve bool, side string) ([]string, error) {
+func SelectSides(r *Request, c Caller, p *charter.Policy, approve bool, side string) ([]string, error) {
 	if c.ID() == r.RequestedBy {
 		return nil, refuse(403, "four-eyes-violation", "the requester cannot decide its own change request")
 	}

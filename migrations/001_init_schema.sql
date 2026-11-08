@@ -442,7 +442,7 @@ CREATE TABLE change_requests (
     target_jurisdiction       jurisdiction_path,                          -- BINDING
     platform_jurisdiction     jurisdiction_path,                          -- TARGET, BINDING
     interconnect_rule  VARCHAR(64),                         -- BINDING with consent ALL across jurisdictions: matched rule, or 'default' (ADR-14)
-    policy_sha256      CHAR(64) NOT NULL,                   -- governance policy in force at creation (§8.2)
+    policy_sha256      CHAR(64) NOT NULL,                   -- charter in force at creation (§8.2)
     distinct_approvers_required BOOLEAN NOT NULL,           -- ADR-13 rule 7; immutable
     expected_revision  BIGINT,                              -- REQUIRED for UPDATE/DELETE
     payload            JSONB NOT NULL,                      -- normalized desired state (§7.2.3); '{}' for DELETE

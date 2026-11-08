@@ -1,5 +1,5 @@
 // Package jcs implements the JSON Canonicalization Scheme (RFC 8785), used
-// for the governance policy hash, payload hashes, the audit hash chain and
+// for the charter hash, payload hashes, the audit hash chain and
 // ETags.
 package jcs
 

@@ -118,7 +118,7 @@ As `livia`, each of these must show an error in the form, and the change must no
 
 ### A-1: the Accounts page
 
-Prerequisite: `test/lab/lab.sh serve test-accounts`, which leaves `ligo` installed with `governance.accounts`. Afterwards, run `reset` and `serve install` before any other scenario. Users: `kim` is the account administrator, `alan` an approver of `acme`.
+Prerequisite: `test/lab/lab.sh serve test-accounts`, which leaves `ligo` installed with `charter.accounts`. Afterwards, run `reset` and `serve install` before any other scenario. Users: `kim` is the account administrator, `alan` an approver of `acme`.
 
 1. As `alan`, open **Accounts**: `acme` only, and no register form. Its page shows the counts and no Retire.
 2. As `kim`, register `umbrella`. The browser goes to its page.

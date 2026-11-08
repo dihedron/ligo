@@ -134,7 +134,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/bindings/{name}", s.binding)
 	mux.HandleFunc("GET /ui/bindings/{name}/status-row", s.bindingStatus)
 	mux.HandleFunc("GET /ui/bindings/wizard", s.wizard)
-	mux.HandleFunc("POST /ui/bindings/governance-preview", s.bindingPreview)
+	mux.HandleFunc("POST /ui/bindings/charter-preview", s.bindingPreview)
 	mux.HandleFunc("POST /ui/bindings", s.bindingCreate)
 	mux.HandleFunc("GET /ui/bindings/{name}/edit-form", s.bindingEditForm)
 	mux.HandleFunc("PUT /ui/bindings/{name}", s.bindingUpdate)

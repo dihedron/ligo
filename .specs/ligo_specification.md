@@ -1,8 +1,8 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.4` (`v1alpha1` API)
+- **Document Version:** `4.0.5` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.0.3` ("scope" becomes "jurisdiction", §0.5). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.6). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.7). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.8). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.9).
+- **Supersedes:** `4.0.4` ("governance" becomes "charter", §0.5). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.6). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.7). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.8). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.9). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.10).
 - **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
@@ -39,6 +39,7 @@ The application is named **`ligo`**, Latin for "I bind", and is pronounced "lee-
 | **Binding** | The directional link: this source may use this target at this access level | Database, managed through the API | `payments-ledger-workers` → `ledger-schema` at `write` |
 
 - **`ligo`** means the application: the daemon, the binary, the service (`ligo serve`).
+- **Jurisdiction** and **charter.** A jurisdiction is who decides about a resource or one side of a change (§3.9). The **charter** is the set of rules every jurisdiction must comply with, one per installation (`charter:` in `server.yaml`, §3.9).
 - **Platform** replaces what 3.x called a *target instance*. In this document "target" always means a registered Target, never a system.
 - **Plugin kinds.** The three stages (ADR-01) are served by three plugin kinds, named the same way in the spec, the protobuf contract (`PluginKind`, §5.9), `server.yaml` (§8.1) and the code:
   - an **IdentityProvider** (Stage 1) decides which principal represents the source: the SVID itself, a directory principal it creates, or a local principal a later stage creates. The built-ins `svid.v1`, `target-local.v1` and `delegated-dynamic.v1` are **mode markers**: they create nothing and only declare an identity mode;
@@ -76,17 +77,22 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 - A **realm** is a technical placement (ADR-03): one SPIRE trust domain, its agent socket, and the plugin processes attached to it. Realms decide where plugins run and which SVIDs they hold. A platform belongs to one realm.
 - A **jurisdiction** (or simply **jurisdiction**) is an organisational ownership boundary (ADR-13, §3.9), such as a cloud tenancy (`cloud/fin-01/payments`) or a data centre (`dc/corp-prod`). Every source, target and platform has an owner jurisdiction. Jurisdictions decide who may propose, approve, see and revoke.
 
-### 0.5 Changelog from 4.0.3 (4.0.4)
+### 0.5 Changelog from 4.0.4 (4.0.5)
+| Area | Change |
+| :--- | :--- |
+| Terminology (§0.4, §3.9 and throughout) | **Breaking change.** "Governance" becomes the **charter**: the set of rules every jurisdiction must comply with (how a workload's jurisdiction follows from its SPIFFE path, name prefixes, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed). In real life, jurisdictions live under a charter or a constitution. §3.9 defines the term, and every released guide carries the definition (`TestCharterIsDefined`). Renamed, with no alias: the `server.yaml` section `governance` (now `charter`; its keys are unchanged), which strict decoding now refuses; the package `internal/governance` (now `internal/charter`); the endpoints `GET /v1/admin/governance` and `POST /v1/admin/governance/evaluate` (now `/v1/admin/charter` and `/v1/admin/charter/evaluate`); the CLI `ligo governance show|check` (now `ligo charter show|check`); the UI route `/ui/bindings/governance-preview` (now `/ui/bindings/charter-preview`); the event `CONFIG_GOVERNANCE_POLICY_CHANGED` (now `CONFIG_CHARTER_CHANGED`); the problem slug `governance-policy-changed` (now `charter-changed`). "The governance policy" is now "the charter"; its hash on change requests keeps the column `policy_sha256`. Where "governance" meant people deciding, the text now says "consent" (trust boundary 6, T-30). Older changelog entries keep the names that were current at the time. No behavioural change. |
+
+### 0.6 Changelog from 4.0.3 (4.0.4)
 | Area | Change |
 | :--- | :--- |
 | Terminology (ADR-13 and throughout) | **Breaking change.** The governance scope becomes the **jurisdiction**: who decides about a source, a target, a platform or one side of a change. "Governance scope" was abstract, and "scope" alone has other meanings. Moving a resource to another jurisdiction at startup is a **transfer**. Renamed, with no alias (no deployment depends on the old names): the `server.yaml` keys `scopes`, `required_scopes`, `target_scopes`, `source_scopes`, `scope_template`, `default_cross_scope`, `require_distinct_approvers_across_scopes` and, under `governance.accounts`, `scope`, `source_scope` and `target_scope` (now `jurisdictions`, `required_jurisdictions`, `target_jurisdictions`, `source_jurisdictions`, `jurisdiction_template`, `default_cross_jurisdiction`, `require_distinct_approvers_across_jurisdictions`, `jurisdiction`, `source_jurisdiction`, `target_jurisdiction`), which strict decoding now refuses; in `001`, edited in place, the domain `scope_path`, the columns `scope`, `owner_scope`, `source_scope`, `target_scope`, `platform_scope` and `n_scopes`, their indexes and `chk_cr_scope_columns`, and the setting `ligo.rescope` (now `ligo.transfer`); the resource and API fields `scope`, `sourceScope`, `targetScope`, `platformScope` and the filter `scope`; the problem slugs `scope-unresolvable`, `account-scope-mismatch` and `namespace-scope-mismatch`; the CLI flags `--scope`, `--source-scope` and `ligo serve --accept-scope-changes`; the audit actions `SOURCE_RESCOPED`, `TARGET_RESCOPED` and `BINDING_RESCOPED` (now `*_TRANSFERRED`) and the apply error `re-scoped` (now `transferred`); the webhook payload keys `sourceScope`, `targetScope` and `platformScope`. The `governance` section, the package and `CONFIG_GOVERNANCE_POLICY_CHANGED` keep their names: governance is the rules, a jurisdiction what they apply to. Older changelog entries keep the names that were current at the time. No behavioural change. |
 
-### 0.6 Changelog from 4.0.2 (4.0.3)
+### 0.7 Changelog from 4.0.2 (4.0.3)
 | Area | Change |
 | :--- | :--- |
 | Terminology (ADR-03 and throughout) | **Breaking change.** The configuration term "zone" becomes **realm**: one trust domain, its SPIRE agent socket and the plugin processes attached to it. "Zone" is what architects call a network segment (a data centre segment, a DMZ, a cloud region), and one realm may serve workloads in several of them. Renamed, with no alias (no deployment depends on the old names): the `server.yaml` keys `zones`, `zone` (instances, platforms, `core_identity`) and `via_zone` (now `realms`, `realm`, `via_realm`), which strict decoding now refuses; the column `zone` of `targets`, `bindings` and `change_requests` and the indexes `idx_bindings_zone`, `idx_cr_status_zone` in `001`, edited in place; the plugin contract fields `InstanceDescriptor.zone`, `BindingContext.zone` and `ConfigureInstancesRequest.zone` (field numbers unchanged); the resource field `metadata.zone`, the admin API filter `zone` and the CLI flag `--zone` (now `--realm`, with no short form, as `-r` is `--expected-revision`); the webhook payload key `zone`; the metric labels `zone` and `socket_zone`. Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.7 Changelog from 4.0.1 (4.0.2)
+### 0.8 Changelog from 4.0.1 (4.0.2)
 | Area | Change |
 | :--- | :--- |
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
@@ -116,7 +122,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
-### 0.8 Changelog from 4.0.0 (4.0.1)
+### 0.9 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
 | :--- | :--- |
 | Web UI (§7.4, EXT-14) | The UI moves from htmx 2.x to **htmx 4.0** (released 2026-08-28), pinned to `4.0.0` and served from `ligo`'s own static files. The `htmx-config` is rewritten for htmx 4: `allowEval`, `allowScriptTags`, `selfRequestsOnly`, `historyCacheSize` and `responseHandling` no longer exist. 4xx responses are now swapped by default, so `409` and `422` fragments are directed to the form's error container with `hx-status:409`/`hx-status:422`, and `5xx` is added to `noSwap`. Requests stay same-origin (`mode: same-origin`, the htmx 4 default) and the request timeout is raised to 90 s, above the plugin RPC timeout. htmx 4 no longer stores pages in browser storage for history. Attribute inheritance is no longer implicit, so templates set every htmx attribute on the element that needs it. The CSRF header hook in `app.js` uses the htmx 4 event `htmx:config:request`. |
@@ -126,7 +132,7 @@ The plugin contract (`v1`, unreleased) gains secret storage strategies and renam
 
 No change to the API, the data model or the workflows.
 
-### 0.9 Changelog from 3.0.2 (4.0.0)
+### 0.10 Changelog from 3.0.2 (4.0.0)
 | Area | Change |
 | :--- | :--- |
 | Resource model (ADR-15, §0.4, §3) | **Breaking change.** Sources and targets become first-class resources, managed through the API with their own change requests, revisions, audit history and lifecycle (`ACTIVE`, `DEPRECATED`, `RETIRED`). A **Source** is an identity specification (trust domain, SVID regex, sample SPIFFE IDs) with metadata; a **Target** is a specific resource on a platform, with access levels and network flows; **Platforms** replace 3.x target instances and stay in `server.yaml`. A **Binding** links one source to one target at one access level, with optional parameters and expiry, and at most one binding exists per (source, target). The free-form `spec`/`roleGrants` of 3.x is replaced by access levels reviewed once by the target and platform owners. Targets are register-only: publishing a target does not create the resource (FW-3). API version `v1alpha2`. |
@@ -145,14 +151,14 @@ No change to the API, the data model or the workflows.
 | Open issues and future work (§13) | FW-1 resolved by first-class targets. FW-2 becomes consumer policies stored with targets. New FW-3 (target provisioning), FW-4 (access recertification) and OI-3 (privilege identifiers of the existing plugins). |
 | Process flows (Appendix E) | E.3, E.4, E.6 and E.7 updated; new E.14 (register and narrow a source), E.15 (publish a target), E.16 (propagation), E.17 (catalog and network pre-flight check), E.18 (binding expiry). |
 
-### 0.10 Changelog from 3.0.1 (3.0.2)
+### 0.11 Changelog from 3.0.1 (3.0.2)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | The conceptual diagram is split into three parts and the logical diagram into two, with the logical diagrams showing keys and the main attributes only (full columns stay in §4.2), so that every diagram remains legible when printed. Content unchanged. |
 
 A printable PDF edition is generated from this Markdown source; this file remains authoritative.
 
-### 0.11 Changelog from 3.0.0 (3.0.1)
+### 0.12 Changelog from 3.0.0 (3.0.1)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | New conceptual model (business entities, including those held in configuration, with definitions, relationships and cardinalities) and logical model (Mermaid entity-relationship diagrams), with a normative table of every relationship, how it is enforced (foreign key, trigger, startup check or none) and why, and the deliberate denormalizations. Checked against the DDL of §4.2. |
@@ -160,7 +166,7 @@ A printable PDF edition is generated from this Markdown source; this file remain
 
 No behavioral change.
 
-### 0.12 Changelog from 2.9.2 (3.0.0)
+### 0.13 Changelog from 2.9.2 (3.0.0)
 | Area | Change |
 | :--- | :--- |
 | Governance scopes (ADR-13, §3.1, §3.3, §3.7, §4.2, §7.2.2, §8.1, §8.2, Appendix D) | Authorization and approval move from zones to **governance scopes**: slash-separated paths (`dc/corp-prod`, `cloud/fin-01/payments`) that model both multi-tenant cloud tenancies and flat, centrally managed data centres. Every binding has an immutable **source scope**, derived from the fixed literal prefix of its SVID regex by an extractor configured per source trust domain, and a **target scope**, configured on its target instance. A regex whose fixed prefix does not identify one scope is rejected, so no pattern can span two tenancies. Role bindings use `scopes` instead of `zones`; `approval.required_zones` becomes `required_scopes`. Zones remain the technical placement of plugins and trust domains. **Breaking change** for configuration, database schema and API. |
@@ -174,33 +180,33 @@ No behavioral change.
 | Fix (§4.2) | `chk_regex_shape` contained `NOT LIKE '%\$'`. In `LIKE`, `\$` is an escaped literal `$`, so the condition contradicted `LIKE '%$'` and the check rejected **every** valid regex. Replaced by `right(source_svid_regex, 2) <> '\$'`. Found while testing the 3.0.0 schema. |
 | Future work (§13) | FW-1: a target scope chosen by a request field, only for plugins that guarantee the field determines the resource. FW-2: standing interconnection approvals stored in the database. |
 
-### 0.13 Changelog from 2.9.1 (2.9.2)
+### 0.14 Changelog from 2.9.1 (2.9.2)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §5.9, §7.1) | Go module path changed from the placeholder `github.com/yourorg/ligo` to `github.com/dihedron/ligo`, including both Protobuf `go_package` options. |
 
-### 0.14 Changelog from 2.9.0 (2.9.1)
+### 0.15 Changelog from 2.9.0 (2.9.1)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §3.1) | Resource API version changed from `bindings.spiffe.io/v1alpha1` to `ligo.dihedron.org/v1alpha1`, a domain owned by the project, instead of a name under the SPIFFE project's domain. |
 
-### 0.15 Changelog from 2.8.0 (2.9.0)
+### 0.16 Changelog from 2.8.0 (2.9.0)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4 and throughout) | Application renamed from `binding` to `ligo` (Latin for "I bind"). Every application-derived identifier was renamed: binary, CLI and `cmd/` directory, Go module and Protobuf packages, environment variables, metrics, DBOS workflow IDs, PostgreSQL roles, advisory locks and `NOTIFY` channel, cookies, HTTP headers, file system paths, SPIFFE IDs, Vault/OpenBao objects, problem URN, endpoint annotation, ownership tag, go-plugin handshake, example host and group names. Identifiers that name the binding resource are unchanged (§0.4). Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.16 Changelog from 2.7.0 (2.8.0)
+### 0.17 Changelog from 2.7.0 (2.8.0)
 | Area | Change |
 | :--- | :--- |
 | Testing (§11.1, §8.3, EXT-17) | All code MUST be tested on a lab built as code in `deploy/lab/`: two SPIRE servers (two trust domains) with agents, Vault or OpenBao, two `binding` replicas, PostgreSQL, an LDAP directory, workload hosts, target systems and a webhook receiver, extended as development needs emerge. Production-like security settings, real machine separation where attestation is tested, fault injection, a merge gate on the full lab suite, both Vault and OpenBao supported only if both pass, clean state per run, no production data, archived evidence. Acceptance scenarios moved to §11.2. |
 
-### 0.17 Changelog from 2.6.0 (2.7.0)
+### 0.18 Changelog from 2.6.0 (2.7.0)
 | Area | Change |
 | :--- | :--- |
 | Final consistency review (ADR-11, §3.1, §3.6, §4.2, §4.3, §5.6, §6.2, §6.3, §7.2, §7.6, §8.2) | Break-glass: ratify/revert concurrency defined (binding row lock, `409 break-glass-not-open`); refused in maintenance mode (reverts still run); revert payload and its re-validation defined; deleting a binding closes its open break-glass change, which then falls under the overdue-review rule; "emit once" markers stored (`break_glass_warned_at`, `review_overdue_notified_at`); API needs Basic credentials, UI needs password re-entry, failures audited; `status.breakGlass` in the admin representation; RBAC rows for `break_glass`, ratify and revert. Also: stale text removed (ADR-11, §6.2), `zones: ["*"]` defined, `s3-e2ee.v1` marked as planned, dispatcher added to startup, shutdown and the HA singletons, webhook `eventId` made restore-safe (UUIDv7 instead of the outbox row number), maintenance list includes break-glass, SVG responses replace the page CSP, theme wording made consistent with T-27, `min_justification_length ≥ 20` validated. New AC-38a–AC-38c. |
 | UI theming (§7.4, §7.6, §8.1, §8.2, T-27, AC-39–AC-43) | External theming through design tokens: conventional files in `/etc/binding/theme` (`theme.css`, `logo`, `logo-dark`, `favicon`, `fonts/`), explicit paths and token colors in `server.yaml` (explicit paths take precedence). Light, dark and system color modes, with a per-user choice stored in a cookie and rendered server-side (no inline script). Theme files validated at startup, served from memory with safe types and sandboxed SVG, and audited in `CONFIG_LOADED`. CSP gains `font-src 'self'`. |
 
-### 0.18 Changelog from 2.5.0 (2.6.0)
+### 0.19 Changelog from 2.5.0 (2.6.0)
 | Area | Change |
 | :--- | :--- |
 | Break-glass (ADR-12, INV-14, INV-16, §4.2, §6.2, §6.3, §7.2, §7.4, §7.5, §8.1, §8.2, §8.4, T-26, R-07, AC-31–AC-38) | People in a per-zone `break_glass` LDAP group can apply emergency changes in approval-required zones immediately, with fresh re-authentication, justification, incident reference and TTL. Creates and updates are reverted automatically on expiry unless a different approver ratifies them; emergency deletes are final but still reviewed. Database-enforced (`chk_break_glass`, `chk_ratification`, `chk_revert`). New `/v1/admin/break-glass`, `/ratify` and `/revert` endpoints, UI form and banner, CLI commands. |
@@ -208,12 +214,12 @@ No behavioral change.
 | Scope | The plugin SDK, the external plugins (Oracle, PostgreSQL, Kafka, OpenStack, Nexus), the Terraform/OpenTofu provider and the Ansible collection will each have their own specification, with the same structure as this one. They are not part of this document. |
 | Open issues (§13) | OI-1: secondary enforcement points (Vault, Keystone, Kafka) cannot express binding regexes. OI-2: the example Oracle + OpenLDAP wiring is not supported by Oracle. |
 
-### 0.19 Changelog from 2.4.0 (2.5.0)
+### 0.20 Changelog from 2.4.0 (2.5.0)
 | Area | Change |
 | :--- | :--- |
 | Delegated approval (ADR-11, INV-14, §4.2, §6.2, §7.2, §8.1, §8.2, §8.4, §10.6, T-25, R-06, AC-27–AC-30) | New `trusted_automation` role lets a portal or automation platform create, update and delete bindings in approval-required zones without a human approver in `binding`, by delegating approval to its upstream process. SPIFFE principals only (enforced in the database); scoped by zone and optional target instances; every request carries an upstream `approvalReference` (optional format pattern); optional self-asserted `automationContext`; optional per-principal rate limit. Change requests record `approval_basis` (`HUMAN`, `ZONE_AUTO`, `DELEGATED`), and `chk_four_eyes` enforces which decider each basis allows. New §10.6 explains what SPIFFE attestation can and cannot distinguish for Ansible and Terraform, and how to separate automation from people running the same tools. |
 
-### 0.20 Changelog from 2.3.1 (2.4.0)
+### 0.21 Changelog from 2.3.1 (2.4.0)
 | Area | Change |
 | :--- | :--- |
 | Regex validator (Appendix A, ADR-06, T-02, AC-03) | Closed a bypass of segment confinement: a `/` inside a repeated or optional group (`(?:[a-z]+\|/)+`, `(/[a-z]+)*`, `(/[a-z]+)?`) let one pattern match identities at any depth. New rule 7d rejects any `/` under `*`, `+`, `?` or `{n,m}`. Removed the 2.3.0 empty-alternation-branch rule, which protected nothing and was trivially bypassed. Appendix A now states the segment-confinement property, gives the rationale for every rule, and includes normative test vectors (A.5). |
@@ -227,7 +233,7 @@ No behavioral change.
 | Principal names (Appendix B, §3.4, §8.1) | Default prefix changed from `bnd-` to `bnd_`, and `-` removed from the custom-prefix grammar (now `^[a-zA-Z][a-zA-Z0-9_]{0,3}$`; example `svc_`). A hyphen is illegal in unquoted Oracle identifiers and needs quoting in PostgreSQL, so 2.3.0 names were rejected by the Oracle plugin's own identifier grammar. |
 | Trust bundles (§7.1, §8.1, §8.2, §10.5, T-24, EXT-16) | Each accepted trust domain now has exactly one authoritative bundle source (its own zone's socket, or a declared `via_zone` for federated domains), closing a path by which a lower-assurance SPIRE server could inject a bundle for another trust domain. `binding` registers on every zone's agent, because SPIRE releases bundles only to registered callers (verified in SPIRE's source, EXT-16). New `federated_trust_domains` setting and Topology C document how to verify additional trust domains through federation with a single agent. |
 
-### 0.21 Changelog from 2.3.0 (editorial patch 2.3.1)
+### 0.22 Changelog from 2.3.0 (editorial patch 2.3.1)
 | Area | Change |
 | :--- | :--- |
 | Editorial | Removed stray `[cite: 1]` tags throughout the prose. |
@@ -240,7 +246,7 @@ No behavioral change.
 
 No behavioral change. Design issues raised in the 2.3.0 review are addressed separately.
 
-### 0.22 Changelog from 2.2.0 (introduced in 2.3.0)
+### 0.23 Changelog from 2.2.0 (introduced in 2.3.0)
 | Area | Change |
 | :--- | :--- |
 | Regex AST (Appendix A) | Forbade `OpAnyCharNotNL` (normal `.`), any `OpCharClass` containing `'/'` (`0x2F`), and `OpEmptyMatch` inside `OpAlternate`, preventing wildcards from crossing SPIFFE path segment boundaries (`/`) or matching empty alternation branches. |
@@ -253,13 +259,13 @@ No behavioral change. Design issues raised in the 2.3.0 review are addressed sep
 | Naming (Appendix B) | Shortened `derived_principal_name` from 23 characters to 20 characters (`"bnd-"` + 16 Base32 chars = 80 bits of entropy) so it satisfies Active Directory's 20-char `sAMAccountName` limit out of the box without plugin-specific truncation. |
 | Pagination & CLI (§7.2.3, §8.4) | Standardized keyset pagination cursors across all list endpoints. Added normative `github.com/jessevdk/go-flags` CLI command/subcommand structure (`serve`, `apply`, `get`, `list`, `delete`, `retry`, `rotate`, `cr`, `target`, `audit`). |
 
-### 0.23 Changelog from 2.1.0 (introduced in 2.2.0)
+### 0.24 Changelog from 2.1.0 (introduced in 2.2.0)
 | Area | Change |
 | :--- | :--- |
 | Naming | Application renamed from `bindd` to `binding`. Every derived identifier was renamed accordingly (§0.4). |
 | Config | `service.application_version` set to `2.2.0` (now `3.0.2`). |
 
-### 0.24 Changelog from 2.0.0 (introduced in 2.1.0)
+### 0.25 Changelog from 2.0.0 (introduced in 2.1.0)
 | Area | Change |
 | :--- | :--- |
 | Regex security | SVID regex validated on the parsed AST (alternation/flag bypass closed); matching moved from PostgreSQL ARE to Go RE2 (ADR-06, Appendix A). |
@@ -462,7 +468,7 @@ Code generators and maintainers MUST preserve these decisions.
 
 ### ADR-13: Jurisdictions and Two-Sided Consent
 - **Problem:**
-  - Workloads and targets live under different governance models. In a **multi-tenant cloud**, authority is partitioned into accounts, tenancies or projects: each team is autonomous inside its own tenancy and has no rights in its neighbours'. In a **traditional data centre**, authority is flat and central: infrastructure, IAM and DBA teams run shared systems on behalf of everybody. A binding can connect any combination: cloud to cloud (in the same tenancy or another one), data centre to data centre, cloud to data centre, and data centre to cloud.
+  - Workloads and targets live under different models of authority. In a **multi-tenant cloud**, authority is partitioned into accounts, tenancies or projects: each team is autonomous inside its own tenancy and has no rights in its neighbours'. In a **traditional data centre**, authority is flat and central: infrastructure, IAM and DBA teams run shared systems on behalf of everybody. A binding can connect any combination: cloud to cloud (in the same tenancy or another one), data centre to data centre, cloud to data centre, and data centre to cloud.
   - Until 2.9, authorization was scoped by realm. A realm is a technical boundary (one trust domain, one SPIRE agent, one set of plugin processes, ADR-03) and does not follow ownership.
   - Any rule that lets a principal provision a binding with authority over only one of its two ends allows privilege escalation:
     - **Target hijacking.** An operator who owns a workload binds it to a database owned by another team and grants their workload roles there.
@@ -491,19 +497,19 @@ Code generators and maintainers MUST preserve these decisions.
   7. **Distinct people per side.** When a request has more than one side decided by people, each side MUST be approved by a different person (`authorization.approval.require_distinct_approvers_across_jurisdictions`, default `true`; an interconnection rule MAY set `distinct_approvers: false` for specific jurisdiction pairs). Break-glass ratifications follow the same rule. The requester can never decide or ratify any side. An approver entitled to more than one pending side states which side an approval is for (`side`); without it the request is refused with `400 side-required`.
   8. **Visibility.** A binding and its change requests are visible to principals holding any role on its source, target or platform jurisdiction, or on the jurisdiction of an additional party. Sources and targets are visible to their owners (and a target to its platform's owners) and, beyond them, according to their `visibility` (§3.2, §3.3). For everybody else they do not exist (`404`).
   9. **Database enforcement.** Sides are rows of `change_request_sides` (§4.2). Row checks enforce per-side four-eyes and the decider allowed for each basis. Deferred constraint triggers enforce, at commit, the set of sides for each resource type and consent rule, completeness before `APPLIED`, the rejection rules, distinct people per side and the delegation reference.
-- **Rationale.** "Either can propose, both must consent, either can revoke" is how two owners agree a connection in practice: either can start the conversation, neither can impose it on the other, and either can end it. With first-class resources the agreement is reached once per resource where possible: a source owner reviews which workloads a regex matches when the source is registered, and a platform owner confirms what a target offers when it is published; a binding then only has to agree on the link. Single-owner changes keep a single step. Deriving the source jurisdiction from the fixed literal prefix of the regex reuses a property Appendix A already guarantees (the prefix contains no wildcard and no segment can vary), so a pattern can never span two tenancies, and an approver can read the tenancy in the pattern itself. Giving the platform owner unilateral revocation reflects who answers for the platform during an incident. Keeping the per-side rules in the database makes the guarantee independent of application bugs. Requiring different people per side stops the few people with broad approver roles from turning the agreement of two governance areas into a single signature. Residual risks: a jurisdiction is only as trustworthy as the registration of SPIFFE IDs in SPIRE (R-08), and an interconnection rule can waive distinct approvers (R-09).
+- **Rationale.** "Either can propose, both must consent, either can revoke" is how two owners agree a connection in practice: either can start the conversation, neither can impose it on the other, and either can end it. With first-class resources the agreement is reached once per resource where possible: a source owner reviews which workloads a regex matches when the source is registered, and a platform owner confirms what a target offers when it is published; a binding then only has to agree on the link. Single-owner changes keep a single step. Deriving the source jurisdiction from the fixed literal prefix of the regex reuses a property Appendix A already guarantees (the prefix contains no wildcard and no segment can vary), so a pattern can never span two tenancies, and an approver can read the tenancy in the pattern itself. Giving the platform owner unilateral revocation reflects who answers for the platform during an incident. Keeping the per-side rules in the database makes the guarantee independent of application bugs. Requiring different people per side stops the few people with broad approver roles from turning the agreement of two charter areas into a single signature. Residual risks: a jurisdiction is only as trustworthy as the registration of SPIFFE IDs in SPIRE (R-08), and an interconnection rule can waive distinct approvers (R-09).
 
 ### ADR-14: Interconnection Policy
 - **Problem:** Two-sided consent protects the interests of the two owners, not the rules of the organisation. Some combinations must never exist whoever agrees to them, such as test or development workloads reaching production systems. Others need a third party that neither owner represents, such as Information Security for any cloud workload reaching the data centre. The only related control before 3.0 was `allowed_source_trust_domains`, which works per trust domain and cannot tell two tenancies of the same trust domain apart.
 - **Decision:**
-  1. `governance.interconnects` in `server.yaml` holds an ordered list of rules. Each rule has a `name`, `from` and `to` lists of jurisdiction patterns, and an `action` (`allow` or `deny`). An `allow` rule MAY list `additional_approvals` (named parties, each with a jurisdiction whose approvers decide that party's side) and MAY set `distinct_approvers: false`.
+  1. `charter.interconnects` in `server.yaml` holds an ordered list of rules. Each rule has a `name`, `from` and `to` lists of jurisdiction patterns, and an `action` (`allow` or `deny`). An `allow` rule MAY list `additional_approvals` (named parties, each with a jurisdiction whose approvers decide that party's side) and MAY set `distinct_approvers: false`.
   2. The policy applies to binding change requests with consent `ALL` whose source jurisdiction differs from their target jurisdiction. The first rule whose `from` matches the source jurisdiction and whose `to` matches the target jurisdiction decides. If none matches, `default_cross_jurisdiction` decides (`deny` by default). Same-jurisdiction bindings never consult the policy, and neither do revocations and downgrades (consent `ANY`), nor changes of sources and targets.
   3. `deny` refuses the request with `403 interconnect-denied`, naming the rule (or `default`). Only the audit entry `CR_INTERCONNECT_DENIED` is stored.
-  4. `allow` adds one side per additional party. The name of the matched rule and the SHA-256 of the governance policy (§8.2) are stored on the change request.
-  5. **Re-checked at apply.** When the last required side approves, the policy now in force is evaluated again, together with the jurisdictions' approval requirements. If the pair is now denied, or the policy now calls for a side the request does not have (a new party, or a human decision on a side that was approved automatically), the request moves to `FAILED_TO_APPLY` (`409 governance-policy-changed`) and must be filed again. A policy change can make a pending request fail; it can never make it pass more easily.
+  4. `allow` adds one side per additional party. The name of the matched rule and the SHA-256 of the charter (§8.2) are stored on the change request.
+  5. **Re-checked at apply.** When the last required side approves, the policy now in force is evaluated again, together with the jurisdictions' approval requirements. If the pair is now denied, or the policy now calls for a side the request does not have (a new party, or a human decision on a side that was approved automatically), the request moves to `FAILED_TO_APPLY` (`409 charter-changed`) and must be filed again. A policy change can make a pending request fail; it can never make it pass more easily.
   6. **Existing bindings** that the current policy would deny are not removed automatically, because removing access is a decision for their owners. Startup reports them (`SYSTEM_INTERCONNECT_VIOLATIONS` audit and webhook, `ligo_interconnect_violations` gauge). A change with consent `ALL` of such a binding is refused; revocation and downgrade are always possible, through break-glass in an emergency.
   7. **The catalog follows the policy.** A target is shown to a principal in the catalog only if, besides being visible to them (§3.3), the policy allows its target jurisdiction for at least one source jurisdiction in which they hold `operator` or `trusted_automation` (§7.2.4). The catalog does not grant anything; it avoids offering what would be refused.
-  8. **The policy lives in the configuration file**, not in the database. It states principles over jurisdiction patterns, so it changes rarely, and new tenancies are covered without editing it. Keeping it out of the admin API means that `ligo` administrators cannot weaken the guardrails they are themselves subject to: changing the policy goes through the change control of `server.yaml` (T-22). Every change is audited at startup (`CONFIG_GOVERNANCE_POLICY_CHANGED`, plus `CONFIG_APPROVAL_POLICY_WEAKENED` when it loosens the policy) and takes effect after a rolling restart; pending requests are protected by rule 5.
+  8. **The policy lives in the configuration file**, not in the database. It states principles over jurisdiction patterns, so it changes rarely, and new tenancies are covered without editing it. Keeping it out of the admin API means that `ligo` administrators cannot weaken the guardrails they are themselves subject to: changing the policy goes through the change control of `server.yaml` (T-22). Every change is audited at startup (`CONFIG_CHARTER_CHANGED`, plus `CONFIG_APPROVAL_POLICY_WEAKENED` when it loosens the policy) and takes effect after a rolling restart; pending requests are protected by rule 5.
 - **Rationale.** Guardrails and the approvals given within them are different things, with different owners and different rates of change. The guardrails are organisational policy, reviewed outside `ligo`. Per-link approvals are operational data. If deciding the target side of every binding becomes a burden, a target owner can pre-approve classes of sources with a consumer policy stored with the target, which may satisfy the target side but can never override a `deny` or replace an additional party (FW-2).
 
 ### ADR-15: First-Class Sources, Targets and Platforms
@@ -917,13 +923,15 @@ An update with several changes uses consent `ANY` only if **every** change in it
 
 ### 3.8 Naming rules
 - Names of sources, targets and bindings MUST match `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`, which allows at most 63 characters. Each resource type has its own name space: a source and a target may share a name. A name is unique among the resources of its type that are not `RETIRED` (bindings are deleted rather than retired, so a binding name is free again once its deletion completes).
-- **Name prefixes.** `governance.name_prefixes` entries apply per resource type (`resources`, default all three). The first entry whose `jurisdictions` match the resource's **owner jurisdiction** wins: the source's jurisdiction for a source, the target's jurisdiction for a target, and the **source jurisdiction** for a binding. The name MUST start with that entry's resolved prefix and be longer than it. A prefix may contain `{n}`, the n-th segment of the jurisdiction (counting from 1): with `prefix: "{2}-{3}-"`, a source whose jurisdiction is `cloud/fin-01/payments` must be named `fin-01-payments-…`. The rule is checked on create; names are immutable.
+- **Name prefixes.** `charter.name_prefixes` entries apply per resource type (`resources`, default all three). The first entry whose `jurisdictions` match the resource's **owner jurisdiction** wins: the source's jurisdiction for a source, the target's jurisdiction for a target, and the **source jurisdiction** for a binding. The name MUST start with that entry's resolved prefix and be longer than it. A prefix may contain `{n}`, the n-th segment of the jurisdiction (counting from 1): with `prefix: "{2}-{3}-"`, a source whose jurisdiction is `cloud/fin-01/payments` must be named `fin-01-payments-…`. The rule is checked on create; names are immutable.
   - **Rationale.** Names are unique across the whole system. Without prefixes any operator could take a name another team needs, and a `409` on create would reveal that a resource the caller cannot see exists. A prefix gives each owner its own part of the name space, so a conflict can only arise among the owner's own resources. Bindings use the source jurisdiction because most bindings are requested by source owners and every binding of a source is visible to them.
 - **Suggested binding names.** The UI and CLI propose `<source>-<target>` (truncated to 63 characters with a 6-character hash suffix when needed), adjusted to the prefix.
 - External resource names (directory principals, database users and roles, Vault roles, Vault paths) MUST be derived from the binding `id` and never from a name. The engine computes the 20-character `derived_principal_name` (Appendix B) once, when the binding is created, with the platform's `principal_prefix`; stores it in `bindings.derived_principal_name`, which never changes (INV-08); and passes the stored value in `BindingContext`. It is never recomputed, so a later change of `principal_prefix` affects only new bindings.
 - Plugins never apply a prefix of their own; they MAY apply a deterministic case transformation (§5.8 rule 2).
 
 ### 3.9 Jurisdictions (Normative)
+
+**The charter.** The **charter** is the set of rules every jurisdiction must comply with: how a workload's jurisdiction follows from its SPIFFE path, each jurisdiction's name prefix, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed. There is one charter per installation, in `server.yaml` under `charter:`. Jurisdictions say who decides; the charter says how jurisdictions are formed and how they may deal with each other. Every change request records the charter in force by its hash, and a change decided under a charter that has since changed is refused. (`policy_sha256` on `change_requests`; `409 charter-changed`.)
 
 **Jurisdiction paths.** A jurisdiction is a path of 1 to 8 segments separated by `/`, at most 128 characters long. Each segment matches `[a-z0-9]([a-z0-9-]*[a-z0-9])?`. Examples: `dc/corp-prod`, `cloud/fin-01/payments`, `k8s/team-alpha`, `sec/infosec`.
 
@@ -941,7 +949,7 @@ Matching works on whole segments. There is no other wildcard.
 
 **Target jurisdiction.** Chosen when the target is published; it MUST match one of the platform's `target_jurisdictions`. A cluster with one schema per tenant is modelled as one target per schema, each owned by its tenant's jurisdiction, all approved by the platform's owner.
 
-**Source jurisdiction.** `governance.source_jurisdictions` has exactly one entry for each trust domain that any platform accepts (`allowed_source_trust_domains`), whether that trust domain is a realm or federated (§7.1). An entry uses one of two modes:
+**Source jurisdiction.** `charter.source_jurisdictions` has exactly one entry for each trust domain that any platform accepts (`allowed_source_trust_domains`), whether that trust domain is a realm or federated (§7.1). An entry uses one of two modes:
 
 | Mode | Use | Configuration | Result |
 | :--- | :--- | :--- | :--- |
@@ -1738,7 +1746,7 @@ CREATE TABLE change_requests (
     target_jurisdiction       jurisdiction_path,                          -- BINDING
     platform_jurisdiction     jurisdiction_path,                          -- TARGET, BINDING
     interconnect_rule  VARCHAR(64),                         -- BINDING with consent ALL across jurisdictions: matched rule, or 'default' (ADR-14)
-    policy_sha256      CHAR(64) NOT NULL,                   -- governance policy in force at creation (§8.2)
+    policy_sha256      CHAR(64) NOT NULL,                   -- charter in force at creation (§8.2)
     distinct_approvers_required BOOLEAN NOT NULL,           -- ADR-13 rule 7; immutable
     expected_revision  BIGINT,                              -- REQUIRED for UPDATE/DELETE
     payload            JSONB NOT NULL,                      -- normalized desired state (§7.2.3); '{}' for DELETE
@@ -2153,8 +2161,8 @@ The audit action vocabulary (**Normative**) is (`resource_type` and `resource_na
 - Operator actions: `RETRY_REQUESTED`, `ROTATE_REQUESTED`
 - Cleanup: `CLEANUP_SKIPPED_NOT_OWNER`
 - Sessions: `SESSION_LOGIN`, `SESSION_LOGIN_FAILED`, `SESSION_LOGOUT`, `SESSION_REVOKED`
-- Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, the governance policy with its SHA-256, and each platform's privilege bounds, allowed endpoints and flows, which the next start compares for rule 19, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
-- Governance: `SOURCE_TRANSFERRED`, `TARGET_TRANSFERRED`, `BINDING_TRANSFERRED` (snapshot: old and new jurisdictions, §8.2 rule 17)
+- Configuration: `CONFIG_LOADED` (snapshot: config SHA-256, theme file SHA-256 values, the charter with its SHA-256, and each platform's privilege bounds, allowed endpoints and flows, which the next start compares for rule 19, §8.2), `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_CHARTER_CHANGED`, `CONFIG_PLATFORM_CHANGED` (snapshot: platform, changed privilege bounds, endpoints or flows, §8.2 rule 19)
+- Jurisdictions: `SOURCE_TRANSFERRED`, `TARGET_TRANSFERRED`, `BINDING_TRANSFERRED` (snapshot: old and new jurisdictions, §8.2 rule 17)
 - Break-glass: `BREAK_GLASS_USED`, `BREAK_GLASS_RATIFIED` (one per ratified side; the snapshot says whether the change is now fully ratified), `BREAK_GLASS_REVERT_STARTED`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE` (snapshots include justification, incident reference and expiry)
 - System: `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED` (snapshot: reason and the number of in-flight bindings at the time), `SYSTEM_INTERCONNECT_VIOLATIONS` (snapshot: the bindings that the current interconnection policy would deny, §8.2 rule 18), `SYSTEM_EXECUTOR_RECOVERED` (§10.2), `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` (snapshot: the additional parties that no break-glass policy covers, with their rules, §8.2 rule 18), `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (snapshot: access levels outside their platform's current bounds, §8.2 rule 19), `SYSTEM_ORPHANED_BINDINGS` (snapshot: the references to platforms, instances or strategies no longer configured, accepted with `--allow-orphaned-bindings`, §8.2 rule 10)
 
@@ -3117,7 +3125,7 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | Action | viewer | operator | approver |
 | :--- | :---: | :---: | :---: |
 | List and get sources, targets, bindings, change requests and audit entries (any role on the resource, or visibility, §7.2.4) | ✓ | ✓ | ✓ |
-| Browse the catalog, list platforms and their UI schemas, read the governance policy, evaluate a planned binding, verify the audit chain, view maintenance status | ✓ | ✓ | ✓ |
+| Browse the catalog, list platforms and their UI schemas, read the charter, evaluate a planned binding, verify the audit chain, view maintenance status | ✓ | ✓ | ✓ |
 | Register, change or retire a source (role on its jurisdiction) | | ✓ | |
 | Publish, change or retire a target (role on its jurisdiction or its platform's jurisdiction) | | ✓ | |
 | Create or change a binding (role on its source or target jurisdiction) | | ✓ | |
@@ -3174,7 +3182,7 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | `GET` | `/v1/admin/platforms` | viewer | Platforms (§3.4) with health. |
 | `GET` | `/v1/admin/platforms/{name}` | viewer | One platform, with its `uiSchemas`. |
 | `GET` | `/v1/admin/catalog/targets` | viewer | Catalog search (§7.2.4). Filters: `q`, `platform`, `platformType`, `jurisdiction`, `label`, `state` (default `ACTIVE`), `forSource=<name>` (only targets the interconnection policy allows for that source, marking those already bound). |
-| `GET` | `/v1/admin/catalog/targets/{name}` | viewer | Catalog view of a target: description, contacts, access levels (names, descriptions, privileges), flows, platform, and the governance outcome for each of the caller's sources (`allowed` with the sides it would need, or `denied`). |
+| `GET` | `/v1/admin/catalog/targets/{name}` | viewer | Catalog view of a target: description, contacts, access levels (names, descriptions, privileges), flows, platform, and the charter outcome for each of the caller's sources (`allowed` with the sides it would need, or `denied`). |
 | `GET` | `/v1/admin/catalog/targets/{name}/flows` | viewer | The target's effective flows without a secret store (§3.6), for the verification tool before a binding exists. |
 | `GET` | `/v1/admin/catalog/sources` | viewer | Sources visible to the caller beyond their own (for a target owner offering a binding). |
 
@@ -3191,17 +3199,17 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | `POST` | `/v1/admin/bindings/{name}/retry` | operator | Allowed in `FAILED`/`DELETE_FAILED`. |
 | `POST` | `/v1/admin/bindings/{name}/rotate` | operator | Allowed in `ACTIVE`; starts a `reapply` with rotation. |
 
-**Change requests, governance, break-glass and operations.**
+**Change requests, charter, break-glass and operations.**
 
 | Method | Path | Role | Description |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/v1/admin/change-requests` | viewer | Keyset-paginated list of the change requests visible to the caller. Filters: `status`, `resourceType`, `resourceName`, `realm`, `jurisdiction` (matched against every jurisdiction of the request), `awaitingMe=true` (requests with a pending side the caller may decide). |
 | `GET` | `/v1/admin/change-requests/{id}` | viewer | The change request representation below, including `payloadSha256`, its sides, `awaitingApproval` and a diff against the current revision of the resource (for a narrowing, the samples it drops or the privileges it removes). |
-| `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 governance-policy-changed`, `409 dependency-pending`, `422 validation-failed`, `422 account-not-registered`, `409 binding-busy`, `409 change-request-not-pending`. |
+| `POST` | `/v1/admin/change-requests/{id}/approve` | approver of a pending side (or operator, ADR-13 rule 6) | Body: `{"payloadSha256": "...", "comment": "...", "side": "TARGET"}` (`side` optional). The hash MUST match. Runs the approval steps below (stale-hash check, re-validation and drift check with no locks held), records the approval of the selected side(s) with the side-decision compare-and-set (§4.3), and applies the change (§6.2) if the consent rule is now satisfied. Returns `200` with the updated change request while sides are still pending. Errors: `400 side-required`, `403 four-eyes-violation`, `403 distinct-approver-required`, `409 payload-mismatch`, `409 normalization-drift`, `409 charter-changed`, `409 dependency-pending`, `422 validation-failed`, `422 account-not-registered`, `409 binding-busy`, `409 change-request-not-pending`. |
 | `POST` | `/v1/admin/change-requests/{id}/decline` | approver of a pending side (or operator, ADR-13 rule 6) | Declines the selected side(s). Body: `{"comment": "...", "side": "SOURCE"}` (`comment` required, `side` optional: without it, every side the caller may decide is declined). A request with consent `ALL` is rejected by any one decline; one with consent `ANY` only when all its sides have declined (INV-20). Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. |
 | `POST` | `/v1/admin/change-requests/{id}/withdraw` | requester | Allowed only while `PENDING`. Compare-and-set (§4.3); `409 change-request-not-pending` if already decided. Withdrawing an inline source's `CREATE` fails the binding `CREATE` that depends on it. |
-| `GET` | `/v1/admin/governance` | viewer | The governance policy in force (source-jurisdiction extractors, approval-required jurisdictions, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_jurisdictions`) and its SHA-256 (§8.2): `{"policy": {…}, "sha256": "<64 hex>"}`. `policy` is the canonical JSON the hash is computed over, so a client can verify `sha256` and compare it with a change request's `policySha256`. |
-| `POST` | `/v1/admin/governance/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the jurisdictions, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. Response: `{"resourceType", "name", "jurisdictions": {"source", "target", "platform"} (bindings) or {"owner", "platform"?} (sources, targets), "namePrefix": {"valid", "detail"?}, "consent", "interconnect": {"rule", "action": "allow"\|"deny"} or null (same-jurisdiction bindings, sources, targets), "sides": [{"side", "jurisdiction", "basis", "decision", "decidedBy"?}]}`; `sides` is empty when the policy denies. It evaluates creations only; the other checks of the pipelines (regex policy, trust domains, plugin validation, RBAC) run when the request is filed. |
+| `GET` | `/v1/admin/charter` | viewer | The charter in force (source-jurisdiction extractors, approval-required jurisdictions, distinct-approver default, interconnection rules, name prefixes, break-glass policies, platforms' `target_jurisdictions`) and its SHA-256 (§8.2): `{"policy": {…}, "sha256": "<64 hex>"}`. `policy` is the canonical JSON the hash is computed over, so a client can verify `sha256` and compare it with a change request's `policySha256`. |
+| `POST` | `/v1/admin/charter/evaluate` | viewer | Dry run for a planned change. Body: `{"resourceType": "BINDING", "name": "…", "source": "<name>" or {"trustDomain", "svidRegex"}, "target": "<name>", "accessLevel": "…"}`, or a source or target body. Returns the jurisdictions, the name-prefix check, the consent rule, the matched interconnection rule and its action, and the sides with the basis each would have if the caller filed the request now. Stores nothing and calls no plugin. Response: `{"resourceType", "name", "jurisdictions": {"source", "target", "platform"} (bindings) or {"owner", "platform"?} (sources, targets), "namePrefix": {"valid", "detail"?}, "consent", "interconnect": {"rule", "action": "allow"\|"deny"} or null (same-jurisdiction bindings, sources, targets), "sides": [{"side", "jurisdiction", "basis", "decision", "decidedBy"?}]}`; `sides` is empty when the policy denies. It evaluates creations only; the other checks of the pipelines (regex policy, trust domains, plugin validation, RBAC) run when the request is filed. |
 | `GET` | `/v1/admin/maintenance` | viewer | `{"maintenanceMode": bool, "reason": "...", "changedBy": "...", "changedAt": "...", "inFlight": N, "propagationQueued": M}`. `inFlight` is the number of bindings in `PROVISIONING` or `DELETING`; the drain of §10.3 is complete when it reaches 0. |
 | `PUT` | `/v1/admin/maintenance` | `admin.full_access` | Body: `{"enabled": bool, "reason": "..."}` (`reason` required when enabling). Updates `system_settings` and audits `SYSTEM_MAINTENANCE_ENABLED`/`_DISABLED` in one transaction. Idempotent. |
 | `POST` | `/v1/admin/break-glass` | `break_glass` (people only) | Break-glass change of a binding (ADR-12). Body: `{"operation": "CREATE\|UPDATE\|DELETE", "binding": {…create/update body…} or "name" + "expectedRevision" for DELETE, "inlineSource": {…source body…} (CREATE only, optional), "justification": "…", "incidentReference": "…", "ttl": "4h"}`. Requires Basic credentials on this request (API) or password re-entry (UI); group membership is re-checked against LDAP. The person MUST hold `break_glass` on every side that would otherwise need a decision (ADR-12). Applied immediately; `409 break-glass-open` if the binding already has an open break-glass change; `429 break-glass-limit` if a side's break-glass policy has `max_open` open changes. Rejected with `422` if no side needs a decision (use a normal change there). |
@@ -3277,7 +3285,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 **Validation pipeline at creation** (`SOURCE`, `CREATE` and `UPDATE`):
 1. JSON schema of the request body.
 2. Name grammar, and for `CREATE` the name prefix (§3.8) and uniqueness among non-retired sources (`422 validation-failed` on `metadata.name`). A `CREATE` body sets neither `metadata.jurisdiction` nor `metadata.state`.
-3. `identity.trustDomain` is a valid SPIFFE trust domain, accepted by at least one platform, with a `governance.source_jurisdictions` entry.
+3. `identity.trustDomain` is a valid SPIFFE trust domain, accepted by at least one platform, with a `charter.source_jurisdictions` entry.
 4. Regex validator (Appendix A).
 5. Jurisdiction (§3.9): `422 jurisdiction-unresolvable` if the fixed prefix does not resolve; for `UPDATE`, `422 immutable-field` if it differs from the stored jurisdiction.
 6. For `UPDATE` with a new regex: narrowing (§3.10, Appendix D.3), `422 widening-not-allowed` with the witness.
@@ -3316,7 +3324,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 2. **Re-validation.** Re-run the creation pipeline of the resource type against the stored payload, without the uniqueness of the pending request and with the policy in force now (ADR-14 rule 5). The RBAC check is replaced by the approver's eligibility for the sides being decided (below). For a `DELETE`, there is no plugin call and no drift check. A binding `CREATE` with an unapplied dependency returns `409 dependency-pending` and stays `PENDING`.
 3. **Normalization drift** (`CREATE`/`UPDATE` only). Rebuild the normalized payload from the plugin result of step 2 and the current source and target revisions, and recompute its hash over the whole payload. If it differs from `payload_sha256` (a plugin upgrade, or an applied change of the source or target since creation), move the change request to `FAILED_TO_APPLY` with the compare-and-set of §4.3 (`apply_error = "normalization drift"`), audit `CR_APPLY_FAILED`, and return `409 normalization-drift`. The requester files a new change request, so the approver reviews the new values.
 4. **Other re-validation failures.** If step 2 fails for any other reason, for example an access level now outside the platform's privilege bounds, a trust domain removed from `allowed_source_trust_domains`, a tightened regex policy, a deprecated target or a removed platform, move the change request to `FAILED_TO_APPLY` with the compare-and-set of §4.3 (`apply_error` = the validation errors), audit `CR_APPLY_FAILED`, and return `422 validation-failed` with the errors (`422 account-not-registered` when the failure is an account's, `.specs/ligo-tenancy.md` §7.2).
-5. **Governance re-check** (ADR-14 rule 5). It needs no remote call, so it runs inside the transaction of step 6, after the side-decision compare-and-set, whenever the request would be complete: compute the sides the request would need under the policy now in force. If the pair is now denied, if a required party is missing from the stored sides, or if a side stored as `AUTO` would now need a decision, move the request to `FAILED_TO_APPLY` (`apply_error = "governance policy changed"`), audit `CR_APPLY_FAILED`, and return `409 governance-policy-changed`.
+5. **Charter re-check** (ADR-14 rule 5). It needs no remote call, so it runs inside the transaction of step 6, after the side-decision compare-and-set, whenever the request would be complete: compute the sides the request would need under the policy now in force. If the pair is now denied, if a required party is missing from the stored sides, or if a side stored as `AUTO` would now need a decision, move the request to `FAILED_TO_APPLY` (`apply_error = "charter changed"`), audit `CR_APPLY_FAILED`, and return `409 charter-changed`.
 6. **Record and apply.** Record the side decision and, if the consent rule is now satisfied, apply (§6.2) in the same transaction. A busy binding leaves the change request `PENDING` and the side undecided (§6.2.2); a revision conflict moves it to `FAILED_TO_APPLY`.
 
 **Deciding sides (Normative)** (`/approve`, `/decline`):
@@ -3360,7 +3368,7 @@ For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility
 ```
 Source change requests carry `ownerJurisdiction`; target change requests carry `ownerJurisdiction` and `platformJurisdiction`. Break-glass sides additionally carry `ratifiedBy`, `ratifiedAt` and `ratificationComment`.
 
-**Rationale.** Approval must apply exactly what the approver reviewed, and stay valid against today's policy, including the governance policy. A stale hash is the approver's problem and is recoverable by refreshing, so the request stays `PENDING`. Drift and validation failures mean the request as reviewed can never be applied unchanged, and any change requires a new review, so the request is closed (`FAILED_TO_APPLY`) instead of holding the resource's name until it expires. Each outcome has its own error code, so the CLI and UI can tell the user what to do next.
+**Rationale.** Approval must apply exactly what the approver reviewed, and stay valid against today's policy, including the charter. A stale hash is the approver's problem and is recoverable by refreshing, so the request stays `PENDING`. Drift and validation failures mean the request as reviewed can never be applied unchanged, and any change requires a new review, so the request is closed (`FAILED_TO_APPLY`) instead of holding the resource's name until it expires. Each outcome has its own error code, so the CLI and UI can tell the user what to do next.
 
 **Responses:**
 - `202 Accepted` with `{"changeRequest": {...}, "resource": {...}|null}`.
@@ -3388,7 +3396,7 @@ Source change requests carry `ownerJurisdiction`; target change requests carry `
 | `change-request-not-pending` | 409 |
 | `payload-mismatch` | 409 |
 | `normalization-drift` | 409 |
-| `governance-policy-changed` | 409 |
+| `charter-changed` | 409 |
 | `break-glass-open` | 409 |
 | `break-glass-not-open` | 409 |
 | `four-eyes-violation` | 403 |
@@ -3465,7 +3473,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 - Inline partial mutations (`retry`, `rotate`, `approve`, `decline`, `withdraw`) respond with HTTP `200 OK` and the updated HTML fragment.
 - Validation or conflict errors on `/ui/*` endpoints respond with `422 Unprocessable Entity` or `409 Conflict` and an HTML error alert fragment swapped into the form's error target container.
 - When an approval returns `409 binding-busy`, the alert MUST state that the binding is currently being provisioned or reconciled, that the change request is still `PENDING`, and that approving again once the operation completes will apply it.
-- **Governance (ADR-13, ADR-14).** Every create and update form (source, target, binding wizard) shows, as soon as the relevant fields are entered, the resolved jurisdictions, the name-prefix check, the consent rule, the interconnection outcome (allowed, denied by rule X, extra parties) and the sides that will need a decision, using the same code as `POST /v1/admin/governance/evaluate`. A source form shows the regex tester (matches, samples, overlaps with other sources of the jurisdiction, and for an update whether it narrows); a target form shows, for an update, which bindings will be re-applied. The change-request view shows every side with its jurisdiction, basis and state; approve and decline buttons appear only for sides the user may decide, with a side selector when the user is eligible for more than one. The dashboard has an "Awaiting my decision" queue (`awaitingMe`).
+- **Charter (ADR-13, ADR-14).** Every create and update form (source, target, binding wizard) shows, as soon as the relevant fields are entered, the resolved jurisdictions, the name-prefix check, the consent rule, the interconnection outcome (allowed, denied by rule X, extra parties) and the sides that will need a decision, using the same code as `POST /v1/admin/charter/evaluate`. A source form shows the regex tester (matches, samples, overlaps with other sources of the jurisdiction, and for an update whether it narrows); a target form shows, for an update, which bindings will be re-applied. The change-request view shows every side with its jurisdiction, basis and state; approve and decline buttons appear only for sides the user may decide, with a side selector when the user is eligible for more than one. The dashboard has an "Awaiting my decision" queue (`awaitingMe`).
 
 **Routes:**
 
@@ -3486,22 +3494,22 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `POST` | `/ui/sources/{name}/{deprecate,reactivate,retire}` | State changes (with confirmation; retire lists the remaining bindings). |
 | `GET` | `/ui/targets` · `/ui/targets/{name}` | Targets the user owns or administers; detail with definition, access levels, flows, bindings ("who can reach this") and audit trail. |
 | `GET` | `/ui/targets/new-form` · `/ui/targets/{name}/edit-form` | Target forms. The platform select triggers `hx-get="/ui/platforms/{name}/fields"`, which renders the definition and grants forms from `GetUISchemas`. |
-| `POST` | `/ui/targets/preview` | Renders the governance outcome of the target form's name, platform and jurisdiction (jurisdictions, name prefix, sides), as `POST /v1/admin/governance/evaluate`. |
+| `POST` | `/ui/targets/preview` | Renders the charter outcome of the target form's name, platform and jurisdiction (jurisdictions, name prefix, sides), as `POST /v1/admin/charter/evaluate`. |
 | `POST` · `PUT` | `/ui/targets` · `/ui/targets/{name}` | Submit a target change request; `200 OK` with `HX-Redirect`. |
 | `POST` | `/ui/targets/{name}/{deprecate,reactivate,retire}`, `/ui/targets/{name}/access-levels/{level}/{deprecate,reactivate,retire}` | State changes. |
 | `POST` | `/ui/targets/{name}/bindings/revoke` | Bulk revocation by source or source jurisdiction (containment), with confirmation. |
-| `GET` | `/ui/accounts` · `/ui/accounts/{name}` | Accounts the user may read (`account_admin`, or a role on the account), paged; detail with the counts of sources, targets and bindings. Linked in the menu only when `governance.accounts` is configured. |
+| `GET` | `/ui/accounts` · `/ui/accounts/{name}` | Accounts the user may read (`account_admin`, or a role on the account), paged; detail with the counts of sources, targets and bindings. Linked in the menu only when `charter.accounts` is configured. |
 | `POST` | `/ui/accounts` · `/ui/accounts/{name}/retire` | Register or retire an account (`account_admin`; retiring with confirmation); `200 OK` with `HX-Redirect: /ui/accounts/{name}`. |
 | `GET` | `/ui/platforms` · `/ui/platforms/{name}/fields` | Platforms (read-only) and their forms. |
 | `GET` | `/ui/platforms/fields?platform={name}` | The same forms, for the target form's platform select, which cannot put its value in the path. |
 | `GET` | `/ui/bindings` | Dashboard: filterable table (source, target, level, phase, expiry), phase badges, pending-change-request and propagation indicators. |
-| `GET` | `/ui/bindings/wizard` | Binding wizard (§7.2.4), started from the catalog (`?target=`) or from a target's page to offer a binding (`?offer=1`). Each step is a fragment; the review step renders `/ui/bindings/governance-preview`. |
+| `GET` | `/ui/bindings/wizard` | Binding wizard (§7.2.4), started from the catalog (`?target=`) or from a target's page to offer a binding (`?offer=1`). Each step is a fragment; the review step renders `/ui/bindings/charter-preview`. |
 | `GET` | `/ui/bindings/{name}` | Detail view: source, target, level, snapshot, effective flows, stage states, audit trail. |
 | `GET` | `/ui/bindings/{name}/edit-form` | Update form: access level (levels with fewer privileges marked "unilateral"), parameters, purpose, labels, expiry. |
 | `POST` | `/ui/bindings` | Submit a create change request (and an inline source's, if any); `200 OK` with `HX-Redirect: /ui/bindings/{name}` (or `/ui/change-requests/{id}` if `PENDING`). |
 | `PUT` | `/ui/bindings/{name}` | Submit an update change request; `200 OK` with `HX-Redirect`. |
 | `DELETE` | `/ui/bindings/{name}` | Submit a revocation (with a confirmation dialog); `200 OK` with `HX-Redirect: /ui/bindings`. |
-| `POST` | `/ui/bindings/governance-preview` | Renders the governance outcome for the wizard's or form's current values (jurisdictions, name prefix, consent rule, interconnection rule, sides), as `POST /v1/admin/governance/evaluate`. |
+| `POST` | `/ui/bindings/charter-preview` | Renders the charter outcome for the wizard's or form's current values (jurisdictions, name prefix, consent rule, interconnection rule, sides), as `POST /v1/admin/charter/evaluate`. |
 | `GET` | `/ui/bindings/{name}/status-row` | Polled with `hx-trigger="every 2s"` and `hx-swap="outerHTML"` while the phase is `PROVISIONING`/`DELETING`. Renders the stepper `[1. Identity] → [2. Target] → [3. Secret Store]` (reversed for delete). Once the phase is terminal, it returns the final row **without** `hx-trigger`; the polling element is replaced and polling stops (htmx 4 has no `286` convention). |
 | `POST` | `/ui/bindings/{name}/retry` | Retry (returns updated status-row fragment). |
 | `POST` | `/ui/bindings/{name}/rotate` | Rotate (returns updated status-row fragment). |
@@ -3521,7 +3529,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 
 `ligo` announces security-relevant events to configured HTTPS webhooks, such as an on-call or ticketing system.
 
-- **Events:** `BREAK_GLASS_USED`, `BREAK_GLASS_EXPIRING`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_RATIFIED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CR_AWAITING_APPROVAL` (one per pending side, so that each owner's queue or ticketing system learns of its own decisions), `CR_INTERCONNECT_DENIED`, `BINDING_REVOKED` (a binding revoked or downgraded by one side, announced to the other jurisdictions; not sent when no other jurisdiction remains, as for a break-glass revert, which has its own event), `BINDING_EXPIRING`, `BINDING_EXPIRED`, `SOURCE_DEPRECATED`, `TARGET_DEPRECATED`, `ACCESS_LEVEL_DEPRECATED` (announced to the jurisdictions of the affected bindings), `PROPAGATION_FAILED`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `CONFIG_PLATFORM_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`, `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`, `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED`, `SYSTEM_EXECUTOR_RECOVERED`, `BINDING_TARGET_DECIDED_BY_PLATFORM` (a platform approver decided a binding's `TARGET` side, announced to the target's jurisdiction alone: .specs/ligo-tenancy.md §9.3). Each webhook subscribes to a subset.
+- **Events:** `BREAK_GLASS_USED`, `BREAK_GLASS_EXPIRING`, `BREAK_GLASS_REVERTED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_RATIFIED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CR_AWAITING_APPROVAL` (one per pending side, so that each owner's queue or ticketing system learns of its own decisions), `CR_INTERCONNECT_DENIED`, `BINDING_REVOKED` (a binding revoked or downgraded by one side, announced to the other jurisdictions; not sent when no other jurisdiction remains, as for a break-glass revert, which has its own event), `BINDING_EXPIRING`, `BINDING_EXPIRED`, `SOURCE_DEPRECATED`, `TARGET_DEPRECATED`, `ACCESS_LEVEL_DEPRECATED` (announced to the jurisdictions of the affected bindings), `PROPAGATION_FAILED`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_CHARTER_CHANGED`, `CONFIG_PLATFORM_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`, `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`, `SYSTEM_MAINTENANCE_ENABLED`, `SYSTEM_MAINTENANCE_DISABLED`, `SYSTEM_EXECUTOR_RECOVERED`, `BINDING_TARGET_DECIDED_BY_PLATFORM` (a platform approver decided a binding's `TARGET` side, announced to the target's jurisdiction alone: .specs/ligo-tenancy.md §9.3). Each webhook subscribes to a subset.
 - **Jurisdiction filter.** A webhook MAY set `jurisdictions` (jurisdiction patterns). It then receives only events about a resource or change request that has a jurisdiction matching the filter (for `CR_AWAITING_APPROVAL`, the pending side's jurisdiction must match; for deprecation events, the jurisdiction of an affected binding). Configuration and system events are delivered regardless of the filter.
 - **Durability (Normative).** Notifications use a transactional outbox: the `notification_outbox` row is inserted in the same transaction as the event (§4.3 lock order), so an event is never lost and never announced unless it committed. A singleton dispatcher (§6.3) delivers due rows with `POST`, retries with exponential backoff (10s doubling to 15m) and abandons a row after 24h (`abandoned_at`, metric `ligo_notifications_abandoned_total{webhook}`, logged at `ERROR`). Delivery is at-least-once; receivers deduplicate on `eventId`. `eventId` is a UUIDv7 generated by the application, not the outbox row number, because a row number can be reused after a database restore (§10.4) and receivers would then drop new events as duplicates.
 - **Never blocking.** A webhook failure never delays or blocks the change it announces.
@@ -3696,7 +3704,7 @@ authorization:                            # roles are granted on jurisdiction pa
     require_distinct_approvers_across_jurisdictions: true        # ADR-13 rule 7 (default true)
     change_request_ttl: 72h
 
-governance:                               # ADR-13, ADR-14, §3.9
+charter:                               # ADR-13, ADR-14, §3.9
   source_jurisdictions:                          # exactly one entry per trust domain listed in any allowed_source_trust_domains
     - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
     - { trust_domain: test.internal, mode: static, jurisdiction: "dc/corp-test" }
@@ -3809,7 +3817,7 @@ notifications:                            # §7.5
       timeout: 5s
       events: [BREAK_GLASS_USED, BREAK_GLASS_EXPIRING, BREAK_GLASS_REVERTED, BREAK_GLASS_REVERT_FAILED,
                BREAK_GLASS_RATIFIED, BREAK_GLASS_REVIEW_OVERDUE, CONFIG_APPROVAL_POLICY_WEAKENED,
-               CONFIG_GOVERNANCE_POLICY_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
+               CONFIG_CHARTER_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
     - name: dba-queue                     # the data centre DBAs' ticket queue: only their own decisions
       url: "https://tickets.corp.internal/hooks/ligo-dba"
       ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
@@ -3987,13 +3995,13 @@ platform_providers:                       # plugin types and the platforms that 
 13. Every `trusted_automation` binding uses `spiffe_id` (never `ldap_group_dn`); its `platforms` exist; its `approval_reference_pattern`, if set, compiles as RE2 and starts with `^` and ends with `$`.
 14. Every `break_glass` binding uses `ldap_group_dn` (never `spiffe_id`); every jurisdiction pattern it lists appears in the `jurisdictions` of a `break_glass.policies` entry; every policy has `5m ≤ default_ttl ≤ max_ttl ≤ 24h` and `max_open ≥ 1`; `min_justification_length ≥ 20` (the database minimum); `incident_reference_pattern`, if set, is a fully anchored RE2. Every webhook URL is `https://`, every `hmac_secret_env` is set, and every webhook `jurisdictions` entry is a valid jurisdiction pattern.
 15. Theme (§7.6): `ui.theme.default_mode` is `system`, `light` or `dark`; every explicitly configured theme file exists; every theme file found has an allowed extension, is within its size limit, matches its type by content, is owned by root and is not writable by the `ligo` user; every key in `ui.theme.colors.light|dark` is a known token name without the `--color-` prefix, and every value is a CSS hex color (`#rgb`, `#rrggbb` or `#rrggbbaa`). A missing optional file or theme directory is not an error.
-16. **Governance (§3.9, ADR-13, ADR-14).**
+16. **Charter (§3.9, ADR-13, ADR-14).**
     - Every authorization binding has `jurisdictions` (and no `realms`); every entry of `jurisdictions`, `approval.required_jurisdictions`, `interconnects.rules[].from`/`to`, `name_prefixes[].jurisdictions` and `break_glass.policies[].jurisdictions` is a valid jurisdiction pattern.
     - Every platform has a `jurisdiction`, which is a valid jurisdiction path (not a pattern), and valid `target_jurisdictions` patterns.
-    - `governance.source_jurisdictions` has exactly one entry for each trust domain listed in any `allowed_source_trust_domains`, and no entry for any other trust domain. `static` entries have a valid jurisdiction path; `path_template` entries satisfy the rules of §3.9 (verified with the Appendix D code).
+    - `charter.source_jurisdictions` has exactly one entry for each trust domain listed in any `allowed_source_trust_domains`, and no entry for any other trust domain. `static` entries have a valid jurisdiction path; `path_template` entries satisfy the rules of §3.9 (verified with the Appendix D code).
     - Interconnection rule names are unique and match `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$` (`default` is reserved); `action` is `allow` or `deny`; `default_cross_jurisdiction` is `allow` or `deny`; `additional_approvals` appear only on `allow` rules, with unique names matching `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$` and a valid jurisdiction path; `distinct_approvers` is a boolean.
     - Every `name_prefixes` entry has `resources` ⊆ {`source`, `target`, `binding`}. A placeholder `{n}` greater than the number of segments of a jurisdiction the entry matches is an error when that jurisdiction is used (at creation, `422 validation-failed`), and at startup for the jurisdictions of existing resources. A resolved prefix MUST match `^[a-z0-9][-a-z0-9]{0,31}$`.
-    - The **governance policy** is the RFC 8785 (JCS) canonical JSON of `authorization.approval.required_jurisdictions`, `require_distinct_approvers_across_jurisdictions`, `governance.source_jurisdictions`, `governance.name_prefixes`, `governance.interconnects`, `break_glass.policies` and the sorted list of `(platform, jurisdiction, target_jurisdictions)` triples, with lowerCamelCase field names and durations in whole seconds (§7.2.3 "JSON naming"). Its SHA-256 is stored on every change request (`policy_sha256`) and in `CONFIG_LOADED`.
+    - The **charter** is the RFC 8785 (JCS) canonical JSON of `authorization.approval.required_jurisdictions`, `require_distinct_approvers_across_jurisdictions`, `charter.source_jurisdictions`, `charter.name_prefixes`, `charter.interconnects`, `break_glass.policies` and the sorted list of `(platform, jurisdiction, target_jurisdictions)` triples, with lowerCamelCase field names and durations in whole seconds (§7.2.3 "JSON naming"). Its SHA-256 is stored on every change request (`policy_sha256`) and in `CONFIG_LOADED`.
 17. **Jurisdiction drift** (checked after the database is connected). For every source that is not `RETIRED`, the jurisdiction derived from its regex with the current extractor MUST equal its stored jurisdiction. For every target that is not `RETIRED`, its stored `platform_jurisdiction` MUST equal its platform's `jurisdiction`, and its jurisdiction MUST still match the platform's `target_jurisdictions`. For every binding, the three jurisdictions MUST equal those of its source, its target and its target's platform. Otherwise startup fails, naming the resources, unless `--accept-jurisdiction-changes` is given. With that flag, `ligo` transfers, in one transaction per source or target together with its bindings (`SET LOCAL ligo.transfer = 'on'`, the only way the immutability triggers allow a jurisdiction change): update the jurisdictions, move every `PENDING` change request of the affected resources and bindings to `FAILED_TO_APPLY` (`apply_error = "re-scoped"`), and audit `SOURCE_TRANSFERRED`, `TARGET_TRANSFERRED` and `BINDING_TRANSFERRED` with the old and new jurisdictions. A pending `CREATE` of a source or target has no resource yet and is left as it is: its approval re-derives the jurisdiction, so a request filed under the old configuration fails then with `409 normalization-drift` (`FAILED_TO_APPLY`), and nothing is created with a stale jurisdiction. A source whose regex no longer resolves at all, and a target whose jurisdiction no longer matches its platform's `target_jurisdictions`, are fatal errors even with the flag: their owners must retire them, or the configuration must be corrected.
 18. **Interconnection violations** (checked after rule 17). Every cross-jurisdiction binding is evaluated against the current interconnection policy. Bindings the policy would deny are logged at `WARN`, listed in one `SYSTEM_INTERCONNECT_VIOLATIONS` audit entry (announced by webhook), and counted in `ligo_interconnect_violations`. They are not changed (ADR-14 rule 6). Then, when any break-glass policy exists, every `additional_approvals` jurisdiction that no policy covers is logged at `WARN` and listed in one `SYSTEM_BREAK_GLASS_PARTY_UNCOVERED` audit entry: startup continues, and break-glass under that rule stays refused (ADR-12 rule 1).
 19. **Platforms** (checked after rule 18, once plugins are running). Every platform's and secret store's `network_flows` follow the flow schema (§3.3) with destinations inside their `allowed_endpoints` (§5.7); `service.workload_advertise` is set. A change of a platform's privilege bounds, endpoints or flows since the previous `CONFIG_LOADED` is audited `CONFIG_PLATFORM_CHANGED`. Every `ACTIVE` or `DEPRECATED` access level is re-checked against its platform's current privilege bounds (with `ValidateTarget`, without `check_existence`); levels now outside the bounds are listed in `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS` (audit and webhook, gauge `ligo_privilege_bound_violations`). They are not changed: re-applying their bindings fails in `EnsureTarget` (§5.8 rule 3) until the target owner narrows or retires the level. Every target flow is re-checked against its platform's current `allowed_endpoints`; flows outside it are omitted from effective flow lists and reported in the same entry.
@@ -4001,7 +4009,7 @@ platform_providers:                       # plugin types and the platforms that 
 **Daemon Startup Sequence (`ligo serve`, Normative):**
 Because `dbos.Launch()` immediately recovers and executes pending workflows from PostgreSQL (`AC-08`), all dependencies required by workflow steps MUST be initialized **before** DBOS is launched:
 1. Parse CLI flags (`jessevdk/go-flags`), load `server.yaml`, compute and log its SHA-256 checksum, and run static config checks (Rules 1, 2, 5, 6, 7, 9, 12, 13, 14, 15, 16, and the static part of 19).
-2. Steps 3 and 4 (SPIRE and the Sealer) run first, before anything is audited: a missing dependency, such as a sealed OpenBao, fails startup with nothing written, so a supervisor restarting `ligo` in a loop cannot flood the audit log. Both must be ready within `service.startup_timeout` (default 60s): an agent socket that does not answer, or an unreachable OpenBao, ends startup with an error naming the dependency, and the supervisor (systemd, with a back-off) restarts `ligo`. Then connect PostgreSQL pools (`app`, `reader`, `dbos`) and write audit `CONFIG_LOADED` with the configuration SHA-256, the SHA-256 of every theme file in use (§7.6), and the governance policy with its SHA-256 (rule 16, T-22). Compare the policy with the snapshot of the most recent previous `CONFIG_LOADED` entry. If its hash differs, write `CONFIG_GOVERNANCE_POLICY_CHANGED` with the differences. If the change loosens the policy (a pattern removed from `required_jurisdictions`; `require_distinct_approvers_across_jurisdictions` turned off or a rule's `distinct_approvers: false` added; a `deny` rule removed, moved below an `allow` rule that now matches its pairs, or changed to `allow`; an additional party removed; `default_cross_jurisdiction` changed to `allow`; a break-glass policy's `max_ttl` or `max_open` raised), log at `WARN` and also write `CONFIG_APPROVAL_POLICY_WEAKENED` listing the loosening changes. Then verify existing platform references and binding wiring (Rules 10, 11), jurisdictions (Rule 17) and interconnections (Rule 18).
+2. Steps 3 and 4 (SPIRE and the Sealer) run first, before anything is audited: a missing dependency, such as a sealed OpenBao, fails startup with nothing written, so a supervisor restarting `ligo` in a loop cannot flood the audit log. Both must be ready within `service.startup_timeout` (default 60s): an agent socket that does not answer, or an unreachable OpenBao, ends startup with an error naming the dependency, and the supervisor (systemd, with a back-off) restarts `ligo`. Then connect PostgreSQL pools (`app`, `reader`, `dbos`) and write audit `CONFIG_LOADED` with the configuration SHA-256, the SHA-256 of every theme file in use (§7.6), and the charter with its SHA-256 (rule 16, T-22). Compare the policy with the snapshot of the most recent previous `CONFIG_LOADED` entry. If its hash differs, write `CONFIG_CHARTER_CHANGED` with the differences. If the change loosens the policy (a pattern removed from `required_jurisdictions`; `require_distinct_approvers_across_jurisdictions` turned off or a rule's `distinct_approvers: false` added; a `deny` rule removed, moved below an `allow` rule that now matches its pairs, or changed to `allow`; an additional party removed; `default_cross_jurisdiction` changed to `allow`; a break-glass policy's `max_ttl` or `max_open` raised), log at `WARN` and also write `CONFIG_APPROVAL_POLICY_WEAKENED` listing the loosening changes. Then verify existing platform references and binding wiring (Rules 10, 11), jurisdictions (Rule 17) and interconnections (Rule 18).
 3. Connect to all `realms[].spiffe_workload_socket` endpoints, start the composite bundle source (§7.1), and acquire `core_identity` from its realm's socket.
 4. Initialize the **Sealer** (`vault-transit` or `local-kek`) and verify connectivity/key availability.
 5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, realm)` plugin processes and execute `Describe` on each; validate Rules 3 and 8 against the descriptions; then execute `ConfigureInstances` on each (§5.2) and initial `Health` checks, and validate Rule 4 and the plugin part of 19.
@@ -4043,7 +4051,7 @@ ligo/
 │   ├── config/                          # YAML parsing + §8.2 validation
 │   ├── engine/                          # domain types, naming (App. B), payload composition (§5.6)
 │   ├── flows/                           # flow schema, allowlist checks, effective flows (ADR-16)
-│   ├── governance/                      # jurisdictions, source-jurisdiction extractors (§3.9, App. D), sides, interconnection policy (ADR-13, ADR-14)
+│   ├── charter/                      # jurisdictions, source-jurisdiction extractors (§3.9, App. D), sides, interconnection policy (ADR-13, ADR-14)
 │   ├── outputvalidation/                # JSON Schema + endpoint allowlist (§5.7)
 │   ├── pluginmgr/                       # go-plugin host, integrity checks, realm processes, retries
 │   ├── propagation/                     # propagation queue and propagator (§6.8)
@@ -4114,7 +4122,7 @@ type Options struct {
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	Exec   ExecutorsCommand     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
 	BG     BreakGlassCommand    `command:"break-glass" description:"Emergency changes in approval-required jurisdictions (ADR-12)."`
-	Gov    GovernanceCommand    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
+	Gov    CharterCommand    `command:"charter" description:"Show the charter and evaluate a planned change (ADR-13, ADR-14)."`
 	Migrate MigrateCommand      `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
 }
 
@@ -4365,7 +4373,7 @@ type PlatformSchemaCommand struct {
 
 type CatalogCommand struct {
 	Search CatalogSearchCommand `command:"search" description:"Search targets visible to you that the interconnection policy allows."`
-	Show   CatalogShowCommand   `command:"show" description:"Show a target's catalog card and the governance outcome for your sources."`
+	Show   CatalogShowCommand   `command:"show" description:"Show a target's catalog card and the charter outcome for your sources."`
 	Flows  CatalogFlowsCommand  `command:"flows" description:"Print a target's flows (JSON, for the verification tool) before any binding exists."`
 }
 
@@ -4497,10 +4505,10 @@ type BGListCommand struct {
 }
 
 // ---------------------------------------------------------------------------
-// Governance subcommands: `ligo governance show|check` (ADR-13, ADR-14)
+// Charter subcommands: `ligo charter show|check` (ADR-13, ADR-14)
 // ---------------------------------------------------------------------------
-type GovernanceCommand struct {
-	Show  GovShowCommand  `command:"show" description:"Show the governance policy in force and its SHA-256."`
+type CharterCommand struct {
+	Show  GovShowCommand  `command:"show" description:"Show the charter in force and its SHA-256."`
 	Check GovCheckCommand `command:"check" description:"Evaluate a planned change: jurisdictions, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
 }
 
@@ -4523,7 +4531,7 @@ type GovCheckCommand struct {
 - When the change was applied at creation (`changeRequest.status == "APPLIED"`), the CLI prints the Change Request ID and, for a binding, its current phase (`PROVISIONING` or `ACTIVE` if `--wait` was passed) and `workflowId`; for a source or target, its new revision and the number of bindings queued for propagation.
 - When sides are still pending (`changeRequest.status == "PENDING"`), the CLI prints a clear notice containing `changeRequest.id`, `changeRequest.payloadSha256`, each pending side with its jurisdiction, and the exact command an approver of each side needs to run:
   `ligo cr approve <cr-id> --sha256 <payloadSha256> --side <side> -m "<comment>"`.
-- When the interconnection policy denies the request, the CLI prints the source and target jurisdictions and the rule that denied it; `ligo governance check` shows the same evaluation before anything is submitted.
+- When the interconnection policy denies the request, the CLI prints the source and target jurisdictions and the rule that denied it; `ligo charter check` shows the same evaluation before anything is submitted.
 - When a source or grants update is not a narrowing, the CLI prints the witness (`422 widening-not-allowed`) and suggests registering a new source or adding a new access level.
 
 ---
@@ -4536,7 +4544,7 @@ type GovCheckCommand struct {
 3. **Plugin IPC:** go-plugin (AutoMTLS) between `ligo` and plugin processes, plus each process's SPIRE agent socket.
 4. **External infrastructure:** plugins ↔ LDAP/AD, Vault, S3, target systems; `ligo` ↔ Vault Transit.
 5. **Persistence:** `ligo` ↔ PostgreSQL (`public` and `dbos` schemas), across three database roles.
-6. **Governance:** requester ↔ approver (change requests), jurisdiction ↔ jurisdiction (two-sided consent, ADR-13), and resource owner ↔ catalog reader (visibility, §7.2.4).
+6. **Consent:** requester ↔ approver (change requests), jurisdiction ↔ jurisdiction (two-sided consent, ADR-13), and resource owner ↔ catalog reader (visibility, §7.2.4).
 7. **Host:** configuration files, plugin directory, `ligo` service account.
 
 ### 9.2 Threat matrix
@@ -4572,7 +4580,7 @@ type GovCheckCommand struct {
 | T-27 | Spoofing / Tampering | 2/7 | A modified theme misleads administrators: hiding the maintenance or break-glass banner, imitating a different system, or running script through an SVG logo. | Theme files root-owned and validated at startup; their hashes audited in `CONFIG_LOADED`; types and sizes restricted; SVG served sandboxed and shown only via `<img>`; CSP limits styles, images and fonts to `ligo` itself; security-relevant UI rendered by the server in every theme. Residual: CSS can still hide elements, so theme changes need the same change control as `server.yaml`. |
 | T-28 | EoP / Spoofing | 2/6 | **Target hijacking and credential injection.** An operator who controls only one end of a binding provisions it alone: binding their own workload to another owner's target and granting access there, or binding another owner's source to a target the operator controls, so that those workloads receive connection details for a system the operator controls. | Two-sided consent: every binding change with consent `ALL` needs the approval of both the source and the target jurisdiction (ADR-13, INV-14), enforced per side in the database; the source's jurisdiction is derived from its regex, so the workload owner cannot be bypassed by choosing a jurisdiction; consent `ANY` is limited to changes that remove access (INV-20); the requester never decides a side; any side can veto. |
 | T-29 | Spoofing / EoP | 1/6 | **Jurisdiction spoofing through SPIRE registration.** Someone who can create SPIRE registration entries registers a workload under another tenancy's path (e.g. `/acct/fin-01/tenant/payments/…`), so that bindings approved for that tenancy reach it, or so that their own bindings are attributed to that tenancy. | Source jurisdictions depend only on SPIFFE ID paths, so registration is part of the trusted base: each tenancy's path prefix MUST be assigned by the platform (a workload registrar that derives the path from the real account, namespace or project; node and workload attestation that tenants cannot influence), and tenants MUST NOT be able to create entries outside their own prefix. The lab tests this assumption (§11.1). Residual risk R-08. |
-| T-30 | EoP / Repudiation | 2/6/7 | **Bypass of cross-boundary governance.** A forbidden flow is created because both owners agree (test to production); a third party is left out; one person with broad approver roles signs for both owners; or the guardrails are weakened to let a change through. | Interconnection policy with default deny and additional parties (ADR-14, INV-19), re-checked at apply; distinct approvers per side (INV-18, DB-enforced); policy only in `server.yaml`, outside the admin API, hashed into every change request and audited at startup, loosening flagged (`CONFIG_APPROVAL_POLICY_WEAKENED`); pending requests can only fail after a policy change. Residual risk R-09. |
+| T-30 | EoP / Repudiation | 2/6/7 | **Bypass of cross-boundary consent.** A forbidden flow is created because both owners agree (test to production); a third party is left out; one person with broad approver roles signs for both owners; or the guardrails are weakened to let a change through. | Interconnection policy with default deny and additional parties (ADR-14, INV-19), re-checked at apply; distinct approvers per side (INV-18, DB-enforced); policy only in `server.yaml`, outside the admin API, hashed into every change request and audited at startup, loosening flagged (`CONFIG_APPROVAL_POLICY_WEAKENED`); pending requests can only fail after a policy change. Residual risk R-09. |
 | T-31 | Info disclosure / DoS | 2 | **Name squatting and probing.** In a shared name space, an operator takes names other owners need, or learns from `409` conflicts that resources invisible to them exist. | Optional per-jurisdiction, per-resource-type name prefixes (§3.8), so each owner creates names only in its own range; `404` for every out-of-jurisdiction read. |
 | T-32 | Spoofing / EoP | 2/4/6 | **Rogue or misleading target.** A target owner publishes a target that claims to be something it is not (a schema it does not own, an access level whose description understates its grants), or names privileges outside what the platform owner intends, to lure source owners or to obtain privilege. | Publication and every change of definition, grants or flows need the platform owner's consent (ADR-13 rule 4); grants bounded by the platform's privilege bounds in three places (§5.8 rule 3); `ValidateTarget` normalizes and, with `check_existence`, verifies the resource; the catalog shows the canonical `privileges` next to the description; the target jurisdiction must lie within the platform's `target_jurisdictions`; full audit. |
 | T-33 | Info disclosure | 2 | **Catalog disclosure.** Browsing the catalog or sources reveals the existence, owners, privileges or network layout of systems to people who should not know them. | `PRIVATE` by default for sources and targets; `LISTED` only to configured jurisdiction patterns; the catalog additionally filtered by the interconnection policy (ADR-14 rule 7); `404` for everything else; platform configuration beyond the documented fields is never exposed; flows of a target shown only to principals who can see it. |
@@ -4591,7 +4599,7 @@ type GovCheckCommand struct {
 | R-06 | For delegated change requests, review quality depends on the upstream approval process; `ligo` records the reference but cannot verify that the referenced approval exists or covers the change. |
 | R-07 | A break-glass change can be misused within its TTL (at most the most restrictive `max_ttl` of its sides' policies) before automatic revert or review. Emergency deletes are not reverted. An outage of the platform's plugin extends an expired `UPDATE` beyond its TTL until the revert can be validated (§6.3). |
 | R-08 | Jurisdictions are only as trustworthy as the assignment of SPIFFE ID paths in SPIRE (T-29). `ligo` cannot detect a workload registered under the wrong tenancy. |
-| R-09 | An interconnection rule with `distinct_approvers: false` lets one person approve both sides for the jurisdiction pairs it covers. Such rules are visible in the governance policy and audited when added. |
+| R-09 | An interconnection rule with `distinct_approvers: false` lets one person approve both sides for the jurisdiction pairs it covers. Such rules are visible in the charter and audited when added. |
 | R-10 | Two sources of the same jurisdiction may overlap (T-34). Overlaps are reported, not refused, because a narrower source for a subset of workloads is a legitimate pattern. |
 | R-11 | Between the commit of a source or target change and the re-apply of each binding (§6.8), the provisioned state on the platform can lag behind the approved state. For a narrowed regex, the workload API is already correct (INV-01); for narrowed grants, the old privileges remain on the target until the binding is re-applied, bounded by the propagation backlog. |
 
@@ -4690,7 +4698,7 @@ If operators prefer to run only **one** SPIRE Agent on the `ligo` host:
 If the SPIRE servers are federated, `ligo` can verify workloads of another trust domain **without connecting to that domain's agent**. The bundle reaches it through federation instead.
 1. Configure the `prod.internal` SPIRE server to federate with the `test.internal` SPIRE server: the prod server's `federation.federates_with` points at the test server's bundle endpoint, so the prod server fetches and keeps the `test.internal` bundle current. The test server must serve its bundle endpoint. Federation in the opposite direction is needed only if test workloads must verify `ligo`'s SPIFFE-issued server certificate.
 2. Add `federatesWith: ["spiffe://test.internal"]` to `ligo`'s core registration entry on the prod SPIRE server. The prod agent then delivers the `test.internal` bundle to `ligo` alongside its own.
-3. In `server.yaml`, add `{ trust_domain: test.internal, via_realm: prod }` to `workload_listener.federated_trust_domains` and `test.internal` to `accepted_trust_domains`. Do **not** also define a `test` realm. A trust domain is either a realm or federated, never both (§8.2 rule 12). If any target accepts the federated trust domain as a source, add an entry for it to `governance.source_jurisdictions` (§3.9, §8.2 rule 16).
+3. In `server.yaml`, add `{ trust_domain: test.internal, via_realm: prod }` to `workload_listener.federated_trust_domains` and `test.internal` to `accepted_trust_domains`. Do **not** also define a `test` realm. A trust domain is either a realm or federated, never both (§8.2 rule 12). If any target accepts the federated trust domain as a source, add an entry for it to `charter.source_jurisdictions` (§3.9, §8.2 rule 16).
 
 What this does **not** cover: plugin processes still need identities that the target systems trust. Test-realm plugins either run in a `test` realm (which needs the test agent after all, and turns this into Topology A), or the test backends (Vault, Oracle bootstrap) are configured to accept prod-issued plugin SVIDs, so the plugins live in the `prod` realm. In the second case, test and prod plugin instances share processes and lose the isolation of ADR-03.
 
@@ -4792,7 +4800,7 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-22 | A `PENDING` change request | Two approvers decide it concurrently (approve/approve, or approve/decline) | Exactly one decision is recorded and audited; the other caller gets `409 change-request-not-pending`; at most one workflow is started. |
 | AC-23 | A `PENDING` binding `CREATE` change request | Approval is attempted while a plugin `ValidateBinding` call is slow (fault-injected delay) | No row locks are held during the delay: concurrent admin actions on other change requests and workflow steps on other bindings are not blocked. |
 | AC-24 | A change request whose side is in an approval-required jurisdiction | The application (fault-injected) tries to record that side as approved by `system:auto-approve`, or to mark the request `APPLIED` while the side is pending | PostgreSQL rejects it (`chk_side_basis`, respectively `trg_change_requests_check` at commit); nothing is provisioned. |
-| AC-25 | `dc/corp-prod` is removed from `approval.required_jurisdictions` while a change request with a pending `dc/corp-prod` side exists, and `ligo` restarts | Startup, then an attempt to apply the pending request without approval | Startup logs a `WARN` and audits `CONFIG_GOVERNANCE_POLICY_CHANGED` and `CONFIG_APPROVAL_POLICY_WEAKENED` naming the pattern; the pending side still requires a human approver other than the requester. |
+| AC-25 | `dc/corp-prod` is removed from `approval.required_jurisdictions` while a change request with a pending `dc/corp-prod` side exists, and `ligo` restarts | Startup, then an attempt to apply the pending request without approval | Startup logs a `WARN` and audits `CONFIG_CHARTER_CHANGED` and `CONFIG_APPROVAL_POLICY_WEAKENED` naming the pattern; the pending side still requires a human approver other than the requester. |
 | AC-26 | Two replicas running; maintenance off | An admin runs `ligo maintenance on`, then an operator submits a change on either replica, and the reconciler's next tick fires | Both replicas return `503 maintenance` for the change; the reconciler starts nothing; in-flight workflows complete; `ligo maintenance status` reports `inFlight` falling to 0; the workload API keeps returning `200`; `SYSTEM_MAINTENANCE_ENABLED` is audited. |
 | AC-27 | SPIFFE principal holds `trusted_automation` for jurisdictions `dc/corp-prod/*` and platform `oracle-prod` with `approval_reference_pattern: '^CHG[0-9]{7}$'` | It POSTs a valid same-jurisdiction binding (source and target in `dc/corp-prod/ledger`) with `approvalReference: "CHG0012345"` | `202`; the change request is `APPLIED`; its single `TARGET` side has basis `DELEGATED`, decided by `system:delegated-approval`; audit `CR_SIDE_APPROVED` contains the reference; provisioning starts without a human approver. |
 | AC-28 | Same principal | It omits `approvalReference`, sends `CHG12`, or binds a target on a platform outside `platforms` | `422 validation-failed` for the reference cases and `403 forbidden` for the target case; no change request is stored. |
@@ -4822,7 +4830,7 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-49 | `marco` is an approver of both `dc/corp-prod/ledger` and `sec/infosec`; a cloud-to-data-centre request has both sides pending; distinct approvers required | `marco` approves without `side`; then with `side: TARGET`; then tries `side: PARTY:security` | `400 side-required`; then the `TARGET` side is approved; then `403 distinct-approver-required`. A direct database update recording `marco` on both sides is rejected at commit (`trg_change_request_sides_check`). With a rule setting `distinct_approvers: false`, one approval without `side` approves both sides. |
 | AC-50 | A request with two pending sides held by different approvers | Both approve at the same moment, on different replicas | The request is applied exactly once; no request is left `PENDING` with every side approved; one workflow is started. |
 | AC-51 | Rules as in §8.1 | A binding `CREATE` from a `dc/corp-test` source to a `dc/corp-prod/ledger` target; and one for a jurisdiction pair no rule covers | `403 interconnect-denied` naming `no-test-to-prod`, respectively `default`; no change request is stored; `CR_INTERCONNECT_DENIED` is audited. |
-| AC-52 | A cross-jurisdiction request is `PENDING` with its `SOURCE` side approved automatically | The policy is tightened (a new additional party, or the source jurisdiction added to `required_jurisdictions`) and `ligo` restarts; then the last pending side is approved | `409 governance-policy-changed`; the request is `FAILED_TO_APPLY`; nothing is provisioned. Loosening the policy instead never completes a pending request without its stored sides. |
+| AC-52 | A cross-jurisdiction request is `PENDING` with its `SOURCE` side approved automatically | The policy is tightened (a new additional party, or the source jurisdiction added to `required_jurisdictions`) and `ligo` restarts; then the last pending side is approved | `409 charter-changed`; the request is `FAILED_TO_APPLY`; nothing is provisioned. Loosening the policy instead never completes a pending request without its stored sides. |
 | AC-53 | A cross-jurisdiction binding between `cloud/fin-01/payments` and `dc/corp-prod/ledger` | An operator of the target jurisdiction revokes it; separately, an operator of the tenancy revokes another such binding | Both requests have consent `ANY`. The first has only a `TARGET` side; a ledger approver approves it and the binding is deleted; nobody in the tenancy can decline it. The second has only a `SOURCE` side, which is approved and applied at once if the tenancy does not require approval. |
 | AC-54 | `trusted_automation` limited to `dc/corp-prod/*` | It files a binding `CREATE` from a `cloud/fin-01/payments` source to `ledger-schema` | The `TARGET` side is `DELEGATED`; the `SOURCE` side is `HUMAN` and pending; nothing is provisioned until a tenancy lead approves it. |
 | AC-55 | A person holds `break_glass` on `dc/corp-prod/*` only | They submit a break-glass binding `CREATE` from a `cloud/fin-01/payments` source to `ledger-schema` | `403 forbidden`. With `break_glass` on both jurisdictions, it is applied; it is reverted at expiry unless an approver of each side ratifies it (two different people); if only one side is ratified, it is still reverted. |
@@ -4842,7 +4850,7 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-69 | A cross-jurisdiction binding at `write`, both jurisdictions requiring approval | The source owner lowers it to `read`; then raises it back to `write` | The downgrade has consent `ANY`, one `SOURCE` side, and is applied after that side's approval alone; the raise has consent `ALL` with `SOURCE`, `TARGET` and any party, and waits for all. |
 | AC-70 | A cross-jurisdiction binding on `oracle-prod` | A `dc/corp-prod` operator (platform owner, not the target owner) revokes it | Consent `ANY` with one `PLATFORM` side; applied after a `dc/corp-prod` approval; `BINDING_REVOKED` is delivered to webhooks filtering on the source and target jurisdictions. The same operator cannot create or raise a binding on that target (`403 forbidden`). |
 | AC-71 | A binding with `expiresAt` in 8 days and `expiry_warning: 7d` | Time passes (lab clock control) to the warning, then to the expiry, with maintenance mode on at the expiry | `BINDING_EXPIRING` is emitted once; at `expiresAt` the workload API stops returning the binding at once; within one sweeper interval a `SYSTEM_EXPIRY` revocation is applied (basis `SYSTEM_EXPIRY`, decider `system:expiry`) even in maintenance; `BINDING_EXPIRED` is audited. |
-| AC-72 | Target A `PRIVATE`, target B `LISTED` to `cloud/fin-01/*`, target C `PUBLIC` in a jurisdiction that rule `no-test-to-prod` denies for `cloud/fin-01-test/*` | An operator of `cloud/fin-01/payments`, and an operator of `cloud/fin-01-test/web`, search the catalog and fetch each target | The first sees B and C, and `404` for A; the second does not see C in the catalog and gets `denied` in C's governance outcome. |
+| AC-72 | Target A `PRIVATE`, target B `LISTED` to `cloud/fin-01/*`, target C `PUBLIC` in a jurisdiction that rule `no-test-to-prod` denies for `cloud/fin-01-test/*` | An operator of `cloud/fin-01/payments`, and an operator of `cloud/fin-01-test/web`, search the catalog and fetch each target | The first sees B and C, and `404` for A; the second does not see C in the catalog and gets `denied` in C's charter outcome. |
 | AC-73 | A workload with one binding whose credential is in `vault-prod` | The probe calls `GET /v1/flows`, `GET /v1/flows?target=ledger-schema` and the catalog flows of the target | The flows are the target's, the platform's, `vault-prod`'s and `ligo`'s, in that order, each with `declaredBy`; the response has no `auth` or `spec`; the catalog flows omit the secret store; ETag and `304` behave as for `/v1/bindings`. |
 | AC-74 | An operator uses the wizard to request a binding with a new inline source | The target owner tries to approve the binding before the source is approved; then the source owner rejects the source | `409 dependency-pending` (the binding request stays `PENDING`); after the rejection, the binding request is `FAILED_TO_APPLY` with `CR_DEPENDENCY_FAILED`. |
 | AC-75 | A break-glass binding `CREATE` with an inline source, unratified | The TTL expires | The binding is deleted by the `SYSTEM_REVERT`, then the source is retired by a `SYSTEM_REVERT` source change; both audited. |
@@ -5732,7 +5740,7 @@ sequenceDiagram
     participant D as DBOS runtime
     L->>FS: read server.yaml and theme files
     FS-->>L: configuration
-    Note over L,FS: static checks (rules 1-2, 5-7, 9, 12-16), compute config and governance policy SHA-256
+    Note over L,FS: static checks (rules 1-2, 5-7, 9, 12-16), compute config and charter SHA-256
     L->>PG: connect app, reader and dbos pools
     L->>PG: read last CONFIG_LOADED, insert CONFIG_LOADED (and policy change or weakening entries)
     L->>PG: check platform references and wiring (rules 10-11), jurisdiction drift (rule 17), interconnection violations (rule 18)
@@ -5756,7 +5764,7 @@ sequenceDiagram
 | Message | Information carried | Protection |
 | :--- | :--- | :--- |
 | Read configuration | `server.yaml`, theme files | Root-owned, read-only for `ligo` (T-22, T-27) |
-| `CONFIG_LOADED` and related entries | Configuration SHA-256, theme file hashes, governance policy and its SHA-256, list of loosening changes | Hash-chained audit (§4.3) |
+| `CONFIG_LOADED` and related entries | Configuration SHA-256, theme file hashes, charter and its SHA-256, list of loosening changes | Hash-chained audit (§4.3) |
 | Drift and violation checks | Stored platform references, wiring, jurisdictions and regexes compared with configuration; lists of affected resources; access levels outside privilege bounds | No secrets |
 | SPIRE Workload API | Trust bundles of every accepted trust domain; `ligo`'s own SVID and private key | Unix socket; private key held in memory only (**secret**) |
 | Vault Transit check | JWT-SVID (**secret**, short-lived) and key metadata | TLS |
@@ -5838,7 +5846,7 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `POST /v1/admin/bindings` | Binding name, source and target names, access level, parameters, purpose, labels, optional expiry, optional `approvalReference` and `automationContext` | TLS, authenticated principal; no secrets are ever submitted |
 | `ValidateBinding` | Platform name, normalized target definition, the level's grants, parameters; back: normalized parameters, requested spec, privileges | AutoMTLS; plugin data rendered only as plain data (INV-12); parameters cannot add privilege (§5.8 rule 8) |
-| Database transaction | Change request with normalized payload and its SHA-256, consent rule, governance policy SHA-256, side, binding requested state composed from the source and target revisions, audit entries | No secrets; lock order and audit insert last (§4.3) |
+| Database transaction | Change request with normalized payload and its SHA-256, consent rule, charter SHA-256, side, binding requested state composed from the source and target revisions, audit entries | No secrets; lock order and audit insert last (§4.3) |
 | Workflow start | Workflow ID (`ligo:apply:<id>:r1:a1`), binding ID, revision, wiring | DBOS journal; sweeper starts it if this call is lost (E.11) |
 | `202` response | Change request and binding representations | Admin view only; never returned to workloads |
 
@@ -5872,7 +5880,7 @@ sequenceDiagram
     A->>PG: side-decision compare-and-set (decision_seq), TARGET approved, audit CR_SIDE_APPROVED, COMMIT
     A-->>Own: 200, awaitingApproval PARTY:security
     Sec->>A: POST approve (payloadSha256, side PARTY:security)
-    Note over A,PG: same checks, then governance re-check against the policy in force
+    Note over A,PG: same checks, then charter re-check against the policy in force
     A->>PG: BEGIN, maintenance check, side-decision compare-and-set, PARTY:security approved
     A->>PG: FOR SHARE source, target, level, insert binding (PROVISIONING), close request APPLIED, audit, COMMIT
     A->>D: start ApplyBindingWorkflow
@@ -5885,7 +5893,7 @@ sequenceDiagram
 - **Veto.** Any approver of a pending side can decline (`/decline`); a request with consent `ALL` is then `REJECTED` at once.
 - **One approver for several sides.** If the target owner approver were also an InfoSec approver, an approval without `side` would get `400 side-required`, and a second approval by the same person `403 distinct-approver-required` (INV-18), unless the rule sets `distinct_approvers: false`.
 - **Concurrent approvals.** If both approvers approve at the same moment, the `decision_seq` compare-and-set serializes them; the second sees the first's decision and applies the change (§4.3, AC-50).
-- **Policy tightened, or target changed, meanwhile.** The final approval moves the request to `FAILED_TO_APPLY` with `409 governance-policy-changed`, respectively `409 normalization-drift` (ADR-14 rule 5, §7.2.3).
+- **Policy tightened, or target changed, meanwhile.** The final approval moves the request to `FAILED_TO_APPLY` with `409 charter-changed`, respectively `409 normalization-drift` (ADR-14 rule 5, §7.2.3).
 - **Denied pair.** If no rule allows the pair, the `POST` returns `403 interconnect-denied` and only `CR_INTERCONNECT_DENIED` is stored; the catalog would not have offered the target to this developer (ADR-14 rule 7).
 
 | Message | Information carried | Protection |

@@ -8,9 +8,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -56,10 +56,10 @@ type Visibility struct {
 type Rules struct {
 	// Extractors derive the jurisdiction of a regex in each trust domain that some
 	// platform accepts (§8.2 rule 15: each has a source_jurisdictions entry).
-	Extractors   map[string]*governance.Extractor
-	NamePrefixes []governance.NamePrefix
+	Extractors   map[string]*charter.Extractor
+	NamePrefixes []charter.NamePrefix
 	Regex        regexpolicy.Policy
-	Accounts     *governance.Accounts // nil: no accounts
+	Accounts     *charter.Accounts // nil: no accounts
 }
 
 // NewRules extracts the rules from a validated configuration.
@@ -72,8 +72,8 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 			}
 		}
 	}
-	r := &Rules{Extractors: map[string]*governance.Extractor{}, NamePrefixes: cfg.Governance.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Governance.Accounts}
-	for _, ss := range cfg.Governance.SourceJurisdictions {
+	r := &Rules{Extractors: map[string]*charter.Extractor{}, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Charter.Accounts}
+	for _, ss := range cfg.Charter.SourceJurisdictions {
 		if !accepted[ss.TrustDomain] {
 			continue
 		}
@@ -217,7 +217,7 @@ func (v *Visibility) Normalize() error {
 			return invalid("visibility.visibleTo is required with LISTED")
 		}
 		for _, p := range v.VisibleTo {
-			if !governance.ValidJurisdictionPattern(p) {
+			if !charter.ValidJurisdictionPattern(p) {
 				return invalid("visibility.visibleTo: %q is not a jurisdiction pattern", p)
 			}
 		}

@@ -10,7 +10,7 @@
 - A **target** is one resource on a **platform**, for example a PostgreSQL database, an Oracle schema or a Kafka topic. It has named access levels and the network flows needed to reach it.
 - A **binding** says that a source may use a target at one of its access levels.
 
-Every change is a change request. Each jurisdiction involved must approve it (maker-checker), as the governance policy requires. `ligo` then provisions an approved binding with a durable, checkpointed three-stage pipeline of plugins: an identity provider, the platform provider and a secret store.
+Every change is a change request. Each jurisdiction involved must approve it (maker-checker), as the charter requires. `ligo` then provisions an approved binding with a durable, checkpointed three-stage pipeline of plugins: an identity provider, the platform provider and a secret store.
 
 The pipeline runs on DBOS and PostgreSQL. Plugins create the principal, grant the privileges on the target and set up credential delivery through Vault or OpenBao. Housekeeping loops repair drift, rotate static secrets, propagate source and target changes, and revoke expired bindings. Attested workloads then ask `ligo` which targets they may use and how to get their credentials.
 
@@ -19,7 +19,7 @@ The pipeline runs on DBOS and PostgreSQL. Plugins create the principal, grant th
 Working:
 - the core engine and storage;
 - the plugin host;
-- change requests and governance;
+- change requests, and the charter that every jurisdiction complies with;
 - the binding workflows, including break-glass;
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;

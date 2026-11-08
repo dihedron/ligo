@@ -79,7 +79,7 @@ commands:
                             test-faults stops the secrets backend and PostgreSQL
                             under bindings being applied; test-accounts (with
                             ligo2 and webhook) resets the lab, installs ligo with
-                            governance.accounts and runs the accounts' e2e; reset
+                            charter.accounts and runs the accounts' e2e; reset
                             and install again before any other suite;
                             test-accounts-chaos likewise: 300 accounts, races under
                             killed replicas, PostgreSQL and the directory stopped

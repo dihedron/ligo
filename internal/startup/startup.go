@@ -1,5 +1,5 @@
 // Package startup runs the startup checks that need the database (§8.2
-// step 2): the CONFIG_LOADED audit and the governance policy's changes,
+// step 2): the CONFIG_LOADED audit and the charter's changes,
 // references to platforms and plugins that no longer exist (rules 10 and
 // 11), names of existing resources (rule 16), jurisdiction drift and transfer
 // (rule 17), and interconnection violations (rule 18); after the plugins
@@ -22,10 +22,10 @@ import (
 	"github.com/dihedron/ligo/internal/accounts"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
@@ -41,15 +41,15 @@ type Checks struct {
 	DB           *pgxpool.Pool // the app pool
 	Config       *config.Config
 	ConfigSHA256 string
-	ThemeSHA256  map[string]string                // the theme files in use and tokens.css (theme.Theme.Hashes)
-	Extractors   map[string]*governance.Extractor // the source jurisdiction extractors, by trust domain (sources.Rules)
+	ThemeSHA256  map[string]string             // the theme files in use and tokens.css (theme.Theme.Hashes)
+	Extractors   map[string]*charter.Extractor // the source jurisdiction extractors, by trust domain (sources.Rules)
 	// AllowOrphanedBindings and AcceptJurisdictionChanges are the flags of
 	// ligo serve (§8.2 rules 10 and 17).
 	AllowOrphanedBindings     bool
 	AcceptJurisdictionChanges bool
 	Logger                    *slog.Logger
 
-	policy *governance.Policy
+	policy *charter.Policy
 }
 
 // Run runs the checks in the order of §8.2 step 2; the first that fails
@@ -81,7 +81,7 @@ func snapshot(v any) json.RawMessage {
 }
 
 // configLoaded audits CONFIG_LOADED and, against the previous entry's
-// policy, CONFIG_GOVERNANCE_POLICY_CHANGED and
+// policy, CONFIG_CHARTER_CHANGED and
 // CONFIG_APPROVAL_POLICY_WEAKENED.
 func (c *Checks) configLoaded(ctx context.Context) error {
 	canonical, err := c.policy.Canonical()
@@ -123,14 +123,14 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		entries = append(entries, audit.Entry{Action: "CONFIG_GOVERNANCE_POLICY_CHANGED", Actor: actor,
+		entries = append(entries, audit.Entry{Action: "CONFIG_CHARTER_CHANGED", Actor: actor,
 			Snapshot: snapshot(map[string]any{"previousSha256": previous.PolicySHA256, "policySha256": sha, "changes": changes})})
-		var old governance.Policy
+		var old charter.Policy
 		if err := json.Unmarshal(previous.Policy, &old); err != nil {
 			return fmt.Errorf("startup: the previous policy: %w", err)
 		}
-		if loose := governance.Loosening(&old, c.policy); len(loose) > 0 {
-			c.Logger.Warn("the governance policy is weaker than at the previous start", "changes", loose)
+		if loose := charter.Loosening(&old, c.policy); len(loose) > 0 {
+			c.Logger.Warn("the charter is weaker than at the previous start", "changes", loose)
 			entries = append(entries, audit.Entry{Action: "CONFIG_APPROVAL_POLICY_WEAKENED", Actor: actor,
 				Snapshot: snapshot(map[string]any{"changes": loose})})
 		}
@@ -327,7 +327,7 @@ func (c *Checks) names(ctx context.Context) error {
 	}
 	var errs []error
 	for _, s := range jurisdictions {
-		if _, err := engine.ResolvePrefix(engine.Kind(s[0]), s[1], c.Config.Governance.NamePrefixes); err != nil {
+		if _, err := engine.ResolvePrefix(engine.Kind(s[0]), s[1], c.Config.Charter.NamePrefixes); err != nil {
 			errs = append(errs, fmt.Errorf("%s jurisdiction %s: %w", s[0], s[1], err))
 		}
 	}
@@ -377,7 +377,7 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 			continue
 		}
 		if field := declared(typ); field != "" {
-			if err := targets.CheckNamespace(c.Config.Governance.Accounts, p.NamespaceTemplate, field, t.jurisdiction, t.definition); err != nil {
+			if err := targets.CheckNamespace(c.Config.Charter.Accounts, p.NamespaceTemplate, field, t.jurisdiction, t.definition); err != nil {
 				fatal = append(fatal, fmt.Sprintf("target %s: %v", t.name, err))
 			}
 		}
@@ -407,7 +407,7 @@ type accountDrift struct {
 // account must be registered: a server that cannot start cannot register it,
 // so the message says how to get there.
 func (c *Checks) accountOf(ctx context.Context, typ, table string, d drift, jurisdiction, stored string, fatal, drifted *[]string, out *[]accountDrift) error {
-	a := c.Config.Governance.Accounts
+	a := c.Config.Charter.Accounts
 	want, _ := a.AccountOf(jurisdiction)
 	if want == stored {
 		return nil
@@ -479,7 +479,7 @@ func (c *Checks) jurisdictions(ctx context.Context) error {
 			drifted = append(drifted, fmt.Sprintf("source %s: %s to %s", s.name, s.old, s.jurisdiction))
 		}
 		if ok && err == nil {
-			if a := c.Config.Governance.Accounts; !a.SourceConforms(s.jurisdiction) {
+			if a := c.Config.Charter.Accounts; !a.SourceConforms(s.jurisdiction) {
 				fatal = append(fatal, fmt.Sprintf("source %s: jurisdiction %s does not conform to %s", s.name, s.jurisdiction, a.SourceJurisdiction))
 			}
 			if err := c.accountOf(ctx, "SOURCE", "sources", s.drift, s.jurisdiction, s.account, &fatal, &drifted, &reaccounted); err != nil {
@@ -507,7 +507,7 @@ func (c *Checks) jurisdictions(ctx context.Context) error {
 		if p == nil {
 			continue // rule 10
 		}
-		if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return governance.JurisdictionMatches(pat, t.jurisdiction) }) {
+		if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, t.jurisdiction) }) {
 			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s is not in the target_jurisdictions of %s", t.name, t.jurisdiction, p.Name))
 		}
 		if p.Jurisdiction != t.old {
@@ -515,7 +515,7 @@ func (c *Checks) jurisdictions(ctx context.Context) error {
 			targets = append(targets, t.drift)
 			drifted = append(drifted, fmt.Sprintf("target %s: platform jurisdiction %s to %s", t.name, t.old, p.Jurisdiction))
 		}
-		if a := c.Config.Governance.Accounts; !a.TargetConforms(t.jurisdiction) {
+		if a := c.Config.Charter.Accounts; !a.TargetConforms(t.jurisdiction) {
 			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s does not conform to %s", t.name, t.jurisdiction, a.TargetJurisdiction))
 		}
 		if err := c.accountOf(ctx, "TARGET", "targets", t.drift, t.jurisdiction, t.account, &fatal, &drifted, &reaccounted); err != nil {

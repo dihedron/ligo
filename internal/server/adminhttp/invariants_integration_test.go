@@ -18,7 +18,7 @@ import (
 // unaudited are the state-changing methods' routes that change no state of
 // their own: read-only checks, or a workflow that audits itself.
 var unaudited = map[string]string{
-	"POST /v1/admin/governance/evaluate":    "a read-only evaluation",
+	"POST /v1/admin/charter/evaluate":       "a read-only evaluation",
 	"POST /v1/admin/sources/test":           "a read-only check",
 	"POST /v1/admin/bindings/{name}/retry":  "audited by the workflow: TestAC09",
 	"POST /v1/admin/bindings/{name}/rotate": "audited by the workflow: TestRotate",

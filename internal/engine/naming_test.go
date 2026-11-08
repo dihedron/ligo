@@ -8,7 +8,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 )
 
 // TestAppendixB checks the derived principal name against values computed
@@ -62,7 +62,7 @@ func TestValidName(t *testing.T) {
 	}
 }
 
-var prefixes = []governance.NamePrefix{
+var prefixes = []charter.NamePrefix{
 	{Jurisdictions: []string{"cloud/*"}, Prefix: "{2}-{3}-"},
 	{Jurisdictions: []string{"dc/corp-prod/*"}, Prefix: "prod-", Resources: []string{string(KindTarget)}},
 }

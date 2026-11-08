@@ -10,7 +10,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 )
@@ -118,7 +118,7 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 				return nil, false, err
 			}
 			after = st.Metadata.Name
-			if !c.Grants.Sees(st.Metadata.Jurisdiction, st.Metadata.PlatformJurisdiction) || f.Jurisdiction != "" && !governance.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction) {
+			if !c.Grants.Sees(st.Metadata.Jurisdiction, st.Metadata.PlatformJurisdiction) || f.Jurisdiction != "" && !charter.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction) {
 				continue
 			}
 			if len(out) == f.Limit {

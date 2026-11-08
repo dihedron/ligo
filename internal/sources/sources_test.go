@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 const (
@@ -175,7 +175,7 @@ func TestVisibility(t *testing.T) {
 // Requirement 2: a source of an account lies in one of its projects.
 func TestJurisdictionForm(t *testing.T) {
 	r := rules(t)
-	r.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
+	r.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 	r.NamePrefixes = nil
 	for jurisdiction, want := range map[string]string{
 		"cloud/acme/app/p1":   "",
@@ -183,7 +183,7 @@ func TestJurisdictionForm(t *testing.T) {
 		"cloud/acme":          "account-jurisdiction-mismatch",
 		"cloud/a-b/app/p1":    "account-jurisdiction-mismatch",
 	} {
-		x, err := governance.NewStaticExtractor(jurisdiction)
+		x, err := charter.NewStaticExtractor(jurisdiction)
 		if err != nil {
 			t.Fatal(err)
 		}

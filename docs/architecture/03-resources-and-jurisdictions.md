@@ -24,4 +24,4 @@ A target and a platform declare the flows needed to reach them, within `allowed_
 
 ## Change requests
 
-Every mutation of a source, target or binding is a change request. It is bound to the exact payload by its SHA-256, which an approver must present, and to the governance policy by its hash. A change that would be applied differently than approved is refused with `normalization-drift` or `governance-policy-changed`.
+Every mutation of a source, target or binding is a change request. It is bound to the exact payload by its SHA-256, which an approver must present, and to the charter by its hash. A change that would be applied differently than approved is refused with `normalization-drift` or `charter-changed`.

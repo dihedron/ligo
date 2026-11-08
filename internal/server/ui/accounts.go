@@ -13,9 +13,9 @@ import (
 func readsAccounts(gs authz.Grants) bool { return gs.Viewer() || gs.AccountAdmin() }
 
 // showsAccounts says whether the menu links to the page: ligo with no
-// governance.accounts has no accounts to manage.
+// charter.accounts has no accounts to manage.
 func (s *Server) showsAccounts(gs authz.Grants) bool {
-	return s.Config.Governance.Accounts != nil && readsAccounts(gs)
+	return s.Config.Charter.Accounts != nil && readsAccounts(gs)
 }
 
 // accountsReadable answers 403 to anyone else.
@@ -39,7 +39,7 @@ func (s *Server) accountList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := session(r).Caller()
-	list, more, err := accounts.List(r.Context(), s.DB, c, s.Config.Governance.Accounts, r.URL.Query().Get("after"), pageSize)
+	list, more, err := accounts.List(r.Context(), s.DB, c, s.Config.Charter.Accounts, r.URL.Query().Get("after"), pageSize)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -64,7 +64,7 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := session(r).Caller()
-	a, err := accounts.Get(r.Context(), s.DB, c, s.Config.Governance.Accounts, r.PathValue("name"))
+	a, err := accounts.Get(r.Context(), s.DB, c, s.Config.Charter.Accounts, r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return

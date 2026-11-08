@@ -1,4 +1,4 @@
-# Governance and consent
+# Consent and the charter
 
 ## Either side proposes; each consents
 

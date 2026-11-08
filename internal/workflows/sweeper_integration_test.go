@@ -14,7 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -193,7 +193,7 @@ func TestSweepSingleton(t *testing.T) {
 // bindings service.
 func TestRunLoops(t *testing.T) {
 	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_SVID)
-	bs := &bindings.Service{DB: v.engine.DB, Requests: &changerequests.Service{DB: v.engine.DB, Policy: &governance.Policy{}}}
+	bs := &bindings.Service{DB: v.engine.DB, Requests: &changerequests.Service{DB: v.engine.DB, Policy: &charter.Policy{}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	done := make(chan struct{}, 2)

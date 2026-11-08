@@ -15,8 +15,8 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -411,11 +411,11 @@ func TestAC52(t *testing.T) {
 	p := example(t).Policy()
 	for i := range p.Interconnects.Rules {
 		if p.Interconnects.Rules[i].Name == "cloud-to-dc" {
-			p.Interconnects.Rules[i].AdditionalApprovals = append(p.Interconnects.Rules[i].AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
+			p.Interconnects.Rules[i].AdditionalApprovals = append(p.Interconnects.Rules[i].AdditionalApprovals, charter.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
 		}
 	}
 	s.Requests.Policy = p
-	if _, err := s.Requests.Approve(ctx, ledgerApp, r.ID, r.PayloadSHA256, "", "ok"); slug(err) != "governance-policy-changed" {
+	if _, err := s.Requests.Approve(ctx, ledgerApp, r.ID, r.PayloadSHA256, "", "ok"); slug(err) != "charter-changed" {
 		t.Errorf("err = %v", err)
 	}
 	if st := status(t, o, r.ID); st != "FAILED_TO_APPLY" {

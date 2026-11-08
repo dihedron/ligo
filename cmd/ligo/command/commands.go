@@ -33,6 +33,6 @@ type Commands struct {
 	Exec     admin.Executors     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
 	BG       admin.BreakGlass    `command:"break-glass" description:"Emergency changes in approval-required jurisdictions (ADR-12)."`
 	Account  admin.Account       `command:"account" description:"Manage the registry of accounts (tenants): list, get, register, retire."`
-	Gov      admin.Governance    `command:"governance" description:"Show the governance policy and evaluate a planned change (ADR-13, ADR-14)."`
+	Gov      admin.Charter       `command:"charter" description:"Show the charter and evaluate a planned change (ADR-13, ADR-14)."`
 	Migrate  migrate.Migrate     `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
 }

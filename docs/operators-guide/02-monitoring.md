@@ -62,7 +62,7 @@ No metric carries a jurisdiction label, as jurisdictions are unbounded. Per-juri
 
 ## Webhooks
 
-Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">`. Receivers should check it, refuse timestamps older than 5 minutes, and deduplicate on `eventId`. A failure never delays the change it announces. Page on these at least: `BREAK_GLASS_USED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_GOVERNANCE_POLICY_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`.
+Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">`. Receivers should check it, refuse timestamps older than 5 minutes, and deduplicate on `eventId`. A failure never delays the change it announces. Page on these at least: `BREAK_GLASS_USED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_CHARTER_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`.
 
 With accounts, send `BINDING_TARGET_DECIDED_BY_PLATFORM` to each account's own team, by giving its webhook the account's jurisdiction. It tells a target's account that a platform approver decided for it. The account can revoke the binding alone.
 

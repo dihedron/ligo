@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 var ErrJurisdictionUnresolvable = errors.New("jurisdiction-unresolvable")
 
 // Extractor derives the jurisdiction of the sources of one trust domain
-// (governance.source_jurisdictions, §3.9).
+// (charter.source_jurisdictions, §3.9).
 type Extractor struct {
 	jurisdiction string // static mode
 	re           *regexp.Regexp

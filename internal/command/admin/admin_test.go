@@ -85,7 +85,7 @@ func TestReadCommands(t *testing.T) {
 		"/v1/admin/bindings/b1/audit":        {`{"items":[{"id":7,"occurredAt":"2026-10-30T10:00:00Z","action":"CR_APPLIED","actor":"dora"}]}`},
 		"/v1/admin/audit/verify":             {`{"valid":true,"entries":12}`},
 		"/v1/admin/maintenance":              {`{"maintenanceMode":true,"inFlight":1}`, `{"maintenanceMode":true,"inFlight":0}`},
-		"/v1/admin/governance":               {`{"policy":{"requiredJurisdictions":[]},"sha256":"ab"}`},
+		"/v1/admin/charter":                  {`{"policy":{"requiredJurisdictions":[]},"sha256":"ab"}`},
 		"/v1/admin/change-requests":          {`{"items":[{"id":"c1","resourceType":"BINDING","resourceName":"b1","operation":"CREATE","kind":"STANDARD","status":"PENDING","awaitingApproval":["TARGET"],"requestedBy":"olga"}]}`},
 		"/v1/admin/change-requests/c1":       {`{"id":"c1","payloadSha256":"ff"}`},
 		"/v1/admin/break-glass":              {`{"items":[{"id":"open","status":"APPLIED","breakGlass":{"expiresAt":"2999-01-01T00:00:00Z"},"sides":[{"basis":"BREAK_GLASS"}]},{"id":"ratified","status":"APPLIED","breakGlass":{"expiresAt":"2999-01-01T00:00:00Z"},"sides":[{"basis":"BREAK_GLASS","ratifiedBy":"dora"}]}]}`},
@@ -115,7 +115,7 @@ func TestReadCommands(t *testing.T) {
 		{"audit list", (&AuditList{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1/audit", []string{"7 2026-10-30T10:00:00Z CR_APPLIED dora -"}},
 		{"audit verify", (&AuditVerify{Base: b}).Execute, "GET /v1/admin/audit/verify", []string{"true 12 -"}},
 		{"maintenance status --wait-drained", (&MaintenanceStatus{Base: b, WaitDrained: true}).Execute, "GET /v1/admin/maintenance", []string{"true - - - 0 -"}},
-		{"governance show", (&GovernanceShow{Base: b}).Execute, "GET /v1/admin/governance", []string{"sha256: ab"}},
+		{"charter show", (&CharterShow{Base: b}).Execute, "GET /v1/admin/charter", []string{"sha256: ab"}},
 		{"cr list", (&ChangeRequestList{Base: b, AwaitingMe: true, Kind: "binding"}).Execute,
 			"GET /v1/admin/change-requests?awaitingMe=true&resourceType=BINDING", []string{"c1 BINDING b1 CREATE STANDARD PENDING TARGET olga"}},
 		{"cr get", (&ChangeRequestGet{Base: b, Args: struct {

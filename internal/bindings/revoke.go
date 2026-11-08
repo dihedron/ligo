@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,7 +30,7 @@ func (s *Service) RevokeOn(ctx context.Context, c changerequests.Caller, target,
 	if comment == "" {
 		return nil, invalid("comment is required")
 	}
-	if sourceJurisdiction != "" && !governance.ValidJurisdictionPattern(sourceJurisdiction) {
+	if sourceJurisdiction != "" && !charter.ValidJurisdictionPattern(sourceJurisdiction) {
 		return nil, invalid("sourceJurisdiction %q is not a jurisdiction pattern", sourceJurisdiction)
 	}
 	var jurisdiction, platformJurisdiction string
@@ -64,7 +64,7 @@ func (s *Service) RevokeOn(ctx context.Context, c changerequests.Caller, target,
 	automation, _ := json.Marshal(map[string]string{"bulkRevocation": target, "comment": comment})
 	var out []Revocation
 	for _, m := range matches {
-		if sourceJurisdiction != "" && !governance.JurisdictionMatches(sourceJurisdiction, m.jurisdiction) {
+		if sourceJurisdiction != "" && !charter.JurisdictionMatches(sourceJurisdiction, m.jurisdiction) {
 			continue
 		}
 		r, err := s.Delete(ctx, c, m.name, m.revision, approvalReference, automation)

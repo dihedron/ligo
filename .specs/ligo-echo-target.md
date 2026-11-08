@@ -69,7 +69,7 @@ test/lab/lab.sh cli ligo-ops get binding echo-bound-svid                        
 2. Sign in as `carol` (password in `test/lab/.state/passwords/ldap-carol`).
 3. **Sources → Register a source**: name `echo-bound-src`, trust domain `prod.lab`, SVID regex `^spiffe://prod\.lab/ns/echo/sa/bound$`, sample `spiffe://prod.lab/ns/echo/sa/bound`. The tester shows the jurisdiction `dc/corp-prod` and the match. Submit: the page shows the pending change request.
 4. As `dave` (password in `test/lab/.state/passwords/ldap-dave`; a separate browser, or a normal window beside a private one, since private windows share their cookies): **Bindings** → "Awaiting my decision" → the source's request → **Approve**. The wizard offers approved sources only, so the source is approved before the binding is requested.
-5. As `carol`: **Catalog → `echo-svid-target` → Request access**: level `echo`, source `echo-bound-src`, Review (set the name to `echo-bound-svid`: the wizard proposes `echo-bound-src-echo-svid-target`; the governance outcome lists the sides), Submit. The page shows the binding's change request, `PENDING`.
+5. As `carol`: **Catalog → `echo-svid-target` → Request access**: level `echo`, source `echo-bound-src`, Review (set the name to `echo-bound-svid`: the wizard proposes `echo-bound-src-echo-svid-target`; the charter outcome lists the sides), Submit. The page shows the binding's change request, `PENDING`.
 6. As `dave`: **Bindings** → "Awaiting my decision" → the binding's request → **Approve**, with "All my sides" if the selector offers it.
 7. Open **Bindings → `echo-bound-svid`**: the status row follows the provisioning until `ACTIVE`.
 

@@ -380,7 +380,7 @@ func (s *Server) bindingOperate(w http.ResponseWriter, r *http.Request) {
 	s.bindingStatus(w, r)
 }
 
-// bindingPreview is POST /ui/bindings/governance-preview: the governance
+// bindingPreview is POST /ui/bindings/charter-preview: the charter
 // outcome of the wizard's values (internal/preview).
 func (s *Server) bindingPreview(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
@@ -396,7 +396,7 @@ func (s *Server) bindingPreview(w http.ResponseWriter, r *http.Request) {
 	if e, err := s.preview().Evaluate(r.Context(), session(r).Caller(), b); err != nil {
 		d.Error = message(err)
 	} else {
-		d.Governance = e
+		d.Charter = e
 	}
 	s.fragment(w, r, http.StatusOK, "binding-check", d)
 }

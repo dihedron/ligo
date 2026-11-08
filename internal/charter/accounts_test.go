@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"strings"

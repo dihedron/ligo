@@ -12,8 +12,8 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -189,7 +189,7 @@ func TestAC55(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
 	s.Requests.Policy.BreakGlassPolicies = append(s.Requests.Policy.BreakGlassPolicies,
-		governance.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
+		charter.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
 	rescuer := caller("rita", role(config.RoleBreakGlass, "cloud/fin-01/*", "dc/corp-prod/*", "sec/infosec"))
 	name := "fin-01-payments-p-" + w.suffix
 	create := func(n string) []byte {

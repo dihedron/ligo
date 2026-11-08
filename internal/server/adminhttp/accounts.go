@@ -50,7 +50,7 @@ func (s *Server) getAccount(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusForbidden, "forbidden", "viewer or account_admin role required")
 		return
 	}
-	a, err := accounts.Get(r.Context(), s.DB, c, s.Config.Governance.Accounts, r.PathValue("name"))
+	a, err := accounts.Get(r.Context(), s.DB, c, s.Config.Charter.Accounts, r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -72,7 +72,7 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	list, more, err := accounts.List(r.Context(), s.DB, c, s.Config.Governance.Accounts, cursor.AfterName, size)
+	list, more, err := accounts.List(r.Context(), s.DB, c, s.Config.Charter.Accounts, cursor.AfterName, size)
 	if err != nil {
 		s.fail(w, r, err)
 		return

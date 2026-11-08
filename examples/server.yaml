@@ -98,7 +98,7 @@ authorization:                            # roles are granted on jurisdiction pa
     require_distinct_approvers_across_jurisdictions: true        # ADR-13 rule 7 (default true)
     change_request_ttl: 72h
 
-governance:                               # ADR-13, ADR-14, §3.9
+charter:                               # ADR-13, ADR-14, §3.9
   source_jurisdictions:                          # exactly one entry per trust domain listed in any allowed_source_trust_domains
     - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
     - { trust_domain: test.internal, mode: static, jurisdiction: "dc/corp-test" }
@@ -211,7 +211,7 @@ notifications:                            # §7.5
       timeout: 5s
       events: [BREAK_GLASS_USED, BREAK_GLASS_EXPIRING, BREAK_GLASS_REVERTED, BREAK_GLASS_REVERT_FAILED,
                BREAK_GLASS_RATIFIED, BREAK_GLASS_REVIEW_OVERDUE, CONFIG_APPROVAL_POLICY_WEAKENED,
-               CONFIG_GOVERNANCE_POLICY_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
+               CONFIG_CHARTER_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
     - name: dba-queue                     # the data centre DBAs' ticket queue: only their own decisions
       url: "https://tickets.corp.internal/hooks/ligo-dba"
       ca_cert_file: "/etc/ligo/tls/corp-ca.crt"

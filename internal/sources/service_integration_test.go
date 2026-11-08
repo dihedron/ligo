@@ -11,8 +11,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -314,12 +314,12 @@ func TestAccountRequired(t *testing.T) {
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
 	account := "t" + x
-	static, err := governance.NewStaticExtractor("cloud/" + account + "/app/p1")
+	static, err := charter.NewStaticExtractor("cloud/" + account + "/app/p1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Rules.Extractors["cloud.internal"] = static
-	s.Rules.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}"}
+	s.Rules.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}"}
 	cfg := example(t)
 	cfg.Authorization.Approval.RequiredJurisdictions = append(cfg.Authorization.Approval.RequiredJurisdictions, "cloud/*")
 	s.Requests.Policy = cfg.Policy() // or the requests would apply at once

@@ -51,7 +51,7 @@ func (s *Server) catalogTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 // catalogTarget: the target with its access levels and flows, and the
-// governance outcome for each of the caller's sources.
+// charter outcome for each of the caller's sources.
 func (s *Server) catalogTarget(w http.ResponseWriter, r *http.Request) {
 	v, err := s.Targets.Get(r.Context(), caller(r), r.PathValue("name"))
 	var outcomes []catalog.Outcome

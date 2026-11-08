@@ -414,13 +414,13 @@ func (s *Server) targetOf(r *http.Request, name string) (*targets.Target, error)
 	return t, nil
 }
 
-// TargetCheck is the governance outcome of the target form.
+// TargetCheck is the charter outcome of the target form.
 type TargetCheck struct {
-	Governance any
-	Error      string
+	Charter any
+	Error   string
 }
 
-// targetPreview is POST /ui/targets/preview: the governance outcome of the
+// targetPreview is POST /ui/targets/preview: the charter outcome of the
 // target's name, platform and jurisdiction (internal/preview).
 func (s *Server) targetPreview(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
@@ -433,7 +433,7 @@ func (s *Server) targetPreview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		d.Error = message(err)
 	} else {
-		d.Governance = e
+		d.Charter = e
 	}
 	s.fragment(w, r, http.StatusOK, "target-check", d)
 }

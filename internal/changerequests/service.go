@@ -13,8 +13,8 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/audit"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -37,9 +37,9 @@ type Resource interface {
 // Rechecker is a Resource whose requests also depend on the policy beyond
 // their sides' approval requirements (bindings: ADR-14 rule 5).
 type Rechecker interface {
-	// Recheck fails, with governance-policy-changed, a request that the
+	// Recheck fails, with charter-changed, a request that the
 	// policy now in force would refuse or give other sides.
-	Recheck(r *Request, p *governance.Policy) error
+	Recheck(r *Request, p *charter.Policy) error
 }
 
 // Differ is a Resource that shows how a request changes the current
@@ -78,7 +78,7 @@ func IsBusy(err error) bool {
 // Service files and decides change requests.
 type Service struct {
 	DB        *pgxpool.Pool // the app pool
-	Policy    *governance.Policy
+	Policy    *charter.Policy
 	TTL       time.Duration // change_request_ttl
 	Resources map[string]Resource
 	// BreakGlassRules are the request-level break-glass rules (ADR-12); the
@@ -294,7 +294,7 @@ const OpenBreakGlass = `r.kind = 'BREAK_GLASS' AND r.status = 'APPLIED' AND r.re
 		ELSE EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = r.id) END`
 
 func (s *Service) checkOpen(ctx context.Context, tx pgx.Tx, items []filed) error {
-	var policies []*governance.BreakGlassPolicy
+	var policies []*charter.BreakGlassPolicy
 	for _, it := range items {
 		for _, sd := range it.r.Sides {
 			if p := s.Policy.BreakGlassPolicyFor(sd.Jurisdiction); sd.Basis == BasisBreakGlass && p != nil && !slices.Contains(policies, p) {
@@ -692,7 +692,7 @@ func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, boo
 				return nil, false, err
 			}
 			if !c.Grants.Sees(r.jurisdictions()...) || f.Jurisdiction != "" && !slices.ContainsFunc(r.jurisdictions(), func(sc string) bool {
-				return governance.JurisdictionMatches(f.Jurisdiction, sc)
+				return charter.JurisdictionMatches(f.Jurisdiction, sc)
 			}) {
 				continue
 			}
@@ -780,7 +780,7 @@ func (s *Service) apply(ctx context.Context, tx pgx.Tx, r *Request, res Resource
 func (s *Service) recheck(r *Request, res Resource) error {
 	for _, sd := range r.Sides {
 		if sd.Basis == BasisAuto && s.Policy.ApprovalRequired(sd.Jurisdiction) {
-			return refuse(409, "governance-policy-changed", "side %s now needs an approver: file the change again", sd.Name)
+			return refuse(409, "charter-changed", "side %s now needs an approver: file the change again", sd.Name)
 		}
 	}
 	if rc, ok := res.(Rechecker); ok {

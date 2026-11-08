@@ -25,8 +25,8 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -63,7 +63,7 @@ func wants(w config.Webhook, e Event) bool {
 		return true
 	}
 	return slices.ContainsFunc(w.Jurisdictions, func(p string) bool {
-		return slices.ContainsFunc(e.Jurisdictions, func(s string) bool { return governance.JurisdictionMatches(p, s) })
+		return slices.ContainsFunc(e.Jurisdictions, func(s string) bool { return charter.JurisdictionMatches(p, s) })
 	})
 }
 

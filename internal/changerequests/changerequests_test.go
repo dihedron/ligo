@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/dihedron/ligo/internal/authz"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 const (
@@ -17,7 +17,7 @@ const (
 	ledger   = "dc/corp-prod/ledger"   // requires approval
 )
 
-var policy = &governance.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*"}}
+var policy = &charter.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*"}}
 
 func grant(role string, jurisdictions ...string) authz.Grant {
 	return authz.Grant{Role: role, Jurisdictions: jurisdictions}

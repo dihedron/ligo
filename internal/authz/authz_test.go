@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 const groups = ",ou=groups,dc=corp,dc=internal"
@@ -210,7 +210,7 @@ func TestInJurisdictions(t *testing.T) {
 // TestAccountGroups: TN-7, TN-8 and TN-18: a group gives its rule's role on its
 // account only while that account is active, added to the static bindings.
 func TestAccountGroups(t *testing.T) {
-	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=corp", Roles: []governance.AccountRole{
+	rules, err := (&charter.AccountGroups{SearchBase: "ou=accounts,dc=corp", Roles: []charter.AccountRole{
 		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/*"},
 		{GroupDN: "cn=approvers,ou={project},ou={account},ou=accounts,dc=corp", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/app/{project}"},
 	}}).Compile()

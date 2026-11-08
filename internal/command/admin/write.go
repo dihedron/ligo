@@ -487,14 +487,14 @@ func (cmd *BreakGlassDelete) Execute([]string) error {
 	})
 }
 
-// GovernanceCheck evaluates the manifest's documents without filing them
-// (ligo governance check -f FILE).
-type GovernanceCheck struct {
+// CharterCheck evaluates the manifest's documents without filing them
+// (ligo charter check -f FILE).
+type CharterCheck struct {
 	Base
 	File string `short:"f" long:"file" required:"true" description:"Manifest to evaluate (YAML or JSON, or '-' for stdin)."`
 }
 
-func (cmd *GovernanceCheck) Execute([]string) error {
+func (cmd *CharterCheck) Execute([]string) error {
 	docs, err := readManifest(cmd.File)
 	if err != nil {
 		return err
@@ -519,7 +519,7 @@ func (cmd *GovernanceCheck) Execute([]string) error {
 				body = map[string]any{"kind": d.kind, "metadata": body["metadata"], "identity": body["identity"]}
 			}
 			var v any
-			if err := c.Do(ctx, "POST", path("governance", "evaluate"), nil, body, &v); err != nil {
+			if err := c.Do(ctx, "POST", path("charter", "evaluate"), nil, body, &v); err != nil {
 				return nil, nil, fmt.Errorf("%s %s: %w", strings.ToLower(d.kind), d.name, err)
 			}
 			items = append(items, v)

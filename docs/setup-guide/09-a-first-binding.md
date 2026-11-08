@@ -57,7 +57,7 @@ accessLevel: read
 ```
 
 ```bash
-ligo governance check -f binding.yaml   # the jurisdictions, the rule and the sides it will need
+ligo charter check -f binding.yaml   # the jurisdictions, the rule and the sides it will need
 ligo apply -f binding.yaml --wait
 ligo get binding payments-ledger
 ```

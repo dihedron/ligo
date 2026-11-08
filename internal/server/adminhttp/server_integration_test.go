@@ -429,8 +429,8 @@ func TestViewerRequired(t *testing.T) {
 		{"GET", "/v1/admin/bindings"},
 		{"GET", "/v1/admin/catalog/targets"},
 		{"GET", "/v1/admin/catalog/sources"},
-		{"GET", "/v1/admin/governance"},
-		{"POST", "/v1/admin/governance/evaluate"},
+		{"GET", "/v1/admin/charter"},
+		{"POST", "/v1/admin/charter/evaluate"},
 		{"GET", "/v1/admin/maintenance"},
 		{"GET", "/v1/admin/audit/verify"},
 		{"GET", "/v1/admin/platforms/oracle-prod"},
@@ -1095,10 +1095,10 @@ func TestCatalogAPI(t *testing.T) {
 	}
 }
 
-// TestGovernanceAPI: the policy in force with its SHA-256, and the dry run
+// TestCharterAPI: the policy in force with its SHA-256, and the dry run
 // of a binding, a source and a target: jurisdictions, name prefix, interconnection
 // rule and sides with their basis, storing nothing.
-func TestGovernanceAPI(t *testing.T) {
+func TestCharterAPI(t *testing.T) {
 	v := setup(t, config.AdminListener{})
 	ctx := context.Background()
 	olga, viewer := v.client(t, opID), v.client(t, viewerID)
@@ -1108,9 +1108,9 @@ func TestGovernanceAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g := v.do(t, viewer, "GET", "/v1/admin/governance", nil)
+	g := v.do(t, viewer, "GET", "/v1/admin/charter", nil)
 	if p, _ := g.body["policy"].(map[string]any); g.code != 200 || g.body["sha256"] != v.bs.Requests.Policy.SHA256() || p["interconnects"] == nil {
-		t.Fatalf("governance: %d %v", g.code, g.body["sha256"])
+		t.Fatalf("charter: %d %v", g.code, g.body["sha256"])
 	}
 
 	var before int64
@@ -1142,21 +1142,21 @@ func TestGovernanceAPI(t *testing.T) {
 		{"target", map[string]any{"kind": "Target", "metadata": map[string]string{"name": "ledger-" + x, "platform": "oracle-prod", "jurisdiction": "dc/corp-prod/ledger"}},
 			"OWNER:HUMAN,PLATFORM:HUMAN", "<nil>", "true"},
 	} {
-		r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", tc.body)
+		r := v.do(t, olga, "POST", "/v1/admin/charter/evaluate", tc.body)
 		if r.code != 200 || sides(r) != tc.sides || fmt.Sprint(r.body["interconnect"]) != tc.rule ||
 			fmt.Sprint(r.body["namePrefix"].(map[string]any)["valid"]) != tc.valid {
 			t.Errorf("%s: %d %+v", tc.name, r.code, r.body)
 		}
 	}
 	v.bs.Requests.Policy.RequiredJurisdictions = nil
-	if r := v.do(t, olga, "POST", "/v1/admin/governance/evaluate", map[string]any{"resourceType": "BINDING", "name": "eval-" + x,
+	if r := v.do(t, olga, "POST", "/v1/admin/charter/evaluate", map[string]any{"resourceType": "BINDING", "name": "eval-" + x,
 		"source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read"}); sides(r) != "TARGET:AUTO" {
 		t.Errorf("no approval required: %+v", r.body)
 	}
 	for body, code := range map[string]int{`{"resourceType":"BINDING","source":"src-` + x + `","target":"nope-` + x + `","accessLevel":"read"}`: 404,
 		`{"resourceType":"BINDING","source":"src-` + x + `","target":"tgt-` + x + `","accessLevel":"admin"}`: 422,
 		`{"kind":"Other"}`: 422, `[]`: 422} {
-		req, _ := http.NewRequest("POST", v.srv.URL+"/v1/admin/governance/evaluate", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", v.srv.URL+"/v1/admin/charter/evaluate", strings.NewReader(body))
 		resp, err := olga.Do(req)
 		if err != nil || resp.StatusCode != code {
 			t.Errorf("%s: %v %v, want %d", body, err, resp.StatusCode, code)

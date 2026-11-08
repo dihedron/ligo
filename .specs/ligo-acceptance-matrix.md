@@ -76,14 +76,14 @@ This file is the index of §11.2 and of the invariants of §4: where each one is
 | AC-41 | Covered | U+B | TestThemeBrowser, TestLayout | Persistence: a new navigation and the cookie's one-year `Max-Age`; no real browser restart. |
 | AC-42 | Covered | U+B | TestLogoSandboxBrowser, TestHandler | The same SVG without the CSP runs its script, as a control. |
 | AC-43 | Covered | U | TestLoadRefuses |  |
-| AC-44 | Covered | I | TestAC44 (bindings, governance) |  |
+| AC-44 | Covered | I | TestAC44 (bindings, charter) |  |
 | AC-45 | Covered | U | TestAC45, TestAppendixD2Extraction |  |
 | AC-46 | Covered | U | TestValidate (sources) |  |
 | AC-47 | Covered | I | TestAC47 |  |
 | AC-48 | Covered | I | TestAC48 |  |
 | AC-49 | Covered | I | TestAC49, TestINV18 |  |
 | AC-50 | Covered | L | TestServeHAConcurrentApproval, TestAC50 |  |
-| AC-51 | Covered | I | TestAC51 (bindings, governance) |  |
+| AC-51 | Covered | I | TestAC51 (bindings, charter) |  |
 | AC-52 | Covered | I | TestAC52 (bindings, changerequests) | Restart replaced by a changed policy in process. |
 | AC-53 | Covered | I | TestRevoke |  |
 | AC-54 | Covered | I+U | TestAC54, TestBuildSides |  |

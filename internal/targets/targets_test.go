@@ -11,9 +11,9 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 func example(t *testing.T) *config.Config {
@@ -292,7 +292,7 @@ func TestMetadata(t *testing.T) {
 // TN-1 and the form of a target's jurisdiction, in the pipeline itself.
 func TestNamespace(t *testing.T) {
 	r := rules(t)
-	r.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
+	r.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 	r.NamespaceField = func(typ string) string { return "schema" }
 	p := r.Platforms["oracle-prod"]
 	p.TargetJurisdictions, p.NamespaceTemplate = []string{"cloud/*", "dc/corp-prod/*"}, "{account}_{tenancy}"

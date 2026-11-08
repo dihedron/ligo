@@ -1,5 +1,5 @@
-// Package preview is the governance dry run of a planned creation (§7.2.3,
-// POST /v1/admin/governance/evaluate), shared by the admin API and the
+// Package preview is the charter dry run of a planned creation (§7.2.3,
+// POST /v1/admin/charter/evaluate), shared by the admin API and the
 // UI's forms (§7.4): the jurisdictions, the name-prefix check, the consent rule,
 // the deciding interconnection rule and the sides with their basis. It
 // stores nothing and calls no plugin; RBAC and the other validations
@@ -14,8 +14,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/engine"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 )
@@ -48,7 +48,7 @@ type Side struct {
 	DecidedAt    *time.Time `json:"decidedAt,omitempty"`
 }
 
-// Evaluation is the governance outcome of a planned CREATE.
+// Evaluation is the charter outcome of a planned CREATE.
 type Evaluation struct {
 	ResourceType  string            `json:"resourceType"`
 	Name          string            `json:"name"`
@@ -100,7 +100,7 @@ func (v *Evaluator) Evaluate(ctx context.Context, c changerequests.Caller, body 
 	return e, nil
 }
 
-func checkName(kind engine.Kind, name, jurisdiction string, prefixes []governance.NamePrefix) NameCheck {
+func checkName(kind engine.Kind, name, jurisdiction string, prefixes []charter.NamePrefix) NameCheck {
 	if err := engine.CheckName(kind, name, jurisdiction, prefixes); err != nil {
 		return NameCheck{Detail: err.Error()}
 	}
@@ -202,7 +202,7 @@ func (v *Evaluator) target(b []byte) (*Evaluation, []changerequests.Candidate, e
 	if !ok {
 		return nil, nil, invalidBody("metadata.platform " + m.Platform + " is not a configured platform")
 	}
-	if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return governance.JurisdictionMatches(pat, m.Jurisdiction) }) {
+	if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, m.Jurisdiction) }) {
 		return nil, nil, invalidBody("metadata.jurisdiction " + m.Jurisdiction + " is not in the target_jurisdictions of " + p.Name)
 	}
 	e := &Evaluation{ResourceType: "TARGET", Name: m.Name, Consent: changerequests.ConsentAll,

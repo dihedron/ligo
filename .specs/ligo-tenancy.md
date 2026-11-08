@@ -32,10 +32,10 @@ A namespace is a jurisdiction (§3.9), so the terms Source, Binding, Target, Pla
 
 ## 4. The structure of jurisdictions
 
-`governance.accounts` in `server.yaml` declares the structure once:
+`charter.accounts` in `server.yaml` declares the structure once:
 
 ```yaml
-governance:
+charter:
   accounts:
     jurisdiction: "cloud/{account}"                  # the account's root
     source_jurisdiction: "cloud/{account}/app/{project}"
@@ -172,7 +172,7 @@ CLI: `ligo account list|get|register|retire`. UI: an **Accounts** page, shown to
 
 ### 7.5 What stays in `server.yaml`
 
-Platforms (plugin wiring, bootstrap credentials, privilege bounds), the interconnection policy, approval requirements, extractors, and `governance.accounts` itself. ADR-14 rule 8 and T-22 keep guardrails out of the API so that ligo's administrators cannot weaken rules they are subject to. Only data about tenants moves to the database.
+Platforms (plugin wiring, bootstrap credentials, privilege bounds), the interconnection policy, approval requirements, extractors, and `charter.accounts` itself. ADR-14 rule 8 and T-22 keep guardrails out of the API so that ligo's administrators cannot weaken rules they are subject to. Only data about tenants moves to the database.
 
 ## 8. Roles from LDAP
 
@@ -197,7 +197,7 @@ The DNs are sorted, as a session keeps its token only while its grants compare e
 ### 9.1 Configuration
 
 ```yaml
-governance:
+charter:
   interconnects:
     default_cross_jurisdiction: deny
     rules:
@@ -207,7 +207,7 @@ authorization:
     required_jurisdictions: ["cloud/*"]
 ```
 
-Without `required_jurisdictions`, an account operator's own sides would be approved automatically (`AUTO`), and nobody would approve a binding inside the account. Startup refuses `governance.accounts` when `required_jurisdictions` does not cover `jurisdiction`.
+Without `required_jurisdictions`, an account operator's own sides would be approved automatically (`AUTO`), and nobody would approve a binding inside the account. Startup refuses `charter.accounts` when `required_jurisdictions` does not cover `jurisdiction`.
 
 ### 9.2 Who decides a binding
 
@@ -284,7 +284,7 @@ T-29 and R-08 (SPIRE registration) are unchanged, and matter more here: account 
 
 **Chunks**, each its own commit, on one branch per PR:
 
-1. `governance.accounts`, its startup rules, template expansion (U).
+1. `charter.accounts`, its startup rules, template expansion (U).
 2. The registry in `001`, its API, CLI and triggers.
 3. Namespaces: capability, engine check, startup check, `ligo-plugin-postgres` `namespace_field`.
 4. `grantable_role_templates`.

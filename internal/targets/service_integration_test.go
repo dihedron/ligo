@@ -11,8 +11,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -352,7 +352,7 @@ func TestAccountRequired(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
-	s.Rules.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
+	s.Rules.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	const account = "ledger"
 	tg := ledger()
 	tg.Metadata.Name = "acct-" + x
@@ -407,7 +407,7 @@ func TestNamespaceAtApproval(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()
 	x := uuid.NewV7().String()[24:]
-	s.Rules.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
+	s.Rules.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	s.Rules.NamespaceField = func(string) string { return "schema" }
 	p := s.Rules.Platforms["oracle-prod"]
 	p.NamespaceTemplate = "{account}_ok"

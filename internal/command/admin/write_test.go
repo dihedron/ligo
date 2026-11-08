@@ -150,7 +150,7 @@ func TestWriteCommands(t *testing.T) {
 		"/v1/admin/maintenance":                           {`{"maintenanceMode":true,"inFlight":0}`},
 		"/v1/admin/executors/ligo1/recover":               {`{"executor":"ligo1","recovered":1,"otherVersions":0}`},
 		"/v1/admin/break-glass":                           {applied},
-		"/v1/admin/governance/evaluate":                   {`{"resourceType":"BINDING","name":"b1","consent":"ALL","sides":[]}`},
+		"/v1/admin/charter/evaluate":                      {`{"resourceType":"BINDING","name":"b1","consent":"ALL","sides":[]}`},
 	})
 	var out bytes.Buffer
 	b := f.base(t, "table", &out)
@@ -195,7 +195,7 @@ func TestWriteCommands(t *testing.T) {
 		{"break-glass apply", (&BreakGlassApply{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1"}, File: bgFile}).Execute,
 			"POST /v1/admin/break-glass", `"inlineSource":{"kind":"Source","metadata":{"name":"s9"}}`},
 		{"break-glass delete", bgDel.Execute, "POST /v1/admin/break-glass", `"operation":"DELETE"`},
-		{"governance check", (&GovernanceCheck{Base: b, File: bgFile}).Execute, "POST /v1/admin/governance/evaluate", `"source":{"svidRegex":null,"trustDomain":null}`},
+		{"charter check", (&CharterCheck{Base: b, File: bgFile}).Execute, "POST /v1/admin/charter/evaluate", `"source":{"svidRegex":null,"trustDomain":null}`},
 	} {
 		out.Reset()
 		if err := tc.run(nil); err != nil {

@@ -209,7 +209,7 @@ func (s *Server) catalogSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // CardPage is a catalog target card: the target, its flows before any
-// binding (no secret store), the same as JSON to copy, and the governance
+// binding (no secret store), the same as JSON to copy, and the charter
 // outcome for each of the user's sources.
 type CardPage struct {
 	Target    *targets.View

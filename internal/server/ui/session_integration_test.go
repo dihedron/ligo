@@ -28,8 +28,8 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -432,7 +432,7 @@ func TestSessionCSRF(t *testing.T) {
 // unchanged: the next re-check removes the only grant, so the session ends.
 func TestSessionAccountRetired(t *testing.T) {
 	v := sessionSetup(t)
-	rules, err := (&governance.AccountGroups{SearchBase: "ou=accounts,dc=ligo,dc=lab", Roles: []governance.AccountRole{
+	rules, err := (&charter.AccountGroups{SearchBase: "ou=accounts,dc=ligo,dc=lab", Roles: []charter.AccountRole{
 		{GroupDN: "cn=approvers,ou={account},ou=accounts,dc=ligo,dc=lab", Role: config.RoleApprover, Jurisdiction: "cloud/{account}/*"}}}).Compile()
 	if err != nil {
 		t.Fatal(err)
@@ -750,7 +750,7 @@ func TestDecisions(t *testing.T) {
 	}
 }
 
-// TestSourceForms: the regex tester with the governance outcome, then a
+// TestSourceForms: the regex tester with the charter outcome, then a
 // source registered, changed, deprecated and retired from the UI, each
 // navigation an HX-Redirect and each refusal a 409 or 422 in the form.
 func TestSourceForms(t *testing.T) {
@@ -775,7 +775,7 @@ func TestSourceForms(t *testing.T) {
 		"samples": {"spiffe://prod.internal/ns/uis/sa/" + x + "\nspiffe://prod.internal/ns/other/sa/x"}, "labels": {"team=ledger"}}
 	resp, check := b.do("POST", "/ui/sources/test", form)
 	if resp.StatusCode != 200 || !strings.Contains(check, "dc/corp-prod") || !strings.Contains(check, ">matches<") ||
-		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Governance") || !strings.Contains(check, "OWNER") {
+		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Charter") || !strings.Contains(check, "OWNER") {
 		t.Errorf("tester: %d %s", resp.StatusCode, check)
 	}
 	form.Set("samples", "spiffe://prod.internal/ns/uis/sa/"+x) // the service requires every sample to match
@@ -935,7 +935,7 @@ func TestTargetForms(t *testing.T) {
 	}
 }
 
-// TestWizard: the binding wizard step by step, its governance preview and
+// TestWizard: the binding wizard step by step, its charter preview and
 // submission; an inline source the binding depends on (AC-74); then the
 // binding edited, retried, rotated and revoked from its page.
 func TestWizard(t *testing.T) {
@@ -977,12 +977,12 @@ func TestWizard(t *testing.T) {
 	}
 	review := step(5, url.Values{"accessLevel": {"read"}, "source": {"src-" + x}})
 	name := "src-" + x + "-tgt-" + x
-	if !strings.Contains(review, `name="name" value="`+name+`"`) || !strings.Contains(review, "/ui/bindings/governance-preview") ||
+	if !strings.Contains(review, `name="name" value="`+name+`"`) || !strings.Contains(review, "/ui/bindings/charter-preview") ||
 		!strings.Contains(review, "ligo-workload-api") {
 		t.Errorf("review: %s", review)
 	}
 	form := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "source": {"src-" + x}, "name": {name}, "purpose": {"reporting"}}
-	if _, check := b.do("POST", "/ui/bindings/governance-preview", form); !strings.Contains(check, "TARGET") {
+	if _, check := b.do("POST", "/ui/bindings/charter-preview", form); !strings.Contains(check, "TARGET") {
 		t.Errorf("preview: %s", check)
 	}
 	resp, body := b.do("POST", "/ui/bindings", form)

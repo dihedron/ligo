@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-// The placeholders of governance.accounts (.specs/ligo-tenancy.md §4).
+// The placeholders of charter.accounts (.specs/ligo-tenancy.md §4).
 const (
 	account = "{account}"
 	project = "{project}"

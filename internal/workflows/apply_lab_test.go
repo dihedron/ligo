@@ -24,8 +24,8 @@ import (
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sealing"
@@ -191,7 +191,7 @@ func labBinding(t *testing.T) *lab {
 			IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod",
 			SecretStorageStrategy: "vault-static"}}},
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
-	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &governance.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
+	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &charter.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
 		Resources: map[string]changerequests.Resource{"BINDING": bs}}
 	operator := changerequests.Caller{Principal: authz.Principal{Name: "olga"}, Grants: authz.Grants{{Role: config.RoleOperator, Jurisdictions: []string{"dc/*"}}}}
 	name := "e2e-" + x
@@ -345,7 +345,7 @@ func TestLabBreakGlass(t *testing.T) {
 	l := labBinding(t)
 	p := l.bs.Requests.Policy
 	p.RequiredJurisdictions = []string{"dc/corp-prod"}
-	p.BreakGlassPolicies = []governance.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}, DefaultTTL: time.Hour, MaxTTL: 2 * time.Hour, MaxOpen: 100,
+	p.BreakGlassPolicies = []charter.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}, DefaultTTL: time.Hour, MaxTTL: 2 * time.Hour, MaxOpen: 100,
 		WarnBefore: 10 * time.Minute}}
 	livia := changerequests.Caller{Principal: authz.Principal{Name: "livia"}, Grants: authz.Grants{{Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/*"}}}}
 	binding := fmt.Sprintf(`{"name":%q,"source":%q,"target":%q,"accessLevel":"read","purpose":"incident INC0012345","expectedRevision":1}`,

@@ -254,7 +254,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 
 	// the accounts behind the roles that directory groups derive
 	var registry *accounts.Registry
-	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+	if a := cfg.Charter.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
 		rules, err := a.LDAPGroups.Compile()
 		if err != nil {
 			return err
@@ -634,7 +634,7 @@ func ldap(cfg *config.Config) (*adminauth.LDAP, error) {
 		}
 	}
 	l := &adminauth.LDAP{Config: c, BindPassword: password, RootCAs: roots, Groups: groups}
-	if a := cfg.Governance.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
+	if a := cfg.Charter.Accounts; a != nil && len(a.LDAPGroups.Roles) > 0 {
 		l.GroupSearchBase = a.LDAPGroups.SearchBase
 	}
 	return l, nil

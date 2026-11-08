@@ -11,7 +11,7 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/jackc/pgx/v5"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -130,7 +130,7 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 			}
 			read++
 			after = st.Metadata.Name
-			if visible(c, st) && (f.Jurisdiction == "" || governance.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction)) {
+			if visible(c, st) && (f.Jurisdiction == "" || charter.JurisdictionMatches(f.Jurisdiction, st.Metadata.Jurisdiction)) {
 				batch = append(batch, v)
 			}
 		}

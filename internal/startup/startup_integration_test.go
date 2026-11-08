@@ -15,8 +15,8 @@ import (
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -211,7 +211,7 @@ func TestConfigLoaded(t *testing.T) {
 		t.Fatalf("CONFIG_LOADED: %v", loaded)
 	}
 	before = v.lastAudit(t) // the first load compared with whatever started last, maybe another test's configuration
-	if err := c.configLoaded(ctx); err != nil || len(v.audited(t, before, "CONFIG_GOVERNANCE_POLICY_CHANGED")) != 0 {
+	if err := c.configLoaded(ctx); err != nil || len(v.audited(t, before, "CONFIG_CHARTER_CHANGED")) != 0 {
 		t.Errorf("same policy reported as changed (%v)", err)
 	}
 
@@ -220,14 +220,14 @@ func TestConfigLoaded(t *testing.T) {
 	if err := c.configLoaded(ctx); err != nil {
 		t.Fatal(err)
 	}
-	changed, weakened := v.audited(t, before, "CONFIG_GOVERNANCE_POLICY_CHANGED"), v.audited(t, before, "CONFIG_APPROVAL_POLICY_WEAKENED")
+	changed, weakened := v.audited(t, before, "CONFIG_CHARTER_CHANGED"), v.audited(t, before, "CONFIG_APPROVAL_POLICY_WEAKENED")
 	if len(changed) != 1 || !strings.Contains(changed[0], `"field": "requiredJurisdictions"`) || len(weakened) != 1 ||
 		!strings.Contains(weakened[0], "removed from required_jurisdictions") {
 		t.Errorf("changed %v, weakened %v", changed, weakened)
 	}
 	// the next start compares with the weaker policy: stricter again is a change, not a weakening
 	c = v.checks(t)
-	if err := c.configLoaded(ctx); err != nil || len(v.audited(t, before, "CONFIG_GOVERNANCE_POLICY_CHANGED")) != 2 ||
+	if err := c.configLoaded(ctx); err != nil || len(v.audited(t, before, "CONFIG_CHARTER_CHANGED")) != 2 ||
 		len(v.audited(t, before, "CONFIG_APPROVAL_POLICY_WEAKENED")) != 1 {
 		t.Errorf("stricter policy (%v)", err)
 	}
@@ -280,7 +280,7 @@ func TestJurisdictions(t *testing.T) {
 	x := v.x
 	td := "st" + x + ".internal"
 	c := v.checks(t)
-	moved, err := governance.NewStaticExtractor("lab/st" + x + "/moved")
+	moved, err := charter.NewStaticExtractor("lab/st" + x + "/moved")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,8 +351,8 @@ func TestNamesAndInterconnects(t *testing.T) {
 	if err := c.names(ctx); err != nil && strings.Contains(err.Error(), x) {
 		t.Fatalf("names: %v", err)
 	}
-	c.Config.Governance.NamePrefixes = append([]governance.NamePrefix{{Jurisdictions: []string{"dc/corp-prod/n" + x}, Prefix: "{5}-"}},
-		c.Config.Governance.NamePrefixes...)
+	c.Config.Charter.NamePrefixes = append([]charter.NamePrefix{{Jurisdictions: []string{"dc/corp-prod/n" + x}, Prefix: "{5}-"}},
+		c.Config.Charter.NamePrefixes...)
 	if err := c.names(ctx); err == nil || !strings.Contains(err.Error(), "target jurisdiction dc/corp-prod/n"+x) {
 		t.Errorf("unresolvable prefix: %v", err)
 	}
@@ -390,9 +390,9 @@ func TestBreakGlassParties(t *testing.T) {
 	c := v.checks(t)
 	var logs bytes.Buffer
 	c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
-	c.policy.BreakGlassPolicies = []governance.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}}}
-	c.policy.Interconnects.Rules = []governance.InterconnectRule{{Name: "gap-" + v.x,
-		AdditionalApprovals: []governance.AdditionalApproval{{Name: "security", Jurisdiction: "sec/infosec"}}}}
+	c.policy.BreakGlassPolicies = []charter.BreakGlassPolicy{{Jurisdictions: []string{"dc/*"}}}
+	c.policy.Interconnects.Rules = []charter.InterconnectRule{{Name: "gap-" + v.x,
+		AdditionalApprovals: []charter.AdditionalApproval{{Name: "security", Jurisdiction: "sec/infosec"}}}}
 	before := v.lastAudit(t)
 	if err := c.breakGlassParties(context.Background()); err != nil {
 		t.Fatal(err)
@@ -495,14 +495,14 @@ func TestAccountDrift(t *testing.T) {
 	td := account + ".internal"
 	c := v.checks(t)
 	jurisdiction := "dc/corp-prod/" + account
-	static, err := governance.NewStaticExtractor(jurisdiction)
+	static, err := charter.NewStaticExtractor(jurisdiction)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Extractors[td] = static
 	src := v.source(t, "acs-"+x, jurisdiction, td)
 	tgt := v.target(t, "act-"+x, "oracle-prod", jurisdiction, "dc/corp-prod")
-	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
+	c.Config.Charter.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	stored := func(table string, id uuid.UUID) string {
 		t.Helper()
 		var a string
@@ -540,7 +540,7 @@ func TestAccountDrift(t *testing.T) {
 		t.Errorf("settled: %v", err)
 	}
 	// the structure removed: the resources are no longer account-managed
-	c.Config.Governance.Accounts = nil
+	c.Config.Charter.Accounts = nil
 	if err := c.jurisdictions(ctx); err == nil || !strings.Contains(err.Error(), `account "`+account+`" to ""`) {
 		t.Fatalf("structure removed: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestJurisdictionForm(t *testing.T) {
 	c := v.checks(t)
 	td := account + ".internal"
 	jurisdiction := "dc/corp-prod/" + account
-	static, err := governance.NewStaticExtractor(jurisdiction)
+	static, err := charter.NewStaticExtractor(jurisdiction)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestJurisdictionForm(t *testing.T) {
 	v.source(t, "fs-"+x, jurisdiction, td)
 	v.target(t, "ft-"+x, "oracle-prod", jurisdiction, "dc/corp-prod")
 	c.AcceptJurisdictionChanges = true
-	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}/app/{project}", TargetJurisdiction: "dc/corp-prod/{account}/data/{tenancy}"}
+	c.Config.Charter.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}/app/{project}", TargetJurisdiction: "dc/corp-prod/{account}/data/{tenancy}"}
 	err = c.jurisdictions(ctx)
 	if err == nil || !strings.Contains(err.Error(), "source fs-"+x+": jurisdiction "+jurisdiction+" does not conform") ||
 		!strings.Contains(err.Error(), "target ft-"+x+": jurisdiction "+jurisdiction+" does not conform") {
@@ -587,7 +587,7 @@ func TestNamespaces(t *testing.T) {
 	x := v.x
 	account := "st" + x
 	c := v.checks(t)
-	c.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
+	c.Config.Charter.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", SourceJurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	declared := func(string) string { return "schema" }
 	id := v.target(t, "nt-"+x, "oracle-prod", "dc/corp-prod/"+account, "dc/corp-prod")
 	v.exec(t, `update targets set definition = '{"schema":"other"}' where id = $1`, id)

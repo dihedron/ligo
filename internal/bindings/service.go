@@ -13,8 +13,8 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/engine"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
@@ -252,7 +252,7 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 type resolved struct {
 	platform                                                     Platform
 	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
-	decision                                                     governance.Decision
+	decision                                                     charter.Decision
 }
 
 // resolve runs the pipeline (§7.2.3 steps 1 to 10) on b, a new binding if
@@ -261,7 +261,7 @@ type resolved struct {
 // checked by the approval itself (Recheck). A change with consent ANY only
 // removes access: it needs no ACTIVE resources and no policy, and the
 // platform's owner may file it too.
-func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *governance.Policy, consent string, inline *sources.Source) (*resolved, error) {
+func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Binding, cur *stored, p *charter.Policy, consent string, inline *sources.Source) (*resolved, error) {
 	b.Kind = "Binding"
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
@@ -345,7 +345,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 		return nil, invalid("the regex of %s: %v", b.Source, err)
 	}
 	res := &resolved{platform: pl, sourceJurisdiction: src.jurisdiction, targetJurisdiction: tgt.jurisdiction, platformJurisdiction: tgt.platformJurisdiction,
-		decision: governance.Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}}
+		decision: charter.Decision{Allowed: true, DistinctApprovers: p.RequireDistinctApprovers}}
 	switch {
 	case c != nil && consent == changerequests.ConsentAny:
 		if err := res.actsFor(*c); err != nil {
@@ -475,7 +475,7 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 
 // Candidates are the sides of a binding change with consent ALL: TARGET,
 // SOURCE when the jurisdictions differ, and the parties of the deciding rule.
-func Candidates(sourceJurisdiction, targetJurisdiction, platform string, d governance.Decision) []changerequests.Candidate {
+func Candidates(sourceJurisdiction, targetJurisdiction, platform string, d charter.Decision) []changerequests.Candidate {
 	sides := []changerequests.Candidate{{Side: "TARGET", Jurisdiction: targetJurisdiction, Platform: platform}}
 	if sourceJurisdiction != targetJurisdiction {
 		sides = append(sides, changerequests.Candidate{Side: "SOURCE", Jurisdiction: sourceJurisdiction, Platform: platform})

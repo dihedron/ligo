@@ -80,7 +80,7 @@ func TestExample(t *testing.T) {
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
 		t.Error("defaults not applied")
 	}
-	if cfg.Governance.NamePrefixes[0].Prefix != "{2}-{3}-" || cfg.SecretSealing.VaultTransit.KeyName != "ligo-interstage" {
+	if cfg.Charter.NamePrefixes[0].Prefix != "{2}-{3}-" || cfg.SecretSealing.VaultTransit.KeyName != "ligo-interstage" {
 		t.Error("nested types not decoded")
 	}
 }
@@ -92,6 +92,7 @@ func TestStrict(t *testing.T) {
 		"two documents":                     example(t) + "\n---\nservice: {}\n",
 		"zones, renamed to realms in 4.0.3": strings.Replace(example(t), "\nrealms:", "\nzones:", 1),
 		"source_scopes, renamed to source_jurisdictions in 4.0.4": strings.Replace(example(t), "  source_jurisdictions:", "  source_scopes:", 1),
+		"governance, renamed to charter in 4.0.5":                 strings.Replace(example(t), "\ncharter:", "\ngovernance:", 1),
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -189,7 +190,7 @@ func TestInsecureDev(t *testing.T) {
 	}
 }
 
-// TestPolicy checks the governance policy built from the §8.1 example.
+// TestPolicy checks the charter built from the §8.1 example.
 func TestPolicy(t *testing.T) {
 	p := parse(t, example(t)).Policy()
 	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
@@ -227,7 +228,7 @@ func TestLoad(t *testing.T) {
 // TestDefaults checks the defaults of an almost empty file.
 func TestDefaults(t *testing.T) {
 	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, jurisdiction: dc/x } ] } ]\n")
-	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Governance.Interconnects.DefaultCrossJurisdiction != "deny" ||
+	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Charter.Interconnects.DefaultCrossJurisdiction != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
 		cfg.PlatformProviders[0].Platforms[0].TargetJurisdictions[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
 		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute {
@@ -298,7 +299,7 @@ func TestPluginRules(t *testing.T) {
 }
 
 func TestAccounts(t *testing.T) {
-	const block = `governance:
+	const block = `charter:
   accounts:
     jurisdiction: "cloud/{account}"
     source_jurisdiction: "cloud/{account}/app/{project}"
@@ -314,7 +315,7 @@ func TestAccounts(t *testing.T) {
 		doc := strings.NewReplacer(replacements...).Replace(example(t))
 		return Validate(parse(t, doc), Options{LookupEnv: lookupEnv})
 	}
-	head := "governance:                               # ADR-13, ADR-14, §3.9\n"
+	head := "charter:                               # ADR-13, ADR-14, §3.9\n"
 	if err := load(t, head, block, required, `required_jurisdictions: ["cloud/*"]`); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestAccountAdminBinding(t *testing.T) {
 }
 
 func TestNamespaceTemplate(t *testing.T) {
-	const accounts = `governance:
+	const accounts = `charter:
   accounts:
     jurisdiction: "cloud/{account}"
     source_jurisdiction: "cloud/{account}/app/{project}"
@@ -365,14 +366,14 @@ func TestNamespaceTemplate(t *testing.T) {
 	load := func(template string, withAccounts bool) error {
 		r := []string{`        target_jurisdictions: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_jurisdictions: ["dc/corp-prod/*"]`}
 		if withAccounts {
-			r = append(r, "governance:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["cloud/*"]`)
+			r = append(r, "charter:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["cloud/*"]`)
 		}
 		return Validate(parse(t, strings.NewReplacer(r...).Replace(example(t))), Options{LookupEnv: lookupEnv})
 	}
 	if err := load("{account}_{tenancy}", true); err != nil {
 		t.Errorf("accepted form: %v", err)
 	}
-	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "governance.accounts") {
+	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "charter.accounts") {
 		t.Errorf("without accounts: %v", err)
 	}
 	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {

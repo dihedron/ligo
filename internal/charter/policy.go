@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"crypto/sha256"
@@ -13,7 +13,7 @@ import (
 )
 
 // SourceJurisdiction is the jurisdiction extractor of one trust domain
-// (governance.source_jurisdictions, §3.9).
+// (charter.source_jurisdictions, §3.9).
 type SourceJurisdiction struct {
 	TrustDomain          string `yaml:"trust_domain" json:"trustDomain"`
 	Mode                 string `yaml:"mode" json:"mode"`
@@ -33,14 +33,14 @@ func (s SourceJurisdiction) Extractor() (*Extractor, error) {
 	return nil, fmt.Errorf("mode must be static or path_template, not %q", s.Mode)
 }
 
-// NamePrefix is an entry of governance.name_prefixes (§3.8).
+// NamePrefix is an entry of charter.name_prefixes (§3.8).
 type NamePrefix struct {
 	Jurisdictions []string `yaml:"jurisdictions" json:"jurisdictions"`
 	Prefix        string   `yaml:"prefix" json:"prefix"`
 	Resources     []string `yaml:"resources" json:"resources,omitempty"` // empty means all kinds
 }
 
-// Interconnects is governance.interconnects (ADR-14).
+// Interconnects is charter.interconnects (ADR-14).
 type Interconnects struct {
 	DefaultCrossJurisdiction string             `yaml:"default_cross_jurisdiction" json:"defaultCrossJurisdiction"`
 	Rules                    []InterconnectRule `yaml:"rules" json:"rules"`
@@ -99,14 +99,14 @@ func (b *BreakGlassPolicy) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PlatformJurisdictions is the governance part of a platform.
+// PlatformJurisdictions is the charter part of a platform.
 type PlatformJurisdictions struct {
 	Platform            string   `json:"platform"`
 	Jurisdiction        string   `json:"jurisdiction"`
 	TargetJurisdictions []string `json:"targetJurisdictions"`
 }
 
-// Policy is the governance policy (§8.2 rule 16): its SHA-256 is stored on
+// Policy is the charter (§8.2 rule 16): its SHA-256 is stored on
 // every change request.
 type Policy struct {
 	RequiredJurisdictions    []string                `json:"requiredJurisdictions"`
@@ -206,7 +206,7 @@ func (p *Policy) Canonical() ([]byte, error) {
 func (p *Policy) SHA256() string {
 	data, err := p.Canonical()
 	if err != nil {
-		panic(fmt.Sprintf("governance: canonical policy: %v", err)) // only plain types: cannot fail
+		panic(fmt.Sprintf("charter: canonical policy: %v", err)) // only plain types: cannot fail
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

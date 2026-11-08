@@ -17,12 +17,12 @@ import (
 // a preference in the browser's cookie, read-only checks, or a workflow that
 // audits itself.
 var unaudited = map[string]string{
-	"POST /ui/preferences/theme":           "a cookie in the browser",
-	"POST /ui/sources/test":                "a read-only check",
-	"POST /ui/targets/preview":             "a read-only check",
-	"POST /ui/bindings/governance-preview": "a read-only check",
-	"POST /ui/bindings/{name}/retry":       "audited by the workflow: TestAC09",
-	"POST /ui/bindings/{name}/rotate":      "audited by the workflow: TestRotate",
+	"POST /ui/preferences/theme":        "a cookie in the browser",
+	"POST /ui/sources/test":             "a read-only check",
+	"POST /ui/targets/preview":          "a read-only check",
+	"POST /ui/bindings/charter-preview": "a read-only check",
+	"POST /ui/bindings/{name}/retry":    "audited by the workflow: TestAC09",
+	"POST /ui/bindings/{name}/rotate":   "audited by the workflow: TestRotate",
 }
 
 var uiRoute = regexp.MustCompile(`mux\.HandleFunc\("((?:POST|PUT|PATCH|DELETE) [^"]+)"`)

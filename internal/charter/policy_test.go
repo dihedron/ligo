@@ -1,4 +1,4 @@
-package governance
+package charter
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
-// examplePolicy is the governance policy of the §8.1 example.
+// examplePolicy is the charter of the §8.1 example.
 func examplePolicy() *Policy {
 	return &Policy{
 		RequiredJurisdictions:    []string{"dc/corp-prod/*", "cloud/fin-01/*"},

@@ -13,7 +13,7 @@ import (
 )
 
 // The accounts' e2e, run by lab.sh serve test-accounts, on a server.yaml with
-// governance.accounts and the platform pg-shared (.specs/ligo-tenancy.md §11).
+// charter.accounts and the platform pg-shared (.specs/ligo-tenancy.md §11).
 
 // accountTarget files a public target of a tenancy on pg-shared, offering role
 // at the level read.

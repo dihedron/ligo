@@ -1,6 +1,6 @@
 // Package catalog reads sources, targets and bindings as the caller may
 // see them (§7.2.4): visibility by role and by the resources' visibility,
-// the catalog of targets a caller could request, and the governance
+// the catalog of targets a caller could request, and the charter
 // outcome of a target for the caller's sources (ADR-14 rule 7).
 package catalog
 
@@ -12,8 +12,8 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,7 +21,7 @@ import (
 // Reader reads the catalog.
 type Reader struct {
 	DB     *pgxpool.Pool // the app pool: ligo_reader only reads the workload views (§4.1)
-	Policy *governance.Policy
+	Policy *charter.Policy
 }
 
 func notFound(format string, args ...any) error {
@@ -133,7 +133,7 @@ func (r *Reader) Targets(ctx context.Context, c changerequests.Caller, q Query) 
 			return nil, err
 		}
 		switch {
-		case !t.visible(c) || q.Jurisdiction != "" && !governance.JurisdictionMatches(q.Jurisdiction, t.Jurisdiction):
+		case !t.visible(c) || q.Jurisdiction != "" && !charter.JurisdictionMatches(q.Jurisdiction, t.Jurisdiction):
 		case sourceID != nil:
 			if sourceJurisdiction == t.Jurisdiction || r.Policy.Evaluate(sourceJurisdiction, t.Jurisdiction).Allowed {
 				t.Bound = bound
@@ -165,7 +165,7 @@ func (r *Reader) requestable(c changerequests.Caller, targetJurisdiction string)
 	return false
 }
 
-// Outcome is the governance outcome of a target for one of the caller's
+// Outcome is the charter outcome of a target for one of the caller's
 // sources: allowed with the sides a binding would need, or denied.
 type Outcome struct {
 	Source             string   `json:"source"`

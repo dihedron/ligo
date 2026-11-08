@@ -274,8 +274,8 @@ visibility: {mode: PRIVATE}
 	}
 
 	out.Reset()
-	if err := (&GovernanceCheck{Base: olga, File: file}).Execute(nil); err != nil || !strings.Contains(out.String(), `"consent": "ALL"`) {
-		t.Errorf("governance check: %v\n%s", err, out.String())
+	if err := (&CharterCheck{Base: olga, File: file}).Execute(nil); err != nil || !strings.Contains(out.String(), `"consent": "ALL"`) {
+		t.Errorf("charter check: %v\n%s", err, out.String())
 	}
 	if err := (&Apply{Base: olga, File: manifest(t, fmt.Sprintf("kind: Target\nmetadata: {name: cli-ledger-%s, platform: oracle-prod, jurisdiction: dc/corp-prod/ledger}\n"+
 		"definition: {schema: LEDGER_APP}\naccessLevels: [{name: read, grants: {roles: [LEDGER_RO_ROLE]}}]\n", x))}).Execute(nil); err == nil ||

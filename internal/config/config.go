@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sealing"
 	"go.yaml.in/yaml/v3"
@@ -26,7 +26,7 @@ type Config struct {
 	Server            Server             `yaml:"server"`
 	AdminAuth         AdminAuth          `yaml:"admin_auth"`
 	Authorization     Authorization      `yaml:"authorization"`
-	Governance        Governance         `yaml:"governance"`
+	Charter           Charter            `yaml:"charter"`
 	RegexPolicy       regexpolicy.Policy `yaml:"regex_policy"`
 	Bindings          BindingsPolicy     `yaml:"bindings"`
 	Propagation       Propagation        `yaml:"propagation"`
@@ -223,11 +223,11 @@ type Approval struct {
 	ChangeRequestTTL                            time.Duration `yaml:"change_request_ttl"`
 }
 
-type Governance struct {
-	SourceJurisdictions []governance.SourceJurisdiction `yaml:"source_jurisdictions"`
-	NamePrefixes        []governance.NamePrefix         `yaml:"name_prefixes"`
-	Interconnects       governance.Interconnects        `yaml:"interconnects"`
-	Accounts            *governance.Accounts            `yaml:"accounts"`
+type Charter struct {
+	SourceJurisdictions []charter.SourceJurisdiction `yaml:"source_jurisdictions"`
+	NamePrefixes        []charter.NamePrefix         `yaml:"name_prefixes"`
+	Interconnects       charter.Interconnects        `yaml:"interconnects"`
+	Accounts            *charter.Accounts            `yaml:"accounts"`
 }
 
 type BindingsPolicy struct {
@@ -301,9 +301,9 @@ type Theme struct {
 }
 
 type BreakGlass struct {
-	MinJustificationLength   int                           `yaml:"min_justification_length"`
-	IncidentReferencePattern string                        `yaml:"incident_reference_pattern"`
-	Policies                 []governance.BreakGlassPolicy `yaml:"policies"`
+	MinJustificationLength   int                        `yaml:"min_justification_length"`
+	IncidentReferencePattern string                     `yaml:"incident_reference_pattern"`
+	Policies                 []charter.BreakGlassPolicy `yaml:"policies"`
 }
 
 type Notifications struct {
@@ -488,8 +488,8 @@ func (c *Config) applyDefaults() {
 		c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions = new(bool)
 		*c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions = true
 	}
-	if c.Governance.Interconnects.DefaultCrossJurisdiction == "" {
-		c.Governance.Interconnects.DefaultCrossJurisdiction = "deny"
+	if c.Charter.Interconnects.DefaultCrossJurisdiction == "" {
+		c.Charter.Interconnects.DefaultCrossJurisdiction = "deny"
 	}
 	for i := range c.PlatformProviders {
 		for j := range c.PlatformProviders[i].Platforms {
@@ -543,19 +543,19 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// Policy returns the governance policy of the configuration (§8.2 rule 16).
-func (c *Config) Policy() *governance.Policy {
-	p := &governance.Policy{
+// Policy returns the charter of the configuration (§8.2 rule 16).
+func (c *Config) Policy() *charter.Policy {
+	p := &charter.Policy{
 		RequiredJurisdictions:    c.Authorization.Approval.RequiredJurisdictions,
 		RequireDistinctApprovers: *c.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions,
-		SourceJurisdictions:      c.Governance.SourceJurisdictions,
-		NamePrefixes:             c.Governance.NamePrefixes,
-		Interconnects:            c.Governance.Interconnects,
+		SourceJurisdictions:      c.Charter.SourceJurisdictions,
+		NamePrefixes:             c.Charter.NamePrefixes,
+		Interconnects:            c.Charter.Interconnects,
 		BreakGlassPolicies:       c.BreakGlass.Policies,
 	}
 	for _, tp := range c.PlatformProviders {
 		for _, pl := range tp.Platforms {
-			p.Platforms = append(p.Platforms, governance.PlatformJurisdictions{Platform: pl.Name, Jurisdiction: pl.Jurisdiction, TargetJurisdictions: pl.TargetJurisdictions})
+			p.Platforms = append(p.Platforms, charter.PlatformJurisdictions{Platform: pl.Name, Jurisdiction: pl.Jurisdiction, TargetJurisdictions: pl.TargetJurisdictions})
 		}
 	}
 	return p

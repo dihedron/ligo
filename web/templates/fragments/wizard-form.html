@@ -36,7 +36,7 @@
   </fieldset>{{end}}
   {{if ge .Step 5}}<fieldset><legend>5. Review</legend>
     <div class="field"><label for="w-name">Binding name</label><input id="w-name" name="name" value="{{.Name}}" required></div>
-    <div hx-post="/ui/bindings/governance-preview" hx-trigger="load" hx-include="#wizard" hx-target="this" hx-swap="innerHTML" {{hxnonce}}><p class="muted">Checking the governance outcome…</p></div>
+    <div hx-post="/ui/bindings/charter-preview" hx-trigger="load" hx-include="#wizard" hx-target="this" hx-swap="innerHTML" {{hxnonce}}><p class="muted">Checking the charter outcome…</p></div>
     <h3>Effective network flows</h3>
     {{template "flows-table" .Flows}}
     <div class="actions"><button type="button" hx-post="/ui/bindings" hx-include="#wizard" hx-target="#wizard-errors" hx-swap="innerHTML"

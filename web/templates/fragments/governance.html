@@ -1,5 +1,5 @@
-{{define "governance"}}<section class="card" aria-live="polite">
-  <h3>Governance</h3>
+{{define "charter"}}<section class="card" aria-live="polite">
+  <h3>Charter</h3>
   <dl class="fields">
     {{range $k, $v := .Jurisdictions}}<dt>{{$k}} jurisdiction</dt><dd>{{$v}}</dd>{{end}}
     <dt>Name prefix</dt><dd>{{if .NamePrefix.Valid}}<span class="badge badge-success">valid</span>{{else}}<span class="badge badge-danger">invalid</span> {{.NamePrefix.Detail}}{{end}}</dd>

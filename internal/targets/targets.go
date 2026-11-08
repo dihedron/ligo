@@ -16,10 +16,10 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/sources"
 	"google.golang.org/protobuf/proto"
@@ -76,8 +76,8 @@ type Platform struct {
 // Rules are the parts of the configuration that validate targets.
 type Rules struct {
 	Platforms    map[string]Platform
-	NamePrefixes []governance.NamePrefix
-	Accounts     *governance.Accounts // nil: no accounts
+	NamePrefixes []charter.NamePrefix
+	Accounts     *charter.Accounts // nil: no accounts
 	// NamespaceField is the definition field a platform type declares for
 	// its namespace (pluginmgr.Manager.NamespaceField).
 	NamespaceField func(platformType string) string
@@ -85,7 +85,7 @@ type Rules struct {
 
 // NewRules extracts the rules from a validated configuration.
 func NewRules(cfg *config.Config) (*Rules, error) {
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Governance.NamePrefixes, Accounts: cfg.Governance.Accounts}
+	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Charter.NamePrefixes, Accounts: cfg.Charter.Accounts}
 	for _, pp := range cfg.PlatformProviders {
 		for _, p := range pp.Platforms {
 			var pc struct {
@@ -132,7 +132,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 		if m.PlatformType != "" || m.PlatformJurisdiction != "" || m.Realm != "" || m.State != "" {
 			return invalid("metadata.platformType, platformJurisdiction, realm and state are set by ligo")
 		}
-		if !governance.ValidJurisdictionPath(m.Jurisdiction) {
+		if !charter.ValidJurisdictionPath(m.Jurisdiction) {
 			return invalid("metadata.jurisdiction %q is not a jurisdiction", m.Jurisdiction)
 		}
 		if err := engine.CheckName(engine.KindTarget, m.Name, m.Jurisdiction, r.NamePrefixes); err != nil {
@@ -145,7 +145,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	if !ok {
 		return invalid("metadata.platform %q is not a configured platform", m.Platform)
 	}
-	if cur == nil && !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return governance.JurisdictionMatches(pat, m.Jurisdiction) }) {
+	if cur == nil && !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, m.Jurisdiction) }) {
 		return invalid("metadata.jurisdiction %s is not in the target_jurisdictions of %s", m.Jurisdiction, p.Name)
 	}
 	if !r.Accounts.TargetConforms(m.Jurisdiction) {
@@ -203,7 +203,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 // CheckNamespace compares the namespace in a normalized definition with what
 // the target's jurisdiction gives (.specs/ligo-tenancy.md §5). ligo does it, not each
 // plugin, so that a plugin cannot get it wrong or forget it.
-func CheckNamespace(a *governance.Accounts, template, field, jurisdiction string, definition []byte) error {
+func CheckNamespace(a *charter.Accounts, template, field, jurisdiction string, definition []byte) error {
 	want, ok := a.NamespaceOf(template, jurisdiction)
 	if !ok {
 		return refuse(422, "namespace-jurisdiction-mismatch", "jurisdiction %s has no namespace: a namespaced platform holds only tenancies", jurisdiction)

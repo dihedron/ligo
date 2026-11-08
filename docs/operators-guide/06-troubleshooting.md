@@ -41,7 +41,7 @@ The API answers within `full_reload_interval` at worst, normally at once.
 
 ## A change is refused
 
-Run `ligo governance check -f <manifest>`: it shows the jurisdictions, the name prefix, the consent rule, the interconnection rule and the sides, without filing anything. Then see the *Error reference*.
+Run `ligo charter check -f <manifest>`: it shows the jurisdictions, the name prefix, the consent rule, the interconnection rule and the sides, without filing anything. Then see the *Error reference*.
 
 ## A binding is stuck
 

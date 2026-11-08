@@ -25,7 +25,7 @@ authorization:
     - { spiffe_id: "spiffe://prod.internal/ops/vera", role: viewer, jurisdictions: ["*"] }
   approval:
     change_request_ttl: 72h
-governance:
+charter:
   source_jurisdictions: []
   interconnects: { default_cross_jurisdiction: deny }
 storage:

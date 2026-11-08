@@ -109,7 +109,7 @@ func (cmd *PlatformSchema) Execute([]string) error {
 // Catalog: ligo catalog search|show|flows.
 type Catalog struct {
 	Search CatalogSearch `command:"search" description:"Search targets visible to you that the interconnection policy allows."`
-	Show   CatalogShow   `command:"show" description:"Show a target's catalog card and the governance outcome for your sources."`
+	Show   CatalogShow   `command:"show" description:"Show a target's catalog card and the charter outcome for your sources."`
 	Flows  CatalogFlows  `command:"flows" description:"Print a target's flows (JSON, for the verification tool) before any binding exists."`
 }
 
@@ -223,15 +223,15 @@ func (cmd *ExecutorsList) Execute([]string) error {
 		col("OLDEST PENDING", "oldestPending"), col("LIVE SESSIONS", "liveSessions"), col("SELF", "self"))
 }
 
-// Governance: ligo governance show|check.
-type Governance struct {
-	Show  GovernanceShow  `command:"show" description:"Show the governance policy in force and its SHA-256."`
-	Check GovernanceCheck `command:"check" description:"Evaluate a planned change: jurisdictions, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
+// Charter: ligo charter show|check.
+type Charter struct {
+	Show  CharterShow  `command:"show" description:"Show the charter in force and its SHA-256."`
+	Check CharterCheck `command:"check" description:"Evaluate a planned change: jurisdictions, name prefix, consent rule, interconnection rule and sides (nothing is stored)."`
 }
 
-type GovernanceShow struct{ Base }
+type CharterShow struct{ Base }
 
-func (cmd *GovernanceShow) Execute([]string) error { return cmd.get(path("governance"), nil) }
+func (cmd *CharterShow) Execute([]string) error { return cmd.get(path("charter"), nil) }
 
 // ChangeRequest: ligo cr list|get|approve|decline|withdraw|ratify|revert|review.
 type ChangeRequest struct {

@@ -10,8 +10,8 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -342,7 +342,7 @@ func TestRevertParty(t *testing.T) {
 	s, o, w, _ := setup(t)
 	ctx := context.Background()
 	s.Requests.Policy.BreakGlassPolicies = append(s.Requests.Policy.BreakGlassPolicies,
-		governance.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
+		charter.BreakGlassPolicy{Jurisdictions: []string{"sec/infosec"}, DefaultTTL: time.Hour, MaxTTL: time.Hour, MaxOpen: 5})
 	rescuer := caller("rita", role(config.RoleBreakGlass, "cloud/fin-01/*", "dc/corp-prod/*", "sec/infosec"))
 	name := "fin-01-payments-bp-" + w.suffix
 	bg, err := s.BreakGlass(ctx, rescuer, emergency("CREATE", `"binding":`+string(body(name, w.cloudSrc, w.ledger, "read"))+`,`, ""))

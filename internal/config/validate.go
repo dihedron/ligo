@@ -11,9 +11,9 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/theme"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -71,7 +71,7 @@ func Validate(cfg *Config, opts Options) error {
 	c.sealing(cfg, opts)
 	c.authorization(cfg)
 	c.breakGlass(cfg, opts)
-	c.governance(cfg)
+	c.charter(cfg)
 	c.platformFlows(cfg)
 	c.theme(cfg)
 	return errors.Join(c.errs...)
@@ -387,13 +387,13 @@ func (c *checker) trustedAutomation(b RoleBinding, platforms map[string]bool) {
 }
 
 // breakGlassBinding checks rule 14 for a break_glass binding.
-func (c *checker) breakGlassBinding(b RoleBinding, policies []governance.BreakGlassPolicy) {
+func (c *checker) breakGlassBinding(b RoleBinding, policies []charter.BreakGlassPolicy) {
 	who := b.LDAPGroupDN + b.SPIFFEID
 	if b.LDAPGroupDN == "" {
 		c.failf(14, "break_glass must be bound to an ldap_group_dn, never to a SPIFFE ID (%q)", who)
 	}
 	for _, s := range b.Jurisdictions {
-		if !slices.ContainsFunc(policies, func(p governance.BreakGlassPolicy) bool { return slices.Contains(p.Jurisdictions, s) }) {
+		if !slices.ContainsFunc(policies, func(p charter.BreakGlassPolicy) bool { return slices.Contains(p.Jurisdictions, s) }) {
 			c.failf(14, "break_glass binding %q: jurisdiction pattern %q appears in no break_glass.policies entry", who, s)
 		}
 	}
@@ -428,11 +428,11 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 	}
 }
 
-// governance checks rule 16.
-func (c *checker) governance(cfg *Config) {
+// charter checks rule 16.
+func (c *checker) charter(cfg *Config) {
 	sourceDomains := map[string]bool{}
 	for _, p := range allPlatforms(cfg) {
-		if !governance.ValidJurisdictionPath(p.Jurisdiction) {
+		if !charter.ValidJurisdictionPath(p.Jurisdiction) {
 			c.failf(16, "platform %q: jurisdiction %q must be a valid jurisdiction path", p.Name, p.Jurisdiction)
 		}
 		c.patterns(16, platformPrefix+p.Name+" target_jurisdictions", p.TargetJurisdictions)
@@ -440,9 +440,9 @@ func (c *checker) governance(cfg *Config) {
 			sourceDomains[td] = true
 		}
 	}
-	c.sourceJurisdictions(cfg.Governance.SourceJurisdictions, sourceDomains)
-	c.namePrefixes(cfg.Governance.NamePrefixes)
-	ic := cfg.Governance.Interconnects
+	c.sourceJurisdictions(cfg.Charter.SourceJurisdictions, sourceDomains)
+	c.namePrefixes(cfg.Charter.NamePrefixes)
+	ic := cfg.Charter.Interconnects
 	if ic.DefaultCrossJurisdiction != "allow" && ic.DefaultCrossJurisdiction != "deny" {
 		c.failf(16, "interconnects.default_cross_jurisdiction must be allow or deny")
 	}
@@ -457,21 +457,21 @@ func (c *checker) governance(cfg *Config) {
 	c.accounts(cfg)
 }
 
-// accounts checks governance.accounts, when present (.specs/ligo-tenancy.md
+// accounts checks charter.accounts, when present (.specs/ligo-tenancy.md
 // §4, §9.1): without approval on every account, an account operator's own
 // sides would be approved automatically.
 func (c *checker) accounts(cfg *Config) {
-	a := cfg.Governance.Accounts
+	a := cfg.Charter.Accounts
 	if a == nil {
 		for _, p := range allPlatforms(cfg) {
 			if p.NamespaceTemplate != "" {
-				c.failf(16, "platform %q: namespace_template needs governance.accounts", p.Name)
+				c.failf(16, "platform %q: namespace_template needs charter.accounts", p.Name)
 			}
 		}
 		return
 	}
 	if err := a.Validate(); err != nil {
-		c.failf(16, "governance.accounts: %v", err)
+		c.failf(16, "charter.accounts: %v", err)
 		return
 	}
 	for _, p := range allPlatforms(cfg) {
@@ -483,21 +483,21 @@ func (c *checker) accounts(cfg *Config) {
 	}
 	for i, r := range a.LDAPGroups.Roles {
 		if !slices.Contains(accountRoles, r.Role) {
-			c.failf(16, "governance.accounts.ldap_groups.roles[%d]: role %q must be one of %v", i, r.Role, accountRoles)
+			c.failf(16, "charter.accounts.ldap_groups.roles[%d]: role %q must be one of %v", i, r.Role, accountRoles)
 		}
 	}
-	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredJurisdictions, func(p string) bool { return governance.JurisdictionMatches(p, a.SampleJurisdiction()) }) {
-		c.failf(16, "governance.accounts: approval.required_jurisdictions must cover every account of %q", a.Jurisdiction)
+	if !slices.ContainsFunc(cfg.Authorization.Approval.RequiredJurisdictions, func(p string) bool { return charter.JurisdictionMatches(p, a.SampleJurisdiction()) }) {
+		c.failf(16, "charter.accounts: approval.required_jurisdictions must cover every account of %q", a.Jurisdiction)
 	}
 }
 
 // namePrefixes checks the patterns and resource kinds of name_prefixes.
-func (c *checker) namePrefixes(prefixes []governance.NamePrefix) {
+func (c *checker) namePrefixes(prefixes []charter.NamePrefix) {
 	for i, p := range prefixes {
-		c.patterns(16, fmt.Sprintf("governance.name_prefixes[%d]", i), p.Jurisdictions)
+		c.patterns(16, fmt.Sprintf("charter.name_prefixes[%d]", i), p.Jurisdictions)
 		for _, k := range p.Resources {
 			if !slices.Contains(knownKinds, k) {
-				c.failf(16, "governance.name_prefixes[%d]: unknown resource %q", i, k)
+				c.failf(16, "charter.name_prefixes[%d]: unknown resource %q", i, k)
 			}
 		}
 	}
@@ -505,29 +505,29 @@ func (c *checker) namePrefixes(prefixes []governance.NamePrefix) {
 
 // sourceJurisdictions checks that source_jurisdictions has exactly one valid entry for
 // each trust domain that platforms accept.
-func (c *checker) sourceJurisdictions(entries []governance.SourceJurisdiction, sourceDomains map[string]bool) {
+func (c *checker) sourceJurisdictions(entries []charter.SourceJurisdiction, sourceDomains map[string]bool) {
 	seen := map[string]bool{}
 	for _, s := range entries {
 		if seen[s.TrustDomain] {
-			c.failf(16, "governance.source_jurisdictions: trust domain %q has more than one entry", s.TrustDomain)
+			c.failf(16, "charter.source_jurisdictions: trust domain %q has more than one entry", s.TrustDomain)
 		}
 		seen[s.TrustDomain] = true
 		if !sourceDomains[s.TrustDomain] {
-			c.failf(16, "governance.source_jurisdictions: trust domain %q is not accepted by any platform", s.TrustDomain)
+			c.failf(16, "charter.source_jurisdictions: trust domain %q is not accepted by any platform", s.TrustDomain)
 		}
 		if _, err := s.Extractor(); err != nil {
-			c.failf(16, "governance.source_jurisdictions[%s]: %v", s.TrustDomain, err)
+			c.failf(16, "charter.source_jurisdictions[%s]: %v", s.TrustDomain, err)
 		}
 	}
 	for td := range sourceDomains {
 		if !seen[td] {
-			c.failf(16, "governance.source_jurisdictions: no entry for trust domain %q", td)
+			c.failf(16, "charter.source_jurisdictions: no entry for trust domain %q", td)
 		}
 	}
 }
 
 // interconnectRule checks one rule of the interconnection policy.
-func (c *checker) interconnectRule(r governance.InterconnectRule) {
+func (c *checker) interconnectRule(r charter.InterconnectRule) {
 	if r.Action != "allow" && r.Action != "deny" {
 		c.failf(16, "interconnect rule %q: action must be allow or deny", r.Name)
 	}
@@ -538,7 +538,7 @@ func (c *checker) interconnectRule(r governance.InterconnectRule) {
 	}
 	parties := map[string]bool{}
 	for _, a := range r.AdditionalApprovals {
-		if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !governance.ValidJurisdictionPath(a.Jurisdiction) {
+		if !partyNameRE.MatchString(a.Name) || parties[a.Name] || !charter.ValidJurisdictionPath(a.Jurisdiction) {
 			c.failf(16, "interconnect rule %q: additional approval %q needs a unique name matching %s and a valid jurisdiction path", r.Name, a.Name, partyNameRE)
 		}
 		parties[a.Name] = true
@@ -597,7 +597,7 @@ func (c *checker) declaredFlows(what string, declared []flows.Flow, config *yaml
 // patterns checks that each entry is a valid jurisdiction pattern.
 func (c *checker) patterns(rule int, where string, patterns []string) {
 	for _, p := range patterns {
-		if !governance.ValidJurisdictionPattern(p) {
+		if !charter.ValidJurisdictionPattern(p) {
 			c.failf(rule, "%s: %q is not a valid jurisdiction pattern", where, p)
 		}
 	}

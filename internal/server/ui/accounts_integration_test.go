@@ -13,7 +13,7 @@ import (
 	"testing"
 	"uuid"
 
-	"github.com/dihedron/ligo/internal/governance"
+	"github.com/dihedron/ligo/internal/charter"
 )
 
 const accountAdmins = "cn=ligo-account-admins,ou=groups,dc=ligo,dc=lab"
@@ -51,7 +51,7 @@ func accountName() string {
 }
 
 func withAccounts(v *sessionEnv) {
-	v.s.Config.Governance.Accounts = &governance.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}",
+	v.s.Config.Charter.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}",
 		TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 }
 
@@ -218,9 +218,9 @@ func TestAccountsPageRoles(t *testing.T) {
 	}
 
 	// no accounts configured: no link
-	v.s.Config.Governance.Accounts = nil
+	v.s.Config.Charter.Accounts = nil
 	if _, body := viewer.do("GET", "/ui/bindings", nil, "HX-Request", ""); strings.Contains(body, `href="/ui/accounts"`) {
-		t.Errorf("a link with no governance.accounts: %s", body)
+		t.Errorf("a link with no charter.accounts: %s", body)
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -27,7 +27,7 @@ import (
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
 var insecure = os.Getenv("CI") != ""
 
-var structure = &governance.Accounts{Jurisdiction: "cloud/{account}"}
+var structure = &charter.Accounts{Jurisdiction: "cloud/{account}"}
 
 func dsn(t *testing.T, role string) string {
 	t.Helper()
@@ -234,7 +234,7 @@ func TestRequire(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
-		accounts           *governance.Accounts
+		accounts           *charter.Accounts
 		jurisdiction, want string
 		slug               string
 		description        string

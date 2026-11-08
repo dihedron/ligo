@@ -1,6 +1,6 @@
-// Package governance implements jurisdictions and the derivation of a
+// Package charter implements jurisdictions and the derivation of a
 // source's jurisdiction from its SVID regex (§3.9, Appendix D).
-package governance
+package charter
 
 import (
 	"regexp"

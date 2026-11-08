@@ -25,7 +25,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `namespace-jurisdiction-mismatch` | 422 | A namespaced platform holds only tenancies, and this jurisdiction is not one | Choose a jurisdiction in the form of `target_jurisdiction`, or another platform |
 | `widening-not-allowed` | 422 | A source can only narrow, and this would add workloads, or the check was undecided | Register a new source |
 | `flow-destination-not-allowed` | 422 | A flow's destination is outside the platform's `allowed_endpoints` | Fix the flow, or ask the platform team |
-| `interconnect-denied` | 403 | The interconnection policy denies this pair of jurisdictions | Ask whoever owns `governance.interconnects` |
+| `interconnect-denied` | 403 | The interconnection policy denies this pair of jurisdictions | Ask whoever owns `charter.interconnects` |
 | `four-eyes-violation` | 403 | The requester tried to decide their own request | Ask another approver |
 | `distinct-approver-required` | 403 | You already decided another side | Ask another approver |
 | `side-required` | 400 | You could decide several sides | Name one with `--side` |
@@ -33,7 +33,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `revision-conflict` | 409 | Someone changed the resource since you read it | Read it again |
 | `resource-changed` | 409 | A resource it relies on changed | File it again |
 | `normalization-drift` | 409 | The source or target changed since validation | File it again |
-| `governance-policy-changed` | 409 | The policy changed since it was filed | File it again |
+| `charter-changed` | 409 | The charter changed since the request was filed, and now denies it or asks for another party | File it again |
 | `change-request-pending` | 409 | The resource has a pending request | Decide or withdraw that one |
 | `change-request-not-pending` | 409 | It has already been decided | Nothing |
 | `dependency-pending` | 409 | It depends on a request not yet applied | Decide that one first |

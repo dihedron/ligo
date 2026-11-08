@@ -13,8 +13,8 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
 	"github.com/dihedron/ligo/migrations"
@@ -275,8 +275,8 @@ func TestAC52(t *testing.T) {
 	s, f, owner := setup(t)
 	s.Resources["BINDING"] = f
 	r := newBinding(t, s, owner)
-	s.Policy = &governance.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*", "cloud/*"}} // tightened
-	if _, err := s.Approve(context.Background(), bob, r.ID, r.PayloadSHA256, "", "ok"); status(err) != "governance-policy-changed" {
+	s.Policy = &charter.Policy{RequiredJurisdictions: []string{"dc/corp-prod/*", "cloud/*"}} // tightened
+	if _, err := s.Approve(context.Background(), bob, r.ID, r.PayloadSHA256, "", "ok"); status(err) != "charter-changed" {
 		t.Fatalf("err = %v", err)
 	}
 	if st, _ := statusOf(t, owner, r.ID); st != "FAILED_TO_APPLY" || f.applied != 0 {
@@ -328,7 +328,7 @@ func TestBusy(t *testing.T) {
 func TestPlatformDecision(t *testing.T) {
 	s, f, owner := setup(t)
 	s.Resources["BINDING"] = f
-	s.Policy = &governance.Policy{RequiredJurisdictions: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
+	s.Policy = &charter.Policy{RequiredJurisdictions: []string{"cloud/*"}} // startup refuses accounts without it (§9.1)
 	ctx := context.Background()
 	const platform = "dc/corp-prod"
 	r := &Request{ResourceType: "BINDING", ResourceName: "test-" + uuid.NewV7().String()[24:], Operation: "CREATE", Consent: ConsentAll, Realm: "prod",

@@ -33,8 +33,8 @@ tags:
     description: "Bindings of a source to a target at one access level (§3.5)."
   - name: change-requests
     description: "Change requests and their sides (§7.2.3)."
-  - name: governance
-    description: "The governance policy and its dry run (ADR-13, ADR-14)."
+  - name: charter
+    description: "The charter and its dry run (ADR-13, ADR-14)."
   - name: break-glass
     description: "Break-glass changes of bindings (ADR-12)."
   - name: operations
@@ -233,7 +233,7 @@ paths:
     get:
       tags: [catalog]
       operationId: getCatalogTarget
-      summary: A target's card with the governance outcome for each of the caller's sources.
+      summary: A target's card with the charter outcome for each of the caller's sources.
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
@@ -375,12 +375,12 @@ paths:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post: { tags: [change-requests, break-glass], operationId: revertChangeRequest, summary: Revert an open break-glass CREATE or UPDATE now; comment (why) is required., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
-  # --- governance --------------------------------------------------------------
-  /v1/admin/governance:
+  # --- charter --------------------------------------------------------------
+  /v1/admin/charter:
     get:
-      tags: [governance]
-      operationId: getGovernance
-      summary: The governance policy in force, as the canonical JSON its SHA-256 is computed over (§8.2).
+      tags: [charter]
+      operationId: getCharter
+      summary: The charter in force, as the canonical JSON its SHA-256 is computed over (§8.2).
       responses:
         "200":
           description: The policy and its hash.
@@ -394,10 +394,10 @@ paths:
                   sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
-  /v1/admin/governance/evaluate:
+  /v1/admin/charter/evaluate:
     post:
-      tags: [governance]
-      operationId: evaluateGovernance
+      tags: [charter]
+      operationId: evaluateCharter
       summary: Dry run of a planned creation; stores nothing and calls no plugin.
       requestBody:
         required: true
@@ -420,7 +420,7 @@ paths:
                 - { type: object, required: [kind], properties: { kind: { enum: [Source, Target] } } }
       responses:
         "200":
-          description: The governance outcome.
+          description: The charter outcome.
           content:
             application/json:
               schema:

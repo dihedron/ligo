@@ -35,7 +35,7 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-27 | A theme misleads administrators. | 2, 7 | Root-owned; validated; hashes audited; SVG sandboxed. |
 | T-28 | Target hijacking, or credential injection. | 2, 6 | Two-sided consent, enforced in the database. |
 | T-29 | A workload is registered under another tenancy. | 1, 6 | A registrar tenants cannot influence. Residual: R-08. |
-| T-30 | Bypass of cross-boundary governance. | 2, 6, 7 | Interconnection policy, default deny; parties; distinct approvers; policy hash, audited. |
+| T-30 | Bypass of cross-boundary consent. | 2, 6, 7 | Interconnection policy, default deny; parties; distinct approvers; policy hash, audited. |
 | T-31 | Name squatting and probing. | 2 | Name prefixes; `404` out of jurisdiction. |
 | T-32 | A rogue or misleading target. | 2, 4, 6 | Platform owner's consent; privilege bounds; canonical privileges shown to reviewers. |
 | T-33 | The catalog discloses systems. | 2 | `PRIVATE` by default; filtered by policy. |

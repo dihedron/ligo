@@ -11,7 +11,7 @@
   <div class="field"><label for="s-regex">SVID regex</label>
     <input id="s-regex" name="svidRegex" class="mono" value="{{.Source.Identity.SVIDRegex}}" required
       hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>
-    <span class="hint">Fully anchored, ^…$ (Appendix A). The tester below shows the jurisdiction, the samples it matches and the governance outcome.</span></div>
+    <span class="hint">Fully anchored, ^…$ (Appendix A). The tester below shows the jurisdiction, the samples it matches and the charter outcome.</span></div>
   <div class="field"><label for="s-samples">Sample SPIFFE IDs (one per line)</label>
     <textarea id="s-samples" name="samples" class="mono"
       hx-post="/ui/sources/test" hx-trigger="input changed delay:500ms" hx-target="#source-check" hx-swap="outerHTML" hx-include="#source" {{hxnonce}}>{{.Samples}}</textarea></div>

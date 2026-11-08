@@ -11,8 +11,8 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 func example(t *testing.T) *config.Config {
@@ -119,25 +119,25 @@ func TestRecheck(t *testing.T) {
 	s := &Service{Rules: rules(t)}
 	r := &changerequests.Request{Consent: changerequests.ConsentAll, SourceJurisdiction: "cloud/fin-01/payments", TargetJurisdiction: "dc/corp-prod/ledger",
 		Sides: []changerequests.Side{{Name: "SOURCE"}, {Name: "TARGET"}, {Name: "PARTY:security"}}}
-	policy := func(edit func(*governance.Policy)) *governance.Policy {
+	policy := func(edit func(*charter.Policy)) *charter.Policy {
 		p := example(t).Policy()
 		edit(p)
 		return p
 	}
-	rule := func(p *governance.Policy) *governance.InterconnectRule {
-		i := slices.IndexFunc(p.Interconnects.Rules, func(r governance.InterconnectRule) bool { return r.Name == "cloud-to-dc" })
+	rule := func(p *charter.Policy) *charter.InterconnectRule {
+		i := slices.IndexFunc(p.Interconnects.Rules, func(r charter.InterconnectRule) bool { return r.Name == "cloud-to-dc" })
 		return &p.Interconnects.Rules[i]
 	}
 	for name, tc := range map[string]struct {
-		p    *governance.Policy
+		p    *charter.Policy
 		want string
 	}{
-		"unchanged":     {policy(func(*governance.Policy) {}), ""},
-		"party dropped": {policy(func(p *governance.Policy) { rule(p).AdditionalApprovals = nil }), ""},
-		"party added": {policy(func(p *governance.Policy) {
-			rule(p).AdditionalApprovals = append(rule(p).AdditionalApprovals, governance.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
-		}), "governance-policy-changed"},
-		"now denied": {policy(func(p *governance.Policy) { rule(p).Action = "deny" }), "governance-policy-changed"},
+		"unchanged":     {policy(func(*charter.Policy) {}), ""},
+		"party dropped": {policy(func(p *charter.Policy) { rule(p).AdditionalApprovals = nil }), ""},
+		"party added": {policy(func(p *charter.Policy) {
+			rule(p).AdditionalApprovals = append(rule(p).AdditionalApprovals, charter.AdditionalApproval{Name: "dpo", Jurisdiction: "sec/privacy"})
+		}), "charter-changed"},
+		"now denied": {policy(func(p *charter.Policy) { rule(p).Action = "deny" }), "charter-changed"},
 	} {
 		if err := s.Recheck(r, tc.p); slug(err) != tc.want {
 			t.Errorf("%s: %v", name, err)

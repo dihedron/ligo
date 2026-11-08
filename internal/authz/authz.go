@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
-	"github.com/dihedron/ligo/internal/governance"
 )
 
 // Principal is an authenticated caller: a SPIFFE ID (mTLS) or an LDAP user
@@ -36,7 +36,7 @@ type Grant struct {
 }
 
 func (g *Grant) covers(jurisdiction string) bool {
-	return slices.ContainsFunc(g.Jurisdictions, func(p string) bool { return governance.JurisdictionMatches(p, jurisdiction) })
+	return slices.ContainsFunc(g.Jurisdictions, func(p string) bool { return charter.JurisdictionMatches(p, jurisdiction) })
 }
 
 // coversPlatform reports whether a trusted_automation grant extends to
@@ -49,7 +49,7 @@ func (g *Grant) coversPlatform(platform string) bool {
 // Authorizer holds the authorization bindings of the configuration.
 type Authorizer struct {
 	bindings []binding
-	rules    *governance.GroupRules
+	rules    *charter.GroupRules
 	active   func(account string) bool
 }
 
@@ -79,7 +79,7 @@ func New(bindings []config.RoleBinding) (*Authorizer, error) {
 // UseAccounts adds the roles derived from directory groups, while active says
 // their account is registered and ACTIVE (.specs/ligo-tenancy.md §8). Call it
 // before serving.
-func (a *Authorizer) UseAccounts(rules *governance.GroupRules, active func(account string) bool) {
+func (a *Authorizer) UseAccounts(rules *charter.GroupRules, active func(account string) bool) {
 	a.rules, a.active = rules, active
 }
 
@@ -148,7 +148,7 @@ func (gs Grants) AccountAdmin() bool {
 // InJurisdictions reports whether a role that reads reaches anywhere in pattern.
 func (gs Grants) InJurisdictions(pattern string) bool {
 	return gs.FullAccess() || gs.has(func(g *Grant) bool {
-		return g.reads() && slices.ContainsFunc(g.Jurisdictions, func(s string) bool { return governance.PatternsOverlap(s, pattern) })
+		return g.reads() && slices.ContainsFunc(g.Jurisdictions, func(s string) bool { return charter.PatternsOverlap(s, pattern) })
 	})
 }
 
@@ -188,7 +188,7 @@ func (gs Grants) Visible(jurisdictions []string, mode string, visibleTo []string
 			return false
 		}
 		return mode == "PUBLIC" || mode == "LISTED" && slices.ContainsFunc(g.Jurisdictions, func(s string) bool {
-			return slices.ContainsFunc(visibleTo, func(v string) bool { return governance.PatternsOverlap(s, v) })
+			return slices.ContainsFunc(visibleTo, func(v string) bool { return charter.PatternsOverlap(s, v) })
 		})
 	})
 }

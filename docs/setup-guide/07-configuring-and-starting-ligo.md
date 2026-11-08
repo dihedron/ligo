@@ -72,7 +72,7 @@ authorization:
     - { ldap_group_dn: "cn=ledger-leads,ou=groups,dc=corp,dc=internal", role: approver, jurisdictions: ["dc/corp-prod/*"] }
   approval:
     required_jurisdictions: ["dc/corp-prod/*"]
-governance:
+charter:
   source_jurisdictions:
     - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
   interconnects:
@@ -80,6 +80,8 @@ governance:
     rules:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
 ```
+
+The **charter** is the set of rules every jurisdiction must comply with: how a workload's jurisdiction follows from its SPIFFE path, each jurisdiction's name prefix, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed. There is one charter per installation, in `server.yaml` under `charter:`. Jurisdictions say who decides; the charter says how jurisdictions are formed and how they may deal with each other. Every change request records the charter in force by its hash, and a change decided under a charter that has since changed is refused.
 
 Each trust domain a platform accepts needs one `source_jurisdictions` entry. Across jurisdictions, `ligo` denies by default: add a rule for each flow you intend.
 
@@ -94,7 +96,7 @@ authorization:
   approval:
     required_jurisdictions: ["cloud/*"]    # startup refuses accounts this does not cover
     require_distinct_approvers_across_jurisdictions: true
-governance:
+charter:
   accounts:
     jurisdiction: "cloud/{account}"
     source_jurisdiction: "cloud/{account}/app/{project}"

@@ -7,14 +7,14 @@ import (
 	"github.com/dihedron/ligo/internal/preview"
 )
 
-func (s *Server) governanceRoutes(mux *router) {
-	mux.HandleFunc("GET /v1/admin/governance", s.getGovernance)
-	mux.HandleFunc("POST /v1/admin/governance/evaluate", s.evaluate)
+func (s *Server) charterRoutes(mux *router) {
+	mux.HandleFunc("GET /v1/admin/charter", s.getCharter)
+	mux.HandleFunc("POST /v1/admin/charter/evaluate", s.evaluate)
 }
 
-// getGovernance: the policy in force, as the canonical JSON its SHA-256
+// getCharter: the policy in force, as the canonical JSON its SHA-256
 // is computed over (§8.2).
-func (s *Server) getGovernance(w http.ResponseWriter, r *http.Request) {
+func (s *Server) getCharter(w http.ResponseWriter, r *http.Request) {
 	if !viewer(caller(r)) {
 		problem(w, http.StatusForbidden, "forbidden", "viewer role required")
 		return

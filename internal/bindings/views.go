@@ -8,8 +8,8 @@ import (
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/flows"
-	"github.com/dihedron/ligo/internal/governance"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/jackc/pgx/v5"
 )
@@ -183,8 +183,8 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 			read++
 			after = v.Metadata.Name
 			m := v.Metadata
-			if !v.visibleTo(c) || f.Jurisdiction != "" && !governance.JurisdictionMatches(f.Jurisdiction, m.SourceJurisdiction) &&
-				!governance.JurisdictionMatches(f.Jurisdiction, m.TargetJurisdiction) && !governance.JurisdictionMatches(f.Jurisdiction, m.PlatformJurisdiction) {
+			if !v.visibleTo(c) || f.Jurisdiction != "" && !charter.JurisdictionMatches(f.Jurisdiction, m.SourceJurisdiction) &&
+				!charter.JurisdictionMatches(f.Jurisdiction, m.TargetJurisdiction) && !charter.JurisdictionMatches(f.Jurisdiction, m.PlatformJurisdiction) {
 				continue
 			}
 			if len(out) == f.Limit {

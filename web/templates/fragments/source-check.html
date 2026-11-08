@@ -10,6 +10,6 @@
     {{range .Overlaps}}<dt>Overlaps</dt><dd>{{.Source}}{{with .Witness}}, both match <span class="mono">{{.}}</span>{{end}}{{if .Undecided}} (maybe){{end}}</dd>{{end}}
   </dl>
 </section>{{else}}<div class="alert" role="alert">The regex is not valid: {{.Error}}</div>{{end}}{{end}}
-{{with .Governance}}{{template "governance" .}}{{end}}
+{{with .Charter}}{{template "charter" .}}{{end}}
 {{with .Error}}<div class="alert alert-warning" role="status">{{.}}</div>{{end}}
 </div>{{end}}

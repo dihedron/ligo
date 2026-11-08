@@ -7,7 +7,7 @@
 LIGO1_E2E=/home/ligo/e2e
 LIGO_E2E_SECRETS=/home/ligo/e2e-secrets # outside LIGO1_E2E, which serve_admins empties
 SERVE_DB=ligo_serve
-LAB_ACCOUNTS="" # non-empty: server.yaml with governance.accounts (serve_test_accounts)
+LAB_ACCOUNTS="" # non-empty: server.yaml with charter.accounts (serve_test_accounts)
 
 # cmd_serve [--on HOST|all] ACTION: start, stop, reload, status and logs act
 # on HOST or on every ligo host (all, the default); install and test always
@@ -416,7 +416,7 @@ authorization:
     required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/payments"$([[ -n "$LAB_ACCOUNTS" ]] && echo ', "tenants/*", "platform/*"')]
     require_distinct_approvers_across_jurisdictions: $([[ -n "$LAB_ACCOUNTS" ]] && echo true || echo false)
     change_request_ttl: 72h
-governance:
+charter:
 $(serve_accounts_config)
   source_jurisdictions:
     $(serve_prod_jurisdiction)
