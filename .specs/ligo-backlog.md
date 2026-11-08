@@ -10,6 +10,9 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 4 | Manual test A-1 | 2026-11-07 | Open: in-person session |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Waiting for the lab host |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
+| 7 | Client SDKs (Go, then Python and Java) | 2026-11-08 | Not started |
+| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started |
+| 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 
 ## 1. Audit pruning
 
@@ -74,3 +77,42 @@ Work agreed for later, with what is known so far. An item here is not a specific
 ## 6. Product examples in the Planning for Deployment Guide
 
 **Why.** The guide describes each dependency by its role and names products only as examples. A later release adds worked examples per product, several per role: for example Vault, OpenBao and CyberArk as secret stores, HAProxy and F5 BIG-IP as load balancers.
+
+## 7. Client SDKs (Go, then Python and Java)
+
+**Why.** Today a workload that wants its bindings does several things by hand: it fetches its X.509-SVID from its SPIRE agent, calls `ligo`'s workload API over mTLS (verifying `ligo`'s own SVID), reads the `spec` and `auth` of each binding, fetches a JWT-SVID with the store's audience, logs in to the store and reads its credential, then connects to the target, and does it again when the credential rotates. An SDK would make this one call, such as "give me a connection to target X", wrapping the SPIFFE Workload API.
+
+**What exists.**
+
+- The workload API, over REST (`GET /v1/bindings`, `GET /v1/flows`) and gRPC (`WorkloadBindingService`: `GetBindings`, `GetFlows`, `api/proto/workload/v1alpha1`), with generated Go code in `api/gen/workload/v1alpha1`.
+- A working prototype of the whole flow in Go: the lab's `echo-client` (`test/lab/echo/client`, about 240 lines and its tests), which does every step above with `go-spiffe/v2`'s `workloadapi` and `jwtsvid` (`.specs/ligo-echo-target.md`). It is lab code, not hardened.
+- `pkg/` today holds only `pluginsdk` and `metadata`: there is no client package.
+
+**To decide.** Go first, in this repository (`pkg/client`) or a module of its own. Then Python and Java, each wrapping that language's SPIFFE library (`py-spiffe`, `java-spiffe`) and generated from the same proto. What the SDK covers beyond discovery: reading credentials per secret storage strategy (`vault-static`, `vault-dynamic`), watching for rotation, checking flows (`/v1/flows`), and how much of the target connection it builds.
+
+## 8. Terraform and OpenTofu provider
+
+**Why.** Teams that manage their infrastructure as code want to declare sources, targets and bindings next to the rest, and have `plan` and `apply` drive `ligo`.
+
+**What exists.** The admin API is described in `api/openapi/admin.v1alpha1.yaml` (48 paths). Every mutation is a change request, with optimistic concurrency (`expectedRevision`) and approval bound to the exact payload (`payloadSha256`). Automation signs in with an SVID, and a `trusted_automation` principal can approve sides of its own scopes by delegation, with a reference to an upstream approval (ADR-11).
+
+**What makes it different from most providers.** An `apply` does not change the resource: it files a change request, which may wait for people of another scope to approve it. The design must settle:
+
+- what `apply` waits for (the request filed, applied, or the binding `ACTIVE`), with time-outs, and what a later `plan` shows while a request is pending;
+- how a pipeline's own review becomes the upstream approval of a `DELEGATED` side, and how that reference is checked;
+- drift: what `plan` shows when people changed a resource through the UI;
+- read-only data sources for platforms and realms, which live in `server.yaml`, not in the API;
+- one provider for Terraform and OpenTofu (the plugin protocol is shared), and its own repository and release.
+
+## 9. A map of the `ligo` topology, and a discovery protocol
+
+**Why.** With several installations (chapter 5 of the Planning for Deployment Guide), nobody sees the whole picture. A visual map would show, across installations: the realms and federated trust domains of each, who trusts whom, which governance scopes each one serves, and a few statistics about each one's bindings (counts by phase, failures, expiries).
+
+**What exists.** Each installation knows its own part: realms, federated domains and accepted trust domains in `server.yaml`; platforms and their scopes through the admin API (read-only); bindings by phase and realm as metrics (`ligo_bindings{phase,realm}`). Nothing today connects installations to each other.
+
+**To explore.**
+
+- **Transport.** A request-reply protocol over gRPC, where each installation answers queries about itself, or a gossip membership library such as `hashicorp/serf`, where installations find each other and spread summaries. Gossip fits finding peers; gRPC fits authenticated, audited queries. A mix is possible.
+- **Who may see the map.** The topology is sensitive: it tells an attacker where trust is, and who can approve what. Answers go only to a more trusted subset of servers, authenticated by SVID over mTLS, with a dedicated role, and every query is logged.
+- **What is shared.** Counts and names, never resources, scopes' members or secrets; whether scope names themselves may leave an installation is to decide.
+- **Where the map is drawn**: the web UI of a designated installation, or a separate read-only tool.
