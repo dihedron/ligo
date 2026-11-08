@@ -6,8 +6,8 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/huh/v2 v2.0.3
-	github.com/chromedp/cdproto v0.157.8
-	github.com/chromedp/chromedp v0.21.0
+	github.com/chromedp/cdproto v0.159.0
+	github.com/chromedp/chromedp v0.22.1
 	github.com/dbos-inc/dbos-transact-golang v1.8.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/go-ldap/ldap/v3 v3.4.15
