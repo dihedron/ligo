@@ -1,0 +1,153 @@
+# Blueprint: a traditional data centre interconnected with a multitenant
+# cloud (Planning for Deployment Guide, chapter 13): the cloud installation.
+# Loaded and validated by docs/docs_test.go.
+service:
+  application_version: "0.2.0"
+  instance_id_env: "LIGO_INSTANCE_ID"
+  workload_advertise: { destination: "ligo.cloud.internal", port: 8443, server_name: "ligo.cloud.internal" }
+
+realms:
+  - { name: cloud, trust_domain: cloud.internal, spiffe_workload_socket: "unix:///run/spire/agent.sock" }
+
+core_identity:
+  realm: cloud
+  svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["https://vault.cloud.internal"] }
+
+server:
+  workload_listener:
+    listen_address: "0.0.0.0:8443"
+    tls_source: spiffe
+    auth_modes: [x509_svid, jwt_svid]
+    accepted_trust_domains: [cloud.internal, prod.dc.internal]
+    federated_trust_domains:                   # the cloud's SPIRE decides to trust the data centre
+      - { trust_domain: prod.dc.internal, via_realm: cloud }
+    expected_jwt_audience: "spiffe://cloud.internal/ns/sys/sa/ligo"
+  admin_listener:
+    listen_address: "0.0.0.0:9443"
+    external_origin: "https://ligo-admin.cloud.internal"
+    tls_source: file
+    tls_cert_file: "/etc/ligo/tls/admin.crt"
+    tls_key_file: "/etc/ligo/tls/admin.key"
+    client_svid_auth: { enabled: true, accepted_trust_domains: [cloud.internal] }
+
+admin_auth:
+  ldap:
+    url: "ldaps://ldap.cloud.internal:636"
+    ca_cert_file: "/etc/ligo/tls/cloud-ca.crt"
+    service_bind_dn: "cn=ligo-admin-auth,ou=services,dc=cloud,dc=internal"
+    service_bind_password_env: "LIGO_LDAP_BIND_PASS"
+    user_base_dn: "ou=users,dc=cloud,dc=internal"
+    user_filter: "(&(objectClass=inetOrgPerson)(uid=%s))"
+    group_membership_filter: "(member=%s)"
+
+authorization:
+  bindings:                                    # the platform team's own groups; tenants' come from charter.accounts
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=cloud,dc=internal", role: viewer, jurisdictions: ["*"] }
+    - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,dc=cloud,dc=internal", role: account_admin }
+    - { ldap_group_dn: "cn=platform-ops,ou=groups,dc=cloud,dc=internal", role: operator, jurisdictions: ["ops/platform"] }
+    - { ldap_group_dn: "cn=platform-leads,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["ops/platform"] }
+    # data-centre teams whose workloads use cloud data: their people, mirrored in the cloud's directory
+    - { ldap_group_dn: "cn=dc-orders-leads,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["dc/prod/core/orders"] }
+    - { ldap_group_dn: "cn=dc-orders-devs,ou=groups,dc=cloud,dc=internal", role: operator, jurisdictions: ["dc/prod/core/orders"] }
+    - { ldap_group_dn: "cn=infosec,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["sec/infosec"] }
+  approval:
+    required_jurisdictions: ["cloud/*", "ops/*", "dc/*", "sec/*"]   # every account root, the platform team, data-centre sources, the party
+    require_distinct_approvers_across_jurisdictions: true
+
+charter:
+  accounts:                                    # one structure for every account
+    jurisdiction: "cloud/{account}"
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
+    ldap_groups:                               # one organisational unit per account
+      search_base: "ou=accounts,dc=cloud,dc=internal"
+      roles:
+        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=cloud,dc=internal", role: operator, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=cloud,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=breakglass,ou={account},ou=accounts,dc=cloud,dc=internal", role: break_glass, jurisdiction: "cloud/{account}/*" }
+  source_jurisdictions:
+    - { trust_domain: cloud.internal, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', jurisdiction_template: 'cloud/${1}/app/${2}' }
+    - { trust_domain: prod.dc.internal, mode: path_template, path_regex: '^/seg/([a-z0-9]+)/team/([a-z0-9]+)/', jurisdiction_template: 'dc/prod/${1}/${2}' }
+  interconnects:
+    default_cross_jurisdiction: deny
+    rules:                                     # across accounts, each account's approvers consent
+      - { name: accounts, from: ["cloud/*"], to: ["cloud/*"], action: allow }
+      - name: dc-core-to-cloud                 # data-centre core workloads (never the DMZ) to tenancies: Information Security consents too
+        from: ["dc/prod/core/*"]
+        to: ["cloud/*"]
+        action: allow
+        additional_approvals: [ { name: security, jurisdiction: "sec/infosec" } ]
+
+break_glass:
+  min_justification_length: 20
+  policies:
+    - { jurisdictions: ["cloud/*"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
+
+storage:
+  postgres:
+    app_dsn_env: "LIGO_PG_APP_DSN"
+    reader_dsn_env: "LIGO_PG_READER_DSN"
+    dbos_dsn_env: "LIGO_PG_DBOS_DSN"
+
+secret_sealing:
+  provider: vault-transit
+  vault_transit:
+    address: "https://vault.cloud.internal:8200"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-sealer"
+    jwt_audience: "https://vault.cloud.internal"
+    mount: "transit"
+    key_name: "ligo-interstage"
+
+plugins:
+  directory: "/usr/lib/ligo/plugins"
+
+identity_providers:
+  - { type: target-local.v1, builtin: true, instances: [ { name: local-cloud, realm: cloud } ] }
+
+secret_stores:
+  - type: "vault.v1"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
+    instances:
+      - name: "vault-cloud"
+        realm: cloud
+        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.cloud.internal"] }
+        config:
+          address: "https://vault.cloud.internal:8200"
+          allowed_endpoints: ["vault.cloud.internal:8200"]
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault"
+          workload_jwt_audience: "https://vault.cloud.internal"
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.cloud.internal", ports: [8200], tls: true, server_name: "vault.cloud.internal" }
+
+platform_providers:
+  - type: "postgres.v1"
+    binary: "ligo-plugin-postgres"
+    sha256: "<64-hex-sha256-of-ligo-plugin-postgres>"
+    platforms:
+      - name: pg-shared                         # one database, one schema per tenancy
+        realm: cloud
+        jurisdiction: "ops/platform"
+        target_jurisdictions: ["cloud/*"]
+        namespace_template: "{account}_{tenancy}"
+        allowed_source_trust_domains: [cloud.internal, prod.dc.internal]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.cloud.internal", ports: [5432], tls: true, server_name: "pg.cloud.internal" }
+        identity_provider: { type: target-local.v1, instance: local-cloud }
+        secret_store: { type: vault.v1, instance: vault-cloud, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.cloud.internal"] }
+        config:
+          host: pg.cloud.internal
+          port: 5432
+          database: tenants
+          grantable_role_templates: ["{namespace}_read", "{namespace}_write"]
+          allowed_endpoints: ["pg.cloud.internal:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.cloud.internal:8200"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "https://vault.cloud.internal"
+            kv_path: kv/data/ligo/bootstrap/pg-shared

@@ -1,0 +1,153 @@
+# Blueprint: the regulated network zone's own installation, next to the cloud
+# of chapter 11 (Planning for Deployment Guide, chapter 12). Loaded and
+# validated by docs/docs_test.go.
+service:
+  application_version: "0.2.0"
+  instance_id_env: "LIGO_INSTANCE_ID"
+  workload_advertise: { destination: "ligo.reg.internal", port: 8443, server_name: "ligo.reg.internal" }
+
+realms:                                        # ligo provisions only in the regulated domain
+  - { name: reg, trust_domain: regulated.internal, spiffe_workload_socket: "unix:///run/spire/agent.sock" }
+
+core_identity:
+  realm: reg
+  svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["https://vault.reg.internal"] }
+
+server:
+  workload_listener:
+    listen_address: "0.0.0.0:8443"
+    tls_source: file                           # a corporate CA certificate: cloud workloads need no regulated bundle
+    tls_cert_file: "/etc/ligo/tls/workload.crt"
+    tls_key_file: "/etc/ligo/tls/workload.key"
+    auth_modes: [x509_svid, jwt_svid]
+    accepted_trust_domains: [regulated.internal, cloud.internal]
+    federated_trust_domains:                   # topology C: the regulated SPIRE server decides to trust the cloud
+      - { trust_domain: cloud.internal, via_realm: reg }
+    expected_jwt_audience: "spiffe://regulated.internal/ns/sys/sa/ligo"
+  admin_listener:
+    listen_address: "0.0.0.0:9443"
+    external_origin: "https://ligo-admin.reg.internal"
+    tls_source: file
+    tls_cert_file: "/etc/ligo/tls/admin.crt"
+    tls_key_file: "/etc/ligo/tls/admin.key"
+    client_svid_auth: { enabled: true, accepted_trust_domains: [regulated.internal] }
+
+admin_auth:
+  ldap:
+    url: "ldaps://ldap.cloud.internal:636"     # the same directory as the cloud's
+    ca_cert_file: "/etc/ligo/tls/cloud-ca.crt"
+    service_bind_dn: "cn=ligo-admin-auth-reg,ou=services,dc=cloud,dc=internal"
+    service_bind_password_env: "LIGO_LDAP_BIND_PASS"
+    user_base_dn: "ou=users,dc=cloud,dc=internal"
+    user_filter: "(&(objectClass=inetOrgPerson)(uid=%s))"
+    group_membership_filter: "(member=%s)"
+
+authorization:
+  bindings:
+    - { ldap_group_dn: "cn=reg-viewers,ou=groups,dc=cloud,dc=internal", role: viewer, jurisdictions: ["reg/*"] }
+    - { ldap_group_dn: "cn=reg-account-admins,ou=groups,dc=cloud,dc=internal", role: account_admin }
+    - { ldap_group_dn: "cn=reg-dba,ou=groups,dc=cloud,dc=internal", role: operator, jurisdictions: ["reg/dba"] }
+    - { ldap_group_dn: "cn=reg-dba-leads,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["reg/dba"] }
+    - { ldap_group_dn: "cn=risk-devs,ou=groups,dc=cloud,dc=internal", role: operator, jurisdictions: ["reg/apps/risk", "reg/data/risk"] }
+    - { ldap_group_dn: "cn=risk-leads,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["reg/apps/risk", "reg/data/risk"] }
+    - { ldap_group_dn: "cn=compliance,ou=groups,dc=cloud,dc=internal", role: approver, jurisdictions: ["sec/compliance"] }
+    - { ldap_group_dn: "cn=reg-oncall,ou=groups,dc=cloud,dc=internal", role: break_glass, jurisdictions: ["reg/*"] }
+  approval:
+    required_jurisdictions: ["reg/*", "cloud/*", "sec/compliance"]
+
+charter:
+  accounts:                                    # the cloud's structure; only accounts allowed in are registered here
+    jurisdiction: "cloud/{account}"
+    source_jurisdiction: "cloud/{account}/app/{project}"
+    target_jurisdiction: "cloud/{account}/data/{tenancy}"
+    ldap_groups:
+      search_base: "ou=accounts,dc=cloud,dc=internal"
+      roles:
+        - { group_dn: "cn=operators,ou={account},ou=accounts,dc=cloud,dc=internal", role: operator, jurisdiction: "cloud/{account}/*" }
+        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=cloud,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
+  source_jurisdictions:
+    - { trust_domain: regulated.internal, mode: path_template, path_regex: '^/team/([a-z0-9]+)/', jurisdiction_template: 'reg/apps/${1}' }
+    - { trust_domain: cloud.internal, mode: path_template, path_regex: '^/acct/([a-z0-9]+)/project/([a-z0-9]+)/', jurisdiction_template: 'cloud/${1}/app/${2}' }
+  interconnects:
+    default_cross_jurisdiction: deny
+    rules:
+      - { name: reg-apps-to-data, from: ["reg/apps/*"], to: ["reg/data/*"], action: allow }
+      - name: cloud-to-reg-data                # a cloud account reaching regulated data: Compliance consents too
+        from: ["cloud/*"]
+        to: ["reg/data/*"]
+        action: allow
+        additional_approvals: [ { name: compliance, jurisdiction: "sec/compliance" } ]
+
+break_glass:
+  min_justification_length: 20
+  incident_reference_pattern: '^INC[0-9]{7}$'
+  policies:
+    - { jurisdictions: ["reg/*"], default_ttl: 1h, max_ttl: 4h, max_open: 2, warn_before: 15m }
+
+storage:
+  postgres:
+    app_dsn_env: "LIGO_PG_APP_DSN"
+    reader_dsn_env: "LIGO_PG_READER_DSN"
+    dbos_dsn_env: "LIGO_PG_DBOS_DSN"
+
+secret_sealing:
+  provider: vault-transit
+  vault_transit:
+    address: "https://vault.reg.internal:8200"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-sealer"
+    jwt_audience: "https://vault.reg.internal"
+    mount: "transit"
+    key_name: "ligo-interstage"
+
+plugins:
+  directory: "/usr/lib/ligo/plugins"
+
+identity_providers:
+  - { type: target-local.v1, builtin: true, instances: [ { name: local-reg, realm: reg } ] }
+
+secret_stores:
+  - type: "vault.v1"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
+    instances:
+      - name: "vault-reg"                      # its JWT auth trusts regulated.internal and cloud.internal
+        realm: reg
+        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.reg.internal"] }
+        config:
+          address: "https://vault.reg.internal:8200"
+          allowed_endpoints: ["vault.reg.internal:8200"]
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault"
+          workload_jwt_audience: "https://vault.reg.internal"
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.reg.internal", ports: [8200], tls: true, server_name: "vault.reg.internal" }
+
+platform_providers:
+  - type: "postgres.v1"
+    binary: "ligo-plugin-postgres"
+    sha256: "<64-hex-sha256-of-ligo-plugin-postgres>"
+    platforms:
+      - name: pg-reg
+        realm: reg
+        jurisdiction: "reg/dba"
+        target_jurisdictions: ["reg/data/*"]
+        allowed_source_trust_domains: [regulated.internal, cloud.internal]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.reg.internal", ports: [5432], tls: true, server_name: "pg.reg.internal" }
+        identity_provider: { type: target-local.v1, instance: local-reg }
+        secret_store: { type: vault.v1, instance: vault-reg, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.reg.internal"] }
+        config:
+          host: pg.reg.internal
+          port: 5432
+          database: risk
+          grantable_roles: [RISK_RO, RISK_RW]
+          allowed_endpoints: ["pg.reg.internal:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.reg.internal:8200"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "https://vault.reg.internal"
+            kv_path: kv/data/ligo/bootstrap/pg-reg

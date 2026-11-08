@@ -45,7 +45,7 @@ make help     # list the targets
 
 ## Install
 
-Each release has deb and rpm packages and archives of `ligo` and of each plugin, and three documents, as PDF files: the **Setup Guide**, the **Operator's Guide**, and **Architecture and Design**. Their sources are in [docs/](docs).
+Each release has deb and rpm packages and archives of `ligo` and of each plugin, and four documents, as PDF files: the **Setup Guide**, the **Operator's Guide**, **Architecture and Design**, and the **Planning for Deployment Guide**. Their sources are in [docs/](docs).
 
 ### Verify a release
 
