@@ -281,7 +281,7 @@ soak_prove() {
 		# shellcheck disable=SC2086 # extra is VAR=value or empty
 		(cd "$wt" && env SOAK_DEV=1 SOAK_SEED="$SOAK_SEED" SOAK_DURATION="${SOAK_DURATION:-15m}" $extra LAB_ASSUME_YES=yes test/lab/lab.sh soak run) \
 			2>&1 | tee "$out/$name.log" || true
-		dir="$(ls -td "$LAB_STATE_DIR"/soak-dev-* | head -1)"
+		dir="$(find "$LAB_STATE_DIR" -maxdepth 1 -name 'soak-dev-*' | sort | tail -n 1)" # names sort by time; ls | head would SIGPIPE under pipefail
 		cp "$dir/summary.md" "$out/$name-summary.md" 2>/dev/null || true
 		got="$({ cat "$dir/history.jsonl" 2>/dev/null; cat "$dir/violations-lab.jsonl" 2>/dev/null; } | jq -rs '[.[] | select(.kind == "violation") | .res] | unique | join(" ")')"
 		if [[ -z "$expect" ]]; then
