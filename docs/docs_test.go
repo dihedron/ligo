@@ -193,3 +193,29 @@ func TestCharterIsDefined(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanningExamples loads every blueprint's server.yaml of the planning
+// guide with the real configuration loader and its static rules, so that the
+// excerpts the guide shows cannot drift from the code
+// (.specs/ligo-planning-guide.md §5).
+func TestPlanningExamples(t *testing.T) {
+	files, err := filepath.Glob("planning-guide/examples/*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no examples in planning-guide/examples")
+	}
+	placeholder := regexp.MustCompile(`<64-hex-sha256-of-[a-z-]+>`)
+	anyEnv := func(string) (string, bool) { return "ligo-1", true }
+	for _, f := range files {
+		cfg, err := config.Parse([]byte(placeholder.ReplaceAllString(read(t, f), strings.Repeat("ab", 32))))
+		if err != nil {
+			t.Errorf("%s: %v", f, err)
+			continue
+		}
+		if err := config.Validate(cfg, config.Options{LookupEnv: anyEnv}); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
+	}
+}

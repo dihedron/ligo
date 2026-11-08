@@ -1,0 +1,133 @@
+# Blueprint: a single network zone, one organisation (Planning for
+# Deployment Guide, chapter 9). Loaded and validated by docs/docs_test.go.
+service:
+  application_version: "0.2.0"
+  instance_id_env: "LIGO_INSTANCE_ID"          # ligo-1, ligo-2: one per replica, never reused
+  workload_advertise: { destination: "ligo.corp.internal", port: 8443, server_name: "ligo.corp.internal" }
+
+realms:                                        # one trust domain, one realm
+  - { name: corp, trust_domain: corp.internal, spiffe_workload_socket: "unix:///run/spire/agent.sock" }
+
+core_identity:
+  realm: corp
+  svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["https://vault.corp.internal"] }
+
+server:
+  workload_listener:
+    listen_address: "0.0.0.0:8443"
+    tls_source: spiffe
+    auth_modes: [x509_svid, jwt_svid]
+    accepted_trust_domains: [corp.internal]
+    expected_jwt_audience: "spiffe://corp.internal/ns/sys/sa/ligo"
+  admin_listener:
+    listen_address: "0.0.0.0:9443"
+    external_origin: "https://ligo-admin.corp.internal"
+    tls_source: file
+    tls_cert_file: "/etc/ligo/tls/admin.crt"
+    tls_key_file: "/etc/ligo/tls/admin.key"
+    client_svid_auth: { enabled: true, accepted_trust_domains: [corp.internal] }
+
+admin_auth:
+  ldap:
+    url: "ldaps://ldap.corp.internal:636"
+    ca_cert_file: "/etc/ligo/tls/corp-ca.crt"
+    service_bind_dn: "cn=ligo-admin-auth,ou=services,dc=corp,dc=internal"
+    service_bind_password_env: "LIGO_LDAP_BIND_PASS"
+    user_base_dn: "ou=users,dc=corp,dc=internal"
+    user_filter: "(&(objectClass=inetOrgPerson)(uid=%s))"
+    group_membership_filter: "(member=%s)"
+
+authorization:
+  bindings:
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal", role: viewer, jurisdictions: ["*"] }
+    - { ldap_group_dn: "cn=platform-ops,ou=groups,dc=corp,dc=internal", role: operator, jurisdictions: ["corp/platform"] }
+    - { ldap_group_dn: "cn=platform-leads,ou=groups,dc=corp,dc=internal", role: approver, jurisdictions: ["corp/platform"] }
+    - { ldap_group_dn: "cn=payments-devs,ou=groups,dc=corp,dc=internal", role: operator, jurisdictions: ["corp/apps/payments", "corp/data/payments"] }
+    - { ldap_group_dn: "cn=payments-leads,ou=groups,dc=corp,dc=internal", role: approver, jurisdictions: ["corp/apps/payments", "corp/data/payments"] }
+    - { ldap_group_dn: "cn=ligo-oncall,ou=groups,dc=corp,dc=internal", role: break_glass, jurisdictions: ["corp/*"] }
+  approval:
+    required_jurisdictions: ["corp/*"]          # every side needs a second person
+
+governance:
+  source_jurisdictions:                         # workloads' SPIFFE paths name their team
+    - trust_domain: corp.internal
+      mode: path_template
+      path_regex: '^/team/([a-z0-9]+)/'
+      jurisdiction_template: 'corp/apps/${1}'
+  interconnects:
+    default_cross_jurisdiction: deny
+    rules:
+      - { name: apps-to-data, from: ["corp/apps/*"], to: ["corp/data/*"], action: allow }
+
+break_glass:
+  min_justification_length: 20
+  policies:
+    - { jurisdictions: ["corp/*"], default_ttl: 2h, max_ttl: 8h, max_open: 3, warn_before: 30m }
+
+storage:
+  postgres:
+    app_dsn_env: "LIGO_PG_APP_DSN"
+    reader_dsn_env: "LIGO_PG_READER_DSN"
+    dbos_dsn_env: "LIGO_PG_DBOS_DSN"
+
+secret_sealing:
+  provider: vault-transit
+  vault_transit:
+    address: "https://vault.corp.internal:8200"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-sealer"
+    jwt_audience: "https://vault.corp.internal"
+    mount: "transit"
+    key_name: "ligo-interstage"
+
+plugins:
+  directory: "/usr/lib/ligo/plugins"
+
+identity_providers:
+  - { type: target-local.v1, builtin: true, instances: [ { name: local-corp, realm: corp } ] }
+
+secret_stores:
+  - type: "vault.v1"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
+    instances:
+      - name: "vault-corp"
+        realm: corp
+        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.corp.internal"] }
+        config:
+          address: "https://vault.corp.internal:8200"
+          allowed_endpoints: ["vault.corp.internal:8200"]
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault"
+          workload_jwt_audience: "https://vault.corp.internal"
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.corp.internal", ports: [8200], tls: true, server_name: "vault.corp.internal" }
+
+platform_providers:
+  - type: "postgres.v1"
+    binary: "ligo-plugin-postgres"
+    sha256: "<64-hex-sha256-of-ligo-plugin-postgres>"
+    platforms:
+      - name: pg-main
+        realm: corp
+        jurisdiction: "corp/platform"            # the platform team runs it
+        target_jurisdictions: ["corp/data/*"]    # each team's targets on it
+        allowed_source_trust_domains: [corp.internal]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.corp.internal", ports: [5432], tls: true, server_name: "pg.corp.internal" }
+        identity_provider: { type: target-local.v1, instance: local-corp }
+        secret_store: { type: vault.v1, instance: vault-corp, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.corp.internal"] }
+        config:
+          host: pg.corp.internal
+          port: 5432
+          database: apps
+          grantable_roles: [APPS_RO, APPS_RW]
+          allowed_endpoints: ["pg.corp.internal:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.corp.internal:8200"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "https://vault.corp.internal"
+            kv_path: kv/data/ligo/bootstrap/postgres

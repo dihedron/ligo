@@ -58,7 +58,7 @@ The outline fixes the scope, not the wording. Every decision chapter has the sam
 
 **Part III, Blueprints**
 
-Each blueprint has the same sections: context and assumptions; network zones (diagram); trust domains, realms and SPIRE (diagram); installations and what they share; governance layout (with a `server.yaml` excerpt, validated by a test, see §5); roles and RACI; capacity and availability; failure analysis; variations; a checklist.
+Each blueprint has the same sections: context and assumptions; one diagram of the network zones, with the trust domains, realms and SPIRE placed on them; installations and what they share; governance layout (with a `server.yaml` excerpt, validated by a test, see §5); roles and RACI; capacity and availability; failure analysis; variations; a checklist.
 
 9. **Single network zone, one organisation**: the smallest production layout. One trust domain, one installation, HA replicas, flat jurisdictions.
 10. **Traditional data centre**: several network zones (for example production, test, DMZ), classic teams and approval chains, no account registry, an interconnection policy that keeps test from production, Information Security as an additional party.

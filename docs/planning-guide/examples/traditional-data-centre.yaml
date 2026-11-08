@@ -1,0 +1,194 @@
+# Blueprint: a traditional data centre with production, DMZ and test network
+# zones (Planning for Deployment Guide, chapter 10). Loaded and validated by
+# docs/docs_test.go.
+service:
+  application_version: "0.2.0"
+  instance_id_env: "LIGO_INSTANCE_ID"
+  workload_advertise: { destination: "ligo.dc.internal", port: 8443, server_name: "ligo.dc.internal" }
+
+realms:                                        # topology A: ligo provisions in both domains
+  - { name: prod, trust_domain: prod.dc.internal, spiffe_workload_socket: "unix:///run/spire/prod/agent.sock" }
+  - { name: test, trust_domain: test.dc.internal, spiffe_workload_socket: "unix:///run/spire/test/agent.sock" }
+
+core_identity:                                 # from the strictest domain
+  realm: prod
+  svid_selector: { match_expr: 'path == "/ns/sys/sa/ligo"', jwt_audience: ["https://vault.prod.dc.internal"] }
+
+server:
+  workload_listener:
+    listen_address: "0.0.0.0:8443"
+    tls_source: file                           # a corporate CA certificate, so test workloads need no prod bundle
+    tls_cert_file: "/etc/ligo/tls/workload.crt"
+    tls_key_file: "/etc/ligo/tls/workload.key"
+    auth_modes: [x509_svid, jwt_svid]
+    accepted_trust_domains: [prod.dc.internal, test.dc.internal]
+    expected_jwt_audience: "spiffe://prod.dc.internal/ns/sys/sa/ligo"
+  admin_listener:
+    listen_address: "0.0.0.0:9443"
+    external_origin: "https://ligo-admin.dc.internal"
+    tls_source: file
+    tls_cert_file: "/etc/ligo/tls/admin.crt"
+    tls_key_file: "/etc/ligo/tls/admin.key"
+    client_svid_auth: { enabled: true, accepted_trust_domains: [prod.dc.internal] }   # admin SVIDs only from production
+
+admin_auth:
+  ldap:
+    url: "ldaps://ldap.dc.internal:636"
+    ca_cert_file: "/etc/ligo/tls/dc-ca.crt"
+    service_bind_dn: "cn=ligo-admin-auth,ou=services,dc=dc,dc=internal"
+    service_bind_password_env: "LIGO_LDAP_BIND_PASS"
+    user_base_dn: "ou=users,dc=dc,dc=internal"
+    user_filter: "(&(objectClass=inetOrgPerson)(uid=%s))"
+    group_membership_filter: "(member=%s)"
+
+authorization:
+  bindings:
+    - { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=dc,dc=internal", role: viewer, jurisdictions: ["*"] }
+    # The DBA team runs the database platforms
+    - { ldap_group_dn: "cn=dba,ou=groups,dc=dc,dc=internal", role: operator, jurisdictions: ["dc/prod/dba", "dc/test/dba"] }
+    - { ldap_group_dn: "cn=dba-leads,ou=groups,dc=dc,dc=internal", role: approver, jurisdictions: ["dc/prod/dba"] }
+    # An application team: its workloads in the core and the DMZ, its data
+    - { ldap_group_dn: "cn=orders-devs,ou=groups,dc=dc,dc=internal", role: operator, jurisdictions: ["dc/prod/core/orders", "dc/prod/dmz/orders", "dc/prod/data/orders"] }
+    - { ldap_group_dn: "cn=orders-leads,ou=groups,dc=dc,dc=internal", role: approver, jurisdictions: ["dc/prod/core/orders", "dc/prod/dmz/orders", "dc/prod/data/orders"] }
+    # Information Security approves what reaches internal data from the DMZ
+    - { ldap_group_dn: "cn=infosec,ou=groups,dc=dc,dc=internal", role: approver, jurisdictions: ["sec/infosec"] }
+    # Developers serve themselves in test
+    - { ldap_group_dn: "cn=developers,ou=groups,dc=dc,dc=internal", role: operator, jurisdictions: ["dc/test/apps", "dc/test/data/*"] }
+    - { ldap_group_dn: "cn=ligo-oncall,ou=groups,dc=dc,dc=internal", role: break_glass, jurisdictions: ["dc/prod/*"] }
+    # Change automation: AWX on dedicated nodes, after an approved ITSM change
+    - spiffe_id: "spiffe://prod.dc.internal/ns/automation/sa/awx-db"
+      role: trusted_automation
+      jurisdictions: ["dc/prod/data/*"]
+      approval_reference_pattern: '^CHG[0-9]{7}$'
+  approval:
+    required_jurisdictions: ["dc/prod/*", "sec/infosec"]   # test is self-service
+
+governance:
+  source_jurisdictions:
+    - trust_domain: prod.dc.internal           # /seg/<core|dmz>/team/<team>/...
+      mode: path_template
+      path_regex: '^/seg/([a-z0-9]+)/team/([a-z0-9]+)/'
+      jurisdiction_template: 'dc/prod/${1}/${2}'
+    - { trust_domain: test.dc.internal, mode: static, jurisdiction: "dc/test/apps" }
+  interconnects:
+    default_cross_jurisdiction: deny
+    rules:                                     # first match wins: denials first
+      - { name: no-test-to-prod, from: ["dc/test/*"], to: ["dc/prod/*"], action: deny }
+      - { name: no-prod-to-test, from: ["dc/prod/*"], to: ["dc/test/*"], action: deny }
+      - { name: core-to-data, from: ["dc/prod/core/*"], to: ["dc/prod/data/*"], action: allow }
+      - name: dmz-to-data
+        from: ["dc/prod/dmz/*"]
+        to: ["dc/prod/data/*"]
+        action: allow
+        additional_approvals: [ { name: security, jurisdiction: "sec/infosec" } ]
+      - { name: test-apps-to-data, from: ["dc/test/apps"], to: ["dc/test/data/*"], action: allow }
+
+break_glass:
+  min_justification_length: 20
+  incident_reference_pattern: '^INC[0-9]{7}$'
+  policies:
+    - { jurisdictions: ["dc/prod/*"], default_ttl: 4h, max_ttl: 8h, max_open: 5, warn_before: 1h }
+
+storage:
+  postgres:
+    app_dsn_env: "LIGO_PG_APP_DSN"
+    reader_dsn_env: "LIGO_PG_READER_DSN"
+    dbos_dsn_env: "LIGO_PG_DBOS_DSN"
+
+secret_sealing:
+  provider: vault-transit
+  vault_transit:
+    address: "https://vault.prod.dc.internal:8200"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-sealer"
+    jwt_audience: "https://vault.prod.dc.internal"
+    mount: "transit"
+    key_name: "ligo-interstage"
+
+plugins:
+  directory: "/usr/lib/ligo/plugins"
+
+identity_providers:
+  - type: target-local.v1
+    builtin: true
+    instances: [ { name: local-prod, realm: prod }, { name: local-test, realm: test } ]
+
+secret_stores:                                 # one store per domain: each trusts its own workloads' JWT-SVIDs
+  - type: "vault.v1"
+    binary: "ligo-plugin-vault"
+    sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
+    instances:
+      - name: "vault-prod"
+        realm: prod
+        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.prod.dc.internal"] }
+        config:
+          address: "https://vault.prod.dc.internal:8200"
+          allowed_endpoints: ["vault.prod.dc.internal:8200"]
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault"
+          workload_jwt_audience: "https://vault.prod.dc.internal"
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.dc.internal", ports: [8200], tls: true, server_name: "vault.prod.dc.internal" }
+      - name: "vault-test"
+        realm: test
+        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.test.dc.internal"] }
+        config:
+          address: "https://vault.test.dc.internal:8200"
+          allowed_endpoints: ["vault.test.dc.internal:8200"]
+          auth_mount: "jwt-spiffe"
+          role: "ligo-plugin-vault"
+          workload_jwt_audience: "https://vault.test.dc.internal"
+        network_flows:
+          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.test.dc.internal", ports: [8200], tls: true, server_name: "vault.test.dc.internal" }
+
+platform_providers:
+  - type: "postgres.v1"
+    binary: "ligo-plugin-postgres"
+    sha256: "<64-hex-sha256-of-ligo-plugin-postgres>"
+    platforms:
+      - name: pg-prod
+        realm: prod
+        jurisdiction: "dc/prod/dba"
+        target_jurisdictions: ["dc/prod/data/*"]
+        allowed_source_trust_domains: [prod.dc.internal]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.prod.dc.internal", ports: [5432], tls: true, server_name: "pg.prod.dc.internal" }
+        identity_provider: { type: target-local.v1, instance: local-prod }
+        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.prod.dc.internal"] }
+        config:
+          host: pg.prod.dc.internal
+          port: 5432
+          database: orders
+          grantable_roles: [ORDERS_RO, ORDERS_RW]
+          allowed_endpoints: ["pg.prod.dc.internal:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.prod.dc.internal:8200"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "https://vault.prod.dc.internal"
+            kv_path: kv/data/ligo/bootstrap/pg-prod
+      - name: pg-test
+        realm: test
+        jurisdiction: "dc/test/dba"
+        target_jurisdictions: ["dc/test/data/*"]
+        allowed_source_trust_domains: [test.dc.internal]
+        network_flows:
+          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.test.dc.internal", ports: [5432], tls: true, server_name: "pg.test.dc.internal" }
+        identity_provider: { type: target-local.v1, instance: local-test }
+        secret_store: { type: vault.v1, instance: vault-test, secret_storage_strategy: vault-static }
+        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.test.dc.internal"] }
+        config:
+          host: pg.test.dc.internal
+          port: 5432
+          database: orders
+          grantable_roles: [ORDERS_RO, ORDERS_RW]
+          allowed_endpoints: ["pg.test.dc.internal:5432"]
+          bootstrap_credential:
+            source: vault
+            address: "https://vault.test.dc.internal:8200"
+            auth_mount: jwt-spiffe
+            role: ligo-plugin-postgres
+            jwt_audience: "https://vault.test.dc.internal"
+            kv_path: kv/data/ligo/bootstrap/pg-test
