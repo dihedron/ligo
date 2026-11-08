@@ -106,6 +106,9 @@ commands:
                             (default 15m) with SOAK_SEED and SOAK_ACCOUNTS (20,
                             a workload each), and keeps the evidence (a clean
                             tree only, or SOAK_DEV=1 for a trial outside it)
+  soak prove                 each mutant of test/lab/soak/mutants on a worktree, run
+                            as soak run, must trip its invariant, and the build as
+                            committed none (.specs/ligo-soak.md §8)
   release-run               destroy the lab, build a new one and run every suite
                             on OpenBao and on Vault, keeping the evidence in
                             test/lab/.evidence (a clean tree only)

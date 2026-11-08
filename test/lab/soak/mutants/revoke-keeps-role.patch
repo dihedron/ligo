@@ -1,0 +1,15 @@
+diff --git a/cmd/plugins/ligo-plugin-postgres/main.go b/cmd/plugins/ligo-plugin-postgres/main.go
+index 0e0f545..8635d6a 100644
+--- a/cmd/plugins/ligo-plugin-postgres/main.go
++++ b/cmd/plugins/ligo-plugin-postgres/main.go
+@@ -638,9 +638,7 @@ func (p *plugin) CleanupTarget(ctx context.Context, r *pluginv1.CleanupTargetReq
+ 	if _, err := conn.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1", principal); err != nil {
+ 		return nil, failure(err)
+ 	}
+-	if _, err := conn.Exec(ctx, "DROP ROLE "+ident); err != nil {
+-		return nil, failure(err)
+-	}
++	_ = ident // mutant: the role is kept
+ 	return &pluginv1.CleanupTargetResponse{}, nil
+ }
+ 

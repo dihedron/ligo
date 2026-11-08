@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.1 (2026-11-08): one workload per account; binding updates instead of target updates; SVID renewal
+- **Version:** 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -75,7 +75,8 @@ Each tick, every 2 seconds, draws one action from the seeded source, with these 
 | 4 | Break-glass a binding; half are ratified, half are left to be reverted |
 | 3 | Register an account |
 | 2 | Retire an account: its sources and targets first, then the registration |
-| 10 | Read-only admin calls: lists, `GET /v1/flows`, the charter |
+| 10 | Read-only admin calls: lists, the catalog, the charter |
+| 3 | Abuse: the requester approves its own binding, then one approver tries SOURCE and TARGET. Both must be refused; one accepted is an SK-4 violation at once. The binding is then decided properly |
 
 Each workload also runs in its own loop, once every 30 seconds, beside the ticks. Live bindings are capped at 200: above the cap, create actions turn into revocations.
 
@@ -104,15 +105,15 @@ The checker runs every 60 seconds, and again 30 seconds after each fault ends. A
 | ID | Must hold | How it is checked |
 | :-- | :-- | :-- |
 | SK-1 | A revoked binding delivers nothing, and its role is gone, within 2 minutes of the revocation being applied | Workload: the binding is absent from its list. Target admin: `pg_roles` no longer has the role |
-| SK-2 | Every `ACTIVE` binding's current credential connects | For each one: the store read, then a connection as that user. Skipped only while the store or that target is under a fault |
-| SK-3 | No credential reads another tenant's schema | Each binding's user tries `select` on a different account's schema: it must be refused (`42501`) |
+| SK-2 | Every `ACTIVE` binding's current credential connects | 20 live bindings drawn each minute, every one at the end: the store read as its workload does, then a connection as that user that reads its tenancy. A failure counts only if the binding is still `ACTIVE` afterwards |
+| SK-3 | No credential reads another tenant's schema | With each credential of SK-2: `select` on another account's schema must be refused (`42501`) |
 | SK-4 | No `APPLIED` change was decided by its requester, or by one person on two people-decided sides | SQL on `change_requests` joined to `change_request_sides`. The lab keeps `require_distinct_approvers_across_jurisdictions` at its default, `true` |
 | SK-5 | No live source or target on a retired account | SQL: `accounts.status = 'RETIRED'` joined to `sources` or `targets` whose state is not `RETIRED` |
 | SK-6 | The roles in PostgreSQL match the bindings: none orphaned, none missing | Target admin: the roles under the lab's ligo role prefix compared with `ACTIVE` bindings' users |
 | SK-7 | Nothing stays in `PROVISIONING` or `DELETING` longer than 10 minutes. An expired break-glass is reverted within 2 minutes of its expiry | SQL on `bindings.phase` and `updated_at`; SQL on `BREAK_GLASS` change requests past `expires_at` with no `SYSTEM_REVERT` |
 | SK-8 | `ligo audit verify` is valid. No password appears in the database or the journals | The CLI as an approver; `serve_scan_secrets`, from `soak.sh`, every 30 minutes and at the end |
 | SK-9 | Every outbox event is delivered or abandoned within its retry window, and none is lost | SQL on `notification_outbox`. The receiver's log has every `event_id` marked delivered |
-| SK-10 | Both replicas give the same answer within 30 seconds | The same list (bindings, accounts) from ligo1 and ligo2 directly: equal after at most 30 seconds of retries |
+| SK-10 | Both replicas answer, and give the same answer within 30 seconds | The accounts and the bindings, every page, from ligo1 and ligo2 directly: equal after at most 30 seconds of retries. A replica that does not answer for 3 checks in a row, outside a fault, is a violation: a hang is otherwise only a skipped check |
 
 While a fault holds, a check that depends on the faulted component is recorded as skipped, not failed. Its limit counts again from the fault's end.
 
@@ -173,10 +174,10 @@ It then runs the unmodified build for 15 minutes, which must trip nothing.
 
 | Mutant | Bug put back | Must trip |
 | :-- | :-- | :-- |
-| `pool-deadlock.patch` | The registry listener on the shared app pool, as before 7f62dae; run with `SOAK_MAX_CONNS=2` | SK-7 or SK-10 |
-| `no-target-check.patch` | A binding applied without its TARGET side's decision | SK-4 |
+| `pool-deadlock.patch` | The registry listener on the shared app pool, as before 7f62dae; run with `SOAK_MAX_CONNS=1`, so the listener holds the pool's only connection | SK-7 or SK-10 |
+| `four-eyes.patch` | One person may approve several sides: the application's check and the database trigger's both removed. The generator's abuse action tries it | SK-4 |
 | `revoke-keeps-role.patch` | A revocation that skips dropping the role | SK-1 and SK-6 |
-| `cross-tenant-grant.patch` | A tenancy's role granted on the platform's other schemas | SK-3 |
+| `cross-tenant-grant.patch` | Every binding's role also granted every tenancy's read role | SK-3 |
 
 A mutant that trips nothing means a gap in the checker. That gap is fixed before any night run.
 

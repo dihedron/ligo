@@ -12,7 +12,8 @@ cmd_soak() {
 	require_lab
 	case "${1:-}" in
 	run) soak_run ;;
-	*) die "soak: run" ;;
+	prove) soak_prove ;;
+	*) die "soak: run or prove" ;;
 	esac
 }
 
@@ -148,7 +149,8 @@ soak_generator() {
 		printf '%s\n' "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" "LIGO_E2E_ADMIN2=https://ligo2.ligo.lab:9443" \
 			"LIGO_E2E_WORKLOAD=https://ligo2.ligo.lab:8443" "LIGO_E2E_DIR=$LIGO1_E2E" "LIGO_E2E_SECRETS=$LIGO_E2E_SECRETS" \
 			"LIGO_E2E_SUFFIX=$E2E_SUFFIX" "LIGO_SOAK_HISTORY=$SOAK_DIR/history.jsonl" "LIGO_SOAK_SEED=$SOAK_SEED" \
-			"LIGO_SOAK_DURATION=$SOAK_DURATION" "LIGO_SOAK_ACCOUNTS=$SOAK_ACCOUNTS"
+			"LIGO_SOAK_DURATION=$SOAK_DURATION" "LIGO_SOAK_ACCOUNTS=$SOAK_ACCOUNTS" \
+			"LIGO_SOAK_DB_DSN=$(pg_dsn migrator pg.ligo.lab /etc/ligo-lab/ca.crt "$SERVE_DB")"
 		for line in "${SOAK_USERS[@]}"; do
 			printf 'LIGO_SOAK_LDAP_%s_PASS=%s\n' "$(tr '[:lower:]' '[:upper:]' <<<"$line")" "$(ldap_password "$line")"
 		done
@@ -209,6 +211,10 @@ soak_run() {
 	kill "$renewer" 2>/dev/null || true
 	wait "$renewer" 2>/dev/null || true
 
+	section "soak: the checks after the run"
+	soak_check_outbox "$dir" || rc=1
+	(serve_scan_secrets 1) 2>&1 | tee "$dir/secrets-scan.log" || { soak_violation "$dir" SK-8 "a password is in the database or a journal"; rc=1; }
+
 	section "soak: evidence"
 	inner_exec ligo1 cat "$SOAK_DIR/history.jsonl" >"$dir/history.jsonl" || warn "soak: no history"
 	inner_exec ligo1 cat "$SOAK_DIR/generator.log" >"$dir/generator.log" || true
@@ -221,6 +227,79 @@ soak_run() {
 	info "soak: evidence in $dir"
 }
 
+# soak_violation DIR ID DETAIL: a violation found by lab.sh, not by the
+# generator, appended to the history as the generator writes them.
+soak_violation() {
+	jq -cn --arg id "$2" --arg detail "$3" '{t: (now | todate), kind: "violation", res: $id, note: $detail, by: "lab.sh"}' >>"$1/violations-lab.jsonl"
+	warn "soak: $2: $3"
+}
+
+# soak_check_outbox DIR: SK-9's other half: every event the outbox marks
+# delivered reached the receiver.
+soak_check_outbox() {
+	local dir="$1" missing
+	hooks_drained
+	serve_sql "select event_id from notification_outbox where delivered_at is not null order by 1" >"$dir/outbox-delivered.txt"
+	inner_exec hooks cat "$HOOKS_LOG" | jq -r '.body | fromjson | .eventId' | sort -u >"$dir/receiver-events.txt"
+	missing="$(comm -23 <(sort -u "$dir/outbox-delivered.txt") "$dir/receiver-events.txt" | wc -l)"
+	info "SK-9: $(wc -l <"$dir/outbox-delivered.txt") events delivered, $missing not at the receiver"
+	((missing == 0)) || { soak_violation "$dir" SK-9 "$missing delivered events never reached the receiver"; return 1; }
+}
+
+# SOAK_MUTANTS: each mutant of test/lab/soak/mutants and the invariants it must
+# trip (any one of them), with the settings it needs; "control" is the build
+# as committed, which must trip none.
+SOAK_MUTANTS=(
+	"control||"
+	"four-eyes|SK-4|"
+	"revoke-keeps-role|SK-1 SK-6|"
+	"cross-tenant-grant|SK-3|"
+	"pool-deadlock|SK-7 SK-10|SOAK_MAX_CONNS=1"
+)
+
+# soak_prove: each mutant applied to a worktree of HEAD, run for
+# SOAK_DURATION (default 15m) with the same seed, its violations compared with
+# those it must trip (.specs/ligo-soak.md §8). The verdicts are evidence.
+soak_prove() {
+	[[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]] || die "soak prove: the tree is dirty: commit first"
+	local commit out entry name expect extra wt dir got rc=0 verdict
+	commit="$(git -C "$REPO_DIR" rev-parse HEAD)"
+	out="$REPO_DIR/test/lab/.evidence/soak-prove-$commit-$(date +%Y%m%dT%H%M%S)"
+	mkdir -p "$out"
+	printf '# Soak prove %s, seed %s\n\n| Mutant | Must trip | Tripped | Verdict |\n| :-- | :-- | :-- | :-- |\n' \
+		"${commit:0:7}" "${SOAK_SEED:=$(date +%s%N)}" >"$out/prove.md"
+	for entry in "${SOAK_MUTANTS[@]}"; do
+		IFS='|' read -r name expect extra <<<"$entry"
+		section "soak prove: $name"
+		wt="$LAB_STATE_DIR/prove-wt"
+		git -C "$REPO_DIR" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
+		git -C "$REPO_DIR" worktree add -q --detach "$wt" "$commit" || die "soak prove: cannot create the worktree"
+		[[ "$name" == control ]] || git -C "$wt" apply "$REPO_DIR/test/lab/soak/mutants/$name.patch" || die "soak prove: $name does not apply"
+		rm -rf "$wt/test/lab/.state"
+		ln -s "$LAB_STATE_DIR" "$wt/test/lab/.state"
+		[[ -f "$LAB_DIR/lab.local.env" ]] && cp "$LAB_DIR/lab.local.env" "$wt/test/lab/"
+		# shellcheck disable=SC2086 # extra is VAR=value or empty
+		(cd "$wt" && env SOAK_DEV=1 SOAK_SEED="$SOAK_SEED" SOAK_DURATION="${SOAK_DURATION:-15m}" $extra LAB_ASSUME_YES=yes test/lab/lab.sh soak run) \
+			2>&1 | tee "$out/$name.log" || true
+		dir="$(ls -td "$LAB_STATE_DIR"/soak-dev-* | head -1)"
+		cp "$dir/summary.md" "$out/$name-summary.md" 2>/dev/null || true
+		got="$({ cat "$dir/history.jsonl" 2>/dev/null; cat "$dir/violations-lab.jsonl" 2>/dev/null; } | jq -rs '[.[] | select(.kind == "violation") | .res] | unique | join(" ")')"
+		if [[ -z "$expect" ]]; then
+			[[ -z "$got" ]] && verdict=pass || verdict=FAIL
+		else
+			verdict=FAIL
+			for id in $expect; do [[ " $got " == *" $id "* ]] && verdict=pass; done
+		fi
+		[[ "$verdict" == pass ]] || rc=1
+		printf '| %s | %s | %s | %s |\n' "$name" "${expect:-none}" "${got:-none}" "$verdict" >>"$out/prove.md"
+		info "soak prove: $name tripped ${got:-nothing}: $verdict"
+		git -C "$REPO_DIR" worktree remove --force "$wt"
+	done
+	cat "$out/prove.md"
+	((rc == 0)) || die "soak prove: the checker misses a mutant, or the control trips: see $out"
+	info "soak prove: every mutant tripped its invariant and the control none: $out"
+}
+
 # soak_summary DIR: the counts of the history, by kind and answer.
 soak_summary() {
 	local h="$1/history.jsonl"
@@ -231,4 +310,9 @@ soak_summary() {
 		errs: map(select(.err)) | length,
 		p95: (map(select(.ms) | .ms) | sort | if length > 0 then .[(length * 95 / 100 | floor)] else 0 end)}
 		| "| \(.k) | \(.n) | \(.codes) | \(.errs) | \(.p95) |"' "$h"
+	printf '\n## Violations\n\n'
+	{ cat "$h"; cat "$1/violations-lab.jsonl" 2>/dev/null || true; } | jq -rs '[.[] | select(.kind == "violation")] |
+		if length == 0 then "None." else (group_by(.res)[] | "- \(.[0].res): \(length), first: \(.[0].note)") end'
+	printf '\n## Checks skipped\n\n'
+	jq -rs '[.[] | select(.kind == "check:skipped")] | if length == 0 then "None." else (group_by(.res)[] | "- \(.[0].res): \(length), first: \(.[0].err)") end' "$h"
 }

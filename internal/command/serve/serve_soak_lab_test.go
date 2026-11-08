@@ -82,6 +82,12 @@ type soakRun struct {
 	bindings                       map[string]soakBinding // live, by name
 	ephemeral                      []string               // registered, not yet retired
 	next                           int                    // names
+	ada2                           *admin                 // ada on ligo2, for SK-10
+	revoked                        []revocation           // for SK-1, once its limit has passed
+	sk6                            map[string]string      // SK-6's suspects at the last check
+	violations                     int
+	silent                         int        // SK-10's checks in a row with a replica not answering
+	checkRng                       *rand.Rand // the checker's, apart from the generator's
 }
 
 // soakAdmin is an LDAP person of the soak, whose password lab.sh passes in.
@@ -225,6 +231,7 @@ var soakActions = []soakAction{
 	{4, "break-glass", (*soakRun).breakGlass},
 	{3, "account:register", (*soakRun).registerAccount},
 	{2, "account:retire", (*soakRun).retireAccount},
+	{3, "abuse", (*soakRun).abuse},
 	{10, "read", (*soakRun).read},
 }
 
@@ -309,13 +316,19 @@ func (s *soakRun) bound(source, target string) bool {
 
 // revision is a resource's current revision, or 0.
 func (s *soakRun) revision(kind, name string) int64 {
+	r, _ := s.revisionAndID(kind, name)
+	return r
+}
+
+// revisionAndID is a resource's current revision and its id, or 0.
+func (s *soakRun) revisionAndID(kind, name string) (int64, string) {
 	code, body := s.call(s.ada, "ada", kind+":get", name, "GET", "/v1/admin/"+kind+"s/"+name, nil)
 	if code != http.StatusOK {
-		return 0
+		return 0, ""
 	}
 	md, _ := body["metadata"].(map[string]any)
 	r, _ := md["revision"].(float64)
-	return int64(r)
+	return int64(r), fmt.Sprint(md["id"])
 }
 
 // revokeBinding deletes a live binding, approved by its source side.
@@ -324,7 +337,7 @@ func (s *soakRun) revokeBinding() {
 	if !ok {
 		return
 	}
-	rev := s.revision("binding", b.name)
+	rev, id := s.revisionAndID("binding", b.name)
 	if rev == 0 {
 		return
 	}
@@ -336,6 +349,7 @@ func (s *soakRun) revokeBinding() {
 	if s.decideAll(filed, b.name, src, dst, false) {
 		s.mu.Lock()
 		delete(s.bindings, b.name)
+		s.revoked = append(s.revoked, revocation{name: b.name, id: id, acct: src, at: time.Now()})
 		s.mu.Unlock()
 		s.h.add(event{Kind: "binding:revoked", Res: b.name, Note: b.target})
 	}
@@ -479,6 +493,42 @@ func (s *soakRun) retireAccount() {
 	s.call(s.ada, "ada", "account:retire", acct, "POST", "/v1/admin/accounts/"+acct+"/retire", nil)
 }
 
+// abuse files a binding inside one account and tries what four-eyes forbids:
+// its requester approving it, then its SOURCE approver approving TARGET too
+// (INV-18). Each must be refused; if one is not, SK-4 is broken at once, and
+// its SQL finds the change too. The binding is then decided properly.
+func (s *soakRun) abuse() {
+	acct := s.accounts[s.rng.IntN(len(s.accounts))]
+	b := soakBinding{name: s.name("ab"), source: s.sourceOf(acct), target: s.targetOf(acct, 1+s.rng.IntN(2))}
+	if s.bound(b.source, b.target) {
+		return
+	}
+	code, filed := s.call(s.op, "soakop", "binding:create", b.name, "POST", "/v1/admin/bindings",
+		map[string]any{"name": b.name, "source": b.source, "target": b.target, "accessLevel": "read"})
+	cr, _ := filed["changeRequest"].(map[string]any)
+	if code != http.StatusAccepted || cr == nil {
+		return
+	}
+	approve := func(who *admin, actor, side string) (int, map[string]any) {
+		return s.call(who, actor, "abuse:"+side, b.name, "POST", "/v1/admin/change-requests/"+fmt.Sprint(cr["id"])+"/approve",
+			map[string]any{"payloadSha256": cr["payloadSha256"], "side": side, "comment": "soak: must be refused"})
+	}
+	if code, _ := approve(s.op, "soakop", "SOURCE"); code/100 == 2 {
+		s.violation("SK-4", b.name+": its requester approved it")
+	}
+	if code, body := approve(s.a, "soaka", "SOURCE"); code == http.StatusOK {
+		if code, _ := approve(s.a, "soaka", "TARGET"); code/100 == 2 {
+			s.violation("SK-4", b.name+": one person approved SOURCE and TARGET")
+		}
+		filed = body
+	}
+	if s.decideAll(filed, b.name, acct, acct, false) {
+		s.mu.Lock()
+		s.bindings[b.name] = b
+		s.mu.Unlock()
+	}
+}
+
 // read is one of the read-only calls people make.
 func (s *soakRun) read() {
 	paths := []string{"/v1/admin/bindings?pageSize=50", "/v1/admin/accounts", "/v1/admin/change-requests?awaitingMe=true",
@@ -593,6 +643,9 @@ func TestSoak(t *testing.T) {
 	s := &soakRun{t: t, x: e2eEnv(t, "LIGO_E2E_SUFFIX"), rng: rand.New(rand.NewPCG(seed, 0)), h: &history{f: f},
 		op: soakAdmin(t, "soakop"), a: soakAdmin(t, "soaka"), b: soakAdmin(t, "soakb"), bg: soakAdmin(t, "soakbg"),
 		ada: renewingAdmin(t, "ada"), rita: renewingAdmin(t, "rita"), peter: renewingAdmin(t, "peter"), bindings: map[string]soakBinding{}}
+	s.checkRng = rand.New(rand.NewPCG(seed, 1<<32))
+	s.ada2 = renewingAdmin(t, "ada")
+	s.ada2.base = e2eEnv(t, "LIGO_E2E_ADMIN2")
 	for i := range n {
 		s.accounts = append(s.accounts, fmt.Sprintf("s%02d", i))
 	}
@@ -617,6 +670,18 @@ func TestSoak(t *testing.T) {
 			}
 		})
 	}
+	wg.Go(func() { // the checker, every minute
+		tick := time.NewTicker(time.Minute)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				s.check(false)
+			}
+		}
+	})
 	counts := map[string]int{}
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
@@ -632,9 +697,15 @@ loop:
 		}
 	}
 	wg.Wait()
+	s.converge()
+	time.Sleep(sk1Limit) // the revocations of the last ticks reach their limit
+	s.check(true)
 	s.mu.Lock()
-	live := len(s.bindings)
+	live, violations := len(s.bindings), s.violations
 	s.mu.Unlock()
-	s.h.add(event{Kind: "end", Note: fmt.Sprintf("actions %v, live bindings %d", counts, live)})
-	t.Logf("soak: actions %v, live bindings %d", counts, live)
+	s.h.add(event{Kind: "end", Note: fmt.Sprintf("actions %v, live bindings %d, violations %d", counts, live, violations)})
+	t.Logf("soak: actions %v, live bindings %d, violations %d", counts, live, violations)
+	if violations > 0 {
+		t.Errorf("%d violations: see the history", violations)
+	}
 }
