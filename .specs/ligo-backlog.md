@@ -13,6 +13,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 7 | Client SDKs (Go, then Python and Java) | 2026-11-08 | Not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
+| 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 
 ## 1. Audit pruning
 
@@ -129,3 +130,24 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - **Who may see the map.** The topology is sensitive: it tells an attacker where trust is, and who can approve what. Answers go only to a more trusted subset of servers, authenticated by SVID over mTLS, with a dedicated role, and every query is logged.
 - **What is shared.** Counts and names, never resources, jurisdictions' members or secrets; whether jurisdiction names themselves may leave an installation is to decide.
 - **Where the map is drawn**: the web UI of a designated installation, or a separate read-only tool.
+
+## 10. Instances managed at run time, plugin types in `server.yaml`
+
+**Why.** Identity provider instances, secret store instances and platforms (the instances of platform providers, where targets live) change as often as the systems they describe: a new database, a new Vault namespace. Today each one is an edit of `server.yaml` and a restart. The plugins themselves, and so the types of the three kinds, change rarely, and a new or upgraded binary needs a restart anyway, because its SHA-256 is pinned in `server.yaml` and in SPIRE. The user's direction (2026-11-08): **instances** become manageable through the API and the web UI; **plugin types** stay in `server.yaml`.
+
+**What exists.**
+
+- Platforms, identity provider instances and secret store instances are in `server.yaml`, with their realm, wiring, privilege bounds (`grantable_roles`, `grantable_role_templates`), `allowed_endpoints`, bootstrap credential references and network flows. They are exposed read-only through the API.
+- ADR-15 keeps platforms in `server.yaml` on purpose: they carry plugin wiring, bootstrap credentials, privilege bounds and endpoint allowlists, which belong to the platform team's change control (T-22: `server.yaml` root-owned, its SHA-256 logged and audited at startup).
+- A binding snapshots its platform's wiring at creation (INV-08), and startup refuses a configuration that removes a platform or instance still referenced by a binding (§8.2 rule 10).
+- The plugin manager starts one process per type and realm and sends it `ConfigureInstances` with all that realm's instances at startup (§5.2). Nothing reconfigures a running process today.
+
+**What the design must settle.**
+
+- **Change control instead of file ownership.** If instances move to the database, T-22's protection must move with them: a change request with the platform team as the deciding side (four eyes), audited, with the privilege bounds and endpoint allowlists validated as today. A changed platform keeps the announcement it has today at startup (`CONFIG_PLATFORM_CHANGED`), and bindings outside a tightened bound are still counted (`SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`).
+- **Reconfiguring running plugins.** A new or changed instance must reach the running process of its type and realm on every replica, without a restart: `ConfigureInstances` again, or a new RPC to add and remove one instance, and what happens to in-flight calls.
+- **Secrets.** Instances reference bootstrap credentials (Vault paths and roles), never hold them; that rule stays, and the API must refuse an instance that embeds a secret.
+- **References.** Removing an instance still referenced by a binding is refused, as at startup today; changing an instance's wiring affects only new bindings (INV-08).
+- **What stays in `server.yaml`.** Plugin types: binary, SHA-256, kind, and whether they are built in. Realms, probably, since they need SPIRE agents on the hosts.
+- **Migration of the configuration.** Instances already in `server.yaml` at upgrade: imported once, or both sources allowed for a while (AGENTS rule 8 prefers no compatibility before a release).
+
