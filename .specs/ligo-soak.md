@@ -170,7 +170,7 @@ A quiet night proves nothing unless the checker is shown to catch bugs. `lab.sh 
 3. runs 15 minutes with `SOAK_FAULTS=none`, except where noted below;
 4. expects the named invariant to trip.
 
-It then runs the unmodified build for 15 minutes, which must trip nothing.
+It then runs the unmodified build for 15 minutes, which must trip nothing, and again with `SOAK_MAX_CONNS=1`, which must trip nothing either: otherwise the pool-deadlock mutant's verdict would prove nothing. A ligo that leaves the setup's calls unanswered is an SK-10 violation, since a hang fails there before any check runs. A run that read no credential skips SK-8's password scan rather than failing it.
 
 | Mutant | Bug put back | Must trip |
 | :-- | :-- | :-- |

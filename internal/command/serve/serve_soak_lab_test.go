@@ -87,6 +87,7 @@ type soakRun struct {
 	sk6                            map[string]string      // SK-6's suspects at the last check
 	violations                     int
 	silent                         int        // SK-10's checks in a row with a replica not answering
+	unanswered                     int        // calls ligo did not answer
 	checkRng                       *rand.Rand // the checker's, apart from the generator's
 }
 
@@ -113,6 +114,19 @@ func renewingAdmin(t *testing.T, who string) *admin {
 	return a
 }
 
+// setupFailed ends the run, whose setup could not complete. If ligo left
+// calls unanswered, that is SK-10's violation: a hung ligo fails here first,
+// before any check runs.
+func (s *soakRun) setupFailed(what string) {
+	s.mu.Lock()
+	n := s.unanswered
+	s.mu.Unlock()
+	if n > 0 {
+		s.violation("SK-10", fmt.Sprintf("ligo left %d calls of the setup unanswered", n))
+	}
+	s.t.Fatal("setup: " + what)
+}
+
 // call is admin.try, timed and recorded.
 func (s *soakRun) call(who *admin, actor, kind, res, method, path string, body any) (int, map[string]any) {
 	start := time.Now()
@@ -120,6 +134,9 @@ func (s *soakRun) call(who *admin, actor, kind, res, method, path string, body a
 	e := event{Kind: kind, Actor: actor, Res: res, Code: code, MS: time.Since(start).Milliseconds()}
 	if err != nil {
 		e.Err = err.Error()
+		s.mu.Lock()
+		s.unanswered++
+		s.mu.Unlock()
 	} else if code/100 != 2 {
 		e.Note = fmt.Sprint(out["type"])
 	}
@@ -183,13 +200,12 @@ func (s *soakRun) decideAll(filed map[string]any, res, src, dst string, ephemera
 // setup registers the soak's accounts and each one's source and two
 // tenancies; failures here fail the run, since nothing else would mean much.
 func (s *soakRun) setup() {
-	t := s.t
 	// every account first: an LDAP person's roles are read when its session
 	// starts, so an account registered later counts only at the session's re-check
 	for _, acct := range s.accounts {
 		code, b := s.call(s.ada, "ada", "account:register", acct, "POST", "/v1/admin/accounts", map[string]any{"name": acct})
 		if code != http.StatusCreated && code != http.StatusConflict {
-			t.Fatalf("register %s: %d %v", acct, code, b)
+			s.setupFailed(fmt.Sprintf("register %s: %d %v", acct, code, b))
 		}
 	}
 	for _, acct := range s.accounts {
@@ -200,14 +216,14 @@ func (s *soakRun) setup() {
 			"identity":   map[string]any{"trustDomain": "prod.lab", "svidRegex": "^" + strings.ReplaceAll(id, ".", `\.`) + "$", "sampleSpiffeIds": []string{id}},
 			"visibility": map[string]string{"mode": "PUBLIC"}})
 		if code != http.StatusAccepted || !s.decideAll(filed, s.sourceOf(acct), acct, acct, false) {
-			t.Fatalf("source of %s: %d %v", acct, code, filed)
+			s.setupFailed(fmt.Sprintf("source of %s: %d %v", acct, code, filed))
 		}
 		for db := 1; db <= 2; db++ {
 			name, ns := s.targetOf(acct, db), fmt.Sprintf("%s_db%d", acct, db)
 			code, filed := s.call(s.op, "soakop", "target:create", name, "POST", "/v1/admin/targets",
 				accountTargetBody(name, fmt.Sprintf("tenants/%s/data/db%d", acct, db), ns, ns+"_read"))
 			if code != http.StatusAccepted || !s.decideAll(filed, name, acct, acct, false) {
-				t.Fatalf("target %s: %d %v", name, code, filed)
+				s.setupFailed(fmt.Sprintf("target %s: %d %v", name, code, filed))
 			}
 		}
 	}

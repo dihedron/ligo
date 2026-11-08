@@ -213,7 +213,11 @@ soak_run() {
 
 	section "soak: the checks after the run"
 	soak_check_outbox "$dir" || rc=1
-	(serve_scan_secrets 1) 2>&1 | tee "$dir/secrets-scan.log" || { soak_violation "$dir" SK-8 "a password is in the database or a journal"; rc=1; }
+	if inner_exec ligo1 test -s "$LIGO_E2E_SECRETS"; then
+		(serve_scan_secrets 1) 2>&1 | tee "$dir/secrets-scan.log" || { soak_violation "$dir" SK-8 "a password is in the database or a journal"; rc=1; }
+	else
+		warn "SK-8: no credential was read, so there is no password to look for: the scan is skipped"
+	fi
 
 	section "soak: evidence"
 	inner_exec ligo1 cat "$SOAK_DIR/history.jsonl" >"$dir/history.jsonl" || warn "soak: no history"
@@ -251,6 +255,7 @@ soak_check_outbox() {
 # as committed, which must trip none.
 SOAK_MUTANTS=(
 	"control||"
+	"control-max-conns-1||SOAK_MAX_CONNS=1"
 	"four-eyes|SK-4|"
 	"revoke-keeps-role|SK-1 SK-6|"
 	"cross-tenant-grant|SK-3|"
