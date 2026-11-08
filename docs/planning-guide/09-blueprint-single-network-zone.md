@@ -32,7 +32,7 @@ Each team's workloads carry its name in their SPIFFE path, `spiffe://corp.intern
 
 Every side needs an approver (`corp/*`), and the only allowed path across jurisdictions is from workloads to data. The configuration, validated by the guide's tests:
 
-```{.yaml include="docs/planning-guide/examples/single-network-zone.yaml" keys="realms authorization governance"}
+```{.yaml include="docs/planning-guide/examples/single-network-zone.yaml" keys="realms authorization charter"}
 ```
 
 One team's leads decide both sides of a binding between its own workloads and its own data. `require_distinct_approvers_across_jurisdictions` makes that two different people. Where that is not enough, give data its own approvers: a separate group for `corp/data/<team>`.

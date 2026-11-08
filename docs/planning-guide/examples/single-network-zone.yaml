@@ -48,7 +48,7 @@ authorization:
   approval:
     required_jurisdictions: ["corp/*"]          # every side needs a second person
 
-governance:
+charter:
   source_jurisdictions:                         # workloads' SPIFFE paths name their team
     - trust_domain: corp.internal
       mode: path_template

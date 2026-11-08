@@ -27,7 +27,7 @@ Each replica starts its plugin processes itself, so a replica host needs everyth
 
 ### PostgreSQL
 
-The database is the installation. It holds the catalog, the change requests, the audit chain and the workflow journal, in two schemas (`public` and `dbos`) used by four roles with separate rights. The database enforces much of the governance itself, so its integrity is part of the security model, not only its availability.
+The database is the installation. It holds the catalog, the change requests, the audit chain and the workflow journal, in two schemas (`public` and `dbos`) used by four roles with separate rights. The database enforces much of the consent rules itself, so its integrity is part of the security model, not only its availability.
 
 ### SPIRE
 

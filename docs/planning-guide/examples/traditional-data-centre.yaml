@@ -63,7 +63,7 @@ authorization:
   approval:
     required_jurisdictions: ["dc/prod/*", "sec/infosec"]   # test is self-service
 
-governance:
+charter:
   source_jurisdictions:
     - trust_domain: prod.dc.internal           # /seg/<core|dmz>/team/<team>/...
       mode: path_template

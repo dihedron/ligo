@@ -39,7 +39,7 @@ Production workloads carry their segment and team in the path, `spiffe://prod.dc
 
 The interconnection policy denies test to production and back first, then allows core to data, DMZ to data with Information Security as an additional party, and test to test:
 
-```{.yaml include="docs/planning-guide/examples/traditional-data-centre.yaml" keys="realms governance"}
+```{.yaml include="docs/planning-guide/examples/traditional-data-centre.yaml" keys="realms charter"}
 ```
 
 ## Roles

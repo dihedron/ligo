@@ -33,6 +33,7 @@ The two are independent. One realm can serve workloads spread over several netwo
 | Installation | One `ligo` database, and the replicas that share it. Installations share nothing with each other unless you make them |
 | Replica | One `ligo serve` process on one host. All replicas of an installation are equal |
 | Jurisdiction | Who decides: a slash-separated path such as `dc/corp-prod` or `cloud/acme/app/payments`. Every source, target and platform has one owner jurisdiction |
+| Charter | The rules every jurisdiction must comply with, one per installation (`charter:` in `server.yaml`); see chapter 6 |
 | Account | A registered tenant: a root jurisdiction, its people in the directory, its workloads under its own SPIFFE paths |
 | Tenancy | A target on a shared, namespaced platform, belonging to one account: on PostgreSQL, one schema |
 | Platform team | The people who own `server.yaml`: the platforms, their plugins and their privilege bounds |

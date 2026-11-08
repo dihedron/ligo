@@ -41,7 +41,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 **What exists today.**
 
 - People sign in by binding to LDAP (`internal/adminauth`): on the web UI login, and with Basic credentials on the admin API. A successful Basic login is remembered for 10 seconds, so the CLI, which sends Basic credentials on every request, does not cost a directory round trip each time.
-- Roles come from LDAP groups (governance rules, and for accounts one rule for all of them).
+- Roles come from LDAP groups (group rules, and for accounts one rule for all of them).
 - Web UI sessions live in the database. Group membership is re-checked against LDAP every `authz_recheck_interval` (default 5 minutes, `internal/server/ui/session.go`). If the directory cannot be reached, the request fails and the session is kept: it fails closed.
 - Automation signs in with an SVID over mTLS, and is not affected.
 

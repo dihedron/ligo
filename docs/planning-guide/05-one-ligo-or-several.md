@@ -48,7 +48,7 @@ Some things are one per installation, and only a second installation divides the
 
 ## Across installations
 
-A binding links a source and a target of the same installation. A workload can still use targets of several installations: each installation that accepts its trust domain can register it as a source, and the workload asks each one for its bindings. What does not cross is governance: each installation has its own approvers, policy and audit, and a binding that spans two installations does not exist.
+A binding links a source and a target of the same installation. A workload can still use targets of several installations: each installation that accepts its trust domain can register it as a source, and the workload asks each one for its bindings. What does not cross is consent: each installation has its own charter, approvers and audit, and a binding that spans two installations does not exist.
 
 Separate installations can share infrastructure without sharing what matters:
 
@@ -74,4 +74,4 @@ Separate installations can share infrastructure without sharing what matters:
 | One installation across a regulatory boundary | One database and one platform team hold both sides |
 | Central `ligo` hosts reaching into a protected network zone | Firewall exceptions from a host that holds every platform's credentials |
 | Several installations sharing one Transit key | A compromise of one unseals the other's inter-stage secrets |
-| No record of which installation owns which jurisdictions | Two installations accept the same target, and governance splits |
+| No record of which installation owns which jurisdictions | Two installations accept the same target, and decisions about it split |

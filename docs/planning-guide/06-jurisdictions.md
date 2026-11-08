@@ -6,6 +6,8 @@ Who decides what? This chapter turns the organisation into a tree of jurisdictio
 
 A jurisdiction is the area in which some people decide. Within the jurisdiction `cloud/aws`, Alice and Bob approve, while the jurisdiction `dc/traditional` is Carol's. Every source, target and platform belongs to one, and each side of a change is decided within its own.
 
+Jurisdictions live under a charter, as states under a constitution. The **charter** is the set of rules every jurisdiction must comply with: how a workload's jurisdiction follows from its SPIFFE path, each jurisdiction's name prefix, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed. There is one charter per installation, in `server.yaml` under `charter:`. Jurisdictions say who decides; the charter says how jurisdictions are formed and how they may deal with each other. Every change request records the charter in force by its hash, and a change decided under a charter that has since changed is refused. This chapter designs both.
+
 ## The jurisdiction tree
 
 A jurisdiction is named by a slash-separated path, and jurisdictions nest like the path's segments. Its shape is yours, but a few rules make it work:
@@ -19,14 +21,14 @@ A jurisdiction is named by a slash-separated path, and jurisdictions nest like t
 
 ## Where a workload's jurisdiction comes from
 
-Nobody chooses a source's jurisdiction: `ligo` derives it from the fixed beginning of the source's SPIFFE ID regex, by one rule per trust domain (`governance.source_jurisdictions`):
+Nobody chooses a source's jurisdiction: `ligo` derives it from the fixed beginning of the source's SPIFFE ID regex, by one rule per trust domain (`charter.source_jurisdictions`):
 
 | Mode | The jurisdiction is | Fits |
 | :---------------- | :---------------------------------------------- | :------------------------------ |
 | `static` | One fixed jurisdiction for the whole trust domain | A data centre whose workloads all belong to one owner jurisdiction |
 | `path_template` | Taken from the SPIFFE path, such as `/acct/<account>/project/<project>/` to `cloud/<account>/app/<project>` | Tenants, whose SPIFFE paths name them |
 
-A regex whose fixed beginning does not name exactly one jurisdiction is refused. So **the SPIFFE path layout is part of the governance design**: agree it with the identity team before workloads are registered, and keep the depth fixed across the organisation. The jurisdiction is only as trustworthy as whoever creates the SPIRE entries (chapter 4).
+A regex whose fixed beginning does not name exactly one jurisdiction is refused. So **the SPIFFE path layout is part of the jurisdiction design**: agree it with the identity team before workloads are registered, and keep the depth fixed across the organisation. The jurisdiction is only as trustworthy as whoever creates the SPIRE entries (chapter 4).
 
 A target's jurisdiction is chosen when it is published, among the patterns its platform allows (`target_jurisdictions`). A platform's own jurisdiction names the team that runs it.
 
@@ -44,7 +46,7 @@ Trusted automation is identified by SPIFFE ID, and SPIFFE tells apart where a pr
 
 ## Who may bind to whom
 
-The interconnection policy (`governance.interconnects`) decides which pairs of jurisdictions may bind across jurisdictions:
+The interconnection policy (`charter.interconnects`) decides which pairs of jurisdictions may bind across jurisdictions:
 
 - **Default deny** for any pair no rule covers. Write the allowed paths, not the forbidden ones.
 - **Ordered rules**, the first match wins: put the specific denials (test to production) before broad allows.
@@ -53,7 +55,7 @@ The interconnection policy (`governance.interconnects`) decides which pairs of j
 
 ## Accounts
 
-Accounts are for many tenants on shared platforms, run by their own people. Use `governance.accounts` when:
+Accounts are for many tenants on shared platforms, run by their own people. Use `charter.accounts` when:
 
 | You have | Without accounts | With accounts |
 | :------------------------------------ | :---------------------------------- | :------------------------------------ |
@@ -72,7 +74,7 @@ Plan, once, for every account:
 
 ## Names
 
-`governance.name_prefixes` gives each jurisdiction its own range of names, such as `ledger-` for `dc/corp-prod/ledger`, so that owners cannot take each other's names. Decide the prefixes with the tree.
+`charter.name_prefixes` gives each jurisdiction its own range of names, such as `ledger-` for `dc/corp-prod/ledger`, so that owners cannot take each other's names. Decide the prefixes with the tree.
 
 ## Recommendation
 
