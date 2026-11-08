@@ -1,0 +1,5 @@
+# Planning for Deployment Guide: title page and PDF metadata (see docs/build.sh)
+title: "Planning for Deployment Guide"
+subtitle: "Architectural blueprints for ligo"
+author: "ligo"
+lang: en-GB
