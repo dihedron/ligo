@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.0 (2026-11-08)
+- **Version:** 1.1 (2026-11-08): one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -38,8 +38,7 @@ The generator and the checker live in package `serve`, so they reuse its lab hel
 | `SOAK_FAULTS` | `none` | `none`, `single` (one at a time) or `all` (single, then combinations) |
 | `SOAK_RACE` | `0` | `1`: `ligo` is built and deployed with `-race` |
 | `SOAK_MAX_CONNS` | unset | Sets `storage.postgres.max_conns` in the lab's `server.yaml` |
-| `SOAK_ACCOUNTS` | `20` | Accounts the generator uses at once |
-| `SOAK_WORKLOADS` | `16` | Workload loops reading credentials and connecting |
+| `SOAK_ACCOUNTS` | `20` | Accounts the generator uses at once, each with one workload |
 
 `lab.sh soak run` writes every setting, the commit and the lab's versions to `settings.json` in the evidence directory. The tree must be clean, as for the release-run, so that the evidence names what ran.
 
@@ -54,7 +53,11 @@ The generator and the checker live in package `serve`, so they reuse its lab hel
   - the platform approver;
   - an operator holding break-glass;
   - the account administrator who registers and retires accounts.
-- **Workloads:** `SOAK_WORKLOADS` X.509-SVIDs minted by `soak.sh` under each account's SPIFFE paths. They are minted with a 1-hour TTL and re-minted every 30 minutes, and a loop reads them from disk on every request.
+- **Workloads:** one per account, `spiffe://prod.lab/acct/<account>/project/p1/sa/w0`. Its account's source names exactly that ID, because the store's `vault-static` strategy matches subjects exactly (OI-1, `422 source-not-exact`).
+- **SVIDs:** `soak.sh` mints each workload's X.509-SVID and JWT-SVID, and the X.509-SVIDs of `ada`, `peter` and `rita`.
+  - Renewal: the X.509-SVIDs every 30 minutes, with a 1-hour TTL; the JWT-SVIDs every 2 minutes, since SPIRE caps them at 5.
+  - The generator re-reads them on every request or TLS handshake.
+- **Registration first:** the setup registers every account before anyone files. An LDAP person's roles are read when their session starts, so an account registered later only counts at the session's re-check.
 
 ### 4.2 Actions
 
@@ -63,19 +66,22 @@ Each tick, every 2 seconds, draws one action from the seeded source, with these 
 | Weight | Action |
 | :-- | :-- |
 | 25 | A workload reads its bindings, takes its credential from the store and connects to its tenancy |
-| 15 | Create a binding, then decide its sides, by the right people |
+| 15 | Create a binding (one in three across accounts), then decide its sides, by the right people. Pairs already bound are skipped |
 | 10 | Revoke a binding (DELETE, owner alone) |
-| 8 | Publish or update a target (a tenancy) |
-| 8 | Register or update a source |
+| 8 | Update a binding's purpose |
+| 8 | Register a source matching no workload, then retire it |
 | 6 | Decline or withdraw a pending change |
 | 5 | Rotate a binding's credential (REAPPLY) |
 | 4 | Break-glass a binding; half are ratified, half are left to be reverted |
-| 4 | Move a person into or out of an account's approver group |
 | 3 | Register an account |
 | 2 | Retire an account: its sources and targets first, then the registration |
 | 10 | Read-only admin calls: lists, `GET /v1/flows`, the charter |
 
-Workload actions also run continuously in `SOAK_WORKLOADS` loops, once every 30 seconds each, beside the ticks. Live bindings are capped at 200: above the cap, create actions turn into revocations.
+Each workload also runs in its own loop, once every 30 seconds, beside the ticks. Live bindings are capped at 200: above the cap, create actions turn into revocations.
+
+The tenancies are fixed, two per account. The platform team creates schemas outside ligo, so the soak cannot publish new ones at run time.
+
+Directory changes are not the generator's: the test binary holds no directory credentials. `soak.sh` moves people into and out of approver groups as an operation, alongside the faults (§6).
 
 ### 4.3 History
 
@@ -135,6 +141,7 @@ While a fault holds, a check that depends on the faulted component is recorded a
 | Webhook failing | the receiver answering 500 | 5 min | outbox drained 5 min after |
 | Reload | `SIGHUP` to one replica | at once | none: no error |
 | Maintenance | maintenance on, then off after 2 min | 2 min | 1 min |
+| Group change | a person added to or removed from an account's approvers group | at once | the role follows at the session's re-check |
 | Rolling restart | `systemctl restart ligo`, one replica, then the other | about 1 min | 1 min each |
 
 `sch_netem` is in the lab VM's kernel. ligo1 and ligo2 are VMs with their own kernels, so `soak.sh` checks for netem there before the first run.

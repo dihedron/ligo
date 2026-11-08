@@ -42,6 +42,8 @@ source "$LAB_DIR/lib/otel.sh"
 source "$LAB_DIR/lib/hooks.sh"
 # shellcheck source=lib/release.sh
 source "$LAB_DIR/lib/release.sh"
+# shellcheck source=lib/soak.sh
+source "$LAB_DIR/lib/soak.sh"
 
 usage() {
 	cat <<USAGE
@@ -99,6 +101,11 @@ commands:
                             psql in the pg container as ligo_ROLE (migrator, app,
                             reader, dbos; default migrator) over TLS, or as
                             postgres over the Unix socket
+  soak run                  the soak (.specs/ligo-soak.md): resets the lab, installs
+                            ligo for accounts, runs the generator for SOAK_DURATION
+                            (default 15m) with SOAK_SEED and SOAK_ACCOUNTS (20,
+                            a workload each), and keeps the evidence (a clean
+                            tree only, or SOAK_DEV=1 for a trial outside it)
   release-run               destroy the lab, build a new one and run every suite
                             on OpenBao and on Vault, keeping the evidence in
                             test/lab/.evidence (a clean tree only)
@@ -277,6 +284,7 @@ main() {
 	vault) require_lab && server_cli vault-prod "$@" ;;
 	ldapsearch) require_lab && ldapsearch_as ligo-admin-auth "$@" ;;
 	release-run) cmd_release_run ;;
+	soak) cmd_soak "$@" ;;
 	snapshot) require_lab && lab_snapshot ;;
 	reset) require_lab && lab_reset ;;
 	stop) require_lab && lab_stop ;;
