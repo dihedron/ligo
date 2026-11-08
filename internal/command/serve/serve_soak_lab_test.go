@@ -198,9 +198,8 @@ func (s *soakRun) setup() {
 		}
 		for db := 1; db <= 2; db++ {
 			name, ns := s.targetOf(acct, db), fmt.Sprintf("%s_db%d", acct, db)
-			start := time.Now()
-			code, filed := accountTarget(s.op, name, fmt.Sprintf("tenants/%s/data/db%d", acct, db), ns, ns+"_read")
-			s.h.add(event{Kind: "target:create", Actor: "soakop", Res: name, Code: code, MS: time.Since(start).Milliseconds()})
+			code, filed := s.call(s.op, "soakop", "target:create", name, "POST", "/v1/admin/targets",
+				accountTargetBody(name, fmt.Sprintf("tenants/%s/data/db%d", acct, db), ns, ns+"_read"))
 			if code != http.StatusAccepted || !s.decideAll(filed, name, acct, acct, false) {
 				t.Fatalf("target %s: %d %v", name, code, filed)
 			}

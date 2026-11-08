@@ -18,13 +18,17 @@ import (
 // accountTarget files a public target of a tenancy on pg-shared, offering role
 // at the level read.
 func accountTarget(who *admin, name, jurisdiction, schema, role string) (int, map[string]any) {
-	return who.do("POST", "/v1/admin/targets", map[string]any{"kind": "Target",
+	return who.do("POST", "/v1/admin/targets", accountTargetBody(name, jurisdiction, schema, role))
+}
+
+func accountTargetBody(name, jurisdiction, schema, role string) map[string]any {
+	return map[string]any{"kind": "Target",
 		"metadata":     map[string]string{"name": name, "platform": "pg-shared", "jurisdiction": jurisdiction},
 		"definition":   map[string]string{"database": "ledger", "schema": schema},
 		"accessLevels": []any{map[string]any{"name": "read", "grants": map[string][]string{"roles": {role}}}},
 		"networkFlows": []any{map[string]any{"name": "ledger", "purpose": "DATA", "protocol": "TCP", "destination": "pg.ligo.lab",
 			"ports": []int{5432}, "tls": true, "serverName": "pg.ligo.lab"}},
-		"visibility": map[string]string{"mode": "PUBLIC"}})
+		"visibility": map[string]string{"mode": "PUBLIC"}}
 }
 
 func accountSource(who *admin, name, id string) (int, map[string]any) {
