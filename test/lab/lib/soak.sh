@@ -279,7 +279,7 @@ soak_prove() {
 		wt="$LAB_STATE_DIR/prove-wt"
 		git -C "$REPO_DIR" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
 		git -C "$REPO_DIR" worktree add -q --detach "$wt" "$commit" || die "soak prove: cannot create the worktree"
-		[[ "$name" == control ]] || git -C "$wt" apply "$REPO_DIR/test/lab/soak/mutants/$name.patch" || die "soak prove: $name does not apply"
+		[[ "$name" == control* ]] || git -C "$wt" apply "$REPO_DIR/test/lab/soak/mutants/$name.patch" || die "soak prove: $name does not apply"
 		rm -rf "$wt/test/lab/.state"
 		ln -s "$LAB_STATE_DIR" "$wt/test/lab/.state"
 		[[ -f "$LAB_DIR/lab.local.env" ]] && cp "$LAB_DIR/lab.local.env" "$wt/test/lab/"
