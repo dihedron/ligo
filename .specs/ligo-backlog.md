@@ -11,7 +11,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Waiting for the lab host |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
 | 7 | Client SDKs (Go, then Python and Java) | 2026-11-08 | Not started |
-| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started |
+| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 
 ## 1. Audit pruning
@@ -23,7 +23,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - **Append-only (T-13).** The trigger `trg_audit_no_update` in `migrations/001_init_schema.sql` refuses every `UPDATE` and `DELETE`, and `ligo_app` holds only `SELECT` and `INSERT`. A pruning path must not open a way to delete arbitrary rows.
 - **The hash chain (§4.3).** Each row's `entry_hash` covers the previous row's hash, starting from 64 zeros. `GET /v1/admin/audit/verify` recomputes from the first row, so deleting the oldest rows breaks verification unless the boundary is kept.
 
-**What is pruned already.** Finished DBOS workflows, after `storage.dbos.workflow_retention` (the sweeper's `retain`, `internal/workflows/sweeper.go`), and delivered or abandoned webhooks after 30 days (`internal/notify/notify.go`). Not pruned: `audit_log`, `change_requests` and retired resources. `001` says retired resources are never deleted, as audit entries and SPIFFE paths refer to them; whether they are in scope is to decide.
+**What is pruned already.** Finished DBOS workflows, after `storage.dbos.workflow_retention` (the sweeper's `retain`, `internal/workflows/sweeper.go`), and delivered or abandoned webhooks after 30 days (`internal/notify/notify.go`). Not pruned: `audit_log`, `change_requests` and retired resources. `001` says retired resources are never deleted, as audit entries and SPIFFE paths refer to them; whether they are in jurisdiction is to decide.
 
 **Direction.**
 
@@ -51,7 +51,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - **The CLI** needs a flow without a password: the OIDC device flow, or a Kerberos ticket.
 - **Where groups come from.** If roles come from identity-provider claims instead of LDAP, the periodic re-check needs a new source, or sessions need a shorter life.
 - **Per method:** rate limits, `SESSION_LOGIN_FAILED` auditing, and rows of the threat model (T-36 and the session threats).
-- Authorisation stays as it is: roles on scopes. Only where the principal and its groups come from becomes pluggable.
+- Authorisation stays as it is: roles on jurisdictions. Only where the principal and its groups come from becomes pluggable.
 
 ## 3. The fix for GO-2026-5932
 
@@ -94,9 +94,9 @@ Work agreed for later, with what is known so far. An item here is not a specific
 
 **Why.** Teams that manage their infrastructure as code want to declare sources, targets and bindings next to the rest, and have `plan` and `apply` drive `ligo`.
 
-**What exists.** The admin API is described in `api/openapi/admin.v1alpha1.yaml` (48 paths). Every mutation is a change request, with optimistic concurrency (`expectedRevision`) and approval bound to the exact payload (`payloadSha256`). Automation signs in with an SVID, and a `trusted_automation` principal can approve sides of its own scopes by delegation, with a reference to an upstream approval (ADR-11).
+**What exists.** The admin API is described in `api/openapi/admin.v1alpha1.yaml` (48 paths). Every mutation is a change request, with optimistic concurrency (`expectedRevision`) and approval bound to the exact payload (`payloadSha256`). Automation signs in with an SVID, and a `trusted_automation` principal can approve sides of its own jurisdictions by delegation, with a reference to an upstream approval (ADR-11).
 
-**What makes it different from most providers.** An `apply` does not change the resource: it files a change request, which may wait for people of another scope to approve it. The design must settle:
+**What makes it different from most providers.** An `apply` does not change the resource: it files a change request, which may wait for people of another jurisdiction to approve it. The design must settle:
 
 - what `apply` waits for (the request filed, applied, or the binding `ACTIVE`), with time-outs, and what a later `plan` shows while a request is pending;
 - how a pipeline's own review becomes the upstream approval of a `DELEGATED` side, and how that reference is checked;
@@ -104,15 +104,28 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - read-only data sources for platforms and realms, which live in `server.yaml`, not in the API;
 - one provider for Terraform and OpenTofu (the plugin protocol is shared), and its own repository and release.
 
+**Direction set by the user (2026-11-08).**
+
+- The provider creates resources **without waiting for approval**.
+- Resources it creates are marked in the database as **managed by automation**. People cannot change them, except by break-glass, and a break-glass change is always reverted: a lasting change goes only through the Terraform manifests again.
+- How trustworthy automation bypasses approval is open for discussion. One idea: register in the database, at run time as accounts are, the SVIDs under which **trusted automation workflows** must run, each limited to a subset of jurisdictions.
+
+**Points to discuss, from what `ligo` does today.**
+
+1. **Part of this exists.** ADR-11's `trusted_automation` role already approves sides by delegation for one SPIFFE principal, limited to jurisdictions and platforms, with a reference to an upstream approval. It lives in `server.yaml`. The idea above moves it into the database and adds the managed-by-automation lock.
+2. **Bindings across jurisdictions.** Delegation never speaks for the other side, or automation of one jurisdiction could bind into another's targets. Inside the automation's own jurisdictions, no waiting is easy; across them, the other side still consents, unless that rule changes on purpose.
+3. **Revocation for containment.** Today any one owner can revoke a binding or lower its level alone (consent `ANY`), so a compromised workload can be cut off at once. If the lock also stops people revoking, containment waits for a manifest change and a pipeline run. Keeping revocation open to people, and flagging the resource as drifted for the pipeline, would avoid that.
+4. **Break-glass DELETE.** ADR-12 never reverts an emergency `DELETE`, because restoring it could re-grant access to a compromised workload. "Always reverted" would contradict it. A middle way: the `DELETE` stands, and the next `plan` shows the resource missing and proposes to recreate it, so that a person reviews it before it returns.
+
 ## 9. A map of the `ligo` topology, and a discovery protocol
 
-**Why.** With several installations (chapter 5 of the Planning for Deployment Guide), nobody sees the whole picture. A visual map would show, across installations: the realms and federated trust domains of each, who trusts whom, which governance scopes each one serves, and a few statistics about each one's bindings (counts by phase, failures, expiries).
+**Why.** With several installations (chapter 5 of the Planning for Deployment Guide), nobody sees the whole picture. A visual map would show, across installations: the realms and federated trust domains of each, who trusts whom, which jurisdictions each one serves, and a few statistics about each one's bindings (counts by phase, failures, expiries).
 
-**What exists.** Each installation knows its own part: realms, federated domains and accepted trust domains in `server.yaml`; platforms and their scopes through the admin API (read-only); bindings by phase and realm as metrics (`ligo_bindings{phase,realm}`). Nothing today connects installations to each other.
+**What exists.** Each installation knows its own part: realms, federated domains and accepted trust domains in `server.yaml`; platforms and their jurisdictions through the admin API (read-only); bindings by phase and realm as metrics (`ligo_bindings{phase,realm}`). Nothing today connects installations to each other.
 
 **To explore.**
 
 - **Transport.** A request-reply protocol over gRPC, where each installation answers queries about itself, or a gossip membership library such as `hashicorp/serf`, where installations find each other and spread summaries. Gossip fits finding peers; gRPC fits authenticated, audited queries. A mix is possible.
 - **Who may see the map.** The topology is sensitive: it tells an attacker where trust is, and who can approve what. Answers go only to a more trusted subset of servers, authenticated by SVID over mTLS, with a dedicated role, and every query is logged.
-- **What is shared.** Counts and names, never resources, scopes' members or secrets; whether scope names themselves may leave an installation is to decide.
+- **What is shared.** Counts and names, never resources, jurisdictions' members or secrets; whether jurisdiction names themselves may leave an installation is to decide.
 - **Where the map is drawn**: the web UI of a designated installation, or a separate read-only tool.

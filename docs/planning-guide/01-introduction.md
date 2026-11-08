@@ -32,8 +32,8 @@ The two are independent. One realm can serve workloads spread over several netwo
 | Trust domain | A SPIFFE trust domain, such as `prod.internal`: the namespace of SPIFFE IDs one SPIRE server (or cluster of servers) signs for |
 | Installation | One `ligo` database, and the replicas that share it. Installations share nothing with each other unless you make them |
 | Replica | One `ligo serve` process on one host. All replicas of an installation are equal |
-| Governance scope | Who decides: a slash-separated path such as `dc/corp-prod` or `cloud/acme/app/payments`. Every source, target and platform has one owner scope |
-| Account | A registered tenant: a root scope, its people in the directory, its workloads under its own SPIFFE paths |
+| Jurisdiction | Who decides: a slash-separated path such as `dc/corp-prod` or `cloud/acme/app/payments`. Every source, target and platform has one owner jurisdiction |
+| Account | A registered tenant: a root jurisdiction, its people in the directory, its workloads under its own SPIFFE paths |
 | Tenancy | A target on a shared, namespaced platform, belonging to one account: on PostgreSQL, one schema |
 | Platform team | The people who own `server.yaml`: the platforms, their plugins and their privilege bounds |
 
@@ -44,8 +44,8 @@ The two are independent. One realm can serve workloads spread over several netwo
 | Which trust domains, and which are realms or federated | Network zones, existing SPIRE | 3 |
 | How many SPIRE servers and agents, and who runs them | Trust domains | 4 |
 | One installation or several, and what they share | Realms, regulation, teams | 5 |
-| The scope tree, accounts and the interconnection policy | Organisation, installations | 6 |
-| Who holds each role, and who is accountable | Scopes, teams | 7 |
+| The jurisdiction tree, accounts and the interconnection policy | Organisation, installations | 6 |
+| Who holds each role, and who is accountable | Jurisdictions, teams | 7 |
 | Replicas, database, store and directory availability; recovery | Everything above | 8 |
 
 ## Limits that shape a plan

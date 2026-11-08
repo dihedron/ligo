@@ -9,7 +9,7 @@ A fourth release document, beside the three of `.specs/ligo-docs.md`. It is for 
 - how network zones map to trust domains, realms and federation;
 - how many SPIRE servers and agents, and where;
 - one `ligo` installation or several, and what they share;
-- how to lay out governance scopes, accounts and the interconnection policy;
+- how to lay out jurisdictions, accounts and the interconnection policy;
 - who holds which role, and who is responsible for what;
 - how many replicas, and what PostgreSQL, Vault or OpenBao and LDAP must provide, for availability and recovery.
 
@@ -34,9 +34,9 @@ Two layers, never confused:
 
 - **Network zone**: the architect's starting point. A segment with its own security level and reachability: a data centre segment, a DMZ, a cloud region or VPC.
 - **Realm**: the configuration term (`realms` in `server.yaml`, called zone before spec 4.0.3). One trust domain, one SPIRE agent socket on the `ligo` host, one set of plugin processes. One realm may serve several network zones; one network zone may hold workloads of several realms.
-- **Trust domain**, **governance scope**, **account**, **tenancy**: as in Architecture and Design and the Setup Guide.
+- **Trust domain**, **jurisdiction**, **account**, **tenancy**: as in Architecture and Design and the Setup Guide.
 
-Each blueprint starts from network zones and ends with realms, trust domains and scopes.
+Each blueprint starts from network zones and ends with realms, trust domains and jurisdictions.
 
 ## 4. Content
 
@@ -52,7 +52,7 @@ The outline fixes the scope, not the wording. Every decision chapter has the sam
 3. **From network zones to trust domains**: one trust domain per network zone or not; topologies A, B and C of the Setup Guide; the rule of one authoritative bundle per domain; the secret store's trust constraint (tenancy spec §9.4); what a workload in each network zone must reach.
 4. **SPIRE topology and sizing**: SPIRE servers per trust domain, server HA, nested SPIRE, federation direction; the agents on each `ligo` host; registration entries and `unix:sha256`; who runs SPIRE, and what a SPIRE administrator can and cannot do to `ligo`.
 5. **One `ligo` or several**: the criteria: blast radius, regulatory separation, production and test, administration teams, failure domains, network reachability, shared or separate PostgreSQL and Vault, the cost of each extra installation. What the interconnection policy already separates inside one installation, and what only separate installations separate.
-6. **Governance layout**: the scope tree, extractors per trust domain, `approval_required` per level, the interconnection policy, `governance.accounts` and the account grammar, trusted automation.
+6. **Jurisdictions**: the jurisdiction tree, extractors per trust domain, `approval_required` per level, the interconnection policy, `governance.accounts` and the account grammar, trusted automation.
 7. **Roles and responsibilities**: the role catalogue (platform team, target and source owners, approvers, platform approvers, account administrators, account operators and approvers, additional parties, break-glass holders, auditors, SPIRE and Vault administrators); a RACI per activity; separation of duties `ligo` enforces and what the organisation must enforce; directory groups.
 8. **Capacity, availability and recovery**: replicas and the load balancer; multi-site (see §5); what each dependency's outage does (from the Operator's Guide, not repeated: summarised and linked); PostgreSQL sizing and connection pools; Vault, LDAP and SPIRE availability; failure domains across sites; backup, restore and disaster recovery. Numbers only where measured (lab or soak), each with where it was measured; otherwise the method to size, not a figure.
 
@@ -60,7 +60,7 @@ The outline fixes the scope, not the wording. Every decision chapter has the sam
 
 Each blueprint has the same sections: context and assumptions; network zones (diagram); trust domains, realms and SPIRE (diagram); installations and what they share; governance layout (with a `server.yaml` excerpt, validated by a test, see §5); roles and RACI; capacity and availability; failure analysis; variations; a checklist.
 
-9. **Single network zone, one organisation**: the smallest production layout. One trust domain, one installation, HA replicas, flat scopes.
+9. **Single network zone, one organisation**: the smallest production layout. One trust domain, one installation, HA replicas, flat jurisdictions.
 10. **Traditional data centre**: several network zones (for example production, test, DMZ), classic teams and approval chains, no account registry, an interconnection policy that keeps test from production, Information Security as an additional party.
 11. **Cloud network zone, multitenant**: hundreds of accounts in one cloud trust domain, one OU per account, platform team and account administrators, tenancies on shared platforms, the platform approver.
 12. **Several network zones, multitenant**: the cloud of blueprint 11 spread over several network zones (for example regions or security levels), each with its own trust domain or not; federation or several realms; one installation or one per network zone, and how the choice changes the roles.

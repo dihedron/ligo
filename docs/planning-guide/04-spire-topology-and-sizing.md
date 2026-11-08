@@ -44,7 +44,7 @@ Whoever administers a SPIRE server can issue any SVID of its trust domain. For `
 | A federating server | Decide which bundle `ligo` accepts for the federated domain | Trusted for that domain |
 | Any server, for another domain | Nothing: `ligo` takes each domain's bundle from one source only | |
 
-A second point matters for multitenancy. `ligo` derives a source's governance scope from its SPIFFE path. If someone who can create entries registers a workload under another tenant's path, bindings approved for that tenant reach it, and `ligo` cannot tell. **Let a registrar that tenants cannot influence create tenants' entries**, and give tenants no direct access to the SPIRE server.
+A second point matters for multitenancy. `ligo` derives a source's jurisdiction from its SPIFFE path. If someone who can create entries registers a workload under another tenant's path, bindings approved for that tenant reach it, and `ligo` cannot tell. **Let a registrar that tenants cannot influence create tenants' entries**, and give tenants no direct access to the SPIRE server.
 
 ## Recommendation
 
