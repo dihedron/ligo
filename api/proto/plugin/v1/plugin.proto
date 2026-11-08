@@ -48,7 +48,7 @@ message SVIDSelectorConfig {
 
 message InstanceDescriptor {
   string name = 1;
-  string zone = 2;
+  string realm = 2;
   string trust_domain = 3;
   string config_json = 4;               // validated against Describe.instance_config_schema_json
   SVIDSelectorConfig svid_selector = 5;
@@ -68,7 +68,7 @@ message BindingContext {
   int64 revision = 3;
   int64 attempt = 4;
   Operation operation = 5;
-  string zone = 6;
+  string realm = 6;
   string source_trust_domain = 7;
   string source_svid_regex = 8;          // validated regex of `revision`
   bool rotate_static_secrets = 9;
@@ -176,7 +176,7 @@ message SecretStorageStrategy {
 }
 
 message ConfigureInstancesRequest {
-  string zone = 1;
+  string realm = 1;
   string spiffe_workload_socket = 2;
   repeated InstanceDescriptor instances = 3;
 }

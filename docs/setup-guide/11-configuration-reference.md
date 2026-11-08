@@ -1,6 +1,6 @@
 # Configuration reference
 
-`server.yaml` holds no secrets, only the names of environment variables. Every change except certificate files needs a rolling restart. A key that lists entries, such as `zones`, shows its fields by their path. Defaults are given where a key may be left out.
+`server.yaml` holds no secrets, only the names of environment variables. Every change except certificate files needs a rolling restart. A key that lists entries, such as `realms`, shows its fields by their path. Defaults are given where a key may be left out.
 
 ::: landscape
 
@@ -17,16 +17,16 @@
 | `service.workload_advertise.port` | Its port. | |
 | `service.workload_advertise.server_name` | The TLS name a workload should expect. | |
 
-## `zones` and `core_identity`
+## `realms` and `core_identity`
 
 | Key | Meaning | Default and rules |
 | :------------------------- | :------------------------------- | :------------------ |
-| `zones` | One trust domain, with one agent socket on this host. Plugins run per zone. | At least one |
-| `zones.name` | The zone's name. | Unique |
-| `zones.trust_domain` | Its trust domain. | |
-| `zones.spiffe_workload_socket` | The agent's Workload API socket. | `unix:///…` |
+| `realms` | One trust domain, with one agent socket on this host. Plugins run per realm. | At least one |
+| `realms.name` | The realm's name. | Unique |
+| `realms.trust_domain` | Its trust domain. | |
+| `realms.spiffe_workload_socket` | The agent's Workload API socket. | `unix:///…` |
 | `core_identity` | `ligo`'s own SVID: serving TLS, and logging in to Transit. | Required |
-| `core_identity.zone` | The zone it comes from. | |
+| `core_identity.realm` | The realm it comes from. | |
 | `core_identity.svid_selector` | Selects exactly one SVID. | |
 | `core_identity.svid_selector.match_expr` | An expression over `spiffe_id`, `trust_domain`, `path`, `hint`, `subject_cn` and `instance_name`. | Must match exactly one |
 | `core_identity.svid_selector.jwt_audience` | The audiences of its JWT-SVIDs. | Includes Transit's |
@@ -43,10 +43,10 @@
 | `server.workload_listener.tls_cert_file` | With `file`; reloaded on `SIGHUP`. | |
 | `server.workload_listener.tls_key_file` | With `file`; reloaded on `SIGHUP`. | |
 | `server.workload_listener.auth_modes` | `x509_svid`, preferred as it has no bearer token; `jwt_svid`. | Not empty |
-| `server.workload_listener.accepted_trust_domains` | The callers' domains: each a zone, or federated. | |
-| `server.workload_listener.federated_trust_domains` | Domains verified through a zone's federation. | |
-| `server.workload_listener.federated_trust_domains.trust_domain` | The domain. | Never also a zone |
-| `server.workload_listener.federated_trust_domains.via_zone` | The zone whose agent delivers its bundle. | |
+| `server.workload_listener.accepted_trust_domains` | The callers' domains: each a realm, or federated. | |
+| `server.workload_listener.federated_trust_domains` | Domains verified through a realm's federation. | |
+| `server.workload_listener.federated_trust_domains.trust_domain` | The domain. | Never also a realm |
+| `server.workload_listener.federated_trust_domains.via_realm` | The realm whose agent delivers its bundle. | |
 | `server.workload_listener.expected_jwt_audience` | The audience a workload's JWT-SVID must have. | Required with `jwt_svid` |
 | `server.workload_listener.max_token_ttl` | The longest accepted `exp - iat`. It bounds a stolen token's replay. | |
 | `server.workload_listener.clock_skew` | The tolerated skew. | |
@@ -258,7 +258,7 @@
 | `platform_providers` | Stage 2. | |
 | `platform_providers.platforms` | Each platform is one of its instances. | |
 | `identity_providers.instances.name` | Its name, unique within its kind. | |
-| `identity_providers.instances.zone` | Its zone. Wiring must stay within one zone. | |
+| `identity_providers.instances.realm` | Its realm. Wiring must stay within one realm. | |
 | `identity_providers.instances.svid_selector` | Selects its SVID: exactly one. | |
 | `identity_providers.instances.svid_selector.match_expr` | An expression over the SVID, as for `core_identity`. | |
 | `identity_providers.instances.svid_selector.jwt_audience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
@@ -279,7 +279,7 @@
 | `secret_stores.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
 | `secret_stores.instances` | Its instances. | |
 | `secret_stores.instances.name` | Its name, unique within its kind. | |
-| `secret_stores.instances.zone` | Its zone. Wiring must stay within one zone. | |
+| `secret_stores.instances.realm` | Its realm. Wiring must stay within one realm. | |
 | `secret_stores.instances.svid_selector` | Selects its SVID: exactly one. | |
 | `secret_stores.instances.svid_selector.match_expr` | An expression over the SVID, as for `core_identity`. | |
 | `secret_stores.instances.svid_selector.jwt_audience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
@@ -299,7 +299,7 @@
 | `platform_providers.binary` | Its file, relative to `plugins.directory`. | |
 | `platform_providers.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
 | `platform_providers.platforms.name` | Its name, unique within its kind. | |
-| `platform_providers.platforms.zone` | Its zone. Wiring must stay within one zone. | |
+| `platform_providers.platforms.realm` | Its realm. Wiring must stay within one realm. | |
 | `platform_providers.platforms.scope` | Its owner scope: the team that runs it. A scope path. | |
 | `platform_providers.platforms.target_scopes` | Scope patterns that may own targets here. By default its scope and below. | |
 | `platform_providers.platforms.namespace_template` | What a target's namespace must be, from the placeholders of `governance.accounts.target_scope`, such as `{account}_{tenancy}`. Needs a plugin that declares a namespace field. | |
@@ -320,11 +320,11 @@
 | `platform_providers.platforms.network_flows.description` | What it is, for readers. | |
 | `platform_providers.platforms.identity_provider` | Its Stage 1: a type and an instance. | |
 | `platform_providers.platforms.identity_provider.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
-| `platform_providers.platforms.identity_provider.instance` | An instance of that type, in the same zone. | |
+| `platform_providers.platforms.identity_provider.instance` | An instance of that type, in the same realm. | |
 | `platform_providers.platforms.identity_provider.secret_storage_strategy` | Such as `vault-static`. May be omitted when one fits. | |
 | `platform_providers.platforms.secret_store` | Its Stage 3: a type, an instance and a strategy. | |
 | `platform_providers.platforms.secret_store.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
-| `platform_providers.platforms.secret_store.instance` | An instance of that type, in the same zone. | |
+| `platform_providers.platforms.secret_store.instance` | An instance of that type, in the same realm. | |
 | `platform_providers.platforms.secret_store.secret_storage_strategy` | Such as `vault-static`. May be omitted when one fits. | |
 | `platform_providers.platforms.principal_prefix` | Replaces `bnd_` in new bindings' names, at most 4 characters. | |
 | `platform_providers.platforms.allowed_source_trust_domains` | The trust domains of its sources. | |

@@ -139,7 +139,7 @@ func (s *Service) revert(ctx context.Context, bg *changerequests.Request, actor,
 		return nil, refuse(409, "break-glass-not-open", "the break-glass change %s was ratified, reverted or closed", bg.ID)
 	}
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: cur.name, ResourceID: &cur.id, Operation: "DELETE",
-		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Zone: cur.zone, SourceScope: cur.sourceScope,
+		Kind: changerequests.KindSystemRevert, Consent: changerequests.ConsentAny, Realm: cur.realm, SourceScope: cur.sourceScope,
 		TargetScope: cur.targetScope, PlatformScope: cur.platformScope, ExpectedRevision: &cur.revision, Payload: json.RawMessage("{}"),
 		RequestedBy: actor, RevertsID: &bg.ID}
 	for _, sd := range bg.Sides {
@@ -231,7 +231,7 @@ func (s *Service) RetireInlineSources(ctx context.Context) error {
 // sources kept for other bindings), once each, and audits
 // BREAK_GLASS_REVIEW_OVERDUE (§6.3).
 func (s *Service) OverdueReviews(ctx context.Context) error {
-	var overdue [][2]string // zone and operation of each change, counted once this commits
+	var overdue [][2]string // realm and operation of each change, counted once this commits
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE change_requests c SET review_overdue_notified_at = now()
 			WHERE c.kind = 'BREAK_GLASS' AND c.status = 'APPLIED' AND c.review_overdue_notified_at IS NULL
@@ -242,7 +242,7 @@ func (s *Service) OverdueReviews(ctx context.Context) error {
 			AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id)
 			AND (c.resource_type <> 'SOURCE' OR EXISTS (SELECT 1 FROM bindings b WHERE b.source_id = c.resource_id
 				AND NOT EXISTS (SELECT 1 FROM change_requests x WHERE x.depends_on_cr_id = c.id AND x.resource_id = b.id)))
-			RETURNING c.id, c.resource_type, c.resource_name, c.resource_id, coalesce(c.zone, ''), c.operation::text`)
+			RETURNING c.id, c.resource_type, c.resource_name, c.resource_id, coalesce(c.realm, ''), c.operation::text`)
 		if err != nil {
 			return err
 		}
@@ -250,12 +250,12 @@ func (s *Service) OverdueReviews(ctx context.Context) error {
 		for rows.Next() {
 			e := audit.Entry{Action: "BREAK_GLASS_REVIEW_OVERDUE", Actor: actorRevert}
 			var id uuid.UUID
-			var zone, op string
-			if err := rows.Scan(&id, &e.ResourceType, &e.ResourceName, &e.ResourceID, &zone, &op); err != nil {
+			var realm, op string
+			if err := rows.Scan(&id, &e.ResourceType, &e.ResourceName, &e.ResourceID, &realm, &op); err != nil {
 				rows.Close()
 				return err
 			}
-			overdue = append(overdue, [2]string{zone, op})
+			overdue = append(overdue, [2]string{realm, op})
 			e.ChangeRequestID = &id
 			entries = append(entries, e)
 		}

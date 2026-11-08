@@ -54,7 +54,7 @@ func Plugins(m *pluginmgr.Manager) ValidateBinding {
 
 // Platform is what bindings need of a configured platform (§8.1).
 type Platform struct {
-	Name, Type, Zone, Scope                        string
+	Name, Type, Realm, Scope                       string
 	AllowedTrustDomains                            []string
 	IdentityProviderType, IdentityProviderInstance string
 	SecretStoreType, SecretStoreInstance           string
@@ -96,7 +96,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
 			r.Allow[p.Name] = allow
-			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Zone: p.Zone, Scope: p.Scope,
+			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Scope: p.Scope,
 				AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix,
 				IdentityProviderType: p.IdentityProvider.Type, IdentityProviderInstance: p.IdentityProvider.Instance,
 				SecretStoreType: p.SecretStore.Type, SecretStoreInstance: p.SecretStore.Instance,

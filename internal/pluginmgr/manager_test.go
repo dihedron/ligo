@@ -31,8 +31,8 @@ import (
 const target = pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
 
 var (
-	prod = config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: "unix:///run/spire/prod/agent.sock"}
-	test = config.Zone{Name: "test", TrustDomain: "test.lab", SPIFFEWorkloadSocket: "unix:///run/spire/test/agent.sock"}
+	prod = config.Realm{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: "unix:///run/spire/prod/agent.sock"}
+	test = config.Realm{Name: "test", TrustDomain: "test.lab", SPIFFEWorkloadSocket: "unix:///run/spire/test/agent.sock"}
 )
 
 func instance(name, expr string, shared bool) *pluginv1.InstanceDescriptor {
@@ -82,8 +82,8 @@ func newManager(t *testing.T, specs ...Spec) (*Manager, *syncBuffer, error) {
 	}
 	if unwired {
 		specs = append(specs,
-			Spec{Builtin: true, Type: "svid.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
-			Spec{Builtin: true, Type: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}})
+			Spec{Builtin: true, Type: "svid.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
+			Spec{Builtin: true, Type: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}})
 	}
 	logs := &syncBuffer{}
 	m := New(specs, Options{
@@ -106,13 +106,13 @@ func health(ctx context.Context, m *Manager, name string) (string, error) {
 	return msg, err
 }
 
-// TestManagerStart: one process per (type, zone), each configured with its
-// zone's instances and socket; the resolved SPIFFE IDs are logged (§5.2,
+// TestManagerStart: one process per (type, realm), each configured with its
+// realm's instances and socket; the resolved SPIFFE IDs are logged (§5.2,
 // ADR-03).
 func TestManagerStart(t *testing.T) {
 	m, logs, err := newManager(t,
-		Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false), instance("pg-dr", "b", false)}},
-		Spec{Zone: test, Instances: []*pluginv1.InstanceDescriptor{instance("pg-test", "c", false)}},
+		Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false), instance("pg-dr", "b", false)}},
+		Spec{Realm: test, Instances: []*pluginv1.InstanceDescriptor{instance("pg-test", "c", false)}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -146,19 +146,19 @@ func TestManagerStartRefusals(t *testing.T) {
 		specs []Spec
 		want  string
 	}{
-		"two SVIDs (AC-15)": {[]Spec{{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "two", false)}}},
+		"two SVIDs (AC-15)": {[]Spec{{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "two", false)}}},
 			`"pg-prod" matched more than one SVID`},
-		"foreign trust domain (INV-10)": {[]Spec{{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "foreign", false)}}},
+		"foreign trust domain (INV-10)": {[]Spec{{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "foreign", false)}}},
 			"pg-prod"},
-		"unresolved": {[]Spec{{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "skip", false)}}},
+		"unresolved": {[]Spec{{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "skip", false)}}},
 			"pg-prod"},
-		"shared SVID": {[]Spec{{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "shared", true), instance("pg-dr", "shared", false)}}},
+		"shared SVID": {[]Spec{{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "shared", true), instance("pg-dr", "shared", false)}}},
 			"pg-dr"},
-		"wrong kind": {[]Spec{{Zone: prod, Env: []string{"TESTPLUGIN_KIND=store"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+		"wrong kind": {[]Spec{{Realm: prod, Env: []string{"TESTPLUGIN_KIND=store"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"kind"},
-		"capabilities of another kind (§5.9)": {[]Spec{{Zone: prod, Env: []string{"TESTPLUGIN_CAPS=store"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+		"capabilities of another kind (§5.9)": {[]Spec{{Realm: prod, Env: []string{"TESTPLUGIN_CAPS=store"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"capabilities"},
-		"wrong type": {[]Spec{{Type: "oracle.v1", Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+		"wrong type": {[]Spec{{Type: "oracle.v1", Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"oracle.v1"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestManagerStartRefusals(t *testing.T) {
 		})
 	}
 	// instances that all allow it may share an SVID
-	if _, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "shared", true), instance("pg-dr", "shared", true)}}); err != nil {
+	if _, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "shared", true), instance("pg-dr", "shared", true)}}); err != nil {
 		t.Errorf("allowed shared SVID: %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestManagerStartRefusals(t *testing.T) {
 // TestManagerRestart: a crashed process fails its in-flight RPC with a
 // retryable error and is restarted with backoff (§5.2).
 func TestManagerRestart(t *testing.T) {
-	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("crash", "a", false)}})
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("crash", "a", false)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,8 +217,8 @@ func TestManagerRestart(t *testing.T) {
 func TestManagerTwoPasses(t *testing.T) {
 	identity := pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
 	_, _, err := newManager(t,
-		Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "local", ConfigJson: `{"password_length":8}`}}},
-		Spec{Type: "oracle.v1", Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+		Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "local", ConfigJson: `{"password_length":8}`}}},
+		Spec{Type: "oracle.v1", Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
 	if err == nil || !strings.Contains(err.Error(), "oracle.v1") {
 		t.Errorf("err = %v, want the description refused", err)
 	}
@@ -239,7 +239,7 @@ func TestManagerRule8(t *testing.T) {
 		"config refused": {`{"type":"object","required":["dsn"]}`, `instance "pg-prod"`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_SCHEMA=" + tc.schema}, Instances: []*pluginv1.InstanceDescriptor{bad}})
+			_, _, err := newManager(t, Spec{Realm: prod, Env: []string{"TESTPLUGIN_SCHEMA=" + tc.schema}, Instances: []*pluginv1.InstanceDescriptor{bad}})
 			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "more than one") {
 				t.Errorf("err = %v, want %q", err, tc.want)
 			}
@@ -247,7 +247,7 @@ func TestManagerRule8(t *testing.T) {
 	}
 	ok := instance("pg-prod", "a", false)
 	ok.ConfigJson = `{"dsn":"postgres://pg"}`
-	if _, _, err := newManager(t, Spec{Zone: prod, Env: []string{`TESTPLUGIN_SCHEMA={"type":"object","required":["dsn"]}`}, Instances: []*pluginv1.InstanceDescriptor{ok}}); err != nil {
+	if _, _, err := newManager(t, Spec{Realm: prod, Env: []string{`TESTPLUGIN_SCHEMA={"type":"object","required":["dsn"]}`}, Instances: []*pluginv1.InstanceDescriptor{ok}}); err != nil {
 		t.Errorf("valid config: %v", err)
 	}
 }
@@ -260,16 +260,16 @@ func TestManagerRule8(t *testing.T) {
 func TestManagerRule3(t *testing.T) {
 	identity := pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
 	store := pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE
-	svid := Spec{Builtin: true, Type: "svid.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}}
-	local := Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}}
-	none := Spec{Builtin: true, Type: "none.v1", Kind: store, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}}
-	two := Spec{Type: "twostore.v1", Kind: store, Zone: prod, Env: []string{"TESTPLUGIN_KIND=store", "TESTPLUGIN_TYPE=twostore.v1", "TESTPLUGIN_STRATEGIES=a:SVID,b:SVID"},
+	svid := Spec{Builtin: true, Type: "svid.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}}
+	local := Spec{Builtin: true, Type: "target-local.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}}
+	none := Spec{Builtin: true, Type: "none.v1", Kind: store, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}}
+	two := Spec{Type: "twostore.v1", Kind: store, Realm: prod, Env: []string{"TESTPLUGIN_KIND=store", "TESTPLUGIN_TYPE=twostore.v1", "TESTPLUGIN_STRATEGIES=a:SVID,b:SVID"},
 		Instances: []*pluginv1.InstanceDescriptor{instance("two-prod", "a", false)}}
 	platform := func(accepts, idp, idpInstance, st, stInstance, strategy string) (Spec, *pluginv1.InstanceDescriptor) {
 		in := instance("pg-prod", "two", false) // "two" would fail ConfigureInstances: rule 3 must refuse first
 		in.IdentityProviderType, in.IdentityProviderInstance = idp, idpInstance
 		in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = st, stInstance, strategy
-		return Spec{Zone: prod, Env: []string{"TESTPLUGIN_ACCEPTS=" + accepts}, Instances: []*pluginv1.InstanceDescriptor{in}}, in
+		return Spec{Realm: prod, Env: []string{"TESTPLUGIN_ACCEPTS=" + accepts}, Instances: []*pluginv1.InstanceDescriptor{in}}, in
 	}
 	for name, tc := range map[string]struct {
 		specs []Spec
@@ -279,7 +279,7 @@ func TestManagerRule3(t *testing.T) {
 		"strategy not declared":    {[]Spec{svid, none, first(platform("SVID", "svid.v1", "svid-prod", "none.v1", "none-prod", "x"))}, `"x"`},
 		"no strategy for the mode": {[]Spec{local, none, first(platform("TARGET_LOCAL", "target-local.v1", "local-prod", "none.v1", "none-prod", ""))}, "secret_storage_strategy"},
 		"several strategies":       {[]Spec{svid, two, first(platform("SVID", "svid.v1", "svid-prod", "twostore.v1", "two-prod", ""))}, "secret_storage_strategy"},
-		"unspecified mode": {[]Spec{{Type: "noid.v1", Kind: identity, Zone: prod, Env: []string{"TESTPLUGIN_KIND=identity", "TESTPLUGIN_TYPE=noid.v1"},
+		"unspecified mode": {[]Spec{{Type: "noid.v1", Kind: identity, Realm: prod, Env: []string{"TESTPLUGIN_KIND=identity", "TESTPLUGIN_TYPE=noid.v1"},
 			Instances: []*pluginv1.InstanceDescriptor{instance("noid-prod", "c", false)}}}, "UNSPECIFIED"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -307,14 +307,14 @@ func first(s Spec, _ *pluginv1.InstanceDescriptor) Spec { return s }
 func TestManagerOutputValidators(t *testing.T) {
 	for _, schema := range []string{"", `{"type":7}`} {
 		// "two" would fail ConfigureInstances: the schema must be refused first
-		_, _, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_OUTPUT_SCHEMA=" + schema}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "two", false)}})
+		_, _, err := newManager(t, Spec{Realm: prod, Env: []string{"TESTPLUGIN_OUTPUT_SCHEMA=" + schema}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "two", false)}})
 		if err == nil || !strings.Contains(err.Error(), "output schema") {
 			t.Errorf("schema %q: err = %v", schema, err)
 		}
 	}
 	in := instance("pg-prod", "a", false)
 	in.ConfigJson = `{"allowed_endpoints":["pg.prod.internal:5432"]}`
-	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{in}})
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{in}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestManagerRestartDescribeChanged(t *testing.T) {
 	if err := os.WriteFile(version, []byte("1.0.0"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m, logs, err := newManager(t, Spec{Zone: prod, Env: []string{"TESTPLUGIN_VERSION_FILE=" + version}, Instances: []*pluginv1.InstanceDescriptor{instance("crash", "a", false)}})
+	m, logs, err := newManager(t, Spec{Realm: prod, Env: []string{"TESTPLUGIN_VERSION_FILE=" + version}, Instances: []*pluginv1.InstanceDescriptor{instance("crash", "a", false)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestManagerRestartDescribeChanged(t *testing.T) {
 // RPCs of one instance run at most max_concurrent_rpcs_per_instance at once
 // (§5.3 rules 6-7).
 func TestManagerCallLimits(t *testing.T) {
-	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestManagerCallLimits(t *testing.T) {
 // TestManagerLogs: plugin stderr and hclog output reach the log redacted
 // (§5.3 rule 5).
 func TestManagerLogs(t *testing.T) {
-	m, logs, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("log", "a", false)}})
+	m, logs, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("log", "a", false)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,9 +440,9 @@ func TestManagerBuiltins(t *testing.T) {
 	identity := pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER
 	store := pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE
 	m := New([]Spec{
-		{Builtin: true, Type: "svid.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
-		{Builtin: true, Type: "target-local.v1", Kind: identity, Zone: test, Instances: []*pluginv1.InstanceDescriptor{{Name: "local-test", ConfigJson: `{"password_length":40}`}}},
-		{Builtin: true, Type: "none.v1", Kind: store, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "no-store-prod", ConfigJson: "{}"}}},
+		{Builtin: true, Type: "svid.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
+		{Builtin: true, Type: "target-local.v1", Kind: identity, Realm: test, Instances: []*pluginv1.InstanceDescriptor{{Name: "local-test", ConfigJson: `{"password_length":40}`}}},
+		{Builtin: true, Type: "none.v1", Kind: store, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "no-store-prod", ConfigJson: "{}"}}},
 	}, Options{RPCTimeout: 5 * time.Second, MaxConcurrentRPCsPerInstance: 1, Logger: slog.New(slog.DiscardHandler)})
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -472,9 +472,9 @@ func TestManagerBuiltins(t *testing.T) {
 	}
 
 	for name, spec := range map[string]Spec{
-		"not a builtin": {Builtin: true, Type: "oracle.v1", Kind: target, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x"}}},
-		"wrong kind":    {Builtin: true, Type: "none.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x"}}},
-		"bad config":    {Builtin: true, Type: "target-local.v1", Kind: identity, Zone: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x", ConfigJson: `{"password_length":8}`}}},
+		"not a builtin": {Builtin: true, Type: "oracle.v1", Kind: target, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x"}}},
+		"wrong kind":    {Builtin: true, Type: "none.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x"}}},
+		"bad config":    {Builtin: true, Type: "target-local.v1", Kind: identity, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "x", ConfigJson: `{"password_length":8}`}}},
 	} {
 		m := New([]Spec{spec}, Options{RPCTimeout: 5 * time.Second, Logger: slog.New(slog.DiscardHandler)})
 		if err := m.Start(ctx); err == nil {
@@ -484,8 +484,8 @@ func TestManagerBuiltins(t *testing.T) {
 	}
 }
 
-// TestSpecs: the example configuration gives one process per (type, zone),
-// with its zone's instances; builtin types are served in ligo.
+// TestSpecs: the example configuration gives one process per (type, realm),
+// with its realm's instances; builtin types are served in ligo.
 func TestSpecs(t *testing.T) {
 	data, err := os.ReadFile("../../examples/server.yaml")
 	if err != nil {
@@ -502,7 +502,7 @@ func TestSpecs(t *testing.T) {
 	}
 	got := map[string][]string{}
 	for _, s := range specs {
-		key := s.Type + "/" + s.Zone.Name
+		key := s.Type + "/" + s.Realm.Name
 		for _, in := range s.Instances {
 			got[key] = append(got[key], in.GetName())
 			if !json.Valid([]byte(in.GetConfigJson())) {
@@ -551,7 +551,7 @@ func TestCallSpan(t *testing.T) {
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { otel.SetTracerProvider(before); otel.SetTextMapPropagator(prop) })
-	m, _, err := newManager(t, Spec{Zone: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,17 +80,17 @@ func TestAudited(t *testing.T) {
 		}{
 			{`insert into sources (id, name, scope, trust_domain, svid_regex, created_by, updated_by) values ($1, $2, 'cloud/fin-01/payments',
 				'cloud.internal', $3, 't', 't')`, []any{src, "src-" + x, `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + x + `$`}},
-			{`insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+			{`insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 				values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', 'dc/corp-prod/ledger', 'dc/corp-prod', '{}', 't', 't')`, []any{tgt, "tgt-" + x}},
 			{`insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, []any{tgt}},
-			{`insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+			{`insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 				identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 				source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision, source_trust_domain, source_svid_regex,
 				requested_spec, created_by, updated_by)
 				values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static',
 				'bnd_' || left(md5($1::uuid::text), 16), 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', 'w', 1, 1, 'cloud.internal', $5,
 				'{}', 't', 't')`, []any{bnd, "b-" + x, src, tgt, `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + x + `$`}},
-			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone, source_scope, target_scope,
+			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm, source_scope, target_scope,
 				platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at)
 				values ($1, 'BINDING', $2, NULL, 'CREATE', 'STANDARD', 'ALL', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod',
 				repeat('a', 64), false, '{}', repeat('b', 64), 'carla', now() + interval '1 day')`, []any{create, "new-" + x}},
@@ -98,14 +98,14 @@ func TestAudited(t *testing.T) {
 				values ($1, 'SOURCE', 'cloud/fin-01/payments', false, 'AUTO', 'carla', 'STANDARD', 'APPROVED', 'system:auto-approve', now()),
 				($1, 'TARGET', 'dc/corp-prod/ledger', true, 'HUMAN', 'carla', 'STANDARD', NULL, NULL, NULL),
 				($1, 'PARTY:security', 'sec/infosec', true, 'HUMAN', 'carla', 'STANDARD', NULL, NULL, NULL)`, []any{create}},
-			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone, source_scope, target_scope,
+			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm, source_scope, target_scope,
 				platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at, expected_revision)
 				values ($1, 'BINDING', $2, $3, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod',
 				repeat('a', 64), false, '{}', repeat('c', 64), 'dino', now() + interval '1 day', 1)`, []any{revoke, "b-" + x, bnd}},
 			{`insert into change_request_sides (change_request_id, side, scope, approval_required, basis, requested_by, cr_kind, decision, decided_by, decided_at)
 				values ($1, 'PLATFORM', 'dc/corp-prod', true, 'HUMAN', 'dino', 'STANDARD', 'APPROVED', 'dora', now())`, []any{revoke}},
 			// a removal that every side decided, as a break-glass revert: no other scope to tell
-			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone, source_scope, target_scope,
+			{`insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm, source_scope, target_scope,
 				platform_scope, policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at, expected_revision)
 				values ($1, 'BINDING', $2, NULL, 'DELETE', 'STANDARD', 'ANY', 'prod', 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod',
 				repeat('a', 64), false, '{}', repeat('d', 64), 'dino', now() + interval '1 day', 1)`, []any{revert, "reverted-" + x}},
@@ -193,7 +193,7 @@ func TestAudited(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = json.Unmarshal(raw, &payload)
-	if r, _ := payload["resource"].(map[string]any); r["source"] != "src-"+x || r["target"] != "tgt-"+x || r["platform"] != "oracle-prod" || payload["zone"] != "prod" {
+	if r, _ := payload["resource"].(map[string]any); r["source"] != "src-"+x || r["target"] != "tgt-"+x || r["platform"] != "oracle-prod" || payload["realm"] != "prod" {
 		t.Errorf("binding payload: %v", payload)
 	}
 }

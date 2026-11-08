@@ -23,7 +23,7 @@ type Review struct {
 	Base
 	Scope string `long:"scope" description:"Only requests with a scope matching this pattern."`
 	Kind  string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Only requests of this resource kind."`
-	Zone  string `short:"z" long:"zone" description:"Only requests of this zone."`
+	Realm string `long:"realm" description:"Only requests of this realm."`
 }
 
 func (cmd *Review) Execute([]string) error {
@@ -34,7 +34,7 @@ func (cmd *Review) Execute([]string) error {
 	}
 	return cmd.connected(func(ctx context.Context, c *client.Client) error {
 		q := url.Values{"awaitingMe": {"true"}}
-		for k, v := range map[string]string{"scope": cmd.Scope, "resourceType": strings.ToUpper(cmd.Kind), "zone": cmd.Zone} {
+		for k, v := range map[string]string{"scope": cmd.Scope, "resourceType": strings.ToUpper(cmd.Kind), "realm": cmd.Realm} {
 			if v != "" {
 				q.Set(k, v)
 			}

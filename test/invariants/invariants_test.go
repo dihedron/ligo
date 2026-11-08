@@ -253,7 +253,7 @@ func TestINV22(t *testing.T) {
 	expectCode(t, "source of a binding removed", f.exec(`delete from sources where id = $1`, f.source), fkViolation)
 	f = newFixture(t, "APP")
 	other := uuid.NewV7()
-	f.must(t, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, created_by, updated_by)
+	f.must(t, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, created_by, updated_by)
 		values ($1, 'ledger-two', 'oracle-prod', 'oracle.v1', 'prod', $2, $3, '{}', 'd', 'd')`, other, f.targetScope, f.platformScope)
 	expectCode(t, "binding at a level the target lacks", f.exec(f.bindingSQL(), f.bindingArgs(uuid.NewV7(), "fin-01-payments-two", f.source, other, "read")...), fkViolation)
 }

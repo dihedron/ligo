@@ -152,7 +152,7 @@ func (s *Server) bindingList(w http.ResponseWriter, r *http.Request, f bindings.
 		return
 	}
 	for key, field := range map[string]*string{"source": &f.Source, "target": &f.Target, "accessLevel": &f.AccessLevel,
-		"platform": &f.Platform, "platformType": &f.PlatformType, "phase": &f.Phase, "trustDomain": &f.TrustDomain, "zone": &f.Zone,
+		"platform": &f.Platform, "platformType": &f.PlatformType, "phase": &f.Phase, "trustDomain": &f.TrustDomain, "realm": &f.Realm,
 		"scope": &f.Scope} {
 		if v := q.Get(key); v != "" && *field == "" {
 			*field = v

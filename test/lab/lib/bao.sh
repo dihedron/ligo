@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The identity scenario's OpenBao: one server per zone, over TLS with the lab
+# The identity scenario's OpenBao: one server per realm, over TLS with the lab
 # CA, Raft storage on one node, initialized and unsealed by the lab, and
 # configured as ligo's operations would (.specs/ligo-test-environment.md,
 # "OpenBao"). The unseal key and the root token stay in the state directory.
@@ -12,7 +12,7 @@ BAO_PORT=8200
 # fails (.specs/ligo-test-environment.md, "HashiCorp Vault").
 secrets_backend() { env_get '.secrets // "openbao"'; }
 
-# secrets_host: the selected backend's server of zone prod.
+# secrets_host: the selected backend's server of realm prod.
 secrets_host() { if [[ "$(secrets_backend)" == vault ]]; then echo vault-prod; else echo bao-prod; fi; }
 
 # secrets_audience: its JWT audience; secrets_addr: its address.
@@ -42,17 +42,17 @@ server_cli() {
 	esac
 }
 
-# bao ZONE ARGS: the bao CLI on the zone's OpenBao.
+# bao REALM ARGS: the bao CLI on the realm's OpenBao.
 bao() {
-	local zone="$1"
+	local realm="$1"
 	shift
-	server_cli "bao-$zone" "$@"
+	server_cli "bao-$realm" "$@"
 }
 
-# secrets_cli ARGS: the CLI on the selected backend's server of zone prod.
+# secrets_cli ARGS: the CLI on the selected backend's server of realm prod.
 secrets_cli() { server_cli "$(secrets_host)" "$@"; }
 
-# bao_conf ZONE: OpenBao's configuration.
+# bao_conf REALM: OpenBao's configuration.
 bao_conf() {
 	cat <<CONF
 ui            = false
@@ -84,10 +84,10 @@ bao_release() {
 	fetch "$base/$file" "$sha"
 }
 
-# bao_server_up ZONE: the zone's OpenBao, installed, initialized, unsealed
+# bao_server_up REALM: the realm's OpenBao, installed, initialized, unsealed
 # and configured.
 bao_server_up() {
-	local zone="$1" name="bao-$1" tmp
+	local realm="$1" name="bao-$1" tmp
 	inner_container "$name" "$LAB_BAO_MEMORY"
 	pki_issue "$name" "DNS:$name.ligo.lab,IP:$(inner_ip "$name"),IP:127.0.0.1"
 	if ! inner_exec "$name" test -x /usr/bin/bao; then
@@ -96,7 +96,7 @@ bao_server_up() {
 		info "$name: OpenBao $LAB_OPENBAO_VERSION installed"
 	fi
 	tmp="$(mktemp -d)"
-	bao_conf "$zone" >"$tmp/openbao.hcl"
+	bao_conf "$realm" >"$tmp/openbao.hcl"
 	inner_push "$tmp/openbao.hcl" "$name" /etc/openbao/openbao.hcl 0640
 	rm -rf "${tmp:?}"
 	inner_push "$LAB_STATE_DIR/pki/$name.crt" "$name" /opt/openbao/tls/tls.crt 0644
@@ -111,7 +111,7 @@ bao_server_up() {
 	bao_init "$name"
 	bao_unseal "$name"
 	bao_configure "$name"
-	info "$name: OpenBao of zone $zone initialized, unsealed and configured"
+	info "$name: OpenBao of realm $realm initialized, unsealed and configured"
 }
 
 # bao_status SERVER: "status" as JSON (exit status 2 means sealed).
@@ -164,18 +164,18 @@ bao_unseal() {
 	die "$server: still sealed, or without a leader"
 }
 
-# bao_configure SERVER: the engines, the JWT auth trusting the zone's SPIRE,
+# bao_configure SERVER: the engines, the JWT auth trusting the realm's SPIRE,
 # and, in prod, the role ligo-sealer (ADR-07): idempotent.
 bao_configure() {
-	local server="$1" zone="${1##*-}"
+	local server="$1" realm="${1##*-}"
 	server_cli "$server" secrets list -format=json | jq -e '."transit/"' >/dev/null || server_cli "$server" secrets enable transit >/dev/null
 	server_cli "$server" read transit/keys/ligo-interstage >/dev/null 2>&1 || server_cli "$server" write -f transit/keys/ligo-interstage >/dev/null
 	server_cli "$server" secrets list -format=json | jq -e '."kv/"' >/dev/null || server_cli "$server" secrets enable -path=kv kv-v2 >/dev/null
 	server_cli "$server" auth list -format=json | jq -e '."jwt-spiffe/"' >/dev/null || server_cli "$server" auth enable -path=jwt-spiffe jwt >/dev/null
 	server_cli "$server" write auth/jwt-spiffe/config \
-		oidc_discovery_url="https://spire-$zone.ligo.lab:$OIDC_PORT" \
+		oidc_discovery_url="https://spire-$realm.ligo.lab:$OIDC_PORT" \
 		oidc_discovery_ca_pem="@$(server_ca "$server")" >/dev/null || die "$server: cannot configure the JWT auth"
-	[[ "$zone" == prod ]] || return 0
+	[[ "$realm" == prod ]] || return 0
 	inner_exec "$server" sh -c 'cat >/root/ligo-sealer.hcl' <<'HCL'
 # ligo's sealer (ADR-07): wrap and unwrap data keys, nothing else
 path "transit/encrypt/ligo-interstage" {
@@ -192,7 +192,7 @@ HCL
 }
 
 # bao_check: as the user ligo on each ligo host, logs in to the selected
-# backend's server of zone prod with a JWT-SVID and wraps a key with Transit
+# backend's server of realm prod with a JWT-SVID and wraps a key with Transit
 # (step 3's done criterion).
 bao_check() {
 	local host uid server
@@ -265,7 +265,7 @@ vault_release() {
 }
 
 # vault_up: the container vault-prod with Vault, installed, initialized,
-# unsealed and configured as OpenBao is. Zone prod only: nothing uses another.
+# unsealed and configured as OpenBao is. Realm prod only: nothing uses another.
 vault_up() {
 	section "HashiCorp Vault (prod)"
 	local name=vault-prod tmp
@@ -300,7 +300,7 @@ vault_up() {
 	bao_unseal "$name"
 	bao_configure "$name"
 	env_set .vault "$(jq -n --arg v "$LAB_VAULT_VERSION" '{version: $v}')"
-	info "$name: Vault of zone prod initialized, unsealed and configured"
+	info "$name: Vault of realm prod initialized, unsealed and configured"
 }
 
 # secrets_apply: only the selected backend's servers run, unsealed.
@@ -338,13 +338,13 @@ cmd_secrets() {
 	info "the backend is $1: run lab.sh serve install"
 }
 
-# identity_bao_up: both zones' OpenBao, Vault with its scenario, then the
+# identity_bao_up: both realms' OpenBao, Vault with its scenario, then the
 # check on the selected backend.
 identity_bao_up() {
 	section "OpenBao (prod, test)"
-	local zone
-	for zone in "${ZONES[@]}"; do
-		bao_server_up "$zone"
+	local realm
+	for realm in "${REALMS[@]}"; do
+		bao_server_up "$realm"
 	done
 	env_set .openbao "$(jq -n --arg v "$LAB_OPENBAO_VERSION" '{version: $v}')"
 	if selected vault || inner_exists vault-prod; then

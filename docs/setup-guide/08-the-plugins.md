@@ -1,6 +1,6 @@
 # The plugins
 
-Each plugin is declared with its binary and its hash. `ligo` runs one process per plugin type and zone, and refuses a binary whose hash differs, before every start.
+Each plugin is declared with its binary and its hash. `ligo` runs one process per plugin type and realm, and refuses a binary whose hash differs, before every start.
 
 ## The Vault store
 
@@ -11,7 +11,7 @@ secret_stores:
     sha256: "<its hash>"
     instances:
       - name: "vault-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.prod.internal"]
@@ -43,14 +43,14 @@ Let `pg_hba.conf` accept any role over `hostssl` with `scram-sha-256` on that da
 
 ```yaml
 identity_providers:
-  - { type: target-local.v1, builtin: true, instances: [ { name: local-prod, zone: prod } ] }
+  - { type: target-local.v1, builtin: true, instances: [ { name: local-prod, realm: prod } ] }
 platform_providers:
   - type: "postgres.v1"
     binary: "ligo-plugin-postgres"
     sha256: "<its hash>"
     platforms:
       - name: pg-ledger
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"
         display_name: "Ledger database"
         allowed_source_trust_domains: [prod.internal]
@@ -119,7 +119,7 @@ identity_providers:
     sha256: "<its hash>"
     instances:
       - name: "ldap-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]

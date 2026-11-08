@@ -566,7 +566,7 @@ func (x *SVIDSelectorConfig) GetJwtAudience() []string {
 type InstanceDescriptor struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Zone            string                 `protobuf:"bytes,2,opt,name=zone,proto3" json:"zone,omitempty"`
+	Realm           string                 `protobuf:"bytes,2,opt,name=realm,proto3" json:"realm,omitempty"`
 	TrustDomain     string                 `protobuf:"bytes,3,opt,name=trust_domain,json=trustDomain,proto3" json:"trust_domain,omitempty"`
 	ConfigJson      string                 `protobuf:"bytes,4,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"` // validated against Describe.instance_config_schema_json
 	SvidSelector    *SVIDSelectorConfig    `protobuf:"bytes,5,opt,name=svid_selector,json=svidSelector,proto3" json:"svid_selector,omitempty"`
@@ -619,9 +619,9 @@ func (x *InstanceDescriptor) GetName() string {
 	return ""
 }
 
-func (x *InstanceDescriptor) GetZone() string {
+func (x *InstanceDescriptor) GetRealm() string {
 	if x != nil {
-		return x.Zone
+		return x.Realm
 	}
 	return ""
 }
@@ -703,7 +703,7 @@ type BindingContext struct {
 	Revision             int64                  `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
 	Attempt              int64                  `protobuf:"varint,4,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	Operation            Operation              `protobuf:"varint,5,opt,name=operation,proto3,enum=ligo.plugin.v1.Operation" json:"operation,omitempty"`
-	Zone                 string                 `protobuf:"bytes,6,opt,name=zone,proto3" json:"zone,omitempty"`
+	Realm                string                 `protobuf:"bytes,6,opt,name=realm,proto3" json:"realm,omitempty"`
 	SourceTrustDomain    string                 `protobuf:"bytes,7,opt,name=source_trust_domain,json=sourceTrustDomain,proto3" json:"source_trust_domain,omitempty"`
 	SourceSvidRegex      string                 `protobuf:"bytes,8,opt,name=source_svid_regex,json=sourceSvidRegex,proto3" json:"source_svid_regex,omitempty"` // validated regex of `revision`
 	RotateStaticSecrets  bool                   `protobuf:"varint,9,opt,name=rotate_static_secrets,json=rotateStaticSecrets,proto3" json:"rotate_static_secrets,omitempty"`
@@ -783,9 +783,9 @@ func (x *BindingContext) GetOperation() Operation {
 	return Operation_OPERATION_UNSPECIFIED
 }
 
-func (x *BindingContext) GetZone() string {
+func (x *BindingContext) GetRealm() string {
 	if x != nil {
-		return x.Zone
+		return x.Realm
 	}
 	return ""
 }
@@ -1629,7 +1629,7 @@ func (x *SecretStorageStrategy) GetSubjectMatch() SubjectMatch {
 
 type ConfigureInstancesRequest struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
-	Zone                 string                 `protobuf:"bytes,1,opt,name=zone,proto3" json:"zone,omitempty"`
+	Realm                string                 `protobuf:"bytes,1,opt,name=realm,proto3" json:"realm,omitempty"`
 	SpiffeWorkloadSocket string                 `protobuf:"bytes,2,opt,name=spiffe_workload_socket,json=spiffeWorkloadSocket,proto3" json:"spiffe_workload_socket,omitempty"`
 	Instances            []*InstanceDescriptor  `protobuf:"bytes,3,rep,name=instances,proto3" json:"instances,omitempty"`
 	unknownFields        protoimpl.UnknownFields
@@ -1666,9 +1666,9 @@ func (*ConfigureInstancesRequest) Descriptor() ([]byte, []int) {
 	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *ConfigureInstancesRequest) GetZone() string {
+func (x *ConfigureInstancesRequest) GetRealm() string {
 	if x != nil {
-		return x.Zone
+		return x.Realm
 	}
 	return ""
 }
@@ -3503,10 +3503,10 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x12SVIDSelectorConfig\x12\x1d\n" +
 	"\n" +
 	"match_expr\x18\x01 \x01(\tR\tmatchExpr\x12!\n" +
-	"\fjwt_audience\x18\x02 \x03(\tR\vjwtAudience\"\xc4\x04\n" +
+	"\fjwt_audience\x18\x02 \x03(\tR\vjwtAudience\"\xc6\x04\n" +
 	"\x12InstanceDescriptor\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04zone\x18\x02 \x01(\tR\x04zone\x12!\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05realm\x18\x02 \x01(\tR\x05realm\x12!\n" +
 	"\ftrust_domain\x18\x03 \x01(\tR\vtrustDomain\x12\x1f\n" +
 	"\vconfig_json\x18\x04 \x01(\tR\n" +
 	"configJson\x12G\n" +
@@ -3518,15 +3518,15 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x11secret_store_type\x18\n" +
 	" \x01(\tR\x0fsecretStoreType\x122\n" +
 	"\x15secret_store_instance\x18\v \x01(\tR\x13secretStoreInstance\x126\n" +
-	"\x17secret_storage_strategy\x18\f \x01(\tR\x15secretStorageStrategy\"\xef\x04\n" +
+	"\x17secret_storage_strategy\x18\f \x01(\tR\x15secretStorageStrategy\"\xf1\x04\n" +
 	"\x0eBindingContext\x12\x1d\n" +
 	"\n" +
 	"binding_id\x18\x01 \x01(\tR\tbindingId\x12!\n" +
 	"\fbinding_name\x18\x02 \x01(\tR\vbindingName\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x03R\brevision\x12\x18\n" +
 	"\aattempt\x18\x04 \x01(\x03R\aattempt\x127\n" +
-	"\toperation\x18\x05 \x01(\x0e2\x19.ligo.plugin.v1.OperationR\toperation\x12\x12\n" +
-	"\x04zone\x18\x06 \x01(\tR\x04zone\x12.\n" +
+	"\toperation\x18\x05 \x01(\x0e2\x19.ligo.plugin.v1.OperationR\toperation\x12\x14\n" +
+	"\x05realm\x18\x06 \x01(\tR\x05realm\x12.\n" +
 	"\x13source_trust_domain\x18\a \x01(\tR\x11sourceTrustDomain\x12*\n" +
 	"\x11source_svid_regex\x18\b \x01(\tR\x0fsourceSvidRegex\x122\n" +
 	"\x15rotate_static_secrets\x18\t \x01(\bR\x13rotateStaticSecrets\x124\n" +
@@ -3600,9 +3600,9 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x15SecretStorageStrategy\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12C\n" +
 	"\x0eidentity_modes\x18\x02 \x03(\x0e2\x1c.ligo.plugin.v1.IdentityModeR\ridentityModes\x12A\n" +
-	"\rsubject_match\x18\x03 \x01(\x0e2\x1c.ligo.plugin.v1.SubjectMatchR\fsubjectMatch\"\xa7\x01\n" +
-	"\x19ConfigureInstancesRequest\x12\x12\n" +
-	"\x04zone\x18\x01 \x01(\tR\x04zone\x124\n" +
+	"\rsubject_match\x18\x03 \x01(\x0e2\x1c.ligo.plugin.v1.SubjectMatchR\fsubjectMatch\"\xa9\x01\n" +
+	"\x19ConfigureInstancesRequest\x12\x14\n" +
+	"\x05realm\x18\x01 \x01(\tR\x05realm\x124\n" +
 	"\x16spiffe_workload_socket\x18\x02 \x01(\tR\x14spiffeWorkloadSocket\x12@\n" +
 	"\tinstances\x18\x03 \x03(\v2\".ligo.plugin.v1.InstanceDescriptorR\tinstances\"K\n" +
 	"\x10ResolvedInstance\x12\x1a\n" +

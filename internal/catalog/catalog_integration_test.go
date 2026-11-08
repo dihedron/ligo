@@ -92,7 +92,7 @@ func exec(t *testing.T, o *pgxpool.Pool, sql string, args ...any) {
 func target(t *testing.T, o *pgxpool.Pool, name, scope, vis, to string) uuid.UUID {
 	t.Helper()
 	id := uuid.NewV7()
-	exec(t, o, `insert into targets (id, name, platform, platform_type, zone, scope, platform_scope, definition, visibility, visible_to, created_by, updated_by)
+	exec(t, o, `insert into targets (id, name, platform, platform_type, realm, scope, platform_scope, definition, visibility, visible_to, created_by, updated_by)
 		values ($1, $2, 'oracle-prod', 'oracle.v1', 'prod', $3, 'dc/corp-prod', '{}', $4, $5::jsonb, 't', 't')`, id, name, scope, vis, to)
 	exec(t, o, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'read', '{}', '[]')`, id)
 	return id
@@ -179,7 +179,7 @@ func TestAC59(t *testing.T) {
 	src := source(t, o, "fin-01-payments-s-"+x, "cloud/fin-01/payments", "cloud.internal", `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/`+x+`$`)
 	tgt := target(t, o, "ledger-"+x, "dc/corp-prod/ledger", "PRIVATE", "[]")
 	binding, name, cr := uuid.NewV7(), "fin-01-payments-b-"+x, uuid.NewV7()
-	exec(t, o, `insert into bindings (id, name, source_id, target_id, access_level, zone, platform_type, platform,
+	exec(t, o, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
 		source_scope, target_scope, platform_scope, workflow_id, source_revision, target_revision,
 		source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
@@ -187,7 +187,7 @@ func TestAC59(t *testing.T) {
 		'bnd_' || left(md5($1::uuid::text), 16), 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal',
 		'^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/x$', '{}', 't', 't')`, binding, name, src, tgt, "ligo:apply:"+binding.String()+":r1:a1")
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, zone,
+		if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
 			source_scope, target_scope, platform_scope, interconnect_rule, policy_sha256, distinct_approvers_required, payload, payload_sha256,
 			requested_by, expires_at) values ($1, 'BINDING', $2, $3, 'CREATE', 'STANDARD', 'ALL', 'prod', 'cloud/fin-01/payments',
 			'dc/corp-prod/ledger', 'dc/corp-prod', 'cloud-to-dc', repeat('a', 64), true, '{}', repeat('b', 64), 'carla', now() + interval '1 day')`,

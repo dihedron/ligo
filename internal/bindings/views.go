@@ -44,7 +44,7 @@ type View struct {
 type ViewMetadata struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
-	Zone          string    `json:"zone"`
+	Realm         string    `json:"realm"`
 	SourceScope   string    `json:"sourceScope"`
 	TargetScope   string    `json:"targetScope"`
 	PlatformScope string    `json:"platformScope"`
@@ -94,7 +94,7 @@ type ViewActive struct {
 	Since     time.Time `json:"since"`
 }
 
-const viewQuery = `SELECT b.id, b.name, b.zone, b.source_scope, b.target_scope, b.platform_scope, b.platform_type, b.platform,
+const viewQuery = `SELECT b.id, b.name, b.realm, b.source_scope, b.target_scope, b.platform_scope, b.platform_type, b.platform,
 	b.identity_provider_type, b.identity_provider_instance, b.secret_store_type, b.secret_store_instance, b.revision, b.active_revision,
 	b.created_at, b.updated_at, b.created_by, b.updated_by, s.name, t.name, b.access_level, b.parameters, coalesce(b.purpose, ''),
 	b.labels, b.expires_at, b.phase, b.operation, b.attempt, b.workflow_id, b.current_step, b.status_message, b.last_transition_at,
@@ -114,7 +114,7 @@ func scanView(row pgx.Row) (*View, error) {
 	var bg *uuid.UUID
 	var bgBy, bgRef, activeRegex string
 	var bgExpires, since *time.Time
-	err := row.Scan(&m.ID, &m.Name, &m.Zone, &m.SourceScope, &m.TargetScope, &m.PlatformScope, &m.PlatformType, &m.Platform,
+	err := row.Scan(&m.ID, &m.Name, &m.Realm, &m.SourceScope, &m.TargetScope, &m.PlatformScope, &m.PlatformType, &m.Platform,
 		&m.Wiring.IdentityProvider.Type, &m.Wiring.IdentityProvider.Instance, &m.Wiring.SecretStore.Type, &m.Wiring.SecretStore.Instance,
 		&m.Revision, &m.ActiveRevision, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy, &v.Source, &v.Target, &v.AccessLevel,
 		&v.Parameters, &v.Purpose, &v.Labels, &v.ExpiresAt, &st.Phase, &st.Operation, &st.Attempt, &st.WorkflowID, &st.CurrentStep,
@@ -149,12 +149,12 @@ func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string)
 
 // Filter selects bindings (GET /v1/admin/bindings).
 type Filter struct {
-	Source, Target, AccessLevel, Platform, PlatformType, Phase, TrustDomain, Zone string
-	Scope                                                                         string     // a pattern matched against the three scopes
-	ExpiringBefore                                                                *time.Time // expires_at before it
-	PropagationPending                                                            *bool
-	After                                                                         string
-	Limit                                                                         int
+	Source, Target, AccessLevel, Platform, PlatformType, Phase, TrustDomain, Realm string
+	Scope                                                                          string     // a pattern matched against the three scopes
+	ExpiringBefore                                                                 *time.Time // expires_at before it
+	PropagationPending                                                             *bool
+	After                                                                          string
+	Limit                                                                          int
 }
 
 // List returns the bindings the caller sees that f selects, by name, at
@@ -165,11 +165,11 @@ func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) (
 	for {
 		rows, err := s.DB.Query(ctx, viewQuery+` WHERE b.name > $1 AND ($2 = '' OR s.name = $2) AND ($3 = '' OR t.name = $3)
 			AND ($4 = '' OR b.access_level = $4) AND ($5 = '' OR b.platform = $5) AND ($6 = '' OR b.platform_type = $6)
-			AND ($7 = '' OR b.phase::text = $7) AND ($8 = '' OR b.source_trust_domain = $8) AND ($9 = '' OR b.zone = $9)
+			AND ($7 = '' OR b.phase::text = $7) AND ($8 = '' OR b.source_trust_domain = $8) AND ($9 = '' OR b.realm = $9)
 			AND ($10::timestamptz IS NULL OR b.expires_at < $10)
 			AND ($11::boolean IS NULL OR $11 = EXISTS (SELECT 1 FROM binding_propagation_queue q WHERE q.binding_id = b.id))
 			ORDER BY b.name LIMIT $12`, after, f.Source, f.Target, f.AccessLevel, f.Platform, f.PlatformType, f.Phase, f.TrustDomain,
-			f.Zone, f.ExpiringBefore, f.PropagationPending, 2*f.Limit)
+			f.Realm, f.ExpiringBefore, f.PropagationPending, 2*f.Limit)
 		if err != nil {
 			return nil, false, err
 		}

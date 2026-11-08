@@ -105,7 +105,7 @@ func TestDelivery(t *testing.T) {
 	outbox := &Outbox{Webhooks: hooks}
 	err = pgx.BeginFunc(ctx, pools.App, func(tx pgx.Tx) error {
 		for _, e := range []Event{
-			{Name: "BREAK_GLASS_USED", Scopes: []string{"dc/corp-prod"}, Payload: map[string]any{"actor": "livia", "zone": "prod"}},
+			{Name: "BREAK_GLASS_USED", Scopes: []string{"dc/corp-prod"}, Payload: map[string]any{"actor": "livia", "realm": "prod"}},
 			{Name: "CR_AWAITING_APPROVAL", Scopes: []string{"cloud/fin-01/payments"}, Payload: map[string]any{"side": "SOURCE"}},
 			{Name: "SYSTEM_MAINTENANCE_ENABLED"}, // nobody subscribes
 		} {

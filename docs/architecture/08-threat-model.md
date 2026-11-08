@@ -13,7 +13,7 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-05 | A plugin injects script or htmx attributes through the UI. | 2, 3 | Declarative forms; `html/template`; no plugin data in `hx-*`; strict CSP with a per-response nonce and Trusted Types. |
 | T-06 | Cross-site state change, or login CSRF. | 2 | `SameSite=Strict` `__Host-` cookies; CSRF token; `Sec-Fetch-Site` and `Origin` checks; cookies refused on the API. |
 | T-07 | Secrets persisted in checkpoints, errors or status. | 5 | Sealing; fixed error messages; retention; a search for the e2e's passwords in the database and journals, after each lab run. |
-| T-08 | An instance authenticates with another's SVID. | 3 | Process per type and zone; exactly one match; trust-domain and distinctness checks. |
+| T-08 | An instance authenticates with another's SVID. | 3 | Process per type and realm; exactly one match; trust-domain and distinctness checks. |
 | T-09 | A plugin binary is replaced. | 3, 7 | Root-owned, non-writable; no symlinks; SHA-256 before every spawn; fd-based exec; SPIRE `unix:sha256`. |
 | T-10 | A delete leaves live credentials. | 4 | Visibility removed at once; state-driven reverse cleanup; `DELETE_FAILED` and retry; tags; sessions ended. |
 | T-11 | Definitions or parameters inject SQL. | 4 | Grammars and quoting; privilege bounds checked three times; parameters cannot add privilege. |

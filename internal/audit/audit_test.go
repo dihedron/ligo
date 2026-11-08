@@ -35,7 +35,7 @@ func TestHash(t *testing.T) {
 	// the same instant hashes the same
 	e.OccurredAt = time.Date(2026, 10, 25, 18, 0, 0, 123456000, time.UTC)
 	if again, _ := e.hash(Genesis); again != got {
-		t.Error("the hash depends on the time zone or on nanoseconds")
+		t.Error("the hash depends on the time realm or on nanoseconds")
 	}
 	if other, _ := e.hash("1" + Genesis[1:]); other == got {
 		t.Error("the hash does not depend on the previous hash")

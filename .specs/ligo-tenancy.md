@@ -234,7 +234,7 @@ An approver of a binding's **platform scope** also qualifies for its `TARGET` si
 
 ### 9.4 Trust domains and the secret store (constraint)
 
-A binding using a secret store works only if the store accepts the JWT-SVIDs of the source's trust domain, or the workload cannot read its credential. So an account's SPIFFE IDs MUST be in the trust domain of the store's zone, or a trust relationship MUST be established, by configuring the store's JWT auth for that trust domain. On the lab, `bao-prod` and `vault-prod` refuse `test.lab` JWT-SVIDs, for this reason.
+A binding using a secret store works only if the store accepts the JWT-SVIDs of the source's trust domain, or the workload cannot read its credential. So an account's SPIFFE IDs MUST be in the trust domain of the store's realm, or a trust relationship MUST be established, by configuring the store's JWT auth for that trust domain. On the lab, `bao-prod` and `vault-prod` refuse `test.lab` JWT-SVIDs, for this reason.
 
 ligo does not check this: the binding reaches `ACTIVE`, and the failure appears when the workload reads. The Setup Guide and Operator's Guide state the constraint.
 

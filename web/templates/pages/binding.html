@@ -2,7 +2,7 @@
 <div class="grid">
   <section class="card"><h2>Binding</h2><dl class="fields">
     <dt>Source</dt><dd>{{.Source}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Access level</dt><dd>{{.AccessLevel}}</dd>
-    <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, zone {{.Metadata.Zone}})</dd>
+    <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, realm {{.Metadata.Realm}})</dd>
     <dt>Scopes</dt><dd>source {{.Metadata.SourceScope}}, target {{.Metadata.TargetScope}}, platform {{.Metadata.PlatformScope}}</dd>
     <dt>Revision</dt><dd>{{.Metadata.Revision}}{{with .Metadata.ActiveRevision}} (active {{.}}){{end}}</dd>
     {{with .Purpose}}<dt>Purpose</dt><dd>{{.}}</dd>{{end}}

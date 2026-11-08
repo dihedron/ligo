@@ -7,7 +7,7 @@ service:
     port: 8443
     server_name: "ligo.prod.internal"
 
-zones:
+realms:
   - name: prod
     trust_domain: prod.internal
     spiffe_workload_socket: "unix:///run/spire/prod/agent.sock"
@@ -16,7 +16,7 @@ zones:
     spiffe_workload_socket: "unix:///run/spire/test/agent.sock"
 
 core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)
-  zone: prod
+  realm: prod
   svid_selector:
     match_expr: 'path == "/ns/sys/sa/ligo"'
     jwt_audience: ["https://vault.prod.internal"]
@@ -28,7 +28,7 @@ server:
     auth_modes: [x509_svid, jwt_svid]
     accepted_trust_domains: [prod.internal, test.internal, cloud.internal]
     federated_trust_domains:              # §7.1, §10.5 Topology C
-      - { trust_domain: cloud.internal, via_zone: prod }   # multi-tenant cloud platform, verified through federation
+      - { trust_domain: cloud.internal, via_realm: prod }   # multi-tenant cloud platform, verified through federation
     expected_jwt_audience: "spiffe://prod.internal/ns/sys/sa/ligo"
     max_token_ttl: 15m
     clock_skew: 30s
@@ -230,22 +230,22 @@ identity_providers:
   - type: "svid.v1"
     builtin: true
     instances:
-      - { name: "svid-passthrough-prod", zone: prod, config: {} }
+      - { name: "svid-passthrough-prod", realm: prod, config: {} }
   - type: "target-local.v1"
     builtin: true
     instances:
-      - { name: "local-account-prod", zone: prod, config: { password_length: 32 } }
+      - { name: "local-account-prod", realm: prod, config: { password_length: 32 } }
   - type: "delegated-dynamic.v1"
     builtin: true
     instances:
-      - { name: "vault-dynamic-db-test", zone: test, config: {} }
+      - { name: "vault-dynamic-db-test", realm: test, config: {} }
   - type: "openldap.v1"
     builtin: false
     binary: "ligo-plugin-openldap"                 # relative to plugins.directory
     sha256: "<64-hex-sha256-of-ligo-plugin-openldap>"
     instances:
       - name: "ldap-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/openldap"'
           jwt_audience: ["https://vault.prod.internal"]
@@ -267,14 +267,14 @@ secret_stores:
   - type: "none.v1"
     builtin: true
     instances:
-      - { name: "no-store-prod", zone: prod, config: {} }
+      - { name: "no-store-prod", realm: prod, config: {} }
   - type: "vault.v1"
     builtin: false
     binary: "ligo-plugin-vault"
     sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
     instances:
       - name: "vault-prod"
-        zone: prod
+        realm: prod
         svid_selector:
           match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
           jwt_audience: ["https://vault.prod.internal"]
@@ -291,7 +291,7 @@ secret_stores:
         network_flows:                    # ADR-16; added to every binding whose credential is in this store
           - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }
       - name: "vault-test"
-        zone: test
+        realm: test
         svid_selector:
           match_expr: 'path == "/ligo/plugin/vault"'
           jwt_audience: ["https://vault.test.internal"]
@@ -312,7 +312,7 @@ platform_providers:                       # plugin types and the platforms that 
     sha256: "<64-hex-sha256-of-ligo-plugin-oracle>"
     platforms:
       - name: "oracle-prod"
-        zone: prod
+        realm: prod
         scope: "dc/corp-prod"            # platform owner scope (§3.9); REQUIRED
         target_scopes: ["dc/corp-prod/*"] # scopes that may own targets here (default: scope and below)
         display_name: "Oracle production cluster"
@@ -344,7 +344,7 @@ platform_providers:                       # plugin types and the platforms that 
             jwt_audience: "https://vault.prod.internal"
             db_static_role: "oracle-prod-ligo-admin"
       - name: "oracle-test-dynamic"
-        zone: test
+        realm: test
         scope: "dc/corp-test"
         network_flows:
           - { name: listener, purpose: DATA, protocol: TCP, destination: "ora-test.test.internal", ports: [1521], tls: false }

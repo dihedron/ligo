@@ -11,7 +11,7 @@ flowchart TB
     WA ~~~ AA
     AA --> E
   end
-  P["Plugin processes, one per type and zone"]
+  P["Plugin processes, one per type and realm"]
   DB[("PostgreSQL: resources, audit, workflow journal")]
   V["Vault or OpenBao"]
   T["Target platforms"]

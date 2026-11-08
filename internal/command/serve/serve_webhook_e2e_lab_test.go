@@ -92,7 +92,7 @@ type hookEvent struct {
 	EventID       string `json:"eventId"`
 	OccurredAt    string `json:"occurredAt"`
 	Actor         string `json:"actor"`
-	Zone          string `json:"zone"`
+	Realm         string `json:"realm"`
 	SideScope     string `json:"sideScope"`
 	SourceScope   string `json:"sourceScope"`
 	TargetScope   string `json:"targetScope"`
@@ -165,7 +165,7 @@ func TestServeWebhookFile(t *testing.T) {
 		t.Fatalf("BREAK_GLASS_USED of hook-bg-%s at oncall: %d", x, len(used))
 	}
 	u := used[0]
-	if u.Actor != "livia" || u.Justification == "" || u.Incident != "INC0012345" || u.Zone != "prod" ||
+	if u.Actor != "livia" || u.Justification == "" || u.Incident != "INC0012345" || u.Realm != "prod" ||
 		u.SourceScope != "dc/corp-prod" || u.TargetScope != "dc/corp-prod/ledger" || u.PlatformScope != "dc/corp-prod" ||
 		u.Resource.Type != "BINDING" || u.Resource.Source == "" || u.Resource.Target == "" || u.Resource.Platform != "pg-ledger" {
 		t.Errorf("BREAK_GLASS_USED: %s", u.raw)

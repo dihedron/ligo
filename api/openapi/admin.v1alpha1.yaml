@@ -276,7 +276,7 @@ paths:
         - $ref: "#/components/parameters/platformType"
         - { name: phase, in: query, schema: { type: string } }
         - { name: trustDomain, in: query, schema: { type: string } }
-        - { name: zone, in: query, schema: { type: string } }
+        - { name: realm, in: query, schema: { type: string } }
         - { name: scope, in: query, description: "A scope pattern matched against any of the three scopes.", schema: { type: string } }
         - { name: expiringBefore, in: query, schema: { type: string, format: date-time } }
         - { name: propagationPending, in: query, schema: { type: boolean } }
@@ -335,7 +335,7 @@ paths:
         - { name: status, in: query, schema: { type: string } }
         - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
         - { name: resourceName, in: query, schema: { type: string } }
-        - { name: zone, in: query, schema: { type: string } }
+        - { name: realm, in: query, schema: { type: string } }
         - { name: scope, in: query, schema: { type: string } }
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"

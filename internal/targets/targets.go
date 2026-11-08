@@ -48,7 +48,7 @@ type Metadata struct {
 	// copied from the platform
 	PlatformType  string `json:"platformType,omitempty"`
 	PlatformScope string `json:"platformScope,omitempty"`
-	Zone          string `json:"zone,omitempty"`
+	Realm         string `json:"realm,omitempty"`
 	State         string `json:"state,omitempty"`
 }
 
@@ -66,11 +66,11 @@ type ValidateTarget func(ctx context.Context, req *pluginv1.ValidateTargetReques
 
 // Platform is what targets need of a configured platform (§8.1).
 type Platform struct {
-	Name, Type, Zone, Scope string
-	TargetScopes            []string
-	NamespaceTemplate       string
-	CheckExistence          bool
-	Allow                   flows.Allowlist
+	Name, Type, Realm, Scope string
+	TargetScopes             []string
+	NamespaceTemplate        string
+	CheckExistence           bool
+	Allow                    flows.Allowlist
 }
 
 // Rules are the parts of the configuration that validate targets.
@@ -98,7 +98,7 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 			if err != nil {
 				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
 			}
-			pl := Platform{Name: p.Name, Type: pp.Type, Zone: p.Zone, Scope: p.Scope, TargetScopes: p.TargetScopes, NamespaceTemplate: p.NamespaceTemplate,
+			pl := Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Scope: p.Scope, TargetScopes: p.TargetScopes, NamespaceTemplate: p.NamespaceTemplate,
 				CheckExistence: p.CheckExistence == nil || *p.CheckExistence, Allow: allow}
 			if len(pl.TargetScopes) == 0 {
 				pl.TargetScopes = []string{p.Scope + "/*"} // the platform's scope and below
@@ -129,8 +129,8 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	t.Kind = "Target"
 	m := &t.Metadata
 	if cur == nil {
-		if m.PlatformType != "" || m.PlatformScope != "" || m.Zone != "" || m.State != "" {
-			return invalid("metadata.platformType, platformScope, zone and state are set by ligo")
+		if m.PlatformType != "" || m.PlatformScope != "" || m.Realm != "" || m.State != "" {
+			return invalid("metadata.platformType, platformScope, realm and state are set by ligo")
 		}
 		if !governance.ValidScopePath(m.Scope) {
 			return invalid("metadata.scope %q is not a scope", m.Scope)
@@ -151,7 +151,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	if !r.Accounts.TargetConforms(m.Scope) {
 		return refuse(422, "account-scope-mismatch", "metadata.scope %s does not have the form %s", m.Scope, r.Accounts.TargetScope)
 	}
-	m.PlatformType, m.PlatformScope, m.Zone = p.Type, p.Scope, p.Zone
+	m.PlatformType, m.PlatformScope, m.Realm = p.Type, p.Scope, p.Realm
 	if cur == nil {
 		m.State = "ACTIVE"
 	}
@@ -224,7 +224,7 @@ func immutable(m, cur *Metadata) error {
 	for _, f := range []struct{ name, got, want string }{
 		{"name", m.Name, cur.Name}, {"platform", m.Platform, cur.Platform}, {"scope", m.Scope, cur.Scope},
 		{"platformType", m.PlatformType, cur.PlatformType}, {"platformScope", m.PlatformScope, cur.PlatformScope},
-		{"zone", m.Zone, cur.Zone},
+		{"realm", m.Realm, cur.Realm},
 	} {
 		if f.got != f.want && (f.got != "" || f.name == "name" || f.name == "platform" || f.name == "scope") {
 			return refuse(422, "immutable-field", "metadata.%s cannot change", f.name)

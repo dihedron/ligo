@@ -206,21 +206,21 @@ func (c *Checks) instance(typ, name string) bool {
 // reference must still be configured.
 func (c *Checks) orphans(ctx context.Context) error {
 	var found []string
-	rows, err := c.DB.Query(ctx, "SELECT name, platform, platform_type, zone FROM targets WHERE state <> 'RETIRED' ORDER BY name")
+	rows, err := c.DB.Query(ctx, "SELECT name, platform, platform_type, realm FROM targets WHERE state <> 'RETIRED' ORDER BY name")
 	if err != nil {
 		return err
 	}
-	type target struct{ name, platform, typ, zone string }
+	type target struct{ name, platform, typ, realm string }
 	targets, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
 		var t target
-		return t, r.Scan(&t.name, &t.platform, &t.typ, &t.zone)
+		return t, r.Scan(&t.name, &t.platform, &t.typ, &t.realm)
 	})
 	if err != nil {
 		return err
 	}
 	for _, t := range targets {
-		if p, typ := c.platform(t.platform); p == nil || typ != t.typ || p.Zone != t.zone {
-			found = append(found, fmt.Sprintf("target %s: platform %s (%s, zone %s)", t.name, t.platform, t.typ, t.zone))
+		if p, typ := c.platform(t.platform); p == nil || typ != t.typ || p.Realm != t.realm {
+			found = append(found, fmt.Sprintf("target %s: platform %s (%s, realm %s)", t.name, t.platform, t.typ, t.realm))
 		}
 	}
 	rows, err = c.DB.Query(ctx, `SELECT b.name, w.typ, w.instance FROM bindings b, LATERAL (VALUES

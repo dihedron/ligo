@@ -11,25 +11,25 @@ import (
 )
 
 // Specs groups the configuration's plugin instances into one process per
-// (type, zone) (ADR-03); builtin types are served inside ligo.
+// (type, realm) (ADR-03); builtin types are served inside ligo.
 func Specs(cfg *config.Config) ([]Spec, error) {
-	zones := map[string]config.Zone{}
-	for _, z := range cfg.Zones {
-		zones[z.Name] = z
+	realms := map[string]config.Realm{}
+	for _, z := range cfg.Realms {
+		realms[z.Name] = z
 	}
 	var specs []Spec
 	index := map[string]int{}
-	add := func(kind pluginv1.PluginKind, typ string, builtin bool, binary, sum, zone string, in *pluginv1.InstanceDescriptor) error {
-		z, ok := zones[zone]
+	add := func(kind pluginv1.PluginKind, typ string, builtin bool, binary, sum, realm string, in *pluginv1.InstanceDescriptor) error {
+		z, ok := realms[realm]
 		if !ok {
-			return fmt.Errorf("instance %q: unknown zone %q", in.GetName(), zone)
+			return fmt.Errorf("instance %q: unknown realm %q", in.GetName(), realm)
 		}
-		k := typ + "\x00" + zone
+		k := typ + "\x00" + realm
 		if i, ok := index[k]; ok {
 			specs[i].Instances = append(specs[i].Instances, in)
 			return nil
 		}
-		spec := Spec{Type: typ, Kind: kind, Builtin: builtin, Zone: z, Instances: []*pluginv1.InstanceDescriptor{in}}
+		spec := Spec{Type: typ, Kind: kind, Builtin: builtin, Realm: z, Instances: []*pluginv1.InstanceDescriptor{in}}
 		if !builtin {
 			checksum, err := hex.DecodeString(sum)
 			if err != nil || len(checksum) != 32 {
@@ -51,7 +51,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 				if err != nil {
 					return nil, err
 				}
-				if err := add(kind, p.Type, p.Builtin, p.Binary, p.SHA256, inst.Zone, in); err != nil {
+				if err := add(kind, p.Type, p.Builtin, p.Binary, p.SHA256, inst.Realm, in); err != nil {
 					return nil, err
 				}
 			}
@@ -66,7 +66,7 @@ func Specs(cfg *config.Config) ([]Spec, error) {
 			in.IdentityProviderType, in.IdentityProviderInstance = pl.IdentityProvider.Type, pl.IdentityProvider.Instance
 			// an omitted secret storage strategy stays empty here: startup defaults it from the store's Describe (§5.6)
 			in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = pl.SecretStore.Type, pl.SecretStore.Instance, pl.SecretStore.SecretStorageStrategy
-			if err := add(pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Zone, in); err != nil {
+			if err := add(pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Realm, in); err != nil {
 				return nil, err
 			}
 		}

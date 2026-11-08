@@ -89,10 +89,10 @@ commands:
                             echo-client on ligo1 as USER (echo-bound, echo-unbound)
   cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);
                             stdin passes through, for manifests
-  spire <prod|test> [args]  spire-server on that zone's server
+  spire <prod|test> [args]  spire-server on that realm's server
   secrets [openbao|vault]   print the secrets backend, or select it and stop the
                             other's servers; then lab.sh reset and serve install
-  bao <prod|test> [args]    the bao CLI on that zone's OpenBao, as root token
+  bao <prod|test> [args]    the bao CLI on that realm's OpenBao, as root token
   vault [args]              the vault CLI on vault-prod, as root token
   ldapsearch [args]         ldapsearch over ldaps as ligo-admin-auth
   psql [--as ROLE | --superuser] [args]

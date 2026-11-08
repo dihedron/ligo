@@ -486,7 +486,7 @@ func (s *Service) file(ctx context.Context, items ...filed) error {
 		applied(ctx, it.res, it.r)
 		for _, sd := range it.r.Sides {
 			if sd.Basis == BasisDelegated && sd.Decision == Approved {
-				metrics.DelegatedApprovals.WithLabelValues(it.r.RequestedBy, it.r.Zone, it.r.Operation).Inc()
+				metrics.DelegatedApprovals.WithLabelValues(it.r.RequestedBy, it.r.Realm, it.r.Operation).Inc()
 			}
 		}
 	}
@@ -660,12 +660,12 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (*Request, er
 
 // Filter selects change requests (GET /v1/admin/change-requests).
 type Filter struct {
-	Status, ResourceType, ResourceName, Zone string
-	Kind                                     string // BREAK_GLASS for GET /v1/admin/break-glass
-	Scope                                    string // a pattern matched against every scope of the request
-	AwaitingMe                               bool   // with a pending side the caller may decide
-	Before                                   *uuid.UUID
-	Limit                                    int
+	Status, ResourceType, ResourceName, Realm string
+	Kind                                      string // BREAK_GLASS for GET /v1/admin/break-glass
+	Scope                                     string // a pattern matched against every scope of the request
+	AwaitingMe                                bool   // with a pending side the caller may decide
+	Before                                    *uuid.UUID
+	Limit                                     int
 }
 
 // List returns the change requests c sees that f selects, newest first,
@@ -676,9 +676,9 @@ func (s *Service) List(ctx context.Context, c Caller, f Filter) ([]*Request, boo
 	before := f.Before
 	for {
 		rows, err := s.DB.Query(ctx, `SELECT id FROM change_requests WHERE ($1 = '' OR status::text = $1)
-			AND ($2 = '' OR resource_type::text = $2) AND ($3 = '' OR resource_name = $3) AND ($4 = '' OR zone = $4)
+			AND ($2 = '' OR resource_type::text = $2) AND ($3 = '' OR resource_name = $3) AND ($4 = '' OR realm = $4)
 			AND ($5::uuid IS NULL OR id < $5) AND ($7 = '' OR kind::text = $7) ORDER BY id DESC LIMIT $6`,
-			f.Status, f.ResourceType, f.ResourceName, f.Zone, before, 2*f.Limit, f.Kind)
+			f.Status, f.ResourceType, f.ResourceName, f.Realm, before, 2*f.Limit, f.Kind)
 		if err != nil {
 			return nil, false, err
 		}
@@ -884,11 +884,11 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 		revert = r.RevertPayload
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
-		zone, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
+		realm, owner_scope, source_scope, target_scope, platform_scope, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
 		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id)
 		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27)`,
-		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Zone), null(r.OwnerScope),
+		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Realm), null(r.OwnerScope),
 		null(r.SourceScope), null(r.TargetScope), null(r.PlatformScope), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
 		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
 		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID); err != nil {
@@ -916,13 +916,13 @@ func (r *Request) kind() string {
 func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) {
 	r := &Request{ID: id}
 	var ttl int64
-	err := q.QueryRow(ctx, `SELECT resource_type, resource_name, resource_id, operation, consent, coalesce(zone, ''),
+	err := q.QueryRow(ctx, `SELECT resource_type, resource_name, resource_id, operation, consent, coalesce(realm, ''),
 		coalesce(owner_scope, ''), coalesce(source_scope, ''), coalesce(target_scope, ''), coalesce(platform_scope, ''),
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
 		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id,
 		requested_at FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
-		&r.Consent, &r.Zone, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
+		&r.Consent, &r.Realm, &r.OwnerScope, &r.SourceScope, &r.TargetScope, &r.PlatformScope, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
 		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID, &r.RequestedAt)
 	if err != nil {

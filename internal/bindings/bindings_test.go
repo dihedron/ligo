@@ -36,7 +36,7 @@ func rules(t *testing.T) *Rules {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Platforms["cloud-pg"] = Platform{Name: "cloud-pg", Type: "postgres.v1", Zone: "prod", Scope: "cloud/fin-01/payments",
+	r.Platforms["cloud-pg"] = Platform{Name: "cloud-pg", Type: "postgres.v1", Realm: "prod", Scope: "cloud/fin-01/payments",
 		AllowedTrustDomains: []string{"cloud.internal", "prod.internal"}, IdentityProviderType: "target-local.v1",
 		IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod", SecretStorageStrategy: "vault-static"}
 	p := r.Platforms["oracle-prod"]
@@ -87,7 +87,7 @@ func (p *plugin) validate(_ context.Context, req *pluginv1.ValidateBindingReques
 
 func TestNewRules(t *testing.T) {
 	p := rules(t).Platforms["oracle-prod"]
-	if p.Type != "oracle.v1" || p.Zone != "prod" || p.Scope != "dc/corp-prod" || p.PrincipalPrefix != "svc_" ||
+	if p.Type != "oracle.v1" || p.Realm != "prod" || p.Scope != "dc/corp-prod" || p.PrincipalPrefix != "svc_" ||
 		p.IdentityProviderType != "openldap.v1" || p.IdentityProviderInstance != "ldap-prod" || p.SecretStoreType != "vault.v1" ||
 		p.SecretStoreInstance != "vault-prod" || p.SecretStorageStrategy != "vault-static" || !slices.Contains(p.AllowedTrustDomains, "cloud.internal") {
 		t.Errorf("platform %+v", p)

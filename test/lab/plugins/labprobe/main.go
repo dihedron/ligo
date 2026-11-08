@@ -1,5 +1,5 @@
 // Command labprobe is a lab plugin (test tooling, never shipped): a secret
-// store whose instances select their SVID from the zone's SPIRE agent and
+// store whose instances select their SVID from the realm's SPIRE agent and
 // whose Health reads the instance's bootstrap credential from Vault with it,
 // answering with the user name only (.specs/ligo-test-environment.md,
 // "Plugins on ligo1"). "labprobe -svids SOCKET" prints the SPIFFE IDs the

@@ -27,10 +27,10 @@ Add `LIGO_PG_DBOS_DSN` in the same form, with `user=ligo_dbos`; the variable tha
 service:
   instance_id_env: "LIGO_INSTANCE_ID"
   workload_advertise: { destination: "ligo.prod.internal", port: 8443, server_name: "ligo.prod.internal" }
-zones:
+realms:
   - { name: prod, trust_domain: prod.internal, spiffe_workload_socket: "unix:///run/spire/prod/agent.sock" }
 core_identity:
-  zone: prod
+  realm: prod
   svid_selector:
     match_expr: 'path == "/ns/sys/sa/ligo"'
     jwt_audience: ["https://vault.prod.internal"]
@@ -119,7 +119,7 @@ Three things outside `ligo` become part of its security:
 
 - **The directory.** Whoever can create groups or add members under an account's unit can grant `ligo` roles in that account. Restrict writing there as you restrict `server.yaml`. Only direct membership counts, and only for registered accounts.
 - **SPIRE.** An account's isolation rests on who can register SPIFFE IDs under `/acct/<account>/`.
-- **The secret store.** A binding using a store works only if the store accepts JWT-SVIDs of the source's trust domain. Keep accounts' SPIFFE IDs in the trust domain of the store's zone, or configure the store's JWT auth for theirs. `ligo` does not check this: the binding reaches `ACTIVE`, and the workload then fails when it reads its credential.
+- **The secret store.** A binding using a store works only if the store accepts JWT-SVIDs of the source's trust domain. Keep accounts' SPIFFE IDs in the trust domain of the store's realm, or configure the store's JWT auth for theirs. `ligo` does not check this: the binding reaches `ACTIVE`, and the workload then fails when it reads its credential.
 
 For a shared PostgreSQL, set `namespace_template` on the platform and use `grantable_role_templates`; see the chapter on plugins. For each tenancy, the platform team creates, outside `ligo`, the schema `<account>_<tenancy>`, its roles with `ADMIN OPTION` for the plugin's admin, and the privileges of those roles. `ligo` checks the names, not what the roles grant.
 

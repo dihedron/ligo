@@ -24,7 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Spec is one plugin process: a plugin type in one zone, with that zone's
+// Spec is one plugin process: a plugin type in one realm, with that realm's
 // instances (ADR-03). A builtin is served in-process instead (§5.1).
 type Spec struct {
 	Type      string
@@ -32,7 +32,7 @@ type Spec struct {
 	Builtin   bool
 	Binary    string // a file name in plugins.directory; not for a builtin
 	SHA256    []byte
-	Zone      config.Zone
+	Realm     config.Realm
 	Instances []*pluginv1.InstanceDescriptor
 	// Env is the plugin's whole environment: ligo's own is never passed on.
 	Env []string
@@ -89,7 +89,7 @@ func New(specs []Spec, opts Options) *Manager {
 		p := &process{spec: s}
 		m.procs = append(m.procs, p)
 		for _, in := range s.Instances {
-			in.Zone, in.TrustDomain = s.Zone.Name, s.Zone.TrustDomain // the process's zone is its instances'
+			in.Realm, in.TrustDomain = s.Realm.Name, s.Realm.TrustDomain // the process's realm is its instances'
 			k := key{s.Kind, in.GetName()}
 			m.byKey[k] = p
 			m.sems[k] = make(chan struct{}, max(opts.MaxConcurrentRPCsPerInstance, 1))
@@ -102,7 +102,7 @@ func New(specs []Spec, opts Options) *Manager {
 // describes them all, checks every instance's config against its plugin's
 // schema (rule 8) and every platform's wiring (rule 3), and compiles the
 // output validators of platforms and stores (§5.7), then configures their instances and checks the SVIDs
-// they resolved: one each, in the zone's trust domain (INV-10), distinct
+// they resolved: one each, in the realm's trust domain (INV-10), distinct
 // unless every instance sharing one allows it (ADR-03). Any failure is fatal
 // and names the instance (AC-15).
 func (m *Manager) Start(ctx context.Context) (err error) {
@@ -157,7 +157,7 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-func what(s Spec) string { return fmt.Sprintf("plugin %s in zone %s", s.Type, s.Zone.Name) }
+func what(s Spec) string { return fmt.Sprintf("plugin %s in realm %s", s.Type, s.Realm.Name) }
 
 // spawn starts one process from its checked binary, or a builtin, and
 // checks what it describes.
@@ -175,7 +175,7 @@ func (m *Manager) spawn(ctx context.Context, s Spec) (*Client, *pluginv1.Describ
 		}
 		cmd := b.Command()
 		cmd.Env = s.Env
-		w := &hclogWriter{log: m.log.With("plugin", s.Type, "zone", s.Zone.Name)}
+		w := &hclogWriter{log: m.log.With("plugin", s.Type, "realm", s.Realm.Name)}
 		c, err = Start(cmd, s.Kind, b.Checksum(), newHCLogger(w), w)
 		_ = b.Close() // the process holds the binary now
 		if err != nil {
@@ -213,7 +213,7 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 	ctx, cancel := context.WithTimeout(ctx, m.opts.RPCTimeout)
 	defer cancel()
 	r, err := c.Control.ConfigureInstances(ctx, &pluginv1.ConfigureInstancesRequest{
-		Zone: s.Zone.Name, SpiffeWorkloadSocket: s.Zone.SPIFFEWorkloadSocket, Instances: s.Instances,
+		Realm: s.Realm.Name, SpiffeWorkloadSocket: s.Realm.SPIFFEWorkloadSocket, Instances: s.Instances,
 	})
 	if err != nil {
 		_, detail := pluginsdk.FromError(err)
@@ -231,17 +231,17 @@ func (m *Manager) configure(ctx context.Context, c *Client, s Spec) (map[string]
 		if err != nil {
 			return nil, fmt.Errorf("instance %q: no SPIFFE ID resolved", in.GetName())
 		}
-		if id.TrustDomain().Name() != s.Zone.TrustDomain {
-			return nil, fmt.Errorf("instance %q: resolved %s, outside the zone's trust domain %s", in.GetName(), id, s.Zone.TrustDomain)
+		if id.TrustDomain().Name() != s.Realm.TrustDomain {
+			return nil, fmt.Errorf("instance %q: resolved %s, outside the realm's trust domain %s", in.GetName(), id, s.Realm.TrustDomain)
 		}
-		m.log.Info("plugin instance resolved", "plugin", s.Type, "zone", s.Zone.Name, "instance", in.GetName(), "spiffe_id", id.String())
+		m.log.Info("plugin instance resolved", "plugin", s.Type, "realm", s.Realm.Name, "instance", in.GetName(), "spiffe_id", id.String())
 	}
 	return resolved, nil
 }
 
 // wire checks every platform's wiring against what its plugins describe and
 // fills its descriptor's identity mode and secret storage strategy (§5.6,
-// §8.2 rule 3). Processes of one type describe the same, whatever the zone.
+// §8.2 rule 3). Processes of one type describe the same, whatever the realm.
 func (m *Manager) wire() error {
 	described := map[key]*pluginv1.DescribeResponse{} // the instance field holds the type
 	for _, p := range m.procs {
@@ -439,7 +439,7 @@ func (m *Manager) supervise(p *process) {
 		}
 		p.mu.Lock()
 		if p.client != nil {
-			m.log.Warn("plugin process exited", "plugin", p.spec.Type, "zone", p.spec.Zone.Name)
+			m.log.Warn("plugin process exited", "plugin", p.spec.Type, "realm", p.spec.Realm.Name)
 			p.client.Kill()
 			p.client = nil
 		}
@@ -454,7 +454,7 @@ func (m *Manager) supervise(p *process) {
 			err = m.reconfigure(c, d, p)
 		}
 		if err != nil {
-			m.log.Error("plugin restart failed", "plugin", p.spec.Type, "zone", p.spec.Zone.Name, "error", err, "retry_in", backoff)
+			m.log.Error("plugin restart failed", "plugin", p.spec.Type, "realm", p.spec.Realm.Name, "error", err, "retry_in", backoff)
 			backoff = min(backoff*2, m.opts.Backoff.Max)
 			continue
 		}
@@ -462,8 +462,8 @@ func (m *Manager) supervise(p *process) {
 		p.client = c
 		p.mu.Unlock()
 		backoff = m.opts.Backoff.Initial
-		metrics.PluginRestarts.WithLabelValues(p.spec.Type, p.spec.Zone.Name).Inc()
-		m.log.Info("plugin process restarted", "plugin", p.spec.Type, "zone", p.spec.Zone.Name)
+		metrics.PluginRestarts.WithLabelValues(p.spec.Type, p.spec.Realm.Name).Inc()
+		m.log.Info("plugin process restarted", "plugin", p.spec.Type, "realm", p.spec.Realm.Name)
 	}
 }
 

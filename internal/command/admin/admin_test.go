@@ -77,7 +77,7 @@ func TestReadCommands(t *testing.T) {
 		"/v1/admin/bindings/b1":              {binding},
 		"/v1/admin/bindings":                 {`{"items":[` + binding + `],"nextPageToken":null}`},
 		"/v1/admin/bindings/b1/flows":        {`{"binding":"b1","networkFlows":[{"name":"db","purpose":"DATA","protocol":"TCP","destination":"pg","ports":[5432],"tls":true,"declaredBy":"target:t1"}]}`},
-		"/v1/admin/platforms":                {`{"items":[{"name":"pg-ledger","type":"postgres.v1","zone":"prod","scope":"dc/x","health":{"serving":true}}]}`},
+		"/v1/admin/platforms":                {`{"items":[{"name":"pg-ledger","type":"postgres.v1","realm":"prod","scope":"dc/x","health":{"serving":true}}]}`},
 		"/v1/admin/platforms/pg-ledger":      {`{"name":"pg-ledger","uiSchemas":{"targetDefinition":{"fields":[]}}}`},
 		"/v1/admin/catalog/targets":          {`{"items":[{"name":"t1","platform":"pg-ledger","platformType":"postgres.v1","scope":"dc/x","state":"ACTIVE","bound":true}]}`},
 		"/v1/admin/catalog/targets/t1":       {`{"metadata":{"name":"t1"},"outcomes":[]}`},

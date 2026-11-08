@@ -28,7 +28,7 @@ func labEnv(t *testing.T, name string) string {
 	return v
 }
 
-// labprobe is the spec of the lab's probe plugin in the zone prod, with one
+// labprobe is the spec of the lab's probe plugin in the realm prod, with one
 // instance selecting by expr.
 func labprobe(t *testing.T, expr string) Spec {
 	t.Helper()
@@ -41,7 +41,7 @@ func labprobe(t *testing.T, expr string) Spec {
 		`","kv_path":"kv/data/ligo/bootstrap/labprobe"},"ca_file":"` + labEnv(t, "LIGO_TEST_CA") + `"}`
 	return Spec{
 		Type: "labprobe.v1", Kind: store, Binary: "labprobe", SHA256: sum,
-		Zone: config.Zone{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")},
+		Realm: config.Realm{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")},
 		Instances: []*pluginv1.InstanceDescriptor{{
 			Name: "labprobe-prod", ConfigJson: cfg,
 			SvidSelector: &pluginv1.SVIDSelectorConfig{MatchExpr: expr, JwtAudience: []string{labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE")}},

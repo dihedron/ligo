@@ -92,7 +92,7 @@ CREATE TABLE targets (
     name               resource_name NOT NULL,
     platform           VARCHAR(128) NOT NULL,               -- configured platform (§8.1); immutable
     platform_type      VARCHAR(128) NOT NULL,               -- plugin type of the platform; immutable
-    zone               VARCHAR(63)  NOT NULL,               -- the platform's zone; immutable
+    realm               VARCHAR(63)  NOT NULL,               -- the platform's realm; immutable
     scope              scope_path NOT NULL,                 -- owner scope; immutable (re-scoping only)
     account            VARCHAR(30) REFERENCES accounts ON DELETE RESTRICT,  -- from the scope; NULL outside account-managed scopes
     platform_scope     scope_path NOT NULL,                 -- the platform's owner scope; immutable (re-scoping only)
@@ -170,7 +170,7 @@ BEGIN
     RAISE EXCEPTION 'target scope modified outside the re-scoping procedure';
   END IF;
   IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.platform <> OLD.platform
-     OR NEW.platform_type <> OLD.platform_type OR NEW.zone <> OLD.zone
+     OR NEW.platform_type <> OLD.platform_type OR NEW.realm <> OLD.realm
      OR (OLD.state = 'RETIRED' AND NEW.state <> 'RETIRED') THEN
     RAISE EXCEPTION 'immutable target column modified';
   END IF;
@@ -241,7 +241,7 @@ CREATE TABLE bindings (
     source_id                   UUID NOT NULL REFERENCES sources(id) ON DELETE RESTRICT,   -- immutable
     target_id                   UUID NOT NULL REFERENCES targets(id) ON DELETE RESTRICT,   -- immutable
     access_level                VARCHAR(32) NOT NULL,
-    zone                        VARCHAR(63)  NOT NULL,
+    realm                        VARCHAR(63)  NOT NULL,
     platform_type               VARCHAR(128) NOT NULL,
     platform                    VARCHAR(128) NOT NULL,
     identity_provider_type      VARCHAR(128) NOT NULL,
@@ -315,7 +315,7 @@ CREATE INDEX idx_bindings_active_td ON bindings (source_trust_domain)
 CREATE INDEX idx_bindings_phase           ON bindings (phase, last_transition_at);
 CREATE INDEX idx_bindings_platform        ON bindings (platform_type, platform);
 CREATE INDEX idx_bindings_target          ON bindings (target_id, access_level);
-CREATE INDEX idx_bindings_zone            ON bindings (zone);
+CREATE INDEX idx_bindings_realm            ON bindings (realm);
 CREATE INDEX idx_bindings_source_scope    ON bindings (source_scope, name);
 CREATE INDEX idx_bindings_target_scope    ON bindings (target_scope, name);
 CREATE INDEX idx_bindings_break_glass     ON bindings (break_glass_expires_at) WHERE break_glass_cr_id IS NOT NULL;
@@ -330,7 +330,7 @@ BEGIN
      AND coalesce(current_setting('ligo.rescope', true), '') <> 'on' THEN
     RAISE EXCEPTION 'binding scope modified outside the re-scoping procedure';
   END IF;
-  IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.zone <> OLD.zone
+  IF NEW.id <> OLD.id OR NEW.name <> OLD.name OR NEW.realm <> OLD.realm
      OR NEW.source_id <> OLD.source_id OR NEW.target_id <> OLD.target_id
      OR NEW.platform_type <> OLD.platform_type OR NEW.platform <> OLD.platform
      OR NEW.identity_provider_type <> OLD.identity_provider_type
@@ -436,7 +436,7 @@ CREATE TABLE change_requests (
     operation          change_request_op NOT NULL,
     kind               change_request_kind NOT NULL,        -- STANDARD, BREAK_GLASS (ADR-12), SYSTEM_REVERT, SYSTEM_EXPIRY; immutable
     consent            consent_rule NOT NULL,               -- ALL: every side must approve; ANY: one side suffices (ADR-13, ADR-15); immutable
-    zone               VARCHAR(63),                         -- TARGET and BINDING: the platform's zone
+    realm               VARCHAR(63),                         -- TARGET and BINDING: the platform's realm
     owner_scope        scope_path,                          -- SOURCE, TARGET
     source_scope       scope_path,                          -- BINDING
     target_scope       scope_path,                          -- BINDING
@@ -468,11 +468,11 @@ CREATE TABLE change_requests (
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
     CONSTRAINT chk_cr_scope_columns CHECK (
         (resource_type = 'SOURCE'  AND owner_scope IS NOT NULL AND source_scope IS NULL AND target_scope IS NULL
-                                   AND platform_scope IS NULL AND zone IS NULL)
-     OR (resource_type = 'TARGET'  AND owner_scope IS NOT NULL AND platform_scope IS NOT NULL AND zone IS NOT NULL
+                                   AND platform_scope IS NULL AND realm IS NULL)
+     OR (resource_type = 'TARGET'  AND owner_scope IS NOT NULL AND platform_scope IS NOT NULL AND realm IS NOT NULL
                                    AND source_scope IS NULL AND target_scope IS NULL)
      OR (resource_type = 'BINDING' AND owner_scope IS NULL AND source_scope IS NOT NULL AND target_scope IS NOT NULL
-                                   AND platform_scope IS NOT NULL AND zone IS NOT NULL)
+                                   AND platform_scope IS NOT NULL AND realm IS NOT NULL)
     ),
     CONSTRAINT chk_interconnect_rule CHECK (
         interconnect_rule IS NULL
@@ -573,7 +573,7 @@ CREATE FUNCTION change_requests_immutable_guard() RETURNS trigger LANGUAGE plpgs
 BEGIN
   IF NEW.resource_type <> OLD.resource_type OR NEW.resource_name <> OLD.resource_name
      OR NEW.kind <> OLD.kind OR NEW.consent <> OLD.consent OR NEW.operation <> OLD.operation
-     OR NEW.zone IS DISTINCT FROM OLD.zone
+     OR NEW.realm IS DISTINCT FROM OLD.realm
      OR NEW.owner_scope IS DISTINCT FROM OLD.owner_scope
      OR NEW.source_scope IS DISTINCT FROM OLD.source_scope
      OR NEW.target_scope IS DISTINCT FROM OLD.target_scope
@@ -709,7 +709,7 @@ CREATE UNIQUE INDEX uq_cr_one_pending_per_resource ON change_requests (resource_
 
 ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
-CREATE INDEX idx_cr_status_zone ON change_requests (status, zone, id DESC);
+CREATE INDEX idx_cr_status_realm ON change_requests (status, realm, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
 CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_cr_sides_pending ON change_request_sides (scope) WHERE decision IS NULL;
