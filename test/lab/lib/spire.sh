@@ -103,6 +103,7 @@ plugins {
           client_key_file         = "/etc/spire/lxd/client.key"
           server_cert_fingerprint = "sha256:$(inner_lxd_fingerprint)"
           projects                = ["default"]
+          keep_alive              = true # lxd-spiffe 0.4: reuse connections, a TLS handshake saved per request
         }
       }
     }
