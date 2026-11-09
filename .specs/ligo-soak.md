@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
+- **Version:** 1.4 (2026-11-09): DAMAGE, SOAK_EXCLUDE, SOAK_NIGHT, faster SVID renewal, SK-1 from the fault's end. 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -39,6 +39,8 @@ The generator and the checker live in package `serve`, so they reuse its lab hel
 | `SOAK_RACE` | `0` | `1`: `ligo` is built and deployed with `-race` |
 | `SOAK_MAX_CONNS` | unset | Sets `storage.postgres.max_conns` in the lab's `server.yaml` |
 | `SOAK_ACCOUNTS` | `20` | Accounts the generator uses at once, each with one workload |
+| `SOAK_EXCLUDE` | empty | Faults left out of the catalogue, by name: a known defect's faults, while it is being fixed |
+| `SOAK_NIGHT` | `0` | `1`: the night's resources, applied after the install (§9) |
 
 `lab.sh soak run` writes every setting, the commit and the lab's versions to `settings.json` in the evidence directory. The tree must be clean, as for the release-run, so that the evidence names what ran.
 
@@ -55,7 +57,8 @@ The generator and the checker live in package `serve`, so they reuse its lab hel
   - the account administrator who registers and retires accounts.
 - **Workloads:** one per account, `spiffe://prod.lab/acct/<account>/project/p1/sa/w0`. Its account's source names exactly that ID, because the store's `vault-static` strategy matches subjects exactly (OI-1, `422 source-not-exact`).
 - **SVIDs:** `soak.sh` mints each workload's X.509-SVID and JWT-SVID, and the X.509-SVIDs of `ada`, `peter` and `rita`.
-  - Renewal: the X.509-SVIDs every 30 minutes, with a 1-hour TTL; the JWT-SVIDs every 2 minutes, since SPIRE caps them at 5.
+  - Renewal: the X.509-SVIDs every 5 minutes, with a 1-hour TTL; the JWT-SVIDs every minute, since SPIRE caps them at 5. A SPIRE outage of 10 minutes then leaves them valid.
+  - SK-2 skips a credential whose workload's JWT-SVID is older than 4 minutes: the harness, not ligo, failed to renew it.
   - The generator re-reads them on every request or TLS handshake.
 - **Registration first:** the setup registers every account before anyone files. An LDAP person's roles are read when their session starts, so an account registered later only counts at the session's re-check.
 
@@ -146,7 +149,7 @@ While a fault holds, a check that depends on the faulted component is recorded a
 
 **How a fault runs** (`test/lab/lib/soak-faults.sh`):
 1. A marker on ligo1 names the fault. While it exists, the checker still runs the safety checks (SK-4, SK-5, SK-8, SK-9) and records SK-1, SK-2, SK-3, SK-6, SK-7 and SK-10 as skipped. SK-1's limit restarts from the fault's end, and SK-7 is judged again only 10 minutes after the last fault ended.
-2. The fault is undone after its duration, then `soak.sh` measures the recovery: the time until both replicas answer an authenticated list. Over the limit is a `RECOVERY` violation.
+2. The fault is undone after its duration, then `soak.sh` measures the recovery: the time until both replicas answer an authenticated list. Over the limit is a `RECOVERY` violation. An answer is not enough: `SOAK_FAULT_GAP` (5 minutes) after the fault, every binding that entered `FAILED` or `DELETE_FAILED` since the fault started and is still there is a `DAMAGE` violation, since ligo did not finish the operation by itself.
 3. The marker goes when ligo has recovered.
 4. No fault starts in the last 15 minutes of the load, so none overlaps the generator's convergence and final check.
 5. Every fault in effect is undone by a trap, even when the run is interrupted.

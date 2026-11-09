@@ -39,7 +39,8 @@ const (
 	sk9Stale      = 30 * time.Minute
 	sk10Limit     = 30 * time.Second
 	sk2Sample     = 20
-	sk10Silent    = 3 // checks in a row, a minute apart, with a replica not answering
+	sk2StaleJWT   = 4 * time.Minute // SPIRE caps JWT-SVIDs at 5
+	sk10Silent    = 3               // checks in a row, a minute apart, with a replica not answering
 )
 
 // violation records a broken invariant.
@@ -97,9 +98,6 @@ func (s *soakRun) check(final bool) {
 		s.checkSQL(ctx, db, false)
 		s.mu.Lock()
 		s.sk6 = nil
-		for i := range s.revoked { // SK-1's limit counts from the fault's end
-			s.revoked[i].at = time.Now()
-		}
 		s.mu.Unlock()
 		s.h.add(event{Kind: "check:skipped", Res: "SK-1 SK-2 SK-3 SK-6 SK-7 SK-10", Err: "fault " + fault})
 	default:
@@ -128,6 +126,11 @@ func (s *soakRun) fault() string {
 	}
 	if s.faulted {
 		s.faulted, s.faultEnd = false, time.Now()
+		for i := range s.revoked { // SK-1's limit counts from the fault's end
+			if s.revoked[i].at.Before(s.faultEnd) {
+				s.revoked[i].at = s.faultEnd
+			}
+		}
 	}
 	return ""
 }
@@ -392,7 +395,12 @@ func (s *soakRun) checkCredential(ctx context.Context, db *pgx.Conn, b soakBindi
 	auth, _ := item["auth"].(map[string]any)
 	cfg, _ := auth["config"].(map[string]any)
 	who := workloadOf(accountOfTarget(b.source))
-	user, password, err := storeFetch(cfg, filepath.Join(os.Getenv("LIGO_E2E_DIR"), who+"-store-jwt"), os.Getenv("LIGO_TEST_CA"),
+	jwt := filepath.Join(os.Getenv("LIGO_E2E_DIR"), who+"-store-jwt")
+	if fi, err := os.Stat(jwt); err != nil || time.Since(fi.ModTime()) > sk2StaleJWT {
+		s.skipped("SK-2", fmt.Errorf("%s: the workload's JWT-SVID is stale: lab.sh could not renew it", b.name))
+		return
+	}
+	user, password, err := storeFetch(cfg, jwt, os.Getenv("LIGO_TEST_CA"),
 		os.Getenv("LIGO_E2E_SECRETS"), "secretPath", kvCredential)
 	if err != nil {
 		if stillActive() {

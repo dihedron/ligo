@@ -29,6 +29,7 @@ soak_settings() {
 	[[ "$SOAK_SEED" =~ ^[0-9]+$ ]] || die "SOAK_SEED: digits only"
 	[[ "$SOAK_FAULTS" =~ ^(none|single|all)$ ]] || die "SOAK_FAULTS: none, single or all"
 	[[ "$SOAK_RACE" =~ ^[01]$ ]] || die "SOAK_RACE: 0 or 1"
+	SOAK_EXCLUDE="${SOAK_EXCLUDE:-}"
 	((SOAK_ACCOUNTS >= 1 && SOAK_ACCOUNTS <= 100)) || die "SOAK_ACCOUNTS: 1 to 100"
 }
 
@@ -123,14 +124,15 @@ soak_admin_svids() {
 	inner_exec spire-prod rm -rf "$dir"
 }
 
-# soak_renew: renews the SVIDs until stopped: the workloads' JWT-SVIDs every 2
-# minutes (SPIRE caps them at 5), every X.509-SVID every 30.
+# soak_renew: renews the SVIDs until stopped: the workloads' JWT-SVIDs every
+# minute (SPIRE caps them at 5), every X.509-SVID (1h) every 5, so that a
+# SPIRE outage of 10 minutes leaves them valid.
 soak_renew() {
 	local n=0
 	while :; do
-		sleep 120
+		sleep 60
 		n=$((n + 1))
-		if ((n % 15 == 0)); then
+		if ((n % 5 == 0)); then
 			soak_svids
 			soak_admin_svids
 		else
@@ -181,6 +183,31 @@ soak_seconds() {
 	echo "$s"
 }
 
+# soak_night: the night's resources (.specs/ligo-soak.md §9), applied after
+# the install, since a reset restores the snapshot's: the lab VM and then the
+# ligo hosts and pg, each stopped, resized and started, as a VM's memory cannot
+# grow while it runs. The next reset brings the daytime sizes back.
+soak_night() {
+	section "soak: the night's resources"
+	lab_stop
+	lxd config set lxd limits.cpu=12 limits.memory=48GiB || die "soak: cannot resize the lab VM"
+	lab_start
+	local host
+	for host in ligo1 ligo2 pg; do
+		inner stop "$host" --timeout 120 || die "soak: cannot stop $host"
+		if [[ "$host" == pg ]]; then
+			inner config set pg limits.memory=4GiB
+		else
+			inner config set "$host" limits.cpu=4 limits.memory=4GiB
+		fi
+		inner start "$host"
+		inner_wait "$host"
+	done
+	pg_wait_ready
+	for host in $(ligo_hosts); do serve_wait "$host"; done
+	info "soak: the lab VM has $(lxd exec lxd -- nproc) CPUs and $(lxd config get lxd limits.memory); ligo1, ligo2 and pg 4GiB"
+}
+
 # soak_run: install the accounts' ligo with the soak's additions, seed the
 # soak's people and tenancies, run the generator, keep the evidence. A dirty
 # tree runs only with SOAK_DEV=1, and its evidence goes to the state directory.
@@ -196,7 +223,7 @@ soak_run() {
 	fi
 	mkdir -p "$dir"
 	jq -n --arg commit "$commit" --arg seed "$SOAK_SEED" --arg duration "$SOAK_DURATION" --arg faults "$SOAK_FAULTS" \
-		--arg race "$SOAK_RACE" --arg max_conns "$SOAK_MAX_CONNS" --arg accounts "$SOAK_ACCOUNTS" \
+		--arg race "$SOAK_RACE" --arg max_conns "$SOAK_MAX_CONNS" --arg exclude "$SOAK_EXCLUDE" --arg night "${SOAK_NIGHT:-0}" --arg accounts "$SOAK_ACCOUNTS" \
 		--arg backend "$(secrets_backend)" --arg dirty "${SOAK_DEV:-0}" '$ARGS.named' >"$dir/settings.json"
 
 	section "soak: install"
@@ -206,6 +233,7 @@ soak_run() {
 	soak_tenancies
 	soak_svids
 	host_user ligo1 soak-admin spiffe://prod.lab/ops/ada # the maintenance fault, as an administrator
+	if [[ "${SOAK_NIGHT:-0}" == 1 ]]; then soak_night; fi
 
 	section "soak: run"
 	soak_renew &

@@ -7,6 +7,7 @@
 
 SOAK_FAULT_GAP=300 # seconds between faults
 SOAK_UNDO=()       # what undoes the faults in effect, for the trap
+SOAK_LAST=()       # the last fault applied and when it started, for soak_damage
 
 # SOAK_FAULT_LIST: name, duration in seconds, recovery limit in seconds.
 SOAK_FAULT_LIST=(
@@ -127,6 +128,8 @@ soak_apply() {
 		((d > hold)) && hold=$d
 		((l > limit)) && limit=$l
 	done
+	local t0
+	t0="$(date -u +%FT%T.%3NZ)"
 	soak_marker "$*"
 	for name in "$@"; do
 		soak_fault_log "$dir" --arg fault "$name" --arg event start
@@ -151,6 +154,19 @@ soak_apply() {
 		soak_violation "$dir" RECOVERY "$* recovered in ${waited}s, over its limit of ${limit}s"
 	fi
 	soak_marker ""
+	SOAK_LAST=("$*" "$t0")
+}
+
+# soak_damage DIR: SOAK_FAULT_GAP after a fault, every binding that went to
+# FAILED or DELETE_FAILED since the fault started, and stayed there, is damage
+# the fault left: ligo did not finish the operation by itself (DAMAGE).
+soak_damage() {
+	local dir="$1" n
+	((${#SOAK_LAST[@]})) || return 0
+	n="$(serve_sql "select count(*) from bindings where phase in ('FAILED', 'DELETE_FAILED') and last_transition_at >= '${SOAK_LAST[1]}'")"
+	soak_fault_log "$dir" --arg fault "${SOAK_LAST[0]}" --arg event damage --argjson bindings "${n:-0}"
+	((n == 0)) || soak_violation "$dir" DAMAGE "${SOAK_LAST[0]} left $n bindings FAILED or DELETE_FAILED"
+	SOAK_LAST=()
 }
 
 # soak_undo: stops the faults in effect, for the trap.
@@ -180,9 +196,10 @@ soak_faults() {
 		sleep 10
 	done
 	while :; do
-		mapfile -t order < <(printf '%s\n' "${SOAK_FAULT_LIST[@]}" | cut -d' ' -f1 | awk -v s="$RANDOM" 'BEGIN{srand(s)} {print rand() "\t" $0}' | sort | cut -f2)
+		mapfile -t order < <(printf '%s\n' "${SOAK_FAULT_LIST[@]}" | cut -d' ' -f1 | grep -vxF -f <(tr ' ' '\n' <<<"${SOAK_EXCLUDE:-}" | grep . || echo '-') | awk -v s="$RANDOM" 'BEGIN{srand(s)} {print rand() "\t" $0}' | sort | cut -f2)
 		for ((i = 0; i < ${#order[@]}; i++)); do
 			sleep "$SOAK_FAULT_GAP"
+			soak_damage "$dir"
 			inner_exec ligo1 systemctl is-active --quiet soak-generator || return 0
 			(($(date +%s) < stop_at)) || return 0
 			a="${order[$i]}"
@@ -261,6 +278,7 @@ soak_try() {
 		section "soak fault: $name"
 		soak_apply "$dir" "$name"
 		sleep 30
+		soak_damage "$dir"
 	done
 	soak_fault_report "$dir"
 	[[ ! -s "$dir/violations-lab.jsonl" ]] || die "soak fault: a recovery was over its limit: $dir"
