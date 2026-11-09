@@ -170,8 +170,13 @@ soak_faults() {
 	# no fault may overlap the generator's last convergence and check
 	stop_at=$(($(date +%s) + $(soak_seconds "$SOAK_DURATION") - 900))
 	RANDOM=$((SOAK_SEED % 32768))
+	local seen=0 # the generator starts after the scheduler: it has ended only once seen running
 	until inner_exec ligo1 grep -q '"kind":"setup:done"' "$SOAK_DIR/history.jsonl" 2>/dev/null; do
-		inner_exec ligo1 systemctl is-active --quiet soak-generator || return 0
+		if inner_exec ligo1 systemctl is-active --quiet soak-generator; then
+			seen=1
+		elif ((seen)); then
+			return 0
+		fi
 		sleep 10
 	done
 	while :; do
