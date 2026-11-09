@@ -16,6 +16,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Not started; to decide |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 
 ## 1. Audit pruning
@@ -215,6 +216,21 @@ Work agreed for later, with what is known so far. An item here is not a specific
 - Whether a flow with `tls: true` is checked up to the TLS handshake, and against which roots: the workload's trust bundle, or the system's.
 - Where the library lives: in netcheck's repository, as its own module, or moved under ligo.
 - Whether the check runs only on demand, or also when the SDK first fetches a binding.
+
+## 13. Outbox retention: delivered events kept 30 days
+
+**Why.** The soak's 2-hour baseline of 2026-11-09 grew `notification_outbox` from 797 to 3,786 rows, while ligo itself did not drift. The table holds every webhook event ever queued: the dispatcher marks a row delivered or abandoned and deletes it only 30 days later (`internal/notify/notify.go`, the main spec's notification dispatcher: "purge delivered or abandoned rows after 30 days"). On a busy installation, that is 30 days of every event's payload. The user's view: once a webhook has been invoked, its row should go, and in any case it should go after some time.
+
+**What exists.** The 30-day purge runs on every dispatcher pass, as one `DELETE` on `coalesce(delivered_at, abandoned_at)`. The period is a constant, not a setting.
+
+**Options.**
+- Delete a row as soon as its webhook answers 2xx. The table then holds only what is still pending.
+- Keep delivered rows for a short, configurable window: it shows what was sent and when, if a receiver says it never got an event. Whether the audit log already records enough of that decides how much this is worth.
+- Keep abandoned rows longer than delivered ones: they are the ones somebody must investigate.
+
+**Affects.**
+- The soak's SK-9 check (`.specs/ligo-soak.md`), which compares the delivered rows with what the receiver logged. Deleted at once, the rows would no longer be there to compare.
+- The webhook e2e in `lab.sh serve test-webhook`, which reads delivered rows.
 
 ## 14. Post-quantum signatures for audit checkpoints
 
