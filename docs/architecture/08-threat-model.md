@@ -15,7 +15,7 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-07 | Secrets persisted in checkpoints, errors or status. | 5 | Sealing; fixed error messages; retention; a search for the e2e's passwords in the database and journals, after each lab run. |
 | T-08 | An instance authenticates with another's SVID. | 3 | Process per type and realm; exactly one match; trust-domain and distinctness checks. |
 | T-09 | A plugin binary is replaced. | 3, 7 | Root-owned, non-writable; no symlinks; SHA-256 before every spawn; fd-based exec; SPIRE `unix:sha256`. |
-| T-10 | A delete leaves live credentials. | 4 | Visibility removed at once; state-driven reverse cleanup; `DELETE_FAILED` and retry; tags; sessions ended. |
+| T-10 | A delete leaves live credentials. | 4 | Visibility removed at once; state-driven cleanup, the access first; the bootstrap credential kept through an outage; `DELETE_FAILED` retried by itself when retryable; tags; sessions ended. |
 | T-11 | Definitions or parameters inject SQL. | 4 | Grammars and quoting; privilege bounds checked three times; parameters cannot add privilege. |
 | T-12 | An insider grants excessive access. | 2, 6 | Jurisdiction RBAC; two-sided consent; four-eyes; distinct approvers; payload hash. |
 | T-13 | An actor denies a change; the audit is altered. | 2, 5 | Hash-chained, append-only audit; SIEM forwarding; request IDs. |

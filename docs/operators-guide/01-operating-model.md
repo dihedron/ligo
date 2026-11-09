@@ -32,9 +32,11 @@ A **jurisdiction**, such as `dc/corp-prod` or `cloud/acme/app/payments`, is who 
 | :--------------- | :-------------------------- | :------------------ |
 | `PROVISIONING` | A workflow is running | The last good snapshot, if any |
 | `ACTIVE` | Fully provisioned | The binding |
-| `FAILED` | The last attempt failed terminally | The last good snapshot, if any |
+| `FAILED` | The last attempt failed terminally; retried by itself if the cause was retryable | The last good snapshot, if any |
 | `DELETING` | Being removed | Nothing |
-| `DELETE_FAILED` | Removal failed terminally | Nothing |
+| `DELETE_FAILED` | Removal failed terminally; retried by itself if the cause was retryable | Nothing |
+
+A failure whose cause was retryable, such as a store or SPIRE outage, is retried by the sweeper, as `system:auto-retry`: 15 seconds after it, then up to every minute, until it succeeds. Only a failure its plugin calls final waits for you. A delete removes the access first, the target's role, or the store's leases for dynamic credentials, so an outage of the store cannot keep a revoked binding's access alive.
 
 Workloads only ever get a binding whose active regex and whose source's current regex both match them, and before its expiry. So a failure never loses working access, and a revocation takes effect at once in the API, even if cleaning up the target takes longer.
 
