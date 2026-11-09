@@ -60,7 +60,7 @@ func (s *Sweeper) Sweep(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer release()
-	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx), s.expiry(ctx))
+	return true, errors.Join(s.workflows(ctx), s.expire(ctx), s.dependencies(ctx), s.sessions(ctx), s.retain(ctx), s.expiry(ctx), s.retries(ctx))
 }
 
 // workflows starts the workflow of a stale binding that DBOS does not know
@@ -210,3 +210,33 @@ func (s *Sweeper) sessions(ctx context.Context) error {
 		WHERE expires_at < now() - interval '7 days' OR revoked_at < now() - interval '7 days'`)
 	return err
 }
+
+// retries starts again the bindings whose failure was retryable and whose
+// next retry is due, oldest first, at most retryBatch a sweep, as
+// system:auto-retry; nothing while maintenance mode is on (§6.3).
+func (s *Sweeper) retries(ctx context.Context) error {
+	var on bool
+	if err := s.Engine.DB.QueryRow(ctx, "SELECT maintenance_mode FROM system_settings").Scan(&on); err != nil || on {
+		return err
+	}
+	rows, err := s.Engine.DB.Query(ctx, `SELECT id FROM bindings WHERE phase IN ('FAILED', 'DELETE_FAILED')
+		AND next_retry_at <= now() ORDER BY next_retry_at LIMIT $1`, retryBatch)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range ids {
+		if _, err := s.Engine.Retry(ctx, id, "system:auto-retry"); err != nil {
+			errs = append(errs, fmt.Errorf("retry %s: %w", id, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// retryBatch bounds the retries a sweep starts, so that an outage's backlog
+// returns over a few sweeps rather than at once.
+const retryBatch = 20

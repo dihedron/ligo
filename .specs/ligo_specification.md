@@ -82,6 +82,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | :--- | :--- |
 | Deprovisioning order (INV-04, ADR-02, §6.5) | A delete cleans first the stage that holds the access. With a static credential that is `TARGET`, then `SECRET_STORE`, then `IDENTITY`: an outage of the store or of SPIRE can delay the store's cleanup but cannot keep access alive. With `DELEGATED_DYNAMIC`, the store's leases are the access and keep the order `SECRET_STORE`, `TARGET`, `IDENTITY`. Before, every mode cleaned the store first: the soak of 2026-11-09 sealed the store for 2 minutes and left revoked bindings with their roles on the target. |
 | Bootstrap credentials (§5.5) | A failed renewal keeps the last good credential: a KV one until a read succeeds, a leased one until its lease ends. Before, a plugin whose credential was due for renewal failed every call while Vault or SPIRE was down, so it could not remove access either: the soak's SPIRE outage of 10 minutes failed deletes at `TARGET` with `BOOTSTRAP_CREDENTIAL_UNAVAILABLE`. |
+| Automatic retry (§4.2, §6, §6.3) | A binding whose attempt failed on a retryable cause is retried by the sweeper, as `system:auto-retry`, 15 s after the failure and doubling to 60 s, without limit and never in maintenance mode; new column `bindings.next_retry_at`. `FAILED` and `DELETE_FAILED` are terminal for an attempt, no longer for the binding. Before, they waited for an operator whatever the cause. |
 
 ### 0.6 Changelog from 4.0.4 (4.0.5)
 | Area | Change |
@@ -1002,9 +1003,9 @@ Rules:
 | :--- | :--- | :--- |
 | `PROVISIONING` | An `apply` or `reapply` workflow is running. | Active snapshot, if one exists |
 | `ACTIVE` | The latest revision is fully provisioned. | Yes |
-| `FAILED` | The latest apply or reapply attempt failed terminally. | Active snapshot, if one exists (last known good) |
+| `FAILED` | The latest apply or reapply attempt failed terminally. The sweeper retries it when the cause was retryable (§6.3); else an operator does. | Active snapshot, if one exists (last known good) |
 | `DELETING` | A `delete` workflow is running. | **No** |
-| `DELETE_FAILED` | The delete attempt failed terminally. | **No** |
+| `DELETE_FAILED` | The delete attempt failed terminally. The sweeper retries it when the cause was retryable (§6.3); else an operator does. | **No** |
 
 In every phase, a binding is served only to callers that also match its source's **current** regex, and only before its expiry (INV-01, INV-25).
 
@@ -1577,6 +1578,7 @@ CREATE TABLE bindings (
     current_step                VARCHAR(64)  NOT NULL DEFAULT 'INIT',
     status_message              TEXT NOT NULL DEFAULT '' CHECK (length(status_message) <= 2048),
     last_transition_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    next_retry_at               TIMESTAMPTZ,                    -- §6.3: the sweeper retries a FAILED or DELETE_FAILED binding then; NULL: an operator must
     rotate_static_secrets       BOOLEAN NOT NULL DEFAULT TRUE,
 
     -- Requested state for `revision`, composed from the source, target and access level
@@ -1630,6 +1632,7 @@ CREATE INDEX idx_bindings_source_jurisdiction    ON bindings (source_jurisdictio
 CREATE INDEX idx_bindings_target_jurisdiction    ON bindings (target_jurisdiction, name);
 CREATE INDEX idx_bindings_break_glass     ON bindings (break_glass_expires_at) WHERE break_glass_cr_id IS NOT NULL;
 CREATE INDEX idx_bindings_expiry          ON bindings (expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_bindings_retry           ON bindings (next_retry_at) WHERE next_retry_at IS NOT NULL;
 
 -- Immutability of identity/wiring/jurisdiction columns (INV-08). Jurisdictions change only through the
 -- startup transfer procedure (§8.2 rule 17), which sets ligo.transfer = 'on' for its transaction.
@@ -2888,9 +2891,14 @@ Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`
 - **Break-glass (ADR-12):**
   - For each binding whose `break_glass_expires_at` is within `warn_before` and whose `break_glass_warned_at` is `NULL`, emit `BREAK_GLASS_EXPIRING` and set `break_glass_warned_at`.
   - For each binding whose `break_glass_expires_at` has passed and that is not busy, create a `SYSTEM_REVERT` change request (`requested_by = 'system:break-glass-expiry'`, `decided_by = 'system:break-glass-revert'`, `reverts_cr_id` = the break-glass change) with one side for each `SOURCE`, `TARGET` and `PLATFORM` side of the break-glass change (same names and jurisdictions, basis `SYSTEM_REVERT`, approved by `system:break-glass-revert`; additional parties are left out, as a revocation has none), and start it via §6.2: a `DELETE` if the break-glass change was a `CREATE`, otherwise an `UPDATE` to its `revert_payload`, bypassing `expectedRevision` but not validation: the revert payload is re-validated with creation steps 2–6, 8 and 9 (§7.2.3; the system needs no RBAC check), and a validation failure, including an interconnection policy that now denies the pair, is treated as a failed revert; a plugin or database that cannot answer records nothing, and the next run retries, so an outage postpones the revert of an expired `UPDATE` with no `BREAK_GLASS_REVERT_FAILED`, only the sweeper's `ERROR` log (R-07). Audit `BREAK_GLASS_REVERT_STARTED`. Busy bindings are retried on the next run. A pending change request of the binding, if any, is withdrawn in the same transaction (`CR_WITHDRAWN`, `decided_by` = the revert's requester): the revert supersedes it, and a pending request would hold the binding's name (`uq_cr_one_pending_per_resource`). A revert that fails validation withdraws it too, because its failed record passes through `PENDING` under the same name. The same applies to `/revert`, which first requires the binding to still reference the break-glass change (`409 break-glass-not-open` otherwise, with nothing withdrawn or recorded).
-  - When a revert workflow ends, audit and announce `BREAK_GLASS_REVERTED` or `BREAK_GLASS_REVERT_FAILED`. A failed revert leaves the emergency state served until an operator retries it, so it MUST be alerted on.
+  - When a revert workflow ends, audit and announce `BREAK_GLASS_REVERTED` or `BREAK_GLASS_REVERT_FAILED`. A failed revert leaves the emergency state served until a retry succeeds, the sweeper's for a retryable cause or else an operator's, so it MUST be alerted on.
   - **Inline source.** When the revert of a break-glass binding `CREATE` with an inline source completes, and the source then has no binding, a `SYSTEM_REVERT` source change retires it (one `OWNER` side, basis `SYSTEM_REVERT`), withdrawing the source's pending change request, if any, in the same transaction, as above. If it has bindings by then (added through normal consent), it stays, and its break-glass change falls under the overdue-review rule until ratified.
   - For each break-glass change that is unratified (at least one of its `BREAK_GLASS` sides has no ratification), whose `requested_at + break_glass_ttl_seconds` has passed, that has not been reverted by an applied `SYSTEM_REVERT`, and whose `review_overdue_notified_at` is `NULL` (emergency deletes, and changes whose binding was deleted), emit `BREAK_GLASS_REVIEW_OVERDUE` and set `review_overdue_notified_at`.
+- **Automatic retry.** A failed attempt whose cause was retryable (a plugin's `retryable` error, or a gRPC code §6.1 classes as retryable) gets `next_retry_at = now() + delay`: 15 s after the first failure of the binding's attempts, doubling to at most 60 s. A final cause sets it to `NULL`.
+  - For each binding in `FAILED` or `DELETE_FAILED` whose `next_retry_at` has passed, at most 20 a pass, oldest first, start a retry as an operator's retry does (`attempt + 1`, a new workflow ID, audit `<OPERATION>_STARTED` with actor `system:auto-retry`), and clear `next_retry_at`. An operator's retry clears it too.
+  - Nothing is retried while maintenance mode is on.
+  - There is no limit on the number of retries: a revocation must finish, and a failed apply keeps serving its last good snapshot meanwhile.
+  - **Rationale (4.0.6).** DBOS resumes a workflow that a crash interrupted, but not an attempt that ended in a recorded failure, and the in-step retry of §6.1 gives up after about 2 minutes. Before 4.0.6, an outage longer than that left every operation it interrupted failed until an operator noticed: the soak of 2026-11-09 left 45 revocations with their access in place for hours.
 - **Notification dispatcher** (singleton, advisory lock `ligo_notifier`): deliver due `notification_outbox` rows (§7.5); purge delivered or abandoned rows after 30 days.
 
 ### 6.4 Apply and reapply workflow (`ApplyBindingWorkflow`)
@@ -4569,7 +4577,7 @@ type GovCheckCommand struct {
 | T-07 | Info disclosure | 5 | Secrets persisted in DBOS checkpoints, errors or status. | Host-side durable sealing via Vault Transit with `wrappedDek` bound into AES-GCM AAD (ADR-07, Appendix C); error sanitization (§6.1); `dbos` retention; INV-03 tests scan all tables and logs for canary secrets. |
 | T-08 | EoP (SVID confusion) | 3 | An instance authenticates with another instance's or realm's SVID. | Process per (type, realm); exactly-one match; trust-domain equality check; distinctness check; resolved IDs logged. |
 | T-09 | Tampering (supply chain) | 3/7 | A plugin binary is replaced. | Root-owned, non-writable directory; no symlinks; SHA-256 verified before every spawn; fd-based exec; SPIRE `unix:sha256` selectors. |
-| T-10 | Tampering / Orphaned access | 4 | Delete leaves live credentials or accounts. | Visibility removed in the start transaction; state-driven reverse-order cleanup; `DELETE_FAILED` plus retry; sweeper; ownership tags. |
+| T-10 | Tampering / Orphaned access | 4 | Delete leaves live credentials or accounts. | Visibility removed in the start transaction; state-driven cleanup, the access first (INV-04); `DELETE_FAILED` retried automatically when its cause was retryable, else by an operator (§6.3); the bootstrap credential kept through an outage (§5.5); sweeper; ownership tags. |
 | T-11 | Tampering / EoP (DDL injection) | 4 | Target definitions, grants or binding parameters inject SQL/DDL into target databases, or into Vault statements. | Identifier grammars plus quoting; privilege bounds (`grantable_roles`) enforced in `ValidateTarget`, `ValidateBinding` and `EnsureTarget`; parameters can never add privilege (§5.8 rule 8); restricted password alphabet; Vault template variables only (§5.8). |
 | T-12 | EoP (insider) | 2/6 | An admin grants a workload under their control excessive privileges or another team's credentials. | Jurisdiction-based RBAC; two-sided consent (ADR-13); maker-checker in approval-required jurisdictions (INV-14); distinct approvers per side (INV-18); payload hash and normalization stability bound to the approval; privilege only through published access levels reviewed by the target and platform owners (ADR-15); full audit. |
 | T-13 | Repudiation | 2/5 | An actor denies a change; audit is altered; workload reads are untraceable. | Hash-chained, append-only audit (insert-only database privileges plus trigger, lock-ordered at transaction end); SIEM forwarding; request IDs; resolution logging; approver recorded. |

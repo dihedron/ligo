@@ -55,6 +55,7 @@ type fake struct {
 	unhealthy    error          // Health fails with it
 	cleanups     []string       // the stages cleaned, in order
 	cleanupFail  map[string]int // stage: how many cleanups fail before one succeeds
+	retryable    bool           // the cleanups that fail say retryable, as an outage would
 	skipped      map[string]bool
 	laterPresent []string // INV-04 violations: the row of a stage cleaned before still there
 	order        []string // INV-04's order the test expects; default: the target first
@@ -154,6 +155,9 @@ func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage st
 	defer f.mu.Unlock()
 	if f.cleanupFail[stage] > 0 {
 		f.cleanupFail[stage]--
+		if f.retryable {
+			return false, pluginsdk.Error(codes.Unavailable, "STORE_UNAVAILABLE", "the provider cannot be reached", true)
+		}
 		return false, pluginsdk.Error(codes.PermissionDenied, "CLEANUP_DENIED", "cleanup refused", false)
 	}
 	f.cleanups = append(f.cleanups, stage)

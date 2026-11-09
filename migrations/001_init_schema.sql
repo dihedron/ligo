@@ -267,6 +267,7 @@ CREATE TABLE bindings (
     current_step                VARCHAR(64)  NOT NULL DEFAULT 'INIT',
     status_message              TEXT NOT NULL DEFAULT '' CHECK (length(status_message) <= 2048),
     last_transition_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    next_retry_at               TIMESTAMPTZ,                    -- §6.3: the sweeper retries a FAILED or DELETE_FAILED binding then; NULL: an operator must
     rotate_static_secrets       BOOLEAN NOT NULL DEFAULT TRUE,
 
     -- Requested state for `revision`, composed from the source, target and access level
@@ -320,6 +321,7 @@ CREATE INDEX idx_bindings_source_jurisdiction    ON bindings (source_jurisdictio
 CREATE INDEX idx_bindings_target_jurisdiction    ON bindings (target_jurisdiction, name);
 CREATE INDEX idx_bindings_break_glass     ON bindings (break_glass_expires_at) WHERE break_glass_cr_id IS NOT NULL;
 CREATE INDEX idx_bindings_expiry          ON bindings (expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_bindings_retry           ON bindings (next_retry_at) WHERE next_retry_at IS NOT NULL;
 
 -- Immutability of identity/wiring/jurisdiction columns (INV-08). Jurisdictions change only through the
 -- startup transfer procedure (§8.2 rule 17), which sets ligo.transfer = 'on' for its transaction.

@@ -169,3 +169,12 @@ func TestStepSpan(t *testing.T) {
 		t.Errorf("status %+v, events %v: the error must not be recorded", s.Status(), s.Events())
 	}
 }
+
+// TestRetryDelay: 15 s after the first failure, doubling to at most 60 s.
+func TestRetryDelay(t *testing.T) {
+	for attempt, want := range map[int64]time.Duration{1: 15 * time.Second, 2: 30 * time.Second, 3: time.Minute, 4: time.Minute, 50: time.Minute} {
+		if got := retryDelay(attempt); got != want {
+			t.Errorf("retryDelay(%d) = %v, want %v", attempt, got, want)
+		}
+	}
+}
