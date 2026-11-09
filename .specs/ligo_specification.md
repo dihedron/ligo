@@ -81,6 +81,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Area | Change |
 | :--- | :--- |
 | Deprovisioning order (INV-04, ADR-02, §6.5) | A delete cleans first the stage that holds the access. With a static credential that is `TARGET`, then `SECRET_STORE`, then `IDENTITY`: an outage of the store or of SPIRE can delay the store's cleanup but cannot keep access alive. With `DELEGATED_DYNAMIC`, the store's leases are the access and keep the order `SECRET_STORE`, `TARGET`, `IDENTITY`. Before, every mode cleaned the store first: the soak of 2026-11-09 sealed the store for 2 minutes and left revoked bindings with their roles on the target. |
+| Bootstrap credentials (§5.5) | A failed renewal keeps the last good credential: a KV one until a read succeeds, a leased one until its lease ends. Before, a plugin whose credential was due for renewal failed every call while Vault or SPIRE was down, so it could not remove access either: the soak's SPIRE outage of 10 minutes failed deletes at `TARGET` with `BOOTSTRAP_CREDENTIAL_UNAVAILABLE`. |
 
 ### 0.6 Changelog from 4.0.4 (4.0.5)
 | Area | Change |
@@ -2338,6 +2339,7 @@ Oracle, OpenLDAP and Active Directory do not accept SVIDs. A plugin instance tha
 - Credentials are configured as `config.bootstrap_credential`, read from Vault using the instance's JWT-SVID.
 - Static credentials on disk or in `server.yaml` are prohibited.
 - Credentials are held only in memory, renewed per Vault lease, and MUST NOT be logged or returned in any RPC.
+- When a renewal fails (Vault or SPIRE unavailable), the plugin keeps using the last good credential: a KV credential, which has no lease, until a read succeeds; a leased one until its lease ends. It asks Vault again at most every 30 s meanwhile and logs a warning, never the credential. An outage of Vault or SPIRE then cannot stop a plugin from removing access (INV-04). A credential the target refuses, because it was rotated meanwhile, fails as `BOOTSTRAP_CREDENTIAL_REJECTED`, which is retryable.
 - The SDK's reader holds its lock while it calls Vault, so the call is bounded: without a client from the plugin, it uses the system roots, TLS 1.2 or later and a 30s timeout; with any client, a response is read up to 1 MiB.
 
 **Normative** (config shape).
