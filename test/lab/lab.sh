@@ -44,6 +44,8 @@ source "$LAB_DIR/lib/hooks.sh"
 source "$LAB_DIR/lib/release.sh"
 # shellcheck source=lib/soak.sh
 source "$LAB_DIR/lib/soak.sh"
+# shellcheck source=lib/soak-faults.sh
+source "$LAB_DIR/lib/soak-faults.sh"
 
 usage() {
 	cat <<USAGE
@@ -103,9 +105,13 @@ commands:
                             postgres over the Unix socket
   soak run                  the soak (.specs/ligo-soak.md): resets the lab, installs
                             ligo for accounts, runs the generator for SOAK_DURATION
-                            (default 15m) with SOAK_SEED and SOAK_ACCOUNTS (20,
-                            a workload each), and keeps the evidence (a clean
+                            (default 15m) with SOAK_SEED, SOAK_ACCOUNTS (20, a
+                            workload each), SOAK_FAULTS (none, single or all),
+                            SOAK_RACE (1: ligo built with -race) and
+                            SOAK_MAX_CONNS, and keeps the evidence (a clean
                             tree only, or SOAK_DEV=1 for a trial outside it)
+  soak fault NAME...|all     each fault on its own against the lab as soak run
+                            left it, with its recovery measured
   soak prove                 each mutant of test/lab/soak/mutants on a worktree, run
                             as soak run, must trip its invariant, and the build as
                             committed none (.specs/ligo-soak.md §8)

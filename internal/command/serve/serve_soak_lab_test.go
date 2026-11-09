@@ -88,6 +88,8 @@ type soakRun struct {
 	violations                     int
 	silent                         int        // SK-10's checks in a row with a replica not answering
 	unanswered                     int        // calls ligo did not answer
+	faulted                        bool       // lab.sh held a fault at the last look
+	faultEnd                       time.Time  // when the last fault ended
 	checkRng                       *rand.Rand // the checker's, apart from the generator's
 }
 

@@ -58,7 +58,11 @@ serve_install() {
 	done
 	cmd_deploy
 	local out="$LAB_STATE_DIR/ligo"
-	(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out" ./cmd/ligo) || die "cannot build ligo"
+	if [[ -n "$LAB_SOAK" && "${SOAK_RACE:-0}" == 1 ]]; then # the soak's race build: -race needs cgo
+		(cd "$REPO_DIR" && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -o "$out" ./cmd/ligo) || die "cannot build ligo with -race"
+	else
+		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out" ./cmd/ligo) || die "cannot build ligo"
+	fi
 	for host in $(ligo_hosts); do
 		inner_push "$out" "$host" /usr/local/bin/ligo 0755
 		inner_exec "$host" install -d -o root -g ligo -m 0750 /etc/ligo

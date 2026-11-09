@@ -86,18 +86,60 @@ func (s *soakRun) check(final bool) {
 		s.h.add(event{Kind: "check", MS: time.Since(start).Milliseconds(),
 			Note: fmt.Sprintf("final %v, SK-1 on %d revocations, SK-2 and SK-3 on %d credentials", final, revoked, credentials)})
 	}()
+	fault := s.fault()
 	db, err := s.ligoDB(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		s.skipped("SK-database", err)
-	} else {
+	case fault != "":
+		// safety holds under any fault; liveness is judged once it is over
 		defer func() { _ = db.Close(context.Background()) }()
-		s.checkSQL(ctx, db)
+		s.checkSQL(ctx, db, false)
+		s.mu.Lock()
+		s.sk6 = nil
+		for i := range s.revoked { // SK-1's limit counts from the fault's end
+			s.revoked[i].at = time.Now()
+		}
+		s.mu.Unlock()
+		s.h.add(event{Kind: "check:skipped", Res: "SK-1 SK-2 SK-3 SK-6 SK-7 SK-10", Err: "fault " + fault})
+	default:
+		defer func() { _ = db.Close(context.Background()) }()
+		s.checkSQL(ctx, db, s.sinceFault() >= sk7Stuck)
 		s.checkRoles(ctx, db)
 		revoked = s.checkRevocations(ctx, db)
 		credentials = s.checkCredentials(ctx, db, final)
 	}
 	s.checkAudit()
-	s.checkReplicas()
+	if fault == "" {
+		s.checkReplicas()
+	}
+}
+
+// fault is the fault lab.sh holds now, from its marker, or "". It notes when
+// the last one ended.
+func (s *soakRun) fault() string {
+	b, err := os.ReadFile(os.Getenv("LIGO_SOAK_FAULT"))
+	name := strings.TrimSpace(string(b))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil && name != "" {
+		s.faulted = true
+		return name
+	}
+	if s.faulted {
+		s.faulted, s.faultEnd = false, time.Now()
+	}
+	return ""
+}
+
+// sinceFault is how long ago the last fault ended; forever if none was held.
+func (s *soakRun) sinceFault() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.faultEnd.IsZero() {
+		return time.Duration(1<<63 - 1)
+	}
+	return time.Since(s.faultEnd)
 }
 
 // sqlChecks: each query returns the rows that break its invariant.
@@ -126,8 +168,13 @@ var sqlChecks = []struct{ id, what, sql string }{
 		where delivered_at is null and abandoned_at is null and created_at < now() - make_interval(secs => ` + fmt.Sprint(sk9Stale.Seconds()) + `)`},
 }
 
-func (s *soakRun) checkSQL(ctx context.Context, db *pgx.Conn) {
+// checkSQL runs the SQL checks; SK-7's only with liveness, since a binding a
+// fault held back may stay in PROVISIONING until SK-7's limit after the fault.
+func (s *soakRun) checkSQL(ctx context.Context, db *pgx.Conn, liveness bool) {
 	for _, c := range sqlChecks {
+		if c.id == "SK-7" && !liveness {
+			continue
+		}
 		bad, err := rows(ctx, db, c.sql)
 		if err != nil {
 			s.skipped(c.id, err)

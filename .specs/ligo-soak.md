@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
+- **Version:** 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -130,16 +130,13 @@ While a fault holds, a check that depends on the faulted component is recorded a
 | Slow PostgreSQL | `tc netem` on ligo1 and ligo2, 200 ms ± 50 ms and 1 % loss, filtered to pg's IP | 5 min | 1 min |
 | Slow directory | the same, to ldap's IP, 2 s | 5 min | 1 min |
 | Slow store | the same, to the store's IP, 500 ms | 5 min | 1 min |
-| Partition | `nft` on one replica dropping traffic to pg, while it keeps serving | 2 min | 2 min |
+| Partition | `tc netem` with 100 % loss from ligo2 to pg (the VMs have no `nft`): a silent drop, while ligo2 keeps serving | 2 min | 2 min |
 | Connections full | idle sessions as a non-ligo role, up to `max_connections` minus the reserved | 2 min | 2 min |
 | Long lock | `lock table bindings in exclusive mode` held | 60 s | 2 min |
-| Disk full | `fallocate` on pg's data volume, leaving 50 MiB | 2 min | 5 min after the space is freed |
 | Memory pressure | `systemctl set-property ligo MemoryHigh=` on ligo2, at its RSS plus 20 % | 5 min | none: no restart, no error rate above 1 % |
 | SPIRE down | SPIRE Server stopped past the workload SVIDs' renewal | 10 min | 2 min after it starts |
 | Store sealed | the backend sealed during an apply, then unsealed | 2 min | 2 min |
-| Bad plugin | `ligo-plugin-echo`'s lab mode, set through a file it reads: `hang`, `garbage`, `oversized` or `exit-mid-stage` | 2 min each | 2 min |
-| Webhook slow | the receiver answering after 20 s | 5 min | outbox drained 5 min after |
-| Webhook failing | the receiver answering 500 | 5 min | outbox drained 5 min after |
+| Webhook down | the receiver stopped | 5 min | 5 min |
 | Reload | `SIGHUP` to one replica | at once | none: no error |
 | Maintenance | maintenance on, then off after 2 min | 2 min | 1 min |
 | Group change | a person added to or removed from an account's approvers group | at once | the role follows at the session's re-check |
@@ -147,11 +144,23 @@ While a fault holds, a check that depends on the faulted component is recorded a
 
 `sch_netem` is in the lab VM's kernel. ligo1 and ligo2 are VMs with their own kernels, so `soak.sh` checks for netem there before the first run.
 
-The bad-plugin modes are lab-only code in `test/lab/plugins/ligo-plugin-echo`, which never ships. With no mode file, the plugin behaves exactly as today.
+**How a fault runs** (`test/lab/lib/soak-faults.sh`):
+1. A marker on ligo1 names the fault. While it exists, the checker still runs the safety checks (SK-4, SK-5, SK-8, SK-9) and records SK-1, SK-2, SK-3, SK-6, SK-7 and SK-10 as skipped. SK-1's limit restarts from the fault's end, and SK-7 is judged again only 10 minutes after the last fault ended.
+2. The fault is undone after its duration, then `soak.sh` measures the recovery: the time until both replicas answer an authenticated list. Over the limit is a `RECOVERY` violation.
+3. The marker goes when ligo has recovered.
+4. No fault starts in the last 15 minutes of the load, so none overlaps the generator's convergence and final check.
+5. Every fault in effect is undone by a trap, even when the run is interrupted.
+
+`lab.sh soak fault NAME...|all` applies faults one at a time against the lab a soak run left, without the generator, to try each one on its own.
+
+**Deferred, not in the catalogue:**
+- **Disk full.** pg has no volume of its own in the lab, so filling its disk would fill the lab VM's and stop every container.
+- **Bad plugin modes.** The soak's bindings use the PostgreSQL and Vault plugins, not the echo plugin, so its modes would not be exercised. A plugin hang (`SIGSTOP`) is covered.
+- **A slow webhook receiver.** The receiver has no slow mode; a stopped receiver is covered.
 
 ## 7. Builds and drift
 
-- **Race build:** `SOAK_RACE=1` builds `ligo` with `-race` for the replicas. Any race report in the journals is a violation.
+- **Race build:** `SOAK_RACE=1` builds `ligo` with `-race`, and so with cgo, for the replicas. Any `WARNING: DATA RACE` in the journals is a `RACE` violation.
 - **Connection pool:** `SOAK_MAX_CONNS=2` starves the pools on purpose. The pool deadlock of 7f62dae is that class of bug.
 - **Drift:** `soak.sh` samples every 10 minutes into `drift.csv`, one row per host and metric:
   - RSS, threads and open FDs of `ligo`, from `/proc`;
@@ -159,7 +168,7 @@ The bad-plugin modes are lab-only code in `test/lab/plugins/ligo-plugin-echo`, w
   - PostgreSQL connections per role;
   - the sizes of `audit_log`, `notification_outbox` and `bindings`;
   - the generator's p50 and p95 per hour, from the history.
-- **Drift that fails the run:** after the first hour, RSS, FDs, connections or plugin processes keep rising across the remaining samples, by more than 20 % from the first hour's median. Tables grow with the audit; their growth is reported, not judged.
+- **Drift that fails the run:** in a run of 2 hours or more, the last sample of RSS, threads, FDs, plugin processes or connections is more than 20 % over the first hour's median (`DRIFT`). Tables grow with the audit; their growth is reported, not judged.
 - **Hang evidence:** ligo has no goroutine endpoint, and adding one would be a product change. So when a request takes over 30 seconds, `soak.sh` keeps that minute's journals and the drift. At the end, before the replicas stop, it sends `SIGQUIT`, and each replica dumps its goroutines to its journal.
 
 ## 8. Proving the checker

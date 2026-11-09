@@ -13,7 +13,8 @@ cmd_soak() {
 	case "${1:-}" in
 	run) soak_run ;;
 	prove) soak_prove ;;
-	*) die "soak: run or prove" ;;
+	fault) shift && soak_try "$@" ;;
+	*) die "soak: run, prove or fault" ;;
 	esac
 }
 
@@ -26,7 +27,8 @@ soak_settings() {
 	SOAK_MAX_CONNS="${SOAK_MAX_CONNS:-}"
 	SOAK_ACCOUNTS="${SOAK_ACCOUNTS:-20}"
 	[[ "$SOAK_SEED" =~ ^[0-9]+$ ]] || die "SOAK_SEED: digits only"
-	[[ "$SOAK_FAULTS" == none ]] || die "SOAK_FAULTS: only none for now"
+	[[ "$SOAK_FAULTS" =~ ^(none|single|all)$ ]] || die "SOAK_FAULTS: none, single or all"
+	[[ "$SOAK_RACE" =~ ^[01]$ ]] || die "SOAK_RACE: 0 or 1"
 	((SOAK_ACCOUNTS >= 1 && SOAK_ACCOUNTS <= 100)) || die "SOAK_ACCOUNTS: 1 to 100"
 }
 
@@ -149,7 +151,7 @@ soak_generator() {
 		printf '%s\n' "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" "LIGO_E2E_ADMIN2=https://ligo2.ligo.lab:9443" \
 			"LIGO_E2E_WORKLOAD=https://ligo2.ligo.lab:8443" "LIGO_E2E_DIR=$LIGO1_E2E" "LIGO_E2E_SECRETS=$LIGO_E2E_SECRETS" \
 			"LIGO_E2E_SUFFIX=$E2E_SUFFIX" "LIGO_SOAK_HISTORY=$SOAK_DIR/history.jsonl" "LIGO_SOAK_SEED=$SOAK_SEED" \
-			"LIGO_SOAK_DURATION=$SOAK_DURATION" "LIGO_SOAK_ACCOUNTS=$SOAK_ACCOUNTS" \
+			"LIGO_SOAK_DURATION=$SOAK_DURATION" "LIGO_SOAK_ACCOUNTS=$SOAK_ACCOUNTS" "LIGO_SOAK_FAULT=$SOAK_DIR/fault" \
 			"LIGO_SOAK_DB_DSN=$(pg_dsn migrator pg.ligo.lab /etc/ligo-lab/ca.crt "$SERVE_DB")"
 		for line in "${SOAK_USERS[@]}"; do
 			printf 'LIGO_SOAK_LDAP_%s_PASS=%s\n' "$(tr '[:lower:]' '[:upper:]' <<<"$line")" "$(ldap_password "$line")"
@@ -184,7 +186,7 @@ soak_seconds() {
 # tree runs only with SOAK_DEV=1, and its evidence goes to the state directory.
 soak_run() {
 	soak_settings
-	local commit dir renewer rc=0 host
+	local commit dir renewer drifter faulter="" rc=0 host
 	commit="$(git -C "$REPO_DIR" rev-parse HEAD)"
 	if [[ -n "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
 		[[ "${SOAK_DEV:-}" == 1 ]] || die "soak: the tree is dirty: commit first, or SOAK_DEV=1 for a trial run that is not evidence"
@@ -203,13 +205,21 @@ soak_run() {
 	soak_directory
 	soak_tenancies
 	soak_svids
+	host_user ligo1 soak-admin spiffe://prod.lab/ops/ada # the maintenance fault, as an administrator
 
 	section "soak: run"
 	soak_renew &
 	renewer=$!
+	soak_drift "$dir" &
+	drifter=$!
+	if [[ "$SOAK_FAULTS" != none ]]; then
+		soak_faults "$dir" &
+		faulter=$!
+	fi
 	soak_generator || rc=1
-	kill "$renewer" 2>/dev/null || true
-	wait "$renewer" 2>/dev/null || true
+	kill "$renewer" "$drifter" ${faulter:+"$faulter"} 2>/dev/null || true
+	wait "$renewer" "$drifter" ${faulter:+"$faulter"} 2>/dev/null || true
+	soak_undo # whatever a stopped scheduler left in effect
 
 	section "soak: the checks after the run"
 	soak_check_outbox "$dir" || rc=1
@@ -226,7 +236,18 @@ soak_run() {
 		inner_exec "$host" journalctl --no-pager -u ligo -o cat >"$dir/journal-$host.log" || true
 	done
 	release_versions >"$dir/versions.txt"
-	soak_summary "$dir" | tee "$dir/summary.md"
+	local races
+	races="$(cat "$dir"/journal-*.log | grep -c 'WARNING: DATA RACE' || true)"
+	if ((races > 0)); then
+		soak_violation "$dir" RACE "$races data races in the replicas' journals"
+		rc=1
+	fi
+	{
+		soak_summary "$dir"
+		soak_fault_report "$dir"
+		soak_drift_report "$dir" "$(($(soak_seconds "$SOAK_DURATION") / 3600))"
+	} | tee "$dir/summary.md"
+	if [[ -s "$dir/drift-over.txt" ]]; then rc=1; fi
 	((rc == 0)) || die "soak: the generator failed; see $dir/generator.log"
 	info "soak: evidence in $dir"
 }
