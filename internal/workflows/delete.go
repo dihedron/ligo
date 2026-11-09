@@ -33,8 +33,8 @@ func (e *Engine) stageRow(ctx context.Context, in ApplyInput, stage string) (*st
 	return r, err
 }
 
-// delete is DeleteBindingWorkflow (§6.5): the stages cleaned in reverse
-// order with the wiring recorded in their rows, then the binding removed.
+// delete is DeleteBindingWorkflow (§6.5): the stages cleaned with the wiring
+// recorded in their rows, the access first (INV-04), then the binding removed.
 func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 	id, err := uuid.Parse(in.BindingID)
 	if err != nil {
@@ -58,7 +58,12 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		}
 		return "DELETE_FAILED", se
 	}
-	for _, stage := range []string{"SECRET_STORE", "TARGET", "IDENTITY"} {
+	order, err := dbos.RunAsStep(ctx, func(c context.Context) ([]string, error) { return e.cleanupOrder(c, in) },
+		dbos.WithStepName("cleanupOrder"))
+	if err != nil {
+		return fail("cleanupOrder", err)
+	}
+	for _, stage := range order {
 		name := "cleanup:" + stage
 		if _, err := dbos.RunAsStep(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, e.cleanup(c, f, in, stage) },
 			dbos.WithStepName(name)); err != nil {
@@ -70,6 +75,26 @@ func (e *Engine) delete(ctx dbos.Context, in ApplyInput) (string, error) {
 		return fail("deleteBinding", err)
 	}
 	return "DELETED", nil
+}
+
+// cleanupOrder is INV-04's order: the stage that holds the access first. With
+// dynamic credentials, Vault's leases are the access, and the role they depend
+// on must outlive them (ADR-02); otherwise the target's role is the access.
+func (e *Engine) cleanupOrder(ctx context.Context, in ApplyInput) ([]string, error) {
+	row, err := e.stageRow(ctx, in, "IDENTITY")
+	if err != nil {
+		return nil, err
+	}
+	identity := &pluginv1.IdentityArtifact{}
+	if row != nil && string(row.artifact) != "{}" {
+		if err := protojson.Unmarshal(row.artifact, identity); err != nil {
+			return nil, err
+		}
+	}
+	if identity.GetMode() == pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC {
+		return []string{"SECRET_STORE", "TARGET", "IDENTITY"}, nil
+	}
+	return []string{"TARGET", "SECRET_STORE", "IDENTITY"}, nil
 }
 
 // cleanup cleans one stage: skipped when it has no row; its row deleted,
