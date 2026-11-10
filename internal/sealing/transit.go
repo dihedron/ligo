@@ -166,14 +166,18 @@ func (k *TransitKEK) currentToken(ctx context.Context) (string, error) {
 	return k.token, nil
 }
 
-// post sends a JSON request. Errors carry Vault's status and messages, never
-// the request body.
+// post sends a JSON request, or a GET when in is nil. Errors carry Vault's
+// status and messages, never the request body.
 func (k *TransitKEK) post(ctx context.Context, path, token string, in, out any) error {
-	body, err := json.Marshal(in)
-	if err != nil {
-		return err
+	method, body := http.MethodGet, []byte(nil)
+	if in != nil {
+		var err error
+		if body, err = json.Marshal(in); err != nil {
+			return err
+		}
+		method = http.MethodPost
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.cfg.Address+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, k.cfg.Address+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
