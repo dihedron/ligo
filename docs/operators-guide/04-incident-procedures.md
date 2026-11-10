@@ -61,7 +61,14 @@ If it cannot come back:
 
 ## The audit chain does not verify
 
-`ligo_audit_chain_valid` is 0, or `ligo audit verify` fails. Someone with database rights has altered history, or a backup was restored badly. Treat it as a security incident: preserve the database, compare with your SIEM's forwarded copy, and look at who holds `ligo_migrator` and the superuser.
+`ligo_audit_chain_valid` is 0, or `ligo audit verify` reports `valid: false`. Someone with database rights has altered history, or a backup was restored badly. Treat it as a security incident:
+
+1. Preserve the database: take a copy before anything else writes to it.
+2. Run `ligo audit verify --full` and note the first broken `id`. A break at a checkpoint means the entries up to it were rewritten and their hashes recomputed: whoever did it had the database but not the signing key. A break between checkpoints, found only by `--full`, means an entry was edited in place.
+3. Compare the entries from the broken `id` onwards with your SIEM's forwarded copy.
+4. Look at who holds `ligo_migrator` and the superuser, and at the database's own logs.
+
+If `ligo audit verify` answers `503 unavailable` instead, the chain is not broken: `ligo` cannot reach the `ligo-audit` key. Check Vault or OpenBao and the `ligo-sealer` policy.
 
 ## A trust bundle conflict
 

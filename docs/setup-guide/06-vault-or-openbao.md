@@ -11,20 +11,25 @@ vault secrets enable -version=2 kv
 
 ## Sealing
 
-Secrets pass between pipeline stages through durable checkpoints, sealed with Transit first. The key can only be used by `ligo`, and is not exportable:
+Secrets pass between pipeline stages through durable checkpoints, sealed with Transit first. The key can only be used by `ligo`, and is not exportable.
+
+A second key, of type `ed25519`, signs checkpoints of the audit chain, so that a chain rewritten in the database no longer verifies. `ligo` signs with it and reads its public keys, to verify signatures without calling Vault each time:
 
 ```bash
 vault write -f transit/keys/ligo-interstage
+vault write transit/keys/ligo-audit type=ed25519
 vault policy write ligo-sealer - <<'HCL'
 path "transit/encrypt/ligo-interstage" { capabilities = ["update"] }
 path "transit/decrypt/ligo-interstage" { capabilities = ["update"] }
+path "transit/sign/ligo-audit"         { capabilities = ["update"] }
+path "transit/keys/ligo-audit"         { capabilities = ["read"] }
 HCL
 vault write auth/jwt-spiffe/role/ligo-sealer role_type=jwt user_claim=sub \
   bound_subject=spiffe://prod.internal/ns/sys/sa/ligo \
   bound_audiences=https://vault.prod.internal token_policies=ligo-sealer token_ttl=15m
 ```
 
-A sealed or unreachable server stops `ligo` at startup, with nothing written. The unit restarts it with a back-off, from 5 s to 5 min.
+A sealed or unreachable server, or a missing key, stops `ligo` at startup, with nothing written. The unit restarts it with a back-off, from 5 s to 5 min.
 
 ## The plugins' bootstrap credentials
 
