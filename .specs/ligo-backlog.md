@@ -15,6 +15,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
+| 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 
 ## 1. Audit pruning
 
@@ -197,3 +198,16 @@ Work agreed for later, with what is known so far. An item here is not a specific
 
 **To decide.** How the server gets the person's identity (their CLI login or an SVID on their machine, never a stored password); whether it runs locally beside the assistant (stdio) or as a service; prompts or resources that explain jurisdictions and the charter to the model; rate limits; and how a person confirms each write tool before it is sent.
 
+## 14. Post-quantum signatures for audit checkpoints
+
+**Why.** Audit checkpoints (spec §4.3) are signed with the Transit key `ligo-audit`, of type `ed25519`. A quantum computer able to break ed25519 could forge checkpoints, and with them a rewritten chain. Signatures are not exposed to "harvest now, decrypt later": the attacker needs that computer when they rewrite the log. The risk grows with retention: a log kept ten years or more could be rewritten once one exists. The SIEM's forwarded copy stays independent evidence.
+
+**Why not now.** Checked on 2026-11-10 with the lab's versions:
+
+- OpenBao 2.7.1 has no post-quantum Transit key: `unknown key type ml-dsa` (also `slh-dsa`, `hybrid`).
+- Vault 2.2.1 Community: `key type ml-dsa is only available in enterprise versions of Vault`.
+- Go 1.27.3 has `crypto/mldsa` (FIPS 204), so `ligo` can verify ML-DSA locally, as it does ed25519.
+
+`ligo` supports both OpenBao and Vault Community, so it cannot depend on a key type only Vault Enterprise has.
+
+**Direction.** When OpenBao or Vault Community offers ML-DSA in Transit, sign each checkpoint with both keys, `ligo-audit` (ed25519) and a second ML-DSA key, and store both signatures. A checkpoint is valid only if both verify, so it is as strong as the stronger of the two. The schema does not change: `key_id` and `signature` are text. The `local-kek` signer can derive an ML-DSA key from the KEK as it does the ed25519 one.
