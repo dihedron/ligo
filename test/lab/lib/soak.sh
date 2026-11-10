@@ -98,10 +98,16 @@ soak_svids() {
 			# both at once, so that the generator never reads a certificate with the other's key
 			inner_exec ligo1 sh -c "mv $LIGO1_E2E/soakw$i-svid.pem.new $LIGO1_E2E/soakw$i-svid.pem && mv $LIGO1_E2E/soakw$i-key.pem.new $LIGO1_E2E/soakw$i-key.pem"
 		fi
-		spire prod jwt mint -spiffeID "$id" -audience "$(secrets_audience)" -ttl 10m 2>/dev/null |
+		# minted first: a failed mint must keep the last good JWT-SVID, not replace it with an empty one
+		local jwt
+		if ! jwt="$(spire prod jwt mint -spiffeID "$id" -audience "$(secrets_audience)" -ttl 10m 2>/dev/null)" || [[ -z "$jwt" ]]; then
+			warn "soak: cannot mint w$i's JWT-SVID"
+			continue
+		fi
+		printf '%s' "$jwt" |
 			inner_exec ligo1 sh -c "tr -d '\n' >$LIGO1_E2E/soakw$i-store-jwt.new && chown ligo:ligo $LIGO1_E2E/soakw$i-store-jwt.new &&
 				chmod 0600 $LIGO1_E2E/soakw$i-store-jwt.new && mv $LIGO1_E2E/soakw$i-store-jwt.new $LIGO1_E2E/soakw$i-store-jwt" ||
-			warn "soak: cannot mint w$i's JWT-SVID"
+			warn "soak: cannot write w$i's JWT-SVID"
 	done
 	inner_exec spire-prod rm -rf "$dir"
 }

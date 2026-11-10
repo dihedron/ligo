@@ -396,7 +396,8 @@ func (s *soakRun) checkCredential(ctx context.Context, db *pgx.Conn, b soakBindi
 	cfg, _ := auth["config"].(map[string]any)
 	who := workloadOf(accountOfTarget(b.source))
 	jwt := filepath.Join(os.Getenv("LIGO_E2E_DIR"), who+"-store-jwt")
-	if fi, err := os.Stat(jwt); err != nil || time.Since(fi.ModTime()) > sk2StaleJWT {
+	// an empty file is as stale as an old one: no JWT-SVID to log in with
+	if fi, err := os.Stat(jwt); err != nil || fi.Size() == 0 || time.Since(fi.ModTime()) > sk2StaleJWT {
 		s.skipped("SK-2", fmt.Errorf("%s: the workload's JWT-SVID is stale: lab.sh could not renew it", b.name))
 		return
 	}
