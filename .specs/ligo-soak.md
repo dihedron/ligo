@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.4 (2026-11-09): DAMAGE, SOAK_EXCLUDE, SOAK_NIGHT, faster SVID renewal, SK-1 from the fault's end. 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
+- **Version:** 1.5 (2026-11-10): a rolling restart paired with a fault that keeps ligo from starting stops the roll instead of ending the scheduler. 1.4 (2026-11-09): DAMAGE, SOAK_EXCLUDE, SOAK_NIGHT, faster SVID renewal, SK-1 from the fault's end. 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -143,7 +143,7 @@ While a fault holds, a check that depends on the faulted component is recorded a
 | Reload | `SIGHUP` to one replica | at once | none: no error |
 | Maintenance | maintenance on, then off after 2 min | 2 min | 1 min |
 | Group change | a person added to or removed from an account's approvers group | at once | the role follows at the session's re-check |
-| Rolling restart | `systemctl restart ligo`, one replica, then the other | about 1 min | 1 min each |
+| Rolling restart | `systemctl restart ligo`, one replica, then the other; a replica not listening after 1 min stops the roll, so the other keeps serving (paired with a sealed store, ligo refuses to start until it is unsealed, §8.2 of the main spec) | about 1 min | 1 min each |
 
 `sch_netem` is in the lab VM's kernel. ligo1 and ligo2 are VMs with their own kernels, so `soak.sh` checks for netem there before the first run.
 

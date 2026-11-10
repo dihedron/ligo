@@ -27,6 +27,18 @@ soak_marker() {
 	fi
 }
 
+# soak_listens HOST SECONDS: whether ligo on HOST listens on :9443 within
+# SECONDS; unlike serve_wait, never ends the caller.
+soak_listens() {
+	local host="$1" out
+	for _ in $(seq 1 "$2"); do
+		out="$(inner_exec "$host" ss -Hltn 'sport = :9443' 2>/dev/null)" || true
+		grep -q LISTEN <<<"$out" && return 0
+		sleep 1
+	done
+	return 1
+}
+
 # soak_netem HOSTS IP DELAY LOSS: delay and loss on traffic from HOSTS to IP;
 # soak_netem_off HOSTS undoes it. Other traffic is untouched.
 soak_netem() {
@@ -91,10 +103,17 @@ soak_fault() {
 	maintenance:start) cli soak-admin maintenance on -m "the soak's maintenance fault" >/dev/null ;;
 	maintenance:stop) cli soak-admin maintenance off >/dev/null ;;
 	rolling-restart:start)
+		# paired with a fault ligo refuses to start under (a sealed store, SPIRE
+		# down), a replica stays down until that fault is undone: the roll stops
+		# there, so the other replica keeps serving, and the recovery after the
+		# undo judges it (serve_wait would end the scheduler)
 		local h
 		for h in $(ligo_hosts); do
 			inner_exec "$h" systemctl restart ligo
-			serve_wait "$h"
+			soak_listens "$h" 60 || {
+				warn "soak: rolling-restart: ligo on $h does not listen after 60s; the roll stops there"
+				break
+			}
 		done
 		;;
 	group-change:start) printf 'dn: cn=approvers,ou=s00,ou=accounts,%s\nchangetype: modify\ndelete: member\nmember: uid=soakb,ou=users,%s\n' "$LDAP_BASE" "$LDAP_BASE" | ldap_admin ldapmodify >/dev/null ;;
