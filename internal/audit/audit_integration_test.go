@@ -72,7 +72,7 @@ func TestChain(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	res, err := Verify(ctx, app)
+	res, err := Verify(ctx, app, signer(t), true)
 	if err != nil || !res.Valid || res.Entries < 8 {
 		t.Errorf("Verify = %+v, %v", res, err)
 	}
@@ -97,7 +97,7 @@ func TestAC18(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	if res, err := Verify(ctx, tx); err != nil || !res.Valid {
+	if res, err := Verify(ctx, tx, signer(t), true); err != nil || !res.Valid {
 		t.Fatalf("before tampering: %+v, %v", res, err)
 	}
 	if _, err := tx.Exec(ctx, "alter table audit_log disable trigger trg_audit_no_update"); err != nil {
@@ -106,7 +106,7 @@ func TestAC18(t *testing.T) {
 	if _, err := tx.Exec(ctx, "update audit_log set actor = 'mallory' where id = $1", ids[1]); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Verify(ctx, tx)
+	res, err := Verify(ctx, tx, signer(t), true)
 	if err != nil || res.Valid || res.FirstBroken != ids[1] {
 		t.Errorf("after tampering with %d: %+v, %v", ids[1], res, err)
 	}

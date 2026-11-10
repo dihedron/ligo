@@ -561,7 +561,10 @@ paths:
     get:
       tags: [operations]
       operationId: verifyAudit
-      summary: Verify the hash chain of the audit log.
+      summary: Verify the hash chain of the audit log and its signed checkpoints (§4.3).
+      description: Checks every signed checkpoint, then re-hashes the entries after the newest one; with full, every entry. 503 when the signing key cannot be reached.
+      parameters:
+        - { name: full, in: query, schema: { type: boolean, default: false } }
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors:
     get:

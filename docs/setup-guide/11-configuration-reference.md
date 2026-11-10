@@ -191,8 +191,9 @@
 | `secret_sealing.vault_transit.jwt_audience` | One of `core_identity.svid_selector.jwt_audience`. | |
 | `secret_sealing.vault_transit.mount` | The Transit mount. | |
 | `secret_sealing.vault_transit.key_name` | The key. | Not exportable |
+| `secret_sealing.vault_transit.audit_key_name` | The ed25519 key that signs audit checkpoints; `ligo` may sign with it and read its public keys. | `ligo-audit` |
 | `secret_sealing.vault_transit.ca_cert_file` | Roots for `address`. | System roots |
-| `secret_sealing.local_kek_file` | `local-kek` only: a 32-byte key. | Not readable by others |
+| `secret_sealing.local_kek_file` | `local-kek` only: a 32-byte key; the audit checkpoints' signing key is derived from it. | Not readable by others |
 | `plugins` | The plugin host. | |
 | `plugins.directory` | Root-owned, not writable by others. | `/usr/lib/ligo/plugins` |
 | `plugins.rpc_timeout` | Each call's deadline. | 60 s |

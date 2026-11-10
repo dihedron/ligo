@@ -28,7 +28,10 @@ type TransitConfig struct {
 	JWTAudience string `yaml:"jwt_audience"`
 	Mount       string `yaml:"mount"`
 	KeyName     string `yaml:"key_name"`
-	CACertFile  string `yaml:"ca_cert_file"` // CAs trusted for address; default the system roots
+	// AuditKeyName is the ed25519 key that signs audit checkpoints (§4.3);
+	// default ligo-audit.
+	AuditKeyName string `yaml:"audit_key_name"`
+	CACertFile   string `yaml:"ca_cert_file"` // CAs trusted for address; default the system roots
 }
 
 // JWTFetcher provides the JWT-SVID ligo logs in to Vault with.

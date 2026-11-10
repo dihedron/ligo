@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -166,11 +167,18 @@ func (cmd *AuditList) Execute([]string) error {
 	return cmd.get(path(cmd.Args.Kind+"s", cmd.Args.Name, "audit"), cmd.query(), columns["audit"]...)
 }
 
-type AuditVerify struct{ Base }
+type AuditVerify struct {
+	Base
+	Full bool `long:"full" description:"Re-hash every entry, not only those after the newest signed checkpoint."`
+}
 
 func (cmd *AuditVerify) Execute([]string) error {
-	return cmd.get(path("audit", "verify"), nil, client.Column{Header: "VALID", Path: "valid"}, client.Column{Header: "ENTRIES", Path: "entries"},
-		client.Column{Header: "FIRST BROKEN", Path: "firstBroken"})
+	var query url.Values
+	if cmd.Full {
+		query = url.Values{"full": {"true"}}
+	}
+	return cmd.get(path("audit", "verify"), query, client.Column{Header: "VALID", Path: "valid"}, client.Column{Header: "ENTRIES", Path: "entries"},
+		client.Column{Header: "CHECKPOINTS", Path: "checkpoints"}, client.Column{Header: "FULL", Path: "full"}, client.Column{Header: "FIRST BROKEN", Path: "firstBroken"})
 }
 
 // Maintenance: ligo maintenance on|off|status.
