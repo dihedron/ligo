@@ -1,0 +1,7 @@
+# Why ligo? is a leaflet: sections that follow each other, not chapters on
+# their own pages (read by docs/build.sh after docs/common/defaults.yaml)
+top-level-division: section
+variables:
+  book: false
+  classoption: []
+  toc-own-page: false

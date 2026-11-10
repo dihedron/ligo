@@ -12,13 +12,14 @@ set -euo pipefail
 
 readonly PANDOC_IMAGE="docker.io/pandoc/extra:3.11.0.0-debian@sha256:fa8ccae75418449568f10f1842706aee1885ab24fba54f5aec08516260fc0166"
 readonly MERMAID_IMAGE="ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:12.0.0@sha256:fa995339034aae7e5cd4f61482248b7f5c51be355b1a6f6eda11a2bbf8401f5f"
-readonly DOCUMENTS=(setup-guide architecture operators-guide planning-guide)
+readonly DOCUMENTS=(setup-guide architecture operators-guide planning-guide why-ligo)
 
 declare -A FILE_NAMES=(
 	[setup-guide]=setup-guide
 	[architecture]=architecture-and-design
 	[operators-guide]=operators-guide
 	[planning-guide]=planning-for-deployment-guide
+	[why-ligo]=why-ligo
 )
 
 die() {
@@ -72,9 +73,12 @@ sed -e "s/\\\$version\\\$/$version/g" -e "s/\\\$date\\\$/$date/g" docs/common/fr
 for d in "${documents[@]}"; do
 	pdf="$out/ligo-${FILE_NAMES[$d]}-$version.pdf"
 	echo "docs: $pdf"
+	# a document's own defaults, if any, override the shared ones
+	own=()
+	if [[ -f "docs/$d/defaults.yaml" ]]; then own=(--defaults "docs/$d/defaults.yaml"); fi
 	# shellcheck disable=SC2046 # the chapters, in file order
 	run "$PANDOC_IMAGE" \
-		--defaults docs/common/defaults.yaml \
+		--defaults docs/common/defaults.yaml "${own[@]}" \
 		--metadata-file "docs/$d/metadata.yaml" \
 		--metadata date="Version $version · $date" \
 		--variable header-right="Version $version" \

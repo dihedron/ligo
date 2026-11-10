@@ -1,0 +1,5 @@
+# Why ligo?: title page and PDF metadata (see docs/build.sh)
+title: "Why ligo?"
+subtitle: "Workload identity, from the machine to the database, across clouds and data centres"
+author: "ligo"
+lang: en-GB
