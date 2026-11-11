@@ -124,3 +124,45 @@ func TestLocalSignerStable(t *testing.T) {
 		t.Errorf("another KEK: %v, want ErrBadSignature", err)
 	}
 }
+
+// Answers from Vault that are not an ed25519 key's, and signatures that do
+// not parse, are refused, never trusted.
+func TestTransitSignerMalformed(t *testing.T) {
+	ctx := context.Background()
+	msg := []byte("checkpoint")
+	for _, c := range []struct{ misbehave, want string }{
+		{"type", "not ed25519"},
+		{"public", "has no ed25519 public key"},
+	} {
+		t.Run(c.misbehave, func(t *testing.T) {
+			f, s := newTransitSigner(t)
+			_, sig, err := s.Sign(ctx, msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			f.misbehave = c.misbehave
+			f.mu.Unlock()
+			if err := s.Verify(ctx, s.ID(), msg, sig); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("verify: %v, want %q", err, c.want)
+			}
+		})
+	}
+	t.Run("signature", func(t *testing.T) {
+		f, s := newTransitSigner(t)
+		f.mu.Lock()
+		f.misbehave = "signature"
+		f.mu.Unlock()
+		if _, _, err := s.Sign(ctx, msg); err == nil || errors.Is(err, ErrSignerUnavailable) {
+			t.Errorf("sign: %v, want an unexpected signature", err)
+		}
+	})
+	t.Run("unparsed", func(t *testing.T) {
+		_, s := newTransitSigner(t)
+		for _, sig := range []string{"nope", "vault:v1", "vault:v:AAAA", "vault:v1:!!!", "vault:v9:AAAA"} {
+			if err := s.Verify(ctx, s.ID(), msg, sig); !errors.Is(err, ErrBadSignature) {
+				t.Errorf("%q: %v, want ErrBadSignature", sig, err)
+			}
+		}
+	})
+}

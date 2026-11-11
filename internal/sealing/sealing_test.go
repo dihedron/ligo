@@ -35,6 +35,8 @@ type fakeTransit struct {
 	unavailable bool
 	// signing holds the versions of the ed25519 audit key, v1 first
 	signing []ed25519.PrivateKey
+	// misbehave makes the audit key's answers wrong: "signature", "type" or "public"
+	misbehave string
 }
 
 func newFakeTransit(t *testing.T) (*fakeTransit, *httptest.Server) {
@@ -101,6 +103,10 @@ func (f *fakeTransit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		msg, _ := base64.StdEncoding.DecodeString(body["input"])
 		v := len(f.signing)
 		sig := ed25519.Sign(f.signing[v-1], msg)
+		if f.misbehave == "signature" {
+			reply(map[string]any{"data": map[string]any{"signature": base64.StdEncoding.EncodeToString(sig)}})
+			return
+		}
 		reply(map[string]any{"data": map[string]any{"signature": fmt.Sprintf("vault:v%d:%s", v, base64.StdEncoding.EncodeToString(sig))}})
 	case "/v1/transit/keys/ligo-audit":
 		if r.Method != http.MethodGet {
@@ -109,9 +115,17 @@ func (f *fakeTransit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		keys := map[string]any{}
 		for i, k := range f.signing {
-			keys[fmt.Sprint(i+1)] = map[string]any{"public_key": base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey))}
+			pub := base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey))
+			if f.misbehave == "public" {
+				pub = "AAAA"
+			}
+			keys[fmt.Sprint(i+1)] = map[string]any{"public_key": pub}
 		}
-		reply(map[string]any{"data": map[string]any{"type": "ed25519", "keys": keys}})
+		typ := "ed25519"
+		if f.misbehave == "type" {
+			typ = "aes256-gcm96"
+		}
+		reply(map[string]any{"data": map[string]any{"type": typ, "keys": keys}})
 	default:
 		http.NotFound(w, r)
 	}
