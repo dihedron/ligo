@@ -71,7 +71,8 @@ serve_test_audit() {
 	cli audit-admin maintenance off >/dev/null
 	out="$(cli audit-admin -o json audit verify --full)" || die "ligo audit verify --full failed"
 	jq -e '.valid' <<<"$out" >/dev/null || die "the chain does not verify after the prune: $out"
-	inner_exec ligo1 curl -fsS http://127.0.0.1:9090/metrics | grep -q '^ligo_audit_oldest_entry_timestamp_seconds ' ||
-		die "ligo_audit_oldest_entry_timestamp_seconds is not served"
+	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
+	out="$(inner_exec ligo1 curl -fsS http://127.0.0.1:9090/metrics)"
+	grep -q '^ligo_audit_oldest_entry_timestamp_seconds ' <<<"$out" || die "ligo_audit_oldest_entry_timestamp_seconds is not served"
 	info "pruned $deleted entries through $head; new entries chain onto the anchor; the full verification passes"
 }

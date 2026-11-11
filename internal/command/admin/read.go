@@ -389,7 +389,7 @@ func (cmd *AuditVerify) verifyFile() error {
 }
 
 func verifyExport(file string, keys sealing.KeySet) (audit.FileResult, error) {
-	f, err := os.Open(file)
+	f, err := os.Open(file) //nolint:gosec // the path is the operator's --file or --out
 	if err != nil {
 		return audit.FileResult{}, err
 	}
