@@ -764,8 +764,16 @@ CREATE INDEX idx_audit_resource ON audit_log (resource_type, resource_name, id D
 CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE resource_id IS NOT NULL;
 CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
+-- The one exception: audit_prune below deletes the head of audit_log, with
+-- ligo.audit_prune on for its own transaction. Setting the variable alone
+-- gives nothing: ligo_app holds no DELETE on the table.
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
+BEGIN
+    IF TG_OP = 'DELETE' AND TG_TABLE_NAME = 'audit_log' AND current_setting('ligo.audit_prune', true) = 'on' THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+END $$;
 CREATE TRIGGER trg_audit_no_update BEFORE UPDATE OR DELETE ON audit_log
     FOR EACH ROW EXECUTE FUNCTION audit_append_only();
 
@@ -782,6 +790,48 @@ CREATE TABLE audit_checkpoints (
 );
 CREATE TRIGGER trg_audit_checkpoints_no_update BEFORE UPDATE OR DELETE ON audit_checkpoints
     FOR EACH ROW EXECUTE FUNCTION audit_append_only();
+
+-- Exports of the chain an operator has taken and verified (ligo audit
+-- export): pruning never deletes past the newest one. Append-only.
+CREATE TABLE audit_exports (
+    id          BIGSERIAL PRIMARY KEY,
+    through     BIGINT NOT NULL UNIQUE,      -- an audit_checkpoints.audit_id
+    sha256      CHAR(64) NOT NULL,           -- of the exported file
+    actor       VARCHAR(255) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TRIGGER trg_audit_exports_no_update BEFORE UPDATE OR DELETE ON audit_exports
+    FOR EACH ROW EXECUTE FUNCTION audit_append_only();
+
+-- audit_prune deletes audit_log up to and including through, under the
+-- chain's lock, and returns the count. through must be a signed checkpoint
+-- (it stays, as the anchor of what remains), at or below the newest export,
+-- and signed more than 24 hours ago: the floor of storage.audit.retention,
+-- which ligo enforces on top. It runs as its owner, the migrator.
+CREATE FUNCTION audit_prune(through BIGINT) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    signed TIMESTAMPTZ;
+    deleted BIGINT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('ligo_audit_chain'));
+    SELECT created_at INTO signed FROM audit_checkpoints WHERE audit_id = through;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'audit_prune: % is not a checkpoint', through;
+    END IF;
+    IF through > (SELECT coalesce(max(e.through), 0) FROM audit_exports e) THEN
+        RAISE EXCEPTION 'audit_prune: % is past the newest export', through;
+    END IF;
+    IF signed > now() - interval '24 hours' THEN
+        RAISE EXCEPTION 'audit_prune: checkpoint % is less than 24 hours old', through;
+    END IF;
+    PERFORM set_config('ligo.audit_prune', 'on', true);
+    DELETE FROM audit_log WHERE id <= through;
+    GET DIAGNOSTICS deleted = ROW_COUNT;
+    PERFORM set_config('ligo.audit_prune', 'off', true);
+    RETURN deleted;
+END $$;
+REVOKE ALL ON FUNCTION audit_prune(BIGINT) FROM PUBLIC;
 
 -- ---------------------------------------------------------------------------
 -- Read models for workload resolution (§4.5) and network flows (ADR-16)
@@ -859,6 +909,9 @@ GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;
 GRANT SELECT, INSERT ON audit_checkpoints TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_checkpoints_id_seq TO ligo_app;
+GRANT SELECT, INSERT ON audit_exports TO ligo_app;
+GRANT USAGE ON SEQUENCE audit_exports_id_seq TO ligo_app;
+GRANT EXECUTE ON FUNCTION audit_prune(BIGINT) TO ligo_app;
 GRANT SELECT, UPDATE ON system_settings TO ligo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON notification_outbox TO ligo_app;
 GRANT USAGE ON SEQUENCE notification_outbox_id_seq TO ligo_app;

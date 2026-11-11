@@ -1,6 +1,6 @@
 # Audit and outbox pruning
 
-- **Version:** 1.0 (2026-11-11), approved
+- **Version:** 1.1 (2026-11-11), approved; 1.1: the 24-hour floor in `audit_prune`, and the T-13 residual risk stated
 - **Backlog:** items 1 (audit pruning) and 13 (outbox retention)
 - **Branch:** `feature/pruning`
 - **Main spec:** becomes 4.0.8; the sections it changes are listed at the end
@@ -79,11 +79,11 @@ Checkpoints are never deleted: one row per hour at most, which is small.
 - `ligo_app` keeps only `SELECT, INSERT` on `audit_log`. The append-only trigger stays.
 - A new function, `audit_prune(through BIGINT) RETURNS BIGINT`, is `SECURITY DEFINER` and owned by the migrator role. `ligo_app` gets `EXECUTE` on it, and nothing else changes. The function:
   1. takes the chain's lock (the one `Append` takes), so no append interleaves;
-  2. refuses unless `through` is a row of `audit_checkpoints` and `through <= max(audit_exports.through)`;
+  2. refuses unless `through` is a row of `audit_checkpoints`, `through <= max(audit_exports.through)`, and that checkpoint was signed more than 24 hours ago (the floor of `retention`, enforced in the database);
   3. sets `ligo.audit_prune = 'on'` for the transaction only (`set_config(..., true)`);
   4. deletes `audit_log` rows with `id <= through`, and returns the count.
 - The trigger function lets a `DELETE` through only when `ligo.audit_prune` is `on`. Setting the variable alone gives nothing: `ligo_app` has no `DELETE` grant.
-- What a compromised `ligo_app` can still do: prune up to the newest export early, ignoring retention. The export exists, so nothing is lost that was not archived. The threat model (T-13) says so.
+- What a compromised `ligo_app` can still do: it can insert an `audit_exports` row itself, so it can prune up to any checkpoint signed more than 24 hours ago, ignoring retention and without a real export. It cannot delete the last 24 hours, rewrite what remains, or delete checkpoints, and the gap shows: the oldest entry moves, `ligo_audit_oldest_entry_timestamp_seconds` jumps, and no `AUDIT_PRUNED` entry explains it unless the attacker writes one. Before this change it could delete nothing. The SIEM's forwarded copy is the independent record. The threat model (T-13) says so.
 
 ### 3.7 Schema (migration 001, edited in place)
 
