@@ -4688,6 +4688,8 @@ type GovCheckCommand struct {
   - `ligo_interconnect_denied_total{rule}` (rule names are bounded by the configuration)
   - `ligo_interconnect_violations` (gauge: existing bindings the current interconnection policy would deny, §8.2 rule 18; SHOULD be alerted on when non-zero)
   - `ligo_audit_chain_valid` (gauge, from a periodic verification)
+  - `ligo_audit_oldest_entry_timestamp_seconds` (gauge, set by the same pass: when the oldest entry left was written; a jump without `SYSTEM_AUDIT_PRUNED` is a deletion)
+  - `ligo_audit_pruned_entries_total` (counter, entries deleted by pruning, `storage.audit.retention`)
   - `ligo_plugin_process_restarts_total{type,realm}`
   - `ligo_break_glass_open{realm}` (gauge) and `ligo_break_glass_total{realm,operation,outcome}` (`outcome`: `ratified`, `reverted`, `revert_failed`, `review_overdue`)
   - `ligo_notifications_abandoned_total{webhook}`

@@ -4,11 +4,13 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -155,4 +157,68 @@ func TestTriggerException(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused(t, ctx, tx, "audit_exports is append-only", "SELECT set_config('ligo.audit_prune', 'on', true); DELETE FROM audit_exports")
+}
+
+// TestPrune: a prune deletes through the newest checkpoint that is signed,
+// exported, signed over 24 hours ago and whose entry is older than the
+// retention, audits SYSTEM_AUDIT_PRUNED, and leaves a chain that verifies;
+// otherwise it does nothing. A signer that cannot be reached prunes nothing.
+func TestPrune(t *testing.T) {
+	app, _ := setup(t)
+	ctx := context.Background()
+	tx, err := app.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	s := signer(t)
+	later := time.Now().Add(48 * time.Hour) // entries are written now: two days on, a 24h retention covers them
+	oldest := func() int64 {
+		t.Helper()
+		var id int64
+		if err := tx.QueryRow(ctx, "SELECT min(id) FROM audit_log").Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	first := anchorHead(t, ctx, tx, 5, 25*time.Hour)
+	if p, err := Prune(ctx, tx, s, 24*time.Hour, later); err != nil || p.Deleted != 0 {
+		t.Errorf("nothing exported: %+v, %v", p, err)
+	}
+	exported(t, ctx, tx, first)
+	if p, err := Prune(ctx, tx, s, 24*time.Hour, time.Now()); err != nil || p.Deleted != 0 {
+		t.Errorf("entries younger than the retention: %+v, %v", p, err)
+	}
+	if _, err := Prune(ctx, tx, unavailable{s}, 24*time.Hour, later); !errors.Is(err, sealing.ErrSignerUnavailable) || oldest() > first {
+		t.Errorf("signer unavailable: %v, oldest %d", err, oldest())
+	}
+	p, err := Prune(ctx, tx, s, 24*time.Hour, later)
+	if err != nil || p.Through != first || p.Export != first || p.Deleted < 5 {
+		t.Fatalf("prune: %+v, %v", p, err)
+	}
+	if oldest() != first+1 {
+		t.Errorf("oldest entry %d, want %d", oldest(), first+1)
+	}
+	var action, snapshot string
+	if err := tx.QueryRow(ctx, "SELECT action, snapshot::text FROM audit_log ORDER BY id DESC LIMIT 1").Scan(&action, &snapshot); err != nil ||
+		action != "SYSTEM_AUDIT_PRUNED" || !strings.Contains(snapshot, `"through": `+itoa(first)) {
+		t.Errorf("audited %q %s (%v)", action, snapshot, err)
+	}
+	for _, full := range []bool{false, true} {
+		if res, err := Verify(ctx, tx, s, full); err != nil || !res.Valid {
+			t.Errorf("verify (full %v) after the prune: %+v, %v", full, res, err)
+		}
+	}
+	if p, err := Prune(ctx, tx, s, 24*time.Hour, later); err != nil || p.Deleted != 0 {
+		t.Errorf("pruned again: %+v, %v", p, err)
+	}
+
+	// the newest checkpoint that qualifies wins; one signed in the last 24 hours does not
+	second := anchorHead(t, ctx, tx, 3, 25*time.Hour)
+	third := anchorHead(t, ctx, tx, 2, time.Hour)
+	exported(t, ctx, tx, third)
+	if p, err := Prune(ctx, tx, s, 24*time.Hour, later); err != nil || p.Through != second || p.Export != third {
+		t.Errorf("prune through the newest qualifying checkpoint: %+v, %v, want through %d", p, err, second)
+	}
 }

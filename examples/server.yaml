@@ -158,6 +158,8 @@ storage:
     reader_statement_timeout: 500ms
   dbos:
     workflow_retention: 168h
+  audit:
+    retention: 0s                         # 0: keep every entry; else at least 24h, and only what was exported is pruned
 
 secret_sealing:
   provider: vault-transit                 # vault-transit | local-kek (requires --insecure-dev)

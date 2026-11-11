@@ -1,6 +1,6 @@
 # Audit and outbox pruning
 
-- **Version:** 1.2 (2026-11-11), approved; 1.1: the 24-hour floor in `audit_prune`, and the T-13 residual risk stated (accepted: the SIEM copy is the authoritative record); 1.2: the export file as built, `SYSTEM_AUDIT_*` action names
+- **Version:** 1.3 (2026-11-11), approved; 1.1: the 24-hour floor in `audit_prune`, and the T-13 residual risk stated (accepted: the SIEM copy is the authoritative record); 1.2: the export file as built, `SYSTEM_AUDIT_*` action names; 1.3: `Append` after a prune of every entry
 - **Backlog:** items 1 (audit pruning) and 13 (outbox retention)
 - **Branch:** `feature/pruning`
 - **Main spec:** becomes 4.0.8; the sections it changes are listed at the end
@@ -87,6 +87,7 @@ Checkpoints are never deleted: one row per hour at most, which is small.
   2. refuses unless `through` is a row of `audit_checkpoints`, `through <= max(audit_exports.through)`, and that checkpoint was signed more than 24 hours ago (the floor of `retention`, enforced in the database);
   3. sets `ligo.audit_prune = 'on'` for the transaction only (`set_config(..., true)`);
   4. deletes `audit_log` rows with `id <= through`, and returns the count.
+- After a prune through the newest entry, the log is empty: the next `Append` chains onto the newest checkpoint's `entry_hash` (the anchor), not onto genesis.
 - The trigger function lets a `DELETE` through only when `ligo.audit_prune` is `on`. Setting the variable alone gives nothing: `ligo_app` has no `DELETE` grant.
 - What a compromised `ligo_app` can still do: it can insert an `audit_exports` row itself, so it can prune up to any checkpoint signed more than 24 hours ago, ignoring retention and without a real export. It cannot delete the last 24 hours, rewrite what remains, or delete checkpoints, and the gap shows: the oldest entry moves, `ligo_audit_oldest_entry_timestamp_seconds` jumps, and no `SYSTEM_AUDIT_PRUNED` entry explains it unless the attacker writes one. Before this change it could delete nothing. The SIEM's forwarded copy is the independent record. The threat model (T-13) says so.
 

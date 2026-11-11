@@ -243,6 +243,14 @@ type Propagation struct {
 type Storage struct {
 	Postgres Postgres `yaml:"postgres"`
 	DBOS     DBOS     `yaml:"dbos"`
+	Audit    Audit    `yaml:"audit"`
+}
+
+// Audit is audit log pruning (.specs/ligo-pruning.md §3.1).
+type Audit struct {
+	// Retention: entries older than this, and exported, are pruned; 0
+	// keeps every entry.
+	Retention time.Duration `yaml:"retention"`
 }
 
 type Postgres struct {
