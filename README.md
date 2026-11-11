@@ -2,7 +2,7 @@
 
 `ligo` (pronounced "lee-go"; Latin for "I bind") is the SPIFFE binding lifecycle service. It manages sources, targets and the bindings that link them.
 
-> **First release.** `ligo` v0.1.0 makes no compatibility promise: interfaces, configuration and the database schema may still change.
+> **Early release.** Until 1.0.0, `ligo` makes no compatibility promise: interfaces, configuration and the database schema may still change between releases. Known limits are listed under [Status](#status), and each is tracked in the [backlog](.specs/ligo-backlog.md).
 
 ## Why ligo?
 
@@ -126,19 +126,28 @@ Working:
 - the core engine and storage;
 - the plugin host;
 - change requests, and the charter that every jurisdiction complies with;
-- the binding workflows, including break-glass;
+- accounts, registered at run time through the API, the CLI or the web UI, each with its own operators and approvers, and tenancies whose namespace is checked on the platform ([.specs/ligo-tenancy.md](.specs/ligo-tenancy.md));
+- the binding workflows, including break-glass, with failures from a retryable cause retried automatically, and deletes that remove access first;
+- the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches;
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`);
 - the external plugins, each with its own package: `ligo-plugin-openldap` (identity provider), `ligo-plugin-postgres` (platform provider) and `ligo-plugin-vault` (secret store, for Vault and OpenBao).
 
-Known limits of v0.1.0:
+Known limits of v0.2.0:
 - PostgreSQL is the only platform provider, and workloads cannot connect to it with an SVID directly (`.specs/ligo-postgres-plugin.md` §10);
 - the Vault store releases a credential to one exact SPIFFE ID, so a source covering many workloads cannot use it (`.specs/ligo-vault-plugin.md` §4);
-- there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07).
+- there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07);
+- `audit_log` is never pruned: it grows with every change, about 35,000 entries in the soak's 9-hour night (backlog item 1);
+- delivered and abandoned webhook events stay in `notification_outbox` for 30 days, a period that cannot be configured (backlog item 13);
+- audit checkpoints are signed with ed25519, not with a post-quantum algorithm: neither OpenBao 2.7.1 nor Vault Community 2.2.1 offers ML-DSA keys (backlog item 14);
+- the incremental audit verification, every 10 minutes, does not detect an entry before the newest checkpoint whose content was changed without re-hashing; the full pass, at startup and every 24 hours, does (spec §4.3);
+- the Accounts web page has not yet been tested by hand in a browser (manual test A-1, backlog item 4);
+- some account scenarios are not yet tested on the lab: a group removal ending a role at the session re-check, break-glass through an account group, hostile DNs against a real OpenLDAP, and account workloads attested by a real SPIRE agent (backlog item 5);
+- `golang.org/x/crypto` is pinned at an untagged commit, the first without the `openpgp` package of GO-2026-5932, until a tagged release contains it (backlog item 3).
 
-Everything is tested on a lab that reproduces the production architecture (two SPIRE trust domains, OpenBao, LDAP, PostgreSQL and target systems; see [.specs/ligo-test-environment.md](.specs/ligo-test-environment.md)). The lab suite passes against OpenBao 2.7.1 and HashiCorp Vault 2.2.1. The lab also runs a toy echo service for trying bindings by hand from the CLI or the web UI ([.specs/ligo-echo-target.md](.specs/ligo-echo-target.md)).
+Everything is tested on a lab that reproduces the production architecture (two SPIRE trust domains, OpenBao, LDAP, PostgreSQL and target systems; see [.specs/ligo-test-environment.md](.specs/ligo-test-environment.md)). The lab suite passes against OpenBao 2.7.1 and HashiCorp Vault 2.2.1. An overnight soak ([.specs/ligo-soak.md](.specs/ligo-soak.md)) runs hours of load with faults injected one at a time and in pairs, judged by an invariant checker that is itself proven against reintroduced bugs. The lab also runs a toy echo service for trying bindings by hand from the CLI or the web UI ([.specs/ligo-echo-target.md](.specs/ligo-echo-target.md)).
 
 The specification is in [.specs/ligo_specification.md](.specs/ligo_specification.md).
 

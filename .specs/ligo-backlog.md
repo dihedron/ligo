@@ -2,13 +2,15 @@
 
 Work agreed for later, with what is known so far. An item here is not a specification: each needs its own spec, approved, before any code (AGENTS.md rule 1). Update this file when an item is added, started or done.
 
+Until 1.0.0, a release does not wait for open items: each one that affects users is listed as a known limit in the README's Status section, with its number here.
+
 | No. | Item | Recorded | Status |
 | :-- | :------------------------------------ | :--------- | :---------------- |
-| 1 | Audit pruning | 2026-11-08 | Not started |
+| 1 | Audit pruning | 2026-11-08 | Not started; known limit of v0.2.0 |
 | 2 | Pluggable authentication | 2026-11-08 | Not started |
-| 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists |
-| 4 | Manual test A-1 | 2026-11-07 | Open: in-person session |
-| 5 | Lab work for v0.2.0 | 2026-11-07 | Waiting for the lab host |
+| 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists (none on 2026-11-11, latest v0.58.0) |
+| 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
+| 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
 | 7 | Client SDKs (Go, then Python and Java) | 2026-11-08 | Not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open |
@@ -16,7 +18,7 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
-| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Not started; to decide |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Not started; to decide; known limit of v0.2.0 |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 
 ## 1. Audit pruning
@@ -78,6 +80,11 @@ Work agreed for later, with what is known so far. An item here is not a specific
 2. **New lab tests**: group removal ending a role at the session re-check, break-glass through an account group, hostile DNs against a real OpenLDAP, account workloads attested by a real SPIRE agent, and the Setup Guide's accounts example run as written.
 3. **The in-person session**, about an hour, before the soak.
 4. **The overnight soak**: a generator with a recorded seed, an invariant checker proved against reintroduced bugs, hang and slowness faults, a two-hour shakedown, then one night on Vault (with `-race` and a small pool) and one on OpenBao with all faults. It will use the next lxd-spiffe release (0.3.2 or 0.4.0), bumped before the shakedown.
+
+**Status (2026-11-11).**
+- Item 1, the release-run of `feature/realm`, passed, and the branch was merged (PR #31).
+- Item 4, the soak, is done. Night 2 (9 h, OpenBao, every fault and pairs of faults) had 0 violations. The backup and restore drill and the audit tamper drill passed after it. The code is merged in PRs #36, #37 and #38.
+- Items 2 and 3, the new lab tests and the in-person session, are postponed past v0.2.0. The README lists both as known limits.
 
 ## 6. Product examples in the Planning for Deployment Guide
 
