@@ -3,7 +3,7 @@
 - **Document Version:** `4.0.7` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
 - **Supersedes:** `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.5). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.6). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.7). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.8). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.9). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.10). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.11). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.12).
-- **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
+- **Target Stack:** Go 1.27.4+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
 ---
@@ -84,6 +84,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 | Signed checkpoints (§4.2, §4.3, T-13) | New append-only table `audit_checkpoints`. Every 1000 entries or 1 hour, `ligo` signs the `entry_hash` of the verified head with an ed25519 key outside the database. A chain rewritten with every hash recomputed, by someone with write access to the database, no longer verifies. Checkpoints have no foreign key, so they will anchor a chain whose head was pruned (backlog). |
 | Configuration and startup (§8.1, §8.2) | New key `secret_sealing.vault_transit.audit_key_name` (default `ligo-audit`): a Transit key of type `ed25519`; `ligo-sealer` needs `update` on `transit/sign/<key>` and `read` on `transit/keys/<key>`. With `local-kek`, the signing key is derived from the KEK with HKDF. Startup signs and verifies a test message, so a missing key fails startup. |
 | API and CLI (§7.2, §8.4) | `GET /v1/admin/audit/verify?full=true` and `ligo audit verify --full`; the response adds `checkpoints` and `full`; `503 unavailable` when the signing key cannot be reached, never `valid: false`. |
+| Target stack | Go 1.27.4, for GO-2026-6859 in `net/http` (an HTTP/1 server crash). |
 
 ### 0.6 Changelog from 4.0.5 (4.0.6)
 | Area | Change |
