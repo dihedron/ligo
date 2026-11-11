@@ -1,6 +1,6 @@
 # ligo — the soak
 
-- **Version:** 1.5 (2026-11-10): a rolling restart paired with a fault that keeps ligo from starting stops the roll instead of ending the scheduler. 1.4 (2026-11-09): DAMAGE, SOAK_EXCLUDE, SOAK_NIGHT, faster SVID renewal, SK-1 from the fault's end. 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
+- **Version:** 1.6 (2026-11-11): an undo that fails is tried again once the pair's other fault is undone; `lab.sh soak fault A+B`. 1.5 (2026-11-10): a rolling restart paired with a fault that keeps ligo from starting stops the roll instead of ending the scheduler. 1.4 (2026-11-09): DAMAGE, SOAK_EXCLUDE, SOAK_NIGHT, faster SVID renewal, SK-1 from the fault's end. 1.3 (2026-11-09): fault markers, recovery and drift verdicts, deferred faults. 1.2 (2026-11-08): SK-2 sampled, SK-10 liveness, the abuse action, the four-eyes mutant. 1.1: one workload per account; binding updates instead of target updates; SVID renewal
 - **Status:** approved plan, harness to build
 - **Scope:** test tooling only. Nothing here ships, and the soak adds no product code. A product change it reveals goes through the main spec, with a test first.
 
@@ -122,7 +122,7 @@ While a fault holds, a check that depends on the faulted component is recorded a
 
 ## 6. Faults
 
-`SOAK_FAULTS=single` runs the catalogue one fault at a time, in seeded order, 5 minutes apart. `all` does the same, then pairs at random. A fault ends at its duration, or at the end of the run. Every fault is undone in a `trap`, even when the run is interrupted.
+`SOAK_FAULTS=single` runs the catalogue one fault at a time, in seeded order, 5 minutes apart. `all` does the same, then pairs at random. A fault ends at its duration, or at the end of the run. Every fault is undone in a `trap`, even when the run is interrupted. An undo that fails is tried again once the pair's other fault is undone: `maintenance off` needs the database a `pg-hang` freezes.
 
 | Fault | How | Duration | Recovery limit |
 | :-- | :-- | :-- | :-- |
@@ -154,7 +154,7 @@ While a fault holds, a check that depends on the faulted component is recorded a
 4. No fault starts in the last 15 minutes of the load, so none overlaps the generator's convergence and final check.
 5. Every fault in effect is undone by a trap, even when the run is interrupted.
 
-`lab.sh soak fault NAME...|all` applies faults one at a time against the lab a soak run left, without the generator, to try each one on its own.
+`lab.sh soak fault NAME...|all` applies faults one at a time against the lab a soak run left, without the generator, to try each one on its own. `A+B` applies faults A and B together, as a pair in a run.
 
 **Deferred, not in the catalogue:**
 - **Disk full.** pg has no volume of its own in the lab, so filling its disk would fill the lab VM's and stop every container.

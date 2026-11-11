@@ -156,9 +156,15 @@ soak_apply() {
 		SOAK_UNDO+=("$name")
 	done
 	sleep "$hold"
+	local failed=()
 	for name in "$@"; do
-		soak_fault "$name" stop || warn "soak: $name did not stop"
+		soak_fault "$name" stop || failed+=("$name")
 		soak_fault_log "$dir" --arg fault "$name" --arg event stop
+	done
+	# an undo can need what the pair's other fault broke (maintenance off
+	# under pg-hang): try it again once every other fault is undone
+	for name in "${failed[@]}"; do
+		soak_fault "$name" stop || warn "soak: $name did not stop"
 	done
 	SOAK_UNDO=()
 	start="$(date +%s)"
@@ -295,7 +301,9 @@ soak_try() {
 	trap soak_undo EXIT
 	for name in "${names[@]}"; do
 		section "soak fault: $name"
-		soak_apply "$dir" "$name"
+		# a+b applies faults a and b together, as a pair in a run does
+		# shellcheck disable=SC2086
+		soak_apply "$dir" ${name//+/ }
 		sleep 30
 		soak_damage "$dir"
 	done

@@ -110,7 +110,7 @@ commands:
                             SOAK_RACE (1: ligo built with -race) and
                             SOAK_MAX_CONNS, and keeps the evidence (a clean
                             tree only, or SOAK_DEV=1 for a trial outside it)
-  soak fault NAME...|all     each fault on its own against the lab as soak run
+  soak fault NAME...|all     each fault (or A+B pair) against the lab as soak run
                             left it, with its recovery measured
   soak prove                 each mutant of test/lab/soak/mutants on a worktree, run
                             as soak run, must trip its invariant, and the build as
