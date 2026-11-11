@@ -307,7 +307,11 @@ type BreakGlass struct {
 }
 
 type Notifications struct {
-	Webhooks []Webhook `yaml:"webhooks"`
+	// How long delivered and abandoned rows stay in notification_outbox;
+	// pointers, as 0 is a valid choice: purge at once.
+	DeliveredRetention *time.Duration `yaml:"delivered_retention"` // default 24h
+	AbandonedRetention *time.Duration `yaml:"abandoned_retention"` // default 720h
+	Webhooks           []Webhook      `yaml:"webhooks"`
 }
 
 type Webhook struct {
@@ -540,6 +544,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Bindings.ExpiryWarning == 0 {
 		c.Bindings.ExpiryWarning = 168 * time.Hour
+	}
+	if c.Notifications.DeliveredRetention == nil {
+		c.Notifications.DeliveredRetention = new(24 * time.Hour)
+	}
+	if c.Notifications.AbandonedRetention == nil {
+		c.Notifications.AbandonedRetention = new(720 * time.Hour)
 	}
 }
 

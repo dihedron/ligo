@@ -6,7 +6,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 
 | No. | Item | Recorded | Status |
 | :-- | :------------------------------------ | :--------- | :---------------- |
-| 1 | Audit pruning | 2026-11-08 | Not started; known limit of v0.2.0 |
+| 1 | Audit pruning | 2026-11-08 | In progress on `feature/pruning` (`.specs/ligo-pruning.md`); known limit of v0.2.0 |
 | 2 | Pluggable authentication | 2026-11-08 | Not started |
 | 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists (none on 2026-11-11, latest v0.58.0) |
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
@@ -18,8 +18,9 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
-| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Not started; to decide; known limit of v0.2.0 |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Decided 2026-11-11: two settings, 24h delivered, 30 days abandoned; on `feature/pruning`; known limit of v0.2.0 |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
+| 15 | Change request pruning | 2026-11-11 | Not started |
 
 ## 1. Audit pruning
 
@@ -252,3 +253,11 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 `ligo` supports both OpenBao and Vault Community, so it cannot depend on a key type only Vault Enterprise has.
 
 **Direction.** When OpenBao or Vault Community offers ML-DSA in Transit, sign each checkpoint with both keys, `ligo-audit` (ed25519) and a second ML-DSA key, and store both signatures. A checkpoint is valid only if both verify, so it is as strong as the stronger of the two. The schema does not change: `key_id` and `signature` are text. The `local-kek` signer can derive an ML-DSA key from the KEK as it does the ed25519 one.
+
+## 15. Change request pruning
+
+**Why.** `change_requests` only grows, as `audit_log` did. Every request, approved, rejected, withdrawn or expired, stays with its revisions, approvals and comments. Audit pruning (item 1) does not cover it: the user decided on 2026-11-11 to keep it out of that branch.
+
+**What makes it hard.** Audit entries refer to change requests by `change_request_id`, and resources keep the request that last changed them. Deleting a request must not leave an audit entry or a resource pointing at nothing that explains it, unless the entry itself was pruned or exported first.
+
+**Direction.** Prune only closed requests older than a retention, and only when every audit entry that names them has been pruned (item 1's boundary), so an exported audit file is the remaining record. Retired resources (001: never deleted) are a separate question.

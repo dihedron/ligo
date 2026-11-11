@@ -2939,7 +2939,7 @@ Every 30s, one replica, holding `pg_try_advisory_lock(hashtext('ligo_sweeper'))`
   - Nothing is retried while maintenance mode is on.
   - There is no limit on the number of retries: a revocation must finish, and a failed apply keeps serving its last good snapshot meanwhile.
   - **Rationale (4.0.6).** DBOS resumes a workflow that a crash interrupted, but not an attempt that ended in a recorded failure, and the in-step retry of §6.1 gives up after about 2 minutes. Before 4.0.6, an outage longer than that left every operation it interrupted failed until an operator noticed: the soak of 2026-11-09 left 45 revocations with their access in place for hours.
-- **Notification dispatcher** (singleton, advisory lock `ligo_notifier`): deliver due `notification_outbox` rows (§7.5); purge delivered or abandoned rows after 30 days.
+- **Notification dispatcher** (singleton, advisory lock `ligo_notifier`): deliver due `notification_outbox` rows (§7.5); purge delivered rows after `notifications.delivered_retention` (default 24h) and abandoned rows after `notifications.abandoned_retention` (default 720h).
 
 ### 6.4 Apply and reapply workflow (`ApplyBindingWorkflow`)
 

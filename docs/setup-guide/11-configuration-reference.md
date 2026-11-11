@@ -231,6 +231,8 @@
 | `break_glass.policies.max_open` | How many may be open. | At least 1 |
 | `break_glass.policies.warn_before` | When the expiry is announced. | |
 | `notifications` | Webhooks. | |
+| `notifications.delivered_retention` | How long a delivered event's row stays in the outbox. `0` purges it in the pass that delivered it. | `24h` |
+| `notifications.abandoned_retention` | How long an abandoned event's row stays, for investigation. | `720h` |
 | `notifications.webhooks` | Each receives the events it names, signed. | |
 | `notifications.webhooks.name` | Its name. | |
 | `notifications.webhooks.url` | `https://` only. | |

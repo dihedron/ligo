@@ -417,6 +417,9 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 		}
 		c.patterns(16, fmt.Sprintf("break_glass.policies[%d]", i), p.Jurisdictions)
 	}
+	if n := cfg.Notifications; *n.DeliveredRetention < 0 || *n.AbandonedRetention < 0 {
+		c.failf(14, "notifications: delivered_retention and abandoned_retention must not be negative")
+	}
 	for _, w := range cfg.Notifications.Webhooks {
 		if u, err := url.Parse(w.URL); err != nil || u.Scheme != "https" || u.Host == "" {
 			c.failf(14, "webhook %q: url must be https://", w.Name)

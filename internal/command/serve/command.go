@@ -297,6 +297,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	dispatcher.DeliveredRetention, dispatcher.AbandonedRetention = *cfg.Notifications.DeliveredRetention, *cfg.Notifications.AbandonedRetention
 	run(dispatcher.Run)
 	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, signer) })
 	run(func(ctx context.Context) { realms.WatchConflicts(ctx, log, time.Minute) })
