@@ -36,6 +36,8 @@ Checkpoints also keep verification cheap. One replica verifies every 10 minutes 
 
 The log is pruned only if a retention is set, and only through a checkpoint that an operator has exported. `ligo audit export` writes the chain to a file, with the checkpoints and the public keys, verifies it and records it; the file verifies later without `ligo`. Once a day the verifying replica deletes the exported entries older than the retention, through the newest checkpoint that qualifies, which stays as the anchor of what remains. The application still has no delete privilege: deletion goes through one database function, owned by the migrator, that refuses anything but an exported checkpoint signed over a day ago.
 
+Change requests follow the audit log: a closed request goes, after its own retention, only once no audit entry names it, and the export carries it, with its sides and approved payload, checked against its hash. A binding keeps its parties' jurisdictions on its own row, so who sees it never depends on old requests.
+
 ## Notifications
 
 A transactional outbox: the row commits with the event, so an event is never lost and never announced unless it committed. A webhook failure never delays the change. Delivery is at least once, signed with HMAC, retried and abandoned after 24 hours. Delivered rows go after a day by default, abandoned ones after 30 days; both are settings.

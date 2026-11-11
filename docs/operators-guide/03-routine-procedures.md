@@ -87,7 +87,7 @@ The audit log is kept whole until you set `storage.audit.retention` (at least `2
 ligo audit export --out /archive/ligo-audit-$(date +%F).jsonl
 ```
 
-The command writes the chain from its oldest entry through the newest signed checkpoint, verifies the file, and records the export with the file's SHA-256 (`SYSTEM_AUDIT_EXPORTED`). The file must not exist. Store it where your records policy says, with its hash. It is the archive: once pruned, those entries are gone from the database.
+The command writes the chain from its oldest entry through the newest signed checkpoint, with every change request its entries name (sides and approved payload included), verifies the file, and records the export with the file's SHA-256 (`SYSTEM_AUDIT_EXPORTED`). The file must not exist. Store it where your records policy says, with its hash. It is the archive: once pruned, those entries are gone from the database.
 
 To check an archived file later, without `ligo` or its database, take the public keys from Vault, not from the file:
 
@@ -99,6 +99,8 @@ ligo audit verify --file /archive/ligo-audit-2026-11-30.jsonl --public-key vault
 A file that does not verify prints the first broken entry and exits non-zero.
 
 Once a day, after a valid verification, the verifying replica deletes the entries older than the retention, through the newest checkpoint that is exported and was signed over a day ago, and writes `SYSTEM_AUDIT_PRUNED`. Nothing is pruned when no export covers old enough entries, or while the signing key cannot be reached.
+
+Change requests are pruned the same way once you set `storage.change_requests.retention` (at least `24h`): after the audit prune, the closed requests decided before the retention go, but only those no audit entry still names, so an export holds them. A request a binding still relies on (its open break-glass change, or a chain of dependencies and reverts) stays. Who can see a binding does not change: its parties are kept on the binding.
 
 If an archived file is lost after its entries were pruned, those entries survive only in the SIEM's forwarded copy and in backups taken before the prune. Export again: the new file starts at the oldest entry left, chained onto the checkpoint below it.
 
