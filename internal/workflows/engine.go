@@ -281,7 +281,7 @@ func (e *Engine) Retry(ctx context.Context, bindingID uuid.UUID, actor string) (
 		err := tx.QueryRow(ctx, `UPDATE bindings SET attempt = attempt + 1, current_step = 'INIT', status_message = '',
 			phase = CASE phase WHEN 'FAILED' THEN 'PROVISIONING'::binding_phase ELSE 'DELETING'::binding_phase END,
 			rotate_static_secrets = (phase = 'FAILED') OR rotate_static_secrets,
-			last_transition_at = now(), updated_at = now(), updated_by = $2,
+			last_transition_at = now(), updated_at = now(), updated_by = $2, next_retry_at = NULL,
 			workflow_id = format('ligo:%s:%s:r%s:a%s', lower(operation::text), id, revision, attempt + 1)
 			WHERE id = $1 AND phase IN ('FAILED', 'DELETE_FAILED') RETURNING name, operation, revision, attempt`, bindingID, actor).Scan(&name, &op, &revision, &attempt)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -298,6 +298,17 @@ func (e *Engine) Retry(ctx context.Context, bindingID uuid.UUID, actor string) (
 		return nil, err
 	}
 	return e.Start(ctx, bindingID)
+}
+
+// retryDelay is how long after its attempt-th failure a binding is retried
+// automatically: 15 s, doubling to 60 s, short enough that access removed by a
+// delete returns soon after the outage that stopped it (§6.3).
+func retryDelay(attempt int64) time.Duration {
+	d := 15 * time.Second
+	for i := int64(1); i < attempt && d < time.Minute; i++ {
+		d *= 2
+	}
+	return min(d, time.Minute)
 }
 
 // fence is what every write of a workflow is fenced on (ADR-08).
@@ -423,9 +434,15 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 		if start, err = attemptStarted(ctx, tx, f); err != nil {
 			return err
 		}
+		// a retryable cause is retried by the sweeper (§6.3); a final one waits for an operator
+		var retry any
+		if cause.Retryable {
+			retry = retryDelay(in.Attempt).String()
+		}
 		tag, err := tx.Exec(ctx, `UPDATE bindings SET phase = $5, current_step = $3, status_message = left($4, 2048),
-			last_transition_at = now(), updated_at = now() WHERE id = $1 AND workflow_id = $2 AND phase = $6`,
-			f.bindingID, f.workflowID, step, cause.Error(), to, from)
+			next_retry_at = now() + $7::interval, last_transition_at = now(), updated_at = now()
+			WHERE id = $1 AND workflow_id = $2 AND phase = $6`,
+			f.bindingID, f.workflowID, step, cause.Error(), to, from, retry)
 		if err != nil {
 			return err
 		}

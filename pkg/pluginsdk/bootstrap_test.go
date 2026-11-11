@@ -142,6 +142,57 @@ func TestBootstrapDBStatic(t *testing.T) {
 	}
 }
 
+// TestBootstrapStale: when Vault cannot be read at refresh time, the last good
+// credential is kept: a KV one until a read succeeds, a leased one until its
+// lease ends. Vault is not asked again for a while after a failure, so that an
+// outage does not slow every call.
+func TestBootstrapStale(t *testing.T) {
+	v := newFakeVault(t)
+	b, err := NewBootstrapCredential(bootstrapConfig(v), fixedJWT("the-jwt"), v.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	b.now = func() time.Time { return now }
+	ctx := context.Background()
+	if _, err := b.Get(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v.refuse = true
+	now = now.Add(time.Hour)
+	if c, err := b.Get(ctx); err != nil || c.Password.Reveal() != "kv-pass-1" {
+		t.Fatalf("KV with Vault refusing: (%+v, %v), want the last good credential", c, err)
+	}
+	v.refuse = false
+	now = now.Add(staleRetry - time.Second)
+	if c, _ := b.Get(ctx); c.Password.Reveal() != "kv-pass-1" {
+		t.Error("Vault asked again before staleRetry")
+	}
+	now = now.Add(time.Second)
+	if c, _ := b.Get(ctx); c.Password.Reveal() != "kv-pass-2" {
+		t.Error("not read again once Vault answers")
+	}
+
+	cfg := bootstrapConfig(v)
+	cfg.KVPath, cfg.DBStaticRole = "", "pg-admin"
+	if b, err = NewBootstrapCredential(cfg, fixedJWT("the-jwt"), v.Client()); err != nil {
+		t.Fatal(err)
+	}
+	b.now = func() time.Time { return now }
+	if _, err := b.Get(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v.refuse = true
+	now = now.Add(90 * time.Second) // past the renewal at 80, within the lease of 100
+	if _, err := b.Get(ctx); err != nil {
+		t.Errorf("lease not over: %v", err)
+	}
+	now = now.Add(staleRetry + 10*time.Second) // past the lease
+	if _, err := b.Get(ctx); err == nil {
+		t.Error("a credential past its lease was returned")
+	}
+}
+
 // TestBootstrapErrors: a refused login, a missing secret and a malformed
 // one fail, and no error carries the response or the token.
 func TestBootstrapErrors(t *testing.T) {

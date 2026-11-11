@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,8 +55,10 @@ type fake struct {
 	unhealthy    error          // Health fails with it
 	cleanups     []string       // the stages cleaned, in order
 	cleanupFail  map[string]int // stage: how many cleanups fail before one succeeds
+	retryable    bool           // the cleanups that fail say retryable, as an outage would
 	skipped      map[string]bool
-	laterPresent []string // INV-04 violations: a later stage's row still there
+	laterPresent []string // INV-04 violations: the row of a stage cleaned before still there
+	order        []string // INV-04's order the test expects; default: the target first
 	principals   []string // the principal name each stage received
 }
 
@@ -131,13 +134,17 @@ func (f *fake) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecretSt
 	return &pluginv1.EnsureSecretStoreResponse{FinalizedClientAuthJson: []byte(`{"secretPath":"kv/data/bindings/x"}`)}, nil
 }
 
-// cleanup records a stage's cleanup, checks that every later stage's row is
-// gone (INV-04), and fails while cleanupFail says so.
-func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage string, later ...string) (bool, error) {
+// cleanup records a stage's cleanup, checks that the row of every stage
+// cleaned before it is gone (INV-04), and fails while cleanupFail says so.
+func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage string) (bool, error) {
 	f.mu.Lock()
 	f.principals = append(f.principals, b.GetDerivedPrincipalName())
+	order := f.order
 	f.mu.Unlock()
-	for _, l := range later {
+	if order == nil {
+		order = []string{"TARGET", "SECRET_STORE", "IDENTITY"}
+	}
+	for _, l := range order[:slices.Index(order, stage)] {
 		var n int
 		_ = f.db.QueryRow(ctx, "SELECT count(*) FROM binding_stage_state WHERE binding_id = $1 AND stage = $2", b.GetBindingId(), l).Scan(&n)
 		if n > 0 {
@@ -148,6 +155,9 @@ func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage st
 	defer f.mu.Unlock()
 	if f.cleanupFail[stage] > 0 {
 		f.cleanupFail[stage]--
+		if f.retryable {
+			return false, pluginsdk.Error(codes.Unavailable, "STORE_UNAVAILABLE", "the provider cannot be reached", true)
+		}
 		return false, pluginsdk.Error(codes.PermissionDenied, "CLEANUP_DENIED", "cleanup refused", false)
 	}
 	f.cleanups = append(f.cleanups, stage)
@@ -155,12 +165,12 @@ func (f *fake) cleanup(ctx context.Context, b *pluginv1.BindingContext, stage st
 }
 
 func (f *fake) CleanupIdentity(ctx context.Context, r *pluginv1.CleanupIdentityRequest) (*pluginv1.CleanupIdentityResponse, error) {
-	skipped, err := f.cleanup(ctx, r.GetBinding(), "IDENTITY", "TARGET", "SECRET_STORE")
+	skipped, err := f.cleanup(ctx, r.GetBinding(), "IDENTITY")
 	return &pluginv1.CleanupIdentityResponse{SkippedNotOwner: skipped}, err
 }
 
 func (f *fake) CleanupTarget(ctx context.Context, r *pluginv1.CleanupTargetRequest) (*pluginv1.CleanupTargetResponse, error) {
-	skipped, err := f.cleanup(ctx, r.GetBinding(), "TARGET", "SECRET_STORE")
+	skipped, err := f.cleanup(ctx, r.GetBinding(), "TARGET")
 	return &pluginv1.CleanupTargetResponse{SkippedNotOwner: skipped}, err
 }
 

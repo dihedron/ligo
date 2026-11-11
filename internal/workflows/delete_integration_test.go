@@ -58,9 +58,10 @@ func (v *env) active(t *testing.T, name string) uuid.UUID {
 	return id
 }
 
-// TestDelete: the stages are cleaned in reverse order, each after the later
-// ones' rows are gone (INV-04); the binding is gone, its workloads lost it
-// when the delete committed (AC-12), and a foreign resource is skipped.
+// TestDelete: the target is cleaned first, then the store, then the identity,
+// each after the rows of those before it are gone (INV-04); the binding is
+// gone, its workloads lost it when the delete committed (AC-12), and a foreign
+// resource is skipped.
 func TestDelete(t *testing.T) {
 	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
 	v.fake.skipped = map[string]bool{"TARGET": true}
@@ -84,11 +85,31 @@ func TestDelete(t *testing.T) {
 	if out, err := wait(t, h); out != "DELETED" || err != nil {
 		t.Fatalf("delete: %q, %v", out, err)
 	}
-	if !slices.Equal(v.fake.cleanups, []string{"SECRET_STORE", "TARGET", "IDENTITY"}) || len(v.fake.laterPresent) > 0 {
+	if !slices.Equal(v.fake.cleanups, []string{"TARGET", "SECRET_STORE", "IDENTITY"}) || len(v.fake.laterPresent) > 0 {
 		t.Errorf("cleanups %v; INV-04 %v", v.fake.cleanups, v.fake.laterPresent)
 	}
 	if v.exists(t, id) || v.audited(t, id, "DELETE_COMPLETED") != 1 || v.audited(t, id, "CLEANUP_SKIPPED_NOT_OWNER") != 1 {
 		t.Errorf("binding left, or audit missing")
+	}
+}
+
+// TestDeleteDynamicOrder: with dynamic credentials, Vault's leases are the
+// access, so the store is cleaned first, then the target (INV-04, ADR-02): a
+// role Vault's leases depend on is not dropped under them.
+func TestDeleteDynamicOrder(t *testing.T) {
+	v := setup(t, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC)
+	v.fake.order = []string{"SECRET_STORE", "TARGET", "IDENTITY"}
+	id := v.active(t, "")
+	v.deleting(t, id)
+	h, err := v.engine.Start(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := wait(t, h); out != "DELETED" || err != nil {
+		t.Fatalf("delete: %q, %v", out, err)
+	}
+	if !slices.Equal(v.fake.cleanups, v.fake.order) || len(v.fake.laterPresent) > 0 {
+		t.Errorf("cleanups %v; INV-04 %v", v.fake.cleanups, v.fake.laterPresent)
 	}
 }
 
@@ -141,7 +162,7 @@ func TestDeleteRetry(t *testing.T) {
 	if out, err := wait(t, h); out != "DELETED" || err != nil {
 		t.Fatalf("retry: %q, %v", out, err)
 	}
-	if !slices.Equal(v.fake.cleanups, []string{"SECRET_STORE", "TARGET", "IDENTITY"}) || v.exists(t, id) {
+	if !slices.Equal(v.fake.cleanups, []string{"TARGET", "SECRET_STORE", "IDENTITY"}) || v.exists(t, id) {
 		t.Errorf("cleanups %v", v.fake.cleanups)
 	}
 }

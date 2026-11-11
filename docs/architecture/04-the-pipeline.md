@@ -29,7 +29,7 @@ Only after every stage succeeds does the transaction promote the **active snapsh
 
 ## Deleting
 
-Deletion runs in reverse, Stage 3 to 1, driven by recorded state, not by the plan. Visibility is removed in the transaction that starts it, so the API is right immediately. Cleanup succeeds on what is absent and skips what it does not own, reporting `skipped_not_owner`, which is audited.
+Deletion removes the access first, driven by recorded state, not by the plan: Stage 2, the target's role, then Stage 3, the store, then Stage 1; with dynamic credentials, whose access is the store's leases, Stage 3 goes first. An outage of the store therefore cannot keep a static credential's access alive. A delete that fails on a retryable cause is retried by the sweeper until it completes. Visibility is removed in the transaction that starts it, so the API is right immediately. Cleanup succeeds on what is absent and skips what it does not own, reporting `skipped_not_owner`, which is audited.
 
 `postgres.v1` also ends the role's sessions, so access ends with the revocation.
 

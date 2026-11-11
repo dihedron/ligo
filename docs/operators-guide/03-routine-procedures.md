@@ -22,7 +22,7 @@ The reconciler also rotates each platform's static secrets at its `rotation_inte
 
 ## Retrying a failure
 
-Read the binding's message, fix the cause (*Error reference*), then `ligo retry <binding>`. It is a new attempt, which rotates static secrets.
+Read the binding's message. A retryable cause needs nothing from you: `ligo` retries the binding by itself once the cause is gone (`ligo audit list` shows `system:auto-retry`). For a final cause, fix it (*Error reference*), then `ligo retry <binding>`. Either way a retry is a new attempt, which rotates static secrets.
 
 ## Revoking
 

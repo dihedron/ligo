@@ -76,17 +76,25 @@ type JWTSource interface {
 // before it is read again.
 const kvRefresh = 5 * time.Minute
 
+// staleRetry is how long the last good credential is used, after a failed
+// refresh, before Vault is asked again.
+const staleRetry = 30 * time.Second
+
 // BootstrapCredential reads an instance's privileged credential from Vault
-// with its JWT-SVID, and reads it again at 80% of its lease (§5.5).
+// with its JWT-SVID, and reads it again at 80% of its lease (§5.5). When the
+// refresh fails, the last good credential stays in use, until its lease ends
+// for a leased one: an outage of Vault or SPIRE must not stop a plugin from
+// removing access.
 type BootstrapCredential struct {
 	cfg    BootstrapCredentialConfig
 	jwt    JWTSource
 	client *http.Client
 	now    func() time.Time
 
-	mu    sync.Mutex
-	cred  Credential
-	until time.Time
+	mu      sync.Mutex
+	cred    Credential
+	until   time.Time // when to read it again
+	expires time.Time // its lease's end; zero for KV, which has none
 }
 
 // NewBootstrapCredential validates cfg; client carries the TLS trust for
@@ -102,7 +110,8 @@ func NewBootstrapCredential(cfg BootstrapCredentialConfig, jwt JWTSource, client
 	return &BootstrapCredential{cfg: cfg, jwt: jwt, client: client, now: time.Now}, nil
 }
 
-// Get returns the credential, read again from Vault when it is due.
+// Get returns the credential, read again from Vault when it is due; if that
+// read fails, the last good one while its lease lasts.
 func (b *BootstrapCredential) Get(ctx context.Context) (Credential, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -110,9 +119,28 @@ func (b *BootstrapCredential) Get(ctx context.Context) (Credential, error) {
 	if b.cred.Username != "" && now.Before(b.until) {
 		return b.cred, nil
 	}
+	cred, until, expires, err := b.read(ctx, now)
+	if err != nil {
+		if b.cred.Username != "" && (b.expires.IsZero() || now.Before(b.expires)) {
+			slog.Warn("the bootstrap credential cannot be refreshed: the last good one stays in use", "error", err)
+			b.until = now.Add(staleRetry)
+			return b.cred, nil
+		}
+		return Credential{}, err
+	}
+	b.cred, b.until, b.expires = cred, until, expires
+	return b.cred, nil
+}
+
+// read reads the credential from Vault, with when to read it again and when
+// its lease ends (zero for KV).
+func (b *BootstrapCredential) read(ctx context.Context, now time.Time) (Credential, time.Time, time.Time, error) {
+	none := func(err error) (Credential, time.Time, time.Time, error) {
+		return Credential{}, time.Time{}, time.Time{}, err
+	}
 	jwt, err := b.jwt.FetchJWT(ctx)
 	if err != nil {
-		return Credential{}, fmt.Errorf("bootstrap credential: %w", err)
+		return none(fmt.Errorf("bootstrap credential: %w", err))
 	}
 	var login struct {
 		Auth struct {
@@ -121,7 +149,7 @@ func (b *BootstrapCredential) Get(ctx context.Context) (Credential, error) {
 	}
 	body, _ := json.Marshal(map[string]string{"role": b.cfg.Role, "jwt": jwt})
 	if err := b.call(ctx, http.MethodPost, "auth/"+b.cfg.AuthMount+"/login", "", body, &login); err != nil {
-		return Credential{}, fmt.Errorf("bootstrap credential: vault login: %w", err)
+		return none(fmt.Errorf("bootstrap credential: vault login: %w", err))
 	}
 	var secret struct {
 		Data struct {
@@ -137,19 +165,19 @@ func (b *BootstrapCredential) Get(ctx context.Context) (Credential, error) {
 		path = "database/static-creds/" + b.cfg.DBStaticRole
 	}
 	if err := b.call(ctx, http.MethodGet, path, login.Auth.ClientToken, nil, &secret); err != nil {
-		return Credential{}, fmt.Errorf("bootstrap credential: reading %s: %w", path, err)
+		return none(fmt.Errorf("bootstrap credential: reading %s: %w", path, err))
 	}
 	cred := Credential{Username: secret.Data.Data["username"], Password: Secret(secret.Data.Data["password"])}
-	until := now.Add(kvRefresh)
+	until, expires := now.Add(kvRefresh), time.Time{}
 	if b.cfg.DBStaticRole != "" {
+		ttl := time.Duration(secret.Data.TTL) * time.Second
 		cred = Credential{Username: secret.Data.Username, Password: Secret(secret.Data.Password)}
-		until = now.Add(time.Duration(secret.Data.TTL) * time.Second * 8 / 10)
+		until, expires = now.Add(ttl*8/10), now.Add(ttl)
 	}
 	if cred.Username == "" || cred.Password == "" {
-		return Credential{}, fmt.Errorf("bootstrap credential: %s has no username and password", path)
+		return none(fmt.Errorf("bootstrap credential: %s has no username and password", path))
 	}
-	b.cred, b.until = cred, until
-	return b.cred, nil
+	return cred, until, expires, nil
 }
 
 // call sends one Vault request and decodes its JSON answer, at most

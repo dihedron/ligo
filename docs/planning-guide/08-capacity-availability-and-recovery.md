@@ -59,10 +59,12 @@ SPIRE is needed by `ligo`, its plugins and every workload. Its availability is c
 | :------------------------ | :-------------------------------------- | :-------------------------------------- |
 | One replica's host | Its in-flight workflows, until recovered | Everything else, through the other replicas |
 | The database | Changes; reads after `max_staleness` | Reads from cache until `max_staleness`; workloads' existing credentials |
-| Vault or OpenBao | Provisioning; workloads reading credentials | Workloads holding credentials; changes that need no sealing |
+| Vault or OpenBao | Provisioning; workloads reading credentials | Workloads holding credentials; changes that need no sealing; removing access on the targets |
 | The directory | People signing in; break-glass | Automation; workloads |
-| A SPIRE server | New and renewed SVIDs, after their lifetime | Everything, until SVIDs expire |
+| A SPIRE server | New and renewed SVIDs, after their lifetime: JWT-SVIDs often last only minutes, and the plugins need them for Vault | Everything, until SVIDs expire; plugins keep their last bootstrap credential |
 | A site | Everything placed only there | What has a copy elsewhere (below) |
+
+When the failed dependency returns, `ligo` finishes on its own what the outage interrupted: a binding whose attempt failed on a retryable cause is retried every minute or so until it succeeds. No one has to retry them by hand, and a revocation interrupted by an outage of the store or SPIRE completes once it is over. Plan for the length of an outage, not for its clean-up.
 
 ## Several sites
 

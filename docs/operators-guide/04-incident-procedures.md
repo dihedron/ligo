@@ -27,11 +27,11 @@ If a revert fails, the emergency state stays served until you retry it: `BREAK_G
 
 ## A plugin or platform is down
 
-Workloads keep the last good snapshot. Retryable errors are retried within the step, up to `plugins.retry`, then the binding is `FAILED`. Once the platform is back, `ligo retry <binding>`; propagations resume by themselves. A plugin process that dies is restarted, with a back-off.
+Workloads keep the last good snapshot. Retryable errors are retried within the step, up to `plugins.retry`, then the binding is `FAILED`, and retried by itself every minute or so until the platform is back; propagations resume by themselves too. `ligo retry <binding>` starts one at once. A plugin process that dies is restarted, with a back-off.
 
 ## Vault or OpenBao is down
 
-`ligo` cannot seal secrets: an attempt that needs to fails with `SEALED_SECRET_UNAVAILABLE`. A new replica cannot start, and logs the reason; running replicas keep serving. Workloads cannot read credentials from the store until it is back. Unseal it, then `ligo retry <binding>`: a retry is a new attempt, which rotates.
+`ligo` cannot seal secrets: an attempt that needs to fails with `SEALED_SECRET_UNAVAILABLE`. A new replica cannot start, and logs the reason; running replicas keep serving. Workloads cannot read credentials from the store until it is back. Unseal it: the bindings that failed meanwhile are retried by themselves within a minute or so, each a new attempt, which rotates. Revocations are not held up by it: a delete removes the target's role before it cleans the store.
 
 This was tested by stopping both backends under real bindings.
 

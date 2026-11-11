@@ -55,7 +55,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 
 ## Plugin errors
 
-A binding's `status.message` gives the code. A retryable error is retried within the step, then the binding is `FAILED`; after that, or for a terminal error, fix the cause and `ligo retry`. Messages are fixed: backends' texts can echo statements or data, and are never copied.
+A binding's `status.message` gives the code. A retryable error is retried within the step, then the binding is `FAILED` and retried by itself, as `system:auto-retry`, until the cause is gone. For a terminal error, fix the cause and `ligo retry`. Messages are fixed: backends' texts can echo statements or data, and are never copied.
 
 ::: landscape
 

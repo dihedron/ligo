@@ -47,7 +47,7 @@ Run `ligo charter check -f <manifest>`: it shows the jurisdictions, the name pre
 
 - **`PROVISIONING` for long.** Its replica may be down: `ligo executors list`. See *A replica died*.
 - **Drift keeps returning.** Someone changes the role by hand. The reconciler repairs it; `ligo audit list` shows `REAPPLY_STARTED`.
-- **`DELETE_FAILED`.** Read the code. `ROLE_OWNS_OBJECTS` is the usual one: reassign the objects, then `ligo retry`.
+- **`DELETE_FAILED`.** Read the code. A retryable one, such as `VAULT_UNAVAILABLE`, clears by itself once the dependency is back. `ROLE_OWNS_OBJECTS`, which is final, is the usual one that does not: reassign the objects, then `ligo retry`.
 
 ## The web UI
 
