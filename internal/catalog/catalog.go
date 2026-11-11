@@ -226,14 +226,12 @@ type Binding struct {
 }
 
 // Binding reads a binding visible to the caller: a role on any of its
-// three jurisdictions, or on the jurisdiction of one of its additional parties, taken
-// from the sides of its change requests (§7.2.4).
+// three jurisdictions, or on the jurisdiction of one of its additional parties, kept
+// on the binding from the sides of its change requests (§7.2.4).
 func (r *Reader) Binding(ctx context.Context, c changerequests.Caller, name string) (*Binding, error) {
 	b := &Binding{Name: name}
 	err := r.DB.QueryRow(ctx, `SELECT b.id, s.name, t.name, b.access_level, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction, b.phase,
-		b.revision, coalesce((SELECT array_agg(DISTINCT sd.jurisdiction) FROM change_requests cr
-			JOIN change_request_sides sd ON sd.change_request_id = cr.id
-			WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}')
+		b.revision, b.party_jurisdictions::text[]
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id WHERE b.name = $1`, name).
 		Scan(&b.ID, &b.Source, &b.Target, &b.AccessLevel, &b.SourceJurisdiction, &b.TargetJurisdiction, &b.PlatformJurisdiction, &b.Phase, &b.Revision, &b.PartyJurisdictions)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Grants.Sees(append([]string{b.SourceJurisdiction, b.TargetJurisdiction, b.PlatformJurisdiction}, b.PartyJurisdictions...)...) {

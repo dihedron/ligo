@@ -103,8 +103,7 @@ const viewQuery = `SELECT b.id, b.name, b.realm, b.source_jurisdiction, b.target
 	b.break_glass_cr_id, coalesce(g.requested_by, ''), coalesce(g.external_approval_ref, ''), b.break_glass_expires_at,
 	b.source_revision, b.target_revision, b.source_trust_domain, b.source_svid_regex, b.requested_spec,
 	coalesce(b.active_source_svid_regex, ''), b.active_since, b.active_auth_config, b.active_spec,
-	coalesce((SELECT array_agg(DISTINCT sd.jurisdiction) FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
-		WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}')
+	b.party_jurisdictions::text[]
 	FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 	LEFT JOIN change_requests g ON g.id = b.break_glass_cr_id`
 
