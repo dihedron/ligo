@@ -864,6 +864,39 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION audit_prune(BIGINT) FROM PUBLIC;
 
+-- change_requests_prune deletes, with their sides, the closed requests
+-- decided before older_than (at least 24 hours ago) that no audit entry
+-- names (their entries were pruned, so an export holds them), that no
+-- binding holds as its open break-glass change, and that no request which
+-- stays depends on or reverts: a chain goes whole or not at all
+-- (.specs/ligo-cr-pruning.md §4.3). It runs as its owner, the migrator:
+-- ligo_app has no DELETE on change_requests.
+CREATE FUNCTION change_requests_prune(older_than TIMESTAMPTZ) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    ids UUID[];
+    kept UUID[];
+    deleted BIGINT;
+BEGIN
+    IF older_than > now() - interval '24 hours' THEN
+        RAISE EXCEPTION 'change_requests_prune: % is less than 24 hours ago', older_than;
+    END IF;
+    SELECT coalesce(array_agg(c.id), '{}') INTO ids FROM change_requests c
+    WHERE c.status <> 'PENDING' AND c.decided_at < older_than
+      AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.change_request_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id);
+    LOOP -- drop what a request that stays still refers to, until nothing changes
+        kept := ARRAY(SELECT x FROM unnest(ids) AS x WHERE NOT EXISTS (
+            SELECT 1 FROM change_requests r WHERE (r.depends_on_cr_id = x OR r.reverts_cr_id = x) AND NOT r.id = ANY (ids)));
+        EXIT WHEN cardinality(kept) = cardinality(ids);
+        ids := kept;
+    END LOOP;
+    DELETE FROM change_requests WHERE id = ANY (ids);
+    GET DIAGNOSTICS deleted = ROW_COUNT;
+    RETURN deleted;
+END $$;
+REVOKE ALL ON FUNCTION change_requests_prune(TIMESTAMPTZ) FROM PUBLIC;
+
 -- ---------------------------------------------------------------------------
 -- Read models for workload resolution (§4.5) and network flows (ADR-16)
 -- ---------------------------------------------------------------------------
@@ -933,8 +966,8 @@ CREATE INDEX idx_outbox_due ON notification_outbox (next_attempt_at)
 -- Grants (role names fixed; executed by ligo_migrator)
 GRANT SELECT, INSERT, UPDATE ON accounts, sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
-GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue,
-      change_requests, admin_sessions TO ligo_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue, admin_sessions TO ligo_app;
+GRANT SELECT, INSERT, UPDATE ON change_requests TO ligo_app;    -- no DELETE: change_requests_prune is the only way
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;
@@ -943,6 +976,7 @@ GRANT USAGE ON SEQUENCE audit_checkpoints_id_seq TO ligo_app;
 GRANT SELECT, INSERT ON audit_exports TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_exports_id_seq TO ligo_app;
 GRANT EXECUTE ON FUNCTION audit_prune(BIGINT) TO ligo_app;
+GRANT EXECUTE ON FUNCTION change_requests_prune(TIMESTAMPTZ) TO ligo_app;
 GRANT SELECT, UPDATE ON system_settings TO ligo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON notification_outbox TO ligo_app;
 GRANT USAGE ON SEQUENCE notification_outbox_id_seq TO ligo_app;
