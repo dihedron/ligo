@@ -74,4 +74,6 @@ Every state-changing action, propagation and workflow outcome is audited, in a h
 
 Every 1000 entries or hour, `ligo` signs the head of the chain with the `ligo-audit` key, outside the database. One replica verifies the chain every 10 minutes, from the newest of these checkpoints, and the whole chain at startup and every 24 hours; `ligo_audit_chain_valid` gives the result. `ligo audit verify` checks it on demand, and `ligo audit verify --full` walks the whole chain. Run a full verification after restoring a backup, and before archiving the log.
 
+With `storage.audit.retention` set, the same replica prunes once a day; each prune writes a `SYSTEM_AUDIT_PRUNED` entry and adds to `ligo_audit_pruned_entries_total`. Alert when `ligo_audit_oldest_entry_timestamp_seconds` moves forward without a `SYSTEM_AUDIT_PRUNED` entry: that is a deletion `ligo` did not make.
+
 An auditor can check the checkpoints without `ligo`: the public keys are at `transit/keys/ligo-audit`, and each checkpoint signs the RFC 8785 JSON of `auditId`, `entryHash` and `createdAt`.

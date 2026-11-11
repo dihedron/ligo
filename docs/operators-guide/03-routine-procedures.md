@@ -79,6 +79,29 @@ While it is on, new change requests, approvals, retries, rotations and break-gla
 
 Follow *Upgrades and removal* in the Setup Guide: drain, migrate, roll out, resume.
 
+## Exporting and pruning the audit log
+
+The audit log is kept whole until you set `storage.audit.retention` (at least `24h`). Even then, `ligo` deletes only what you have exported. Export regularly, for example monthly, as an admin with full access:
+
+```sh
+ligo audit export --out /archive/ligo-audit-$(date +%F).jsonl
+```
+
+The command writes the chain from its oldest entry through the newest signed checkpoint, verifies the file, and records the export with the file's SHA-256 (`SYSTEM_AUDIT_EXPORTED`). The file must not exist. Store it where your records policy says, with its hash. It is the archive: once pruned, those entries are gone from the database.
+
+To check an archived file later, without `ligo` or its database, take the public keys from Vault, not from the file:
+
+```sh
+vault read -format=json transit/keys/ligo-audit | jq -r '.data.keys | to_entries[] | "vault-transit:ligo-audit/\(.key)=\(.value.public_key)"'
+ligo audit verify --file /archive/ligo-audit-2026-11-30.jsonl --public-key vault-transit:ligo-audit/1=...
+```
+
+A file that does not verify prints the first broken entry and exits non-zero.
+
+Once a day, after a valid verification, the verifying replica deletes the entries older than the retention, through the newest checkpoint that is exported and was signed over a day ago, and writes `SYSTEM_AUDIT_PRUNED`. Nothing is pruned when no export covers old enough entries, or while the signing key cannot be reached.
+
+If an archived file is lost after its entries were pruned, those entries survive only in the SIEM's forwarded copy and in backups taken before the prune. Export again: the new file starts at the oldest entry left, chained onto the checkpoint below it.
+
 ## Backing up
 
 The schemas `public` and `dbos` live in one database and must be backed up together, with point-in-time recovery. Restoring is in *Incident procedures*. Keep the Vault Transit key too: without it, sealed checkpoints cannot be opened, and those attempts fail until retried.

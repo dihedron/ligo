@@ -32,11 +32,13 @@ Each entry hashes the previous one. The application can only insert: it has no u
 
 A hash chain alone does not stop someone with write access to the database: they can change an entry and recompute every hash after it. So `ligo` regularly signs the head of the chain with an ed25519 key in Transit, outside the database, and stores these **checkpoints** in a table of their own, append-only too. A rewritten chain no longer matches its signed checkpoints.
 
-Checkpoints also keep verification cheap. One replica verifies every 10 minutes from the newest checkpoint, in short batches, and the whole chain daily; the result is a metric. An edit before the newest checkpoint that did not recompute hashes is found by the daily full pass. Checkpoints have no foreign key to the entries, so they can later anchor a log whose oldest entries were pruned.
+Checkpoints also keep verification cheap. One replica verifies every 10 minutes from the newest checkpoint, in short batches, and the whole chain daily; the result is a metric. An edit before the newest checkpoint that did not recompute hashes is found by the daily full pass. Checkpoints have no foreign key to the entries, so they anchor a log whose oldest entries were pruned.
+
+The log is pruned only if a retention is set, and only through a checkpoint that an operator has exported. `ligo audit export` writes the chain to a file, with the checkpoints and the public keys, verifies it and records it; the file verifies later without `ligo`. Once a day the verifying replica deletes the exported entries older than the retention, through the newest checkpoint that qualifies, which stays as the anchor of what remains. The application still has no delete privilege: deletion goes through one database function, owned by the migrator, that refuses anything but an exported checkpoint signed over a day ago.
 
 ## Notifications
 
-A transactional outbox: the row commits with the event, so an event is never lost and never announced unless it committed. A webhook failure never delays the change. Delivery is at least once, signed with HMAC, retried and abandoned after 24 hours.
+A transactional outbox: the row commits with the event, so an event is never lost and never announced unless it committed. A webhook failure never delays the change. Delivery is at least once, signed with HMAC, retried and abandoned after 24 hours. Delivered rows go after a day by default, abandoned ones after 30 days; both are settings.
 
 ## High availability
 

@@ -128,7 +128,7 @@ Working:
 - change requests, and the charter that every jurisdiction complies with;
 - accounts, registered at run time through the API, the CLI or the web UI, each with its own operators and approvers, and tenancies whose namespace is checked on the platform ([.specs/ligo-tenancy.md](.specs/ligo-tenancy.md));
 - the binding workflows, including break-glass, with failures from a retryable cause retried automatically, and deletes that remove access first;
-- the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches;
+- the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported ([.specs/ligo-pruning.md](.specs/ligo-pruning.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
@@ -139,8 +139,8 @@ Known limits of v0.2.0:
 - PostgreSQL is the only platform provider, and workloads cannot connect to it with an SVID directly (`.specs/ligo-postgres-plugin.md` §10);
 - the Vault store releases a credential to one exact SPIFFE ID, so a source covering many workloads cannot use it (`.specs/ligo-vault-plugin.md` §4);
 - there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07);
-- `audit_log` is never pruned: it grows with every change, about 35,000 entries in the soak's 9-hour night (backlog item 1);
-- delivered and abandoned webhook events stay in `notification_outbox` for 30 days, a period that cannot be configured (backlog item 13);
+- `audit_log` is never pruned: it grows with every change, about 35,000 entries in the soak's 9-hour night (backlog item 1; on main for the next release: `storage.audit.retention` and `ligo audit export`);
+- delivered and abandoned webhook events stay in `notification_outbox` for 30 days, a period that cannot be configured (backlog item 13; on main for the next release: `notifications.delivered_retention` and `abandoned_retention`);
 - audit checkpoints are signed with ed25519, not with a post-quantum algorithm: neither OpenBao 2.7.1 nor Vault Community 2.2.1 offers ML-DSA keys (backlog item 14);
 - the incremental audit verification, every 10 minutes, does not detect an entry before the newest checkpoint whose content was changed without re-hashing; the full pass, at startup and every 24 hours, does (spec §4.3);
 - the Accounts web page has not yet been tested by hand in a browser (manual test A-1, backlog item 4);

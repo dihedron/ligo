@@ -6,7 +6,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 
 | No. | Item | Recorded | Status |
 | :-- | :------------------------------------ | :--------- | :---------------- |
-| 1 | Audit pruning | 2026-11-08 | In progress on `feature/pruning` (`.specs/ligo-pruning.md`); known limit of v0.2.0 |
+| 1 | Audit pruning | 2026-11-08 | Built on `feature/pruning` (`.specs/ligo-pruning.md`, spec 4.0.8); lab step pending; known limit of v0.2.0 |
 | 2 | Pluggable authentication | 2026-11-08 | Not started |
 | 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists (none on 2026-11-11, latest v0.58.0) |
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
@@ -18,7 +18,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
-| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Decided 2026-11-11: two settings, 24h delivered, 30 days abandoned; on `feature/pruning`; known limit of v0.2.0 |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Built on `feature/pruning`: two settings, 24h delivered, 30 days abandoned; known limit of v0.2.0 |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 | 15 | Change request pruning | 2026-11-11 | Not started |
 

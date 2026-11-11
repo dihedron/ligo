@@ -68,6 +68,8 @@ If it cannot come back:
 3. Compare the entries from the broken `id` onwards with your SIEM's forwarded copy.
 4. Look at who holds `ligo_migrator` and the superuser, and at the database's own logs.
 
+Before treating a missing range of entries as tampering, look for a `SYSTEM_AUDIT_PRUNED` entry: a prune deletes the oldest entries on purpose, and names the checkpoint it stopped at. The oldest entry left must then chain onto that checkpoint, which `ligo audit verify --full` checks.
+
 If `ligo audit verify` answers `503 unavailable` instead, the chain is not broken: `ligo` cannot reach the `ligo-audit` key. Check Vault or OpenBao and the `ligo-sealer` policy.
 
 ## A trust bundle conflict
