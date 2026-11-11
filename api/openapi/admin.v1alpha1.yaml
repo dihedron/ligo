@@ -566,6 +566,37 @@ paths:
       parameters:
         - { name: full, in: query, schema: { type: boolean, default: false } }
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/audit/export:
+    get:
+      tags: [operations]
+      operationId: exportAudit
+      summary: Export the audit log through a signed checkpoint, as JSON Lines (admin.full_access).
+      description: A header with the signing key's public versions, the checkpoints that cover the export and the one below its first entry, then every entry from the oldest left through the checkpoint, each with its canonical row. Verifiable offline with `ligo audit verify --file`. 422 when through is not a checkpoint; 503 when the signing key cannot be reached.
+      parameters:
+        - { name: through, in: query, description: "A checkpoint's audit entry id; the newest checkpoint when absent.", schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "200":
+          description: The export, one JSON object per line.
+          content: { application/x-ndjson: { schema: { type: string } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "5XX": { $ref: "#/components/responses/Problem" }
+  /v1/admin/audit/exports:
+    post:
+      tags: [operations]
+      operationId: recordAuditExport
+      summary: Record an export taken and verified (admin.full_access); pruning never passes the newest record.
+      description: Audits SYSTEM_AUDIT_EXPORTED. 409 audit-export-recorded when an export through this checkpoint or a later one is recorded; 422 when through is not a checkpoint or sha256 is not 64 hex characters.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [through, sha256]
+              properties:
+                through: { type: integer, format: int64, description: "The checkpoint the export ends on." }
+                sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Of the exported file." }
+      responses: { "201": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors:
     get:
       tags: [operations]

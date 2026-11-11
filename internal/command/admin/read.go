@@ -1,12 +1,24 @@
 package admin
 
 import (
+	"bufio"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/client"
+	"github.com/dihedron/ligo/internal/sealing"
 )
 
 // Get displays a source, target or binding (ligo get KIND NAME).
@@ -151,10 +163,11 @@ func (cmd *CatalogFlows) Execute([]string) error {
 	return cmd.flows(path("catalog", "targets", cmd.Args.Name, "flows"))
 }
 
-// Audit: ligo audit list|verify.
+// Audit: ligo audit list|verify|export.
 type Audit struct {
 	List   AuditList   `command:"list" alias:"ls" description:"List audit entries for a source, target or binding."`
-	Verify AuditVerify `command:"verify" description:"Verify the cryptographic hash chain of the audit log."`
+	Verify AuditVerify `command:"verify" description:"Verify the cryptographic hash chain of the audit log, or of an exported file."`
+	Export AuditExport `command:"export" description:"Export the audit log through a signed checkpoint, verify the file and record the export (requires admin.full_access)."`
 }
 
 type AuditList struct {
@@ -169,10 +182,18 @@ func (cmd *AuditList) Execute([]string) error {
 
 type AuditVerify struct {
 	Base
-	Full bool `long:"full" description:"Re-hash every entry, not only those after the newest signed checkpoint."`
+	Full       bool     `long:"full" description:"Re-hash every entry, not only those after the newest signed checkpoint."`
+	File       string   `long:"file" description:"Verify an exported file offline, without the server."`
+	PublicKeys []string `long:"public-key" value-name:"KEYID/VERSION=BASE64" description:"With --file: a public key to verify the checkpoints with, instead of the file's own (repeatable)."`
 }
 
+var fileColumns = []client.Column{col("VALID", "valid"), col("FROM", "from"), col("THROUGH", "through"), col("ENTRIES", "entries"),
+	col("CHECKPOINTS", "checkpoints"), col("KEYS FROM FILE", "keysFromFile"), col("FIRST BROKEN", "firstBroken"), col("REASON", "reason")}
+
 func (cmd *AuditVerify) Execute([]string) error {
+	if cmd.File != "" {
+		return cmd.verifyFile()
+	}
 	var query url.Values
 	if cmd.Full {
 		query = url.Values{"full": {"true"}}
@@ -333,4 +354,99 @@ func isOpen(cr map[string]any, now time.Time) bool {
 		}
 	}
 	return false
+}
+
+// verifyFile checks an export offline (.specs/ligo-pruning.md §3.3); a file
+// that does not verify is an error, after its result is printed.
+func (cmd *AuditVerify) verifyFile() error {
+	var keys sealing.KeySet
+	for _, k := range cmd.PublicKeys {
+		id, b64, ok := strings.Cut(k, "=")
+		slash := strings.LastIndex(id, "/")
+		pub, err := base64.StdEncoding.DecodeString(b64)
+		if !ok || slash < 1 || err != nil || len(pub) != ed25519.PublicKeySize {
+			return fmt.Errorf("--public-key %q: want KEYID/VERSION=BASE64 of an ed25519 public key", k)
+		}
+		if keys == nil {
+			keys = sealing.KeySet{}
+		}
+		if keys[id[:slash]] == nil {
+			keys[id[:slash]] = map[string]ed25519.PublicKey{}
+		}
+		keys[id[:slash]][id[slash+1:]] = pub
+	}
+	res, err := verifyExport(cmd.File, keys)
+	if err != nil {
+		return err
+	}
+	if err := client.Print(cmd.writer(), cmd.format(), asMap(res), fileColumns...); err != nil {
+		return err
+	}
+	if !res.Valid {
+		return fmt.Errorf("%s does not verify: %s", cmd.File, res.Reason)
+	}
+	return nil
+}
+
+func verifyExport(file string, keys sealing.KeySet) (audit.FileResult, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return audit.FileResult{}, err
+	}
+	defer func() { _ = f.Close() }()
+	return audit.VerifyFile(bufio.NewReader(f), keys)
+}
+
+// asMap gives v the shape client.Print's columns read.
+func asMap(v any) map[string]any {
+	b, _ := json.Marshal(v)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+type AuditExport struct {
+	Base
+	Through int64  `long:"through" description:"The checkpoint to export through (an audit entry id); the newest checkpoint by default."`
+	Out     string `long:"out" required:"yes" description:"The file to write; it must not exist."`
+}
+
+// Execute downloads the export, verifies it with the keys it carries, and
+// records it with its SHA-256 only if it verifies (.specs/ligo-pruning.md
+// §3.2): pruning never passes an export that is not recorded.
+func (cmd *AuditExport) Execute([]string) error {
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		f, err := os.OpenFile(cmd.Out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, nil, err
+		}
+		var query url.Values
+		if cmd.Through > 0 {
+			query = url.Values{"through": {strconv.FormatInt(cmd.Through, 10)}}
+		}
+		h := sha256.New()
+		err = c.Do(ctx, "GET", path("audit", "export"), query, nil, io.MultiWriter(f, h))
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			_ = os.Remove(cmd.Out)
+			return nil, nil, err
+		}
+		res, err := verifyExport(cmd.Out, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !res.Valid {
+			return nil, nil, fmt.Errorf("%s does not verify (%s): the export is not recorded", cmd.Out, res.Reason)
+		}
+		sum := hex.EncodeToString(h.Sum(nil))
+		if err := c.Do(ctx, "POST", path("audit", "exports"), nil, map[string]any{"through": res.Through, "sha256": sum}, nil); err != nil {
+			return nil, nil, fmt.Errorf("%s verifies but was not recorded: %w", cmd.Out, err)
+		}
+		out := asMap(res)
+		out["file"], out["sha256"] = cmd.Out, sum
+		return out, []client.Column{col("FILE", "file"), col("FROM", "from"), col("THROUGH", "through"), col("ENTRIES", "entries"),
+			col("CHECKPOINTS", "checkpoints"), col("SHA256", "sha256")}, nil
+	})
 }

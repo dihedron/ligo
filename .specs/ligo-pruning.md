@@ -1,6 +1,6 @@
 # Audit and outbox pruning
 
-- **Version:** 1.1 (2026-11-11), approved; 1.1: the 24-hour floor in `audit_prune`, and the T-13 residual risk stated
+- **Version:** 1.2 (2026-11-11), approved; 1.1: the 24-hour floor in `audit_prune`, and the T-13 residual risk stated (accepted: the SIEM copy is the authoritative record); 1.2: the export file as built, `SYSTEM_AUDIT_*` action names
 - **Backlog:** items 1 (audit pruning) and 13 (outbox retention)
 - **Branch:** `feature/pruning`
 - **Main spec:** becomes 4.0.8; the sections it changes are listed at the end
@@ -33,27 +33,32 @@ storage:
 
 ### 3.2 Export
 
-`ligo audit export --through ID --out FILE` writes one JSON Lines file:
+`ligo audit export [--through ID] --out FILE` writes one JSON Lines file, in this order:
 
-1. A header line: `{"kind":"header","from":N,"through":M,"prevHash":"...","exportedAt":"...","publicKeys":{"vault:v1":"<base64>"}}`. `prevHash` is the `prev_hash` of entry N.
-2. Every entry from N to M, in order, as the API returns it, including `prevHash` and `entryHash`.
-3. Every signed checkpoint with `auditId` in N..M.
+1. A header line: `{"kind":"header","from":N,"through":M,"exportedAt":"...","prevHash":"...","publicKeys":{"<key ID>":{"<version>":"<base64>"}}}`. `prevHash` is the `prev_hash` of entry N. The public keys are every version of the signing key, read from Vault at export time.
+2. The signed checkpoints with `auditId` in N..M, and the newest one below N if any: after a prune, that one is the anchor, and its `entryHash` must equal the header's `prevHash`. Each: `{"kind":"checkpoint","auditId","entryHash","createdAt","keyId","signature"}`.
+3. Every entry from N to M, in order: `{"kind":"entry","id","prevHash","entryHash","row":{...}}`, where `row` is the canonical (JCS) form that was hashed, so the hash is recomputed from the file alone.
 
-- `--through` must name a checkpoint (`audit_id` of a row of `audit_checkpoints`). Without it, the export goes to the newest checkpoint. N is the oldest entry still in the database.
-- After writing, the CLI verifies the file on its own (§3.3). Only if that passes does it call `POST /v1/admin/audit/exports` with `{"through":M,"sha256":"<hex of the file>"}`.
-- The server checks that M is a checkpoint, and that M is beyond the last recorded export. It inserts a row in `audit_exports` (append-only) and appends `AUDIT_EXPORTED` to the audit log, with M and the hash.
-- `GET /v1/admin/audit/export?through=M` streams the same lines; the CLI writes them. It is read-only and runs in batches of 5000 (as `Verify`), each its own statement.
+Checkpoints come first so that the verifier knows them before it streams the entries.
+
+- `--through` must name a checkpoint whose entry is still in the log. Without it, the export goes to the newest checkpoint. N is the oldest entry still in the database. Entries up to a checkpoint never change, so the export needs no snapshot.
+- `--out` must not exist. On a refusal the file is removed.
+- After writing, the CLI verifies the file with the keys it carries (§3.3). Only if that passes does it call `POST /v1/admin/audit/exports` with `{"through":M,"sha256":"<hex of the file>"}`. A file that does not verify is kept and not recorded.
+- The server checks that M is a checkpoint (422 otherwise), and that no export through M or later is recorded (409 `audit-export-recorded`). It inserts a row in `audit_exports` and appends `SYSTEM_AUDIT_EXPORTED`, with M and the hash, in one transaction.
+- `GET /v1/admin/audit/export?through=M` streams `application/x-ndjson`. It is read-only, in batches of 5000 entries, each its own statement. Errors before the first line are problems (422 not a checkpoint, 503 signer unavailable); an error later cuts the stream, and the CLI's verification fails on the file.
 - Role: full access (`Grants.FullAccess`), for both the download and the record. `audit verify` needs only a viewer, but an export spans every jurisdiction, and recording one allows deletion.
 
 ### 3.3 Offline verification
 
-`ligo audit verify --file FILE [--public-key KEYID=BASE64 ...]` checks a file without the server:
+`ligo audit verify --file FILE [--public-key KEYID/VERSION=BASE64 ...]` checks a file without the server:
 
-- every entry re-hashes from the header's `prevHash`;
-- every checkpoint's signature verifies, and its `entryHash` equals the entry's;
-- the last entry is a checkpoint.
+- every checkpoint's signature verifies (`vault:vN:` and `local:v1:` signatures);
+- the anchor below the first entry, if present, matches the header's `prevHash`;
+- every entry re-hashes from the header's `prevHash`, ids increasing, starting at the header's `from`;
+- every checkpoint's `entryHash` equals its entry's hash;
+- the last entry is the header's `through`, and a checkpoint.
 
-The public keys come from the header unless `--public-key` gives them. The output says which: an auditor should take the keys from Vault (`GET transit/keys/ligo-audit`), not from the file under test.
+The public keys come from the header unless `--public-key` gives them; the output's `keysFromFile` says which. An auditor should take the keys from Vault (`GET transit/keys/ligo-audit`), not from the file under test. A file that does not verify prints its result, with `firstBroken` and `reason`, and exits non-zero.
 
 ### 3.4 What a prune deletes
 
@@ -71,7 +76,7 @@ Checkpoints are never deleted: one row per hour at most, which is small.
 
 - It runs in the audit verify loop, after a valid incremental pass, on the replica holding `ligo_audit_verify`. It runs at most once every 24 h (a constant).
 - It skips with a warning when the signer is unavailable, when the last verify was not valid, or when nothing is due.
-- It calls `audit_prune(B)` (§3.6), then appends `AUDIT_PRUNED` with B, the number of entries deleted, and the export it relied on.
+- It calls `audit_prune(B)` (§3.6), then appends `SYSTEM_AUDIT_PRUNED` with B, the number of entries deleted, and the export it relied on.
 - Metrics: `ligo_audit_pruned_entries_total`, and `ligo_audit_oldest_entry_timestamp_seconds`.
 
 ### 3.6 Deleting without opening T-13
@@ -83,7 +88,7 @@ Checkpoints are never deleted: one row per hour at most, which is small.
   3. sets `ligo.audit_prune = 'on'` for the transaction only (`set_config(..., true)`);
   4. deletes `audit_log` rows with `id <= through`, and returns the count.
 - The trigger function lets a `DELETE` through only when `ligo.audit_prune` is `on`. Setting the variable alone gives nothing: `ligo_app` has no `DELETE` grant.
-- What a compromised `ligo_app` can still do: it can insert an `audit_exports` row itself, so it can prune up to any checkpoint signed more than 24 hours ago, ignoring retention and without a real export. It cannot delete the last 24 hours, rewrite what remains, or delete checkpoints, and the gap shows: the oldest entry moves, `ligo_audit_oldest_entry_timestamp_seconds` jumps, and no `AUDIT_PRUNED` entry explains it unless the attacker writes one. Before this change it could delete nothing. The SIEM's forwarded copy is the independent record. The threat model (T-13) says so.
+- What a compromised `ligo_app` can still do: it can insert an `audit_exports` row itself, so it can prune up to any checkpoint signed more than 24 hours ago, ignoring retention and without a real export. It cannot delete the last 24 hours, rewrite what remains, or delete checkpoints, and the gap shows: the oldest entry moves, `ligo_audit_oldest_entry_timestamp_seconds` jumps, and no `SYSTEM_AUDIT_PRUNED` entry explains it unless the attacker writes one. Before this change it could delete nothing. The SIEM's forwarded copy is the independent record. The threat model (T-13) says so.
 
 ### 3.7 Schema (migration 001, edited in place)
 
@@ -98,7 +103,7 @@ CREATE TABLE audit_exports (
 -- append-only trigger; ligo_app: SELECT, INSERT
 ```
 
-`AUDIT_EXPORTED` and `AUDIT_PRUNED` are new actions (§4.3 action list).
+`SYSTEM_AUDIT_EXPORTED` and `SYSTEM_AUDIT_PRUNED` are new actions (§4.3 action list). They are `SYSTEM_*` because they name no resource (`chk_audit_resource`).
 
 ## 4. Outbox retention
 
@@ -134,8 +139,8 @@ notifications:
 
 1. **Outbox retention** (settings, dispatcher, config checks, tests).
 2. **Schema and `audit_prune`** (001, integration tests on the function and the trigger).
-3. **Export and offline verification** (API, CLI, `audit_exports`, `AUDIT_EXPORTED`).
-4. **The prune loop** (boundary rule, `AUDIT_PRUNED`, metrics).
+3. **Export and offline verification** (API, CLI, `audit_exports`, `SYSTEM_AUDIT_EXPORTED`).
+4. **The prune loop** (boundary rule, `SYSTEM_AUDIT_PRUNED`, metrics).
 5. **Docs and main spec 4.0.8**:
    - §4.2 tables;
    - §4.3 actions;

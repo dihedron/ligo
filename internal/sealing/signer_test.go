@@ -166,3 +166,63 @@ func TestTransitSignerMalformed(t *testing.T) {
 		}
 	})
 }
+
+// A KeySet built from PublicKeys verifies what the signer signed, across a
+// rotation, with no signer at hand; anything else is ErrBadSignature.
+func TestKeySet(t *testing.T) {
+	ctx := context.Background()
+	f, transit := newTransitSigner(t)
+	msg := []byte("checkpoint")
+	sigs := map[Signer][]string{}
+	_, v1, err := transit.Sign(ctx, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.rotate()
+	_, v2, err := transit.Sign(ctx, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigs[transit] = []string{v1, v2}
+	local := NewLocalSigner(newLocal(t))
+	_, l1, _ := local.Sign(ctx, msg)
+	sigs[local] = []string{l1}
+
+	keys := KeySet{}
+	for s := range sigs {
+		pubs, err := s.PublicKeys(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys[s.ID()] = pubs
+	}
+	if len(keys[transit.ID()]) != 2 {
+		t.Errorf("transit public keys: %d versions, want 2", len(keys[transit.ID()]))
+	}
+	for s, list := range sigs {
+		for _, sig := range list {
+			if err := keys.Verify(s.ID(), msg, sig); err != nil {
+				t.Errorf("%s %.9s: %v", s.ID(), sig, err)
+			}
+			if err := keys.Verify(s.ID(), []byte("other"), sig); !errors.Is(err, ErrBadSignature) {
+				t.Errorf("another message: %v", err)
+			}
+		}
+	}
+	for _, bad := range []struct{ keyID, sig string }{
+		{"nobody", v1},                       // unknown key
+		{transit.ID(), "vault:v9:" + v1[9:]}, // unknown version
+		{transit.ID(), "nope"},               // unparsed
+		{local.ID(), v1},                     // another key's signature
+	} {
+		if err := keys.Verify(bad.keyID, msg, bad.sig); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("%s %.12s: %v, want ErrBadSignature", bad.keyID, bad.sig, err)
+		}
+	}
+	f.mu.Lock() // PublicKeys asks Vault afresh: sealed, it cannot answer
+	f.unavailable = true
+	f.mu.Unlock()
+	if _, err := transit.PublicKeys(ctx); !errors.Is(err, ErrSignerUnavailable) {
+		t.Errorf("PublicKeys with Vault away: %v, want ErrSignerUnavailable", err)
+	}
+}

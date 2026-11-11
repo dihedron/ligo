@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 )
@@ -22,6 +23,9 @@ type Signer interface {
 	// Verify returns nil, ErrBadSignature, or ErrSignerUnavailable when the
 	// key needed cannot be had right now.
 	Verify(ctx context.Context, keyID string, msg []byte, sig string) error
+	// PublicKeys returns the key's public versions, "1", "2"..., for an
+	// export to carry (ligo audit export).
+	PublicKeys(ctx context.Context) (map[string]ed25519.PublicKey, error)
 }
 
 var (
@@ -91,6 +95,28 @@ func (s *TransitSigner) public(ctx context.Context, version string) (ed25519.Pub
 	if pub, ok := s.pubs[version]; ok {
 		return pub, nil
 	}
+	if err := s.load(ctx); err != nil {
+		return nil, err
+	}
+	pub, ok := s.pubs[version]
+	if !ok {
+		return nil, ErrBadSignature // a version Vault never had
+	}
+	return pub, nil
+}
+
+// PublicKeys implements Signer: every version, read from Vault afresh.
+func (s *TransitSigner) PublicKeys(ctx context.Context) (map[string]ed25519.PublicKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(ctx); err != nil {
+		return nil, err
+	}
+	return maps.Clone(s.pubs), nil
+}
+
+// load reads the key's public versions into s.pubs; s.mu is held.
+func (s *TransitSigner) load(ctx context.Context) error {
 	var out struct {
 		Data struct {
 			Type string `json:"type"`
@@ -100,28 +126,29 @@ func (s *TransitSigner) public(ctx context.Context, version string) (ed25519.Pub
 		} `json:"data"`
 	}
 	if err := s.kek.call(ctx, "/v1/"+s.kek.cfg.Mount+"/keys/"+s.key, nil, &out); err != nil {
-		return nil, fmt.Errorf("%w: vault transit keys: %w", ErrSignerUnavailable, err)
+		return fmt.Errorf("%w: vault transit keys: %w", ErrSignerUnavailable, err)
 	}
 	if out.Data.Type != "ed25519" {
-		return nil, fmt.Errorf("vault transit key %s is %q, not ed25519", s.key, out.Data.Type)
+		return fmt.Errorf("vault transit key %s is %q, not ed25519", s.key, out.Data.Type)
 	}
 	for v, k := range out.Data.Keys {
 		pub, err := base64.StdEncoding.DecodeString(k.PublicKey)
 		if err != nil || len(pub) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("vault transit key %s: version %s has no ed25519 public key", s.key, v)
+			return fmt.Errorf("vault transit key %s: version %s has no ed25519 public key", s.key, v)
 		}
 		s.pubs[v] = pub
 	}
-	pub, ok := s.pubs[version]
-	if !ok {
-		return nil, ErrBadSignature // a version Vault never had
-	}
-	return pub, nil
+	return nil
 }
 
 // splitVaultSignature parses "vault:v<N>:<base64>".
 func splitVaultSignature(sig string) (version string, raw []byte, ok bool) {
-	rest, ok := strings.CutPrefix(sig, "vault:v")
+	return splitSignature("vault", sig)
+}
+
+// splitSignature parses "<scheme>:v<N>:<base64>".
+func splitSignature(scheme, sig string) (version string, raw []byte, ok bool) {
+	rest, ok := strings.CutPrefix(sig, scheme+":v")
 	if !ok {
 		return "", nil, false
 	}
@@ -162,6 +189,29 @@ func (s *LocalSigner) Verify(_ context.Context, keyID string, msg []byte, sig st
 	b64, ok := strings.CutPrefix(sig, "local:v1:")
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if keyID != s.id || !ok || err != nil || !ed25519.Verify(s.key.Public().(ed25519.PublicKey), msg, raw) {
+		return ErrBadSignature
+	}
+	return nil
+}
+
+// PublicKeys implements Signer: one version, "1".
+func (s *LocalSigner) PublicKeys(context.Context) (map[string]ed25519.PublicKey, error) {
+	return map[string]ed25519.PublicKey{"1": s.key.Public().(ed25519.PublicKey)}, nil
+}
+
+// KeySet verifies checkpoint signatures with public keys alone, as an
+// auditor does with an exported file: by key ID, then by version.
+type KeySet map[string]map[string]ed25519.PublicKey
+
+// Verify returns nil or ErrBadSignature: a key ID or version the set does
+// not hold cannot verify.
+func (k KeySet) Verify(keyID string, msg []byte, sig string) error {
+	version, raw, ok := splitSignature("vault", sig)
+	if !ok {
+		version, raw, ok = splitSignature("local", sig)
+	}
+	pub := k[keyID][version]
+	if !ok || pub == nil || !ed25519.Verify(pub, msg, raw) {
 		return ErrBadSignature
 	}
 	return nil
