@@ -188,7 +188,7 @@ type AuditVerify struct {
 }
 
 var fileColumns = []client.Column{col("VALID", "valid"), col("FROM", "from"), col("THROUGH", "through"), col("ENTRIES", "entries"),
-	col("CHECKPOINTS", "checkpoints"), col("KEYS FROM FILE", "keysFromFile"), col("FIRST BROKEN", "firstBroken"), col("REASON", "reason")}
+	col("CHECKPOINTS", "checkpoints"), col("CHANGE REQUESTS", "changeRequests"), col("KEYS FROM FILE", "keysFromFile"), col("FIRST BROKEN", "firstBroken"), col("REASON", "reason")}
 
 func (cmd *AuditVerify) Execute([]string) error {
 	if cmd.File != "" {

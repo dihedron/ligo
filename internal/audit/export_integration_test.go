@@ -5,11 +5,15 @@ package audit
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
+	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/sealing"
 )
 
@@ -124,5 +128,64 @@ func TestExportRoundTrip(t *testing.T) {
 	bad := edit(t, buf.Bytes(), `"kind":"header"`, `"prevHash":"`, `"prevHash":"0`)
 	if res, _ := VerifyFile(bytes.NewReader(bad), nil); res.Valid {
 		t.Error("a header whose prevHash is not the anchor's")
+	}
+}
+
+// TestExportChangeRequests: an export carries each request its entries
+// name, with its sides and payload; offline verification checks the payload
+// against payloadSha256 and that an entry names the request
+// (.specs/ligo-cr-pruning.md §4.5).
+func TestExportChangeRequests(t *testing.T) {
+	app, _ := setup(t)
+	ctx := context.Background()
+	tx, err := app.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	s := signer(t)
+
+	cr := uuid.NewV7()
+	payload := []byte(`{"metadata":{"name":"q"},"identity":{"trustDomain":"prod.internal","svidRegex":"^x$"},"visibility":"PUBLIC"}`)
+	canonical, _ := jcs.Transform(payload)
+	sum := sha256.Sum256(canonical)
+	if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_jurisdiction,
+		policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, expires_at, status, decided_by, decided_at)
+		values ($1, 'SOURCE', 'q-export', 'CREATE', 'STANDARD', 'ALL', 'dc/corp-prod/ledger', repeat('a', 64), true, $2, $3, 'carla',
+		now() + interval '1 day', 'WITHDRAWN', 'carla', now())`, cr, payload, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+		values ($1, 'OWNER', 'dc/corp-prod/ledger', true, 'HUMAN', 'carla', 'STANDARD')`, cr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Append(ctx, tx, Entry{ResourceType: "SOURCE", ResourceName: "q-export", ChangeRequestID: &cr, Action: "CR_WITHDRAWN", Actor: "carla"}); err != nil {
+		t.Fatal(err)
+	}
+	through := anchorHead(t, ctx, tx, 1, 25*time.Hour)
+
+	var buf bytes.Buffer
+	if _, err := Export(ctx, tx, s, through, &buf); err != nil {
+		t.Fatal(err)
+	}
+	file := buf.Bytes()
+	if !bytes.Contains(file, []byte(`"kind":"change_request","changeRequestId":"`+cr.String()+`"`)) {
+		t.Fatalf("the request is not in the export")
+	}
+	res, err := VerifyFile(bytes.NewReader(file), nil)
+	if err != nil || !res.Valid || res.ChangeRequests < 1 {
+		t.Fatalf("verify: %+v, %v", res, err)
+	}
+	for _, c := range []struct {
+		name   string
+		file   []byte
+		reason string
+	}{
+		{"a payload changed", edit(t, file, `"kind":"change_request","changeRequestId":"`+cr.String(), `"visibility":"PUBLIC"`, `"visibility":"PRIVATE"`), "payload"},
+		{"a request no entry names", edit(t, file, `"kind":"change_request","changeRequestId":"`+cr.String(), `"changeRequestId":"`+cr.String(), `"changeRequestId":"`+uuid.NewV7().String()), "names"},
+	} {
+		if res, err := VerifyFile(bytes.NewReader(c.file), nil); err != nil || res.Valid || !strings.Contains(res.Reason, c.reason) {
+			t.Errorf("%s: %+v, %v, want %q", c.name, res, err, c.reason)
+		}
 	}
 }

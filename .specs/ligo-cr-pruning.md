@@ -63,7 +63,7 @@ Their sides go with them (`ON DELETE CASCADE`). `SYSTEM_CR_PRUNED` records the c
 
 ### 4.5 The audit export carries the requests
 
-- `ligo audit export` adds one line per request named by an exported entry, after the checkpoints and before the entries: `{"kind":"change_request", "id", "row":{...}, "sides":[...], "payloadSha256"}`.
+- `ligo audit export` adds one line per request named by an exported entry, after the checkpoints and before the entries: `{"kind":"change_request", "changeRequestId", "row":{...}, "sides":[...], "payloadSha256"}`. The key is `changeRequestId`, not `id`: entry lines use `id` for their number.
 - The export's own entries are the reason the request is in it; a request named by no exported entry is not.
 - `ligo audit verify --file` checks each request's payload against its `payloadSha256` (JCS, SHA-256), and that each request is named by an entry of the file.
 - The request lines are not part of the hash chain or the checkpoints. They are as trustworthy as the database they came from, and the file's SHA-256 recorded in `audit_exports` fixes them from then on. The spec and the Operator's Guide say so.
