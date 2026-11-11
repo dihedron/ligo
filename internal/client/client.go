@@ -162,7 +162,8 @@ func (p *Problem) Error() string {
 }
 
 // Do sends body as JSON to path with query and decodes the answer into out
-// (any JSON, when out is *any); a problem is a *Problem error.
+// (any JSON, when out is *any), or copies it into out when out is an
+// io.Writer, whatever its size; a problem is a *Problem error.
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -191,6 +192,10 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return fmt.Errorf("client: %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if w, ok := out.(io.Writer); ok && resp.StatusCode < 400 {
+		_, err := io.Copy(w, resp.Body)
+		return err
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return err

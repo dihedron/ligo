@@ -18,7 +18,7 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-10 | A delete leaves live credentials. | 4 | Visibility removed at once; state-driven cleanup, the access first; the bootstrap credential kept through an outage; `DELETE_FAILED` retried by itself when retryable; tags; sessions ended. |
 | T-11 | Definitions or parameters inject SQL. | 4 | Grammars and quoting; privilege bounds checked three times; parameters cannot add privilege. |
 | T-12 | An insider grants excessive access. | 2, 6 | Jurisdiction RBAC; two-sided consent; four-eyes; distinct approvers; payload hash. |
-| T-13 | An actor denies a change; the audit is altered. | 2, 5 | Hash-chained, append-only audit; checkpoints signed with a key outside the database; SIEM forwarding; request IDs. |
+| T-13 | An actor denies a change; the audit is altered. | 2, 5 | Hash-chained, append-only audit; checkpoints signed with a key outside the database; pruning only through an exported checkpoint over a day old, by a database function the application cannot bypass; SIEM forwarding, the authoritative copy; request IDs. A compromised application can record an export it never took and prune early; the oldest-entry metric shows it. |
 | T-14 | Direct database writes. | 5 | Separate roles; reader limited to a view; revalidation; immutable-column triggers. Residual: R-05. |
 | T-15 | A plugin returns attacker-controlled endpoints. | 3, 4 | Output schema and `allowed_endpoints` validation. |
 | T-16 | Secrets leak through plugin logs. | 3 | Redacting logger and secret types; host-side redaction; plugins log codes only. |

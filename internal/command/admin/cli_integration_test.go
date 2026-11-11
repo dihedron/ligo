@@ -131,12 +131,14 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		{LDAPGroupDN: "cn=olga", Role: config.RoleOperator, Jurisdictions: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: "cn=dora", Role: config.RoleApprover, Jurisdictions: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: "cn=reg", Role: config.RoleAccountAdmin},
+		{LDAPGroupDN: "cn=ada", Role: config.RoleFullAccess, Jurisdictions: []string{"*"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &adminhttp.Server{Listener: config.AdminListener{AllowBasicAuth: true}, Config: cfg, LDAP: directory{}, Authz: az, DB: pools.App,
-		Requests: requests, Bindings: bs, Sources: ss, Targets: ts, Catalog: &catalog.Reader{DB: pools.App, Policy: policy}, Logger: slog.New(slog.DiscardHandler)}
+		Requests: requests, Bindings: bs, Sources: ss, Targets: ts, Catalog: &catalog.Reader{DB: pools.App, Policy: policy}, Logger: slog.New(slog.DiscardHandler),
+		Signer: zeroSigner(t)}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv, owner

@@ -147,9 +147,12 @@ func Append(ctx context.Context, tx pgx.Tx, e Entry) (int64, error) {
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('ligo_audit_chain'))"); err != nil {
 		return 0, fmt.Errorf("audit: lock: %w", err)
 	}
-	prev := Genesis
-	err := tx.QueryRow(ctx, "SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1").Scan(&prev)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	// the last entry's hash; with every entry pruned, the anchor's: the
+	// newest checkpoint signed the head that was deleted
+	var prev string
+	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1),
+		(SELECT entry_hash FROM audit_checkpoints ORDER BY audit_id DESC LIMIT 1), $1)`, Genesis).Scan(&prev)
+	if err != nil {
 		return 0, fmt.Errorf("audit: %w", err)
 	}
 	hash, err := e.hash(prev)

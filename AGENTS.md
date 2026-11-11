@@ -18,8 +18,9 @@
 8. **No unneeded backward compatibility:** Backward compatibility is not necessary (and should be avoided if it complicates code, introduces warts or hinders comprehension of the design and the code) until a product's major version (e.g. v1.0.0) is released, and even then it may be worth evaluating costs and benefits of keeping the product backward-compatible versus bumping the product's major version. Always ask for the user's choice unless the decision is trivial.
 9. **Fuzzy Testing and Benchmarking:** Propose fuzzy testing and benchmarking when reasonable.
 10. **Lab Testing:** Whenever applicable, propose to set up a lab environment to cover complex integration scenarios; don't shy away from proposing more coverage scenarios, including lengthy stress tests and chaos monkey to check for correctness under random conditions (e.g. race conditions, malfunctions), whenever reasonable.
-11. **Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. 
-12. **Sane Commits:** run `go test ./...` before every commit and check that everything is still sane.
+11. **Up-to-date Documentation:** Always keep documentation up to date and aligned with the code and the product behaviour.
+12. **Publish Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. Additional documents may be produced on a per-project basis.
+13. **Sane Commits:** run `go test ./...` before every commit and check that everything is still sane.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers; propose additional libraries where applicable.

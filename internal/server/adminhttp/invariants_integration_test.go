@@ -181,6 +181,8 @@ func TestINV11Routes(t *testing.T) {
 	act("POST /v1/admin/executors/{id}/recover", "SYSTEM_EXECUTOR_RECOVERED", admin, "/v1/admin/executors/gone-"+x+"/recover", nil)
 	act("PUT /v1/admin/maintenance", "SYSTEM_MAINTENANCE_ENABLED", admin, "/v1/admin/maintenance", map[string]any{"enabled": true, "reason": "INV-11"})
 	act("PUT /v1/admin/maintenance", "SYSTEM_MAINTENANCE_DISABLED", admin, "/v1/admin/maintenance", map[string]any{"enabled": false})
+	act("POST /v1/admin/audit/exports", "SYSTEM_AUDIT_EXPORTED", admin, "/v1/admin/audit/exports",
+		map[string]any{"through": newCheckpoint(t, v, zeroSigner(t)), "sha256": strings.Repeat("e", 64)})
 
 	account := "inv" + x
 	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from accounts where name = $1", account) })

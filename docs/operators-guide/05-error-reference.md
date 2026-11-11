@@ -38,6 +38,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `change-request-not-pending` | 409 | It has already been decided | Nothing |
 | `dependency-pending` | 409 | It depends on a request not yet applied | Decide that one first |
 | `binding-exists` | 409 | That source and target are already bound | Update the binding |
+| `audit-export-recorded` | 409 | An export through this checkpoint or a later one is already recorded | Export through a newer checkpoint; `ligo audit export` without `--through` takes the newest |
 | `binding-busy` | 409 | A workflow is running on it | Wait, then repeat |
 | `invalid-transition` | 409 | Not possible in its phase | Check the phase |
 | `resource-in-use` | 409 | Bindings use it | Revoke them first |

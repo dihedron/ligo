@@ -28,6 +28,7 @@ cmd_serve() {
 	test-otel) serve_test_otel ;;
 	test-webhook) serve_test_webhook ;;
 	test-faults) serve_test_faults ;;
+	test-audit) serve_test_audit ;;
 	test-accounts) serve_test_accounts ;;
 	test-accounts-chaos) serve_test_accounts_chaos ;;
 	start | stop | reload | status | logs)
@@ -41,7 +42,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 

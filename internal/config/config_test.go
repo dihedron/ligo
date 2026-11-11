@@ -138,6 +138,9 @@ func TestRules(t *testing.T) {
 		{"short justification", "min_justification_length: 20", "min_justification_length: 10", 14, nil},
 		{"http webhook", `url: "https://oncall.corp.internal/hooks/ligo"`, `url: "http://oncall.corp.internal/hooks/ligo"`, 14, nil},
 		{"unset webhook secret", "LIGO_WEBHOOK_DBA_SECRET", "LIGO_WEBHOOK_UNSET", 14, nil},
+		{"audit retention below 24h", "  audit:\n    retention: 0s", "  audit:\n    retention: 23h", 9, nil},
+		{"negative delivered retention", "  delivered_retention: 24h", "  delivered_retention: -1h", 14, nil},
+		{"negative abandoned retention", "  abandoned_retention: 720h", "  abandoned_retention: -1h", 14, nil},
 		{"bad jurisdiction pattern", `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["dc/*/x"]`, 16, nil},
 		{"platform jurisdiction is a pattern", `jurisdiction: "dc/corp-prod"            #`, `jurisdiction: "dc/corp-prod/*"            #`, 16, nil},
 		{"source jurisdiction missing", "    - { trust_domain: test.internal, mode: static, jurisdiction: \"dc/corp-test\" }\n", "", 16, nil},
@@ -231,8 +234,13 @@ func TestDefaults(t *testing.T) {
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Charter.Interconnects.DefaultCrossJurisdiction != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
 		cfg.PlatformProviders[0].Platforms[0].TargetJurisdictions[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
-		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute {
+		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute ||
+		*cfg.Notifications.DeliveredRetention != 24*time.Hour || *cfg.Notifications.AbandonedRetention != 720*time.Hour {
 		t.Errorf("defaults: %+v", cfg)
+	}
+	// 0 is kept: delivered rows go in the pass that delivered them
+	if cfg := parse(t, "notifications: { delivered_retention: 0s }\n"); *cfg.Notifications.DeliveredRetention != 0 {
+		t.Errorf("delivered_retention 0 became %v", *cfg.Notifications.DeliveredRetention)
 	}
 	if err := Validate(cfg, Options{}); err == nil {
 		t.Error("an almost empty configuration passed validation")

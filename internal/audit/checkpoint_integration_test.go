@@ -4,6 +4,7 @@ package audit
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"os"
 	"path/filepath"
@@ -19,15 +20,21 @@ import (
 // to the shared database must verify in the others.
 func signer(t *testing.T) sealing.Signer {
 	t.Helper()
+	return sealing.NewLocalSigner(mustKEK(t, make([]byte, 32)))
+}
+
+// mustKEK is a local KEK of the given bytes.
+func mustKEK(t *testing.T, key []byte) *sealing.LocalKEK {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "kek")
-	if err := os.WriteFile(path, make([]byte, 32), 0o600); err != nil {
+	if err := os.WriteFile(path, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	kek, err := sealing.NewLocalKEK(path, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sealing.NewLocalSigner(kek)
+	return kek
 }
 
 // tampering opens a transaction as the owner, with the append-only
@@ -62,17 +69,24 @@ func appendN(t *testing.T, ctx context.Context, tx pgx.Tx, n int) []int64 {
 	return ids
 }
 
-// checkpoint verifies and signs the head, an hour from now: due whatever
-// checkpoint other tests committed.
-func checkpoint(t *testing.T, ctx context.Context, tx pgx.Tx, s sealing.Signer) {
+// checkpoint verifies and signs the head, an hour after now or after the
+// newest checkpoint, whichever is later: due whatever checkpoint other tests
+// committed, some dated ahead. It returns the time it signed at.
+func checkpoint(t *testing.T, ctx context.Context, tx pgx.Tx, s sealing.Signer) time.Time {
 	t.Helper()
 	res, err := Verify(ctx, tx, s, false)
 	if err != nil || !res.Valid {
 		t.Fatalf("verify before the checkpoint: %+v, %v", res, err)
 	}
-	if done, err := Checkpoint(ctx, tx, s, res, time.Now().Add(checkpointAge)); err != nil || !done {
+	var at time.Time
+	if err := tx.QueryRow(ctx, "SELECT greatest(now(), coalesce(max(created_at), now())) FROM audit_checkpoints").Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	at = at.Add(checkpointAge)
+	if done, err := Checkpoint(ctx, tx, s, res, at); err != nil || !done {
 		t.Fatalf("checkpoint: %v, %v", done, err)
 	}
+	return at
 }
 
 // rehash recomputes every hash from id on, as an attacker with the
@@ -222,13 +236,12 @@ func TestCheckpointDue(t *testing.T) {
 	ctx, tx := tampering(t)
 	s := signer(t)
 	appendN(t, ctx, tx, 2)
-	checkpoint(t, ctx, tx, s)
+	last := checkpoint(t, ctx, tx, s)
 	appendN(t, ctx, tx, 2)
 	res, err := Verify(ctx, tx, s, false)
 	if err != nil || !res.Valid {
 		t.Fatal(res, err)
 	}
-	last := time.Now().Add(checkpointAge) // the helper's checkpoint
 	if done, err := Checkpoint(ctx, tx, s, res, last); err != nil || done {
 		t.Errorf("2 entries later: %v, %v; want not due", done, err)
 	}
@@ -256,4 +269,8 @@ type unavailable struct{ sealing.Signer }
 
 func (unavailable) Verify(context.Context, string, []byte, string) error {
 	return sealing.ErrSignerUnavailable
+}
+
+func (unavailable) PublicKeys(context.Context) (map[string]ed25519.PublicKey, error) {
+	return nil, sealing.ErrSignerUnavailable
 }

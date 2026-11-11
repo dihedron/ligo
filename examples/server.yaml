@@ -158,6 +158,8 @@ storage:
     reader_statement_timeout: 500ms
   dbos:
     workflow_retention: 168h
+  audit:
+    retention: 0s                         # 0: keep every entry; else at least 24h, and only what was exported is pruned
 
 secret_sealing:
   provider: vault-transit                 # vault-transit | local-kek (requires --insecure-dev)
@@ -203,6 +205,8 @@ break_glass:                              # ADR-12; role holders are set in auth
     - { jurisdictions: ["sec/infosec"], default_ttl: 2h, max_ttl: 4h, max_open: 3, warn_before: 30m }
 
 notifications:                            # §7.5
+  delivered_retention: 24h                # a delivered event's row is purged after this; 0: at once
+  abandoned_retention: 720h               # an abandoned one's after this
   webhooks:
     - name: oncall
       url: "https://oncall.corp.internal/hooks/ligo"

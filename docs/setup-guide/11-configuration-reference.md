@@ -181,6 +181,8 @@
 | `storage.postgres.reader_statement_timeout` | Bounds a resolver query. | 100 ms to 5 min |
 | `storage.dbos` | The workflow journal. | |
 | `storage.dbos.workflow_retention` | How long finished workflows, and their sealed checkpoints, are kept. | |
+| `storage.audit` | Audit log pruning. | |
+| `storage.audit.retention` | Entries older than this are pruned, once exported with `ligo audit export`. `0` keeps every entry; otherwise at least `24h`. | `0` |
 | `secret_sealing` | How secrets between stages are sealed. | |
 | `secret_sealing.provider` | `vault-transit`. `local-kek` needs `--insecure-dev`: development only. | |
 | `secret_sealing.vault_transit` | Transit. | |
@@ -231,6 +233,8 @@
 | `break_glass.policies.max_open` | How many may be open. | At least 1 |
 | `break_glass.policies.warn_before` | When the expiry is announced. | |
 | `notifications` | Webhooks. | |
+| `notifications.delivered_retention` | How long a delivered event's row stays in the outbox. `0` purges it in the pass that delivered it. | `24h` |
+| `notifications.abandoned_retention` | How long an abandoned event's row stays, for investigation. | `720h` |
 | `notifications.webhooks` | Each receives the events it names, signed. | |
 | `notifications.webhooks.name` | Its name. | |
 | `notifications.webhooks.url` | `https://` only. | |

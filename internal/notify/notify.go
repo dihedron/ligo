@@ -95,12 +95,8 @@ func (o *Outbox) Enqueue(ctx context.Context, tx pgx.Tx, e Event) error {
 	return nil
 }
 
-// Retention: a row is abandoned this long after it was written, and
-// delivered or abandoned rows are purged after purgeAfter (§7.5, §6.3).
-const (
-	abandonAfter = 24 * time.Hour
-	purgeAfter   = 30 * 24 * time.Hour
-)
+// abandonAfter: a row is abandoned this long after it was written (§7.5).
+const abandonAfter = 24 * time.Hour
 
 // backoff is the wait after the n-th failed attempt: 10s doubling to 15m.
 func backoff(n int) time.Duration {
@@ -132,7 +128,12 @@ type Dispatcher struct {
 	DB       *pgxpool.Pool // the app pool
 	Interval time.Duration // between passes; default 5s
 	Logger   *slog.Logger
-	targets  map[string]target
+	// Delivered and abandoned rows are purged after these (§7.5,
+	// notifications.delivered_retention and abandoned_retention); 0 purges
+	// them in the pass that settled them.
+	DeliveredRetention time.Duration
+	AbandonedRetention time.Duration
+	targets            map[string]target
 }
 
 // NewDispatcher prepares the configured webhooks: their secrets from the
@@ -236,7 +237,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context) (bool, error) {
 		}
 	}
 	if _, err := d.DB.Exec(ctx, `DELETE FROM notification_outbox
-		WHERE coalesce(delivered_at, abandoned_at) < now() - $1::interval`, purgeAfter.String()); err != nil {
+		WHERE delivered_at <= now() - $1::interval OR abandoned_at <= now() - $2::interval`,
+		d.DeliveredRetention.String(), d.AbandonedRetention.String()); err != nil {
 		errs = append(errs, err)
 	}
 	return true, errors.Join(errs...)

@@ -65,7 +65,7 @@ func (r *receiver) count() int {
 // TestDelivery: rows written in the event's transaction for the webhooks
 // that want it are delivered once, signed, verified against the webhook's
 // CA; a failing receiver is retried with backoff and abandoned after 24h
-// (AC-37); old rows are purged.
+// (AC-37); old rows are purged on their retention windows.
 func TestDelivery(t *testing.T) {
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn(t, "MIGRATOR"))
@@ -126,6 +126,7 @@ func TestDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	d.DeliveredRetention, d.AbandonedRetention = 24*time.Hour, 720*time.Hour
 	if ran, err := d.Dispatch(ctx); !ran || err != nil || rec.count() != 2 {
 		t.Fatalf("dispatch: %v %v, %d delivered", ran, err, rec.count())
 	}
@@ -171,8 +172,13 @@ func TestDelivery(t *testing.T) {
 		t.Errorf("not abandoned after 24h (%v)", err)
 	}
 
-	// rows delivered or abandoned 30 days ago are purged; a webhook no longer configured is an error
-	if _, err := owner.Exec(ctx, "update notification_outbox set delivered_at = now() - interval '31 days' where webhook = $1 and delivered_at is not null", oncall); err != nil {
+	// delivered rows are purged after DeliveredRetention, abandoned ones after
+	// AbandonedRetention; a webhook no longer configured is an error
+	if _, err := owner.Exec(ctx, `update notification_outbox set delivered_at = now() - interval '25 hours'
+		where id = (select min(id) from notification_outbox where webhook = $1 and delivered_at is not null)`, oncall); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, "update notification_outbox set abandoned_at = now() - interval '2 days' where webhook = $1 and abandoned_at is not null", oncall); err != nil {
 		t.Fatal(err)
 	}
 	if err := pgx.BeginFunc(ctx, pools.App, func(tx pgx.Tx) error {
@@ -180,11 +186,40 @@ func TestDelivery(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&Dispatcher{DB: pools.App, Logger: slog.New(slog.DiscardHandler)}).Dispatch(ctx); err != nil {
+	kept := &Dispatcher{DB: pools.App, Logger: slog.New(slog.DiscardHandler), DeliveredRetention: 24 * time.Hour, AbandonedRetention: 720 * time.Hour}
+	if _, err := kept.Dispatch(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.QueryRow(ctx, "select count(*) from notification_outbox where webhook = $1 and delivered_at is not null", oncall).Scan(&rows); err != nil || rows != 0 {
-		t.Errorf("%d delivered rows left (%v)", rows, err)
+	count := func(where string) int {
+		t.Helper()
+		var n int
+		if err := owner.QueryRow(ctx, "select count(*) from notification_outbox where "+where).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// of the two delivered rows, the one delivered 25h ago goes
+	if n := count("webhook = '" + oncall + "' and delivered_at is not null"); n != 1 {
+		t.Errorf("%d delivered rows, want the recent one kept and the 25h old one purged (retention 24h)", n)
+	}
+	if n := count("webhook = '" + oncall + "' and abandoned_at is not null"); n != 1 {
+		t.Errorf("%d rows abandoned 2 days ago, want 1 kept, retention 30 days", n)
+	}
+	if _, err := owner.Exec(ctx, "update notification_outbox set abandoned_at = now() - interval '31 days' where webhook = $1 and abandoned_at is not null", oncall); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kept.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("webhook = '" + oncall + "' and abandoned_at is not null"); n != 0 {
+		t.Errorf("%d rows abandoned 31 days ago left", n)
+	}
+	// retention 0: delivered rows go in the pass that delivered them
+	if _, err := (&Dispatcher{DB: pools.App, Logger: slog.New(slog.DiscardHandler), AbandonedRetention: 720 * time.Hour}).Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("delivered_at is not null"); n != 0 {
+		t.Errorf("%d delivered rows left with retention 0", n)
 	}
 	if err := owner.QueryRow(ctx, "select last_error from notification_outbox where webhook = $1 and delivered_at is null and abandoned_at is null", dba).
 		Scan(&lastError); err != nil || lastError != "webhook "+dba+" is no longer configured" {

@@ -297,8 +297,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	dispatcher.DeliveredRetention, dispatcher.AbandonedRetention = *cfg.Notifications.DeliveredRetention, *cfg.Notifications.AbandonedRetention
 	run(dispatcher.Run)
-	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, signer) })
+	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, signer, cfg.Storage.Audit.Retention) })
 	run(func(ctx context.Context) { realms.WatchConflicts(ctx, log, time.Minute) })
 
 	// the metrics: the process-wide ones, and this run's database and cache
@@ -337,23 +338,33 @@ func traced(listener string, h http.Handler) http.Handler {
 }
 
 // Audit verification (§4.3): incremental every auditVerifyEvery, a full
-// pass every auditFullEvery, on the replica that holds ligo_audit_verify.
+// pass every auditFullEvery, on the replica that holds ligo_audit_verify;
+// with storage.audit.retention set, a prune every auditPruneEvery after a
+// valid pass (.specs/ligo-pruning.md §3.5).
 const (
 	auditVerifyEvery = 10 * time.Minute
 	auditFullEvery   = 24 * time.Hour
+	auditPruneEvery  = 24 * time.Hour
 )
 
 // verifyAudit verifies the audit chain and signs a checkpoint when one is
 // due, for ligo_audit_chain_valid; a broken chain is also logged. The first
-// pass a replica runs under the lock is a full one.
-func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer) {
-	var lastFull time.Time
+// pass a replica runs under the lock is a full one, and so is its first
+// prune check.
+func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, retention time.Duration) {
+	var lastFull, lastPrune time.Time
 	for {
 		full := time.Since(lastFull) >= auditFullEvery
-		if ran, err := verifyAuditOnce(ctx, log, db, signer, full); err != nil && ctx.Err() == nil {
+		prune := retention > 0 && time.Since(lastPrune) >= auditPruneEvery
+		if ran, err := verifyAuditOnce(ctx, log, db, signer, full, prune, retention); err != nil && ctx.Err() == nil {
 			log.Warn("audit chain verification", "full", full, "error", err)
-		} else if ran && full {
-			lastFull = time.Now()
+		} else if ran {
+			if full {
+				lastFull = time.Now()
+			}
+			if prune {
+				lastPrune = time.Now()
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -365,7 +376,7 @@ func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer
 
 // verifyAuditOnce runs one pass if this replica takes the lock; it reports
 // whether it ran.
-func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, full bool) (bool, error) {
+func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, full, prune bool, retention time.Duration) (bool, error) {
 	release, locked, err := store.TryLock(ctx, db, "ligo_audit_verify")
 	if err != nil || !locked {
 		return false, err
@@ -383,6 +394,20 @@ func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, si
 	metrics.AuditChainValid.Set(1)
 	if _, err := audit.Checkpoint(ctx, db, signer, r, time.Now()); err != nil {
 		log.Warn("audit checkpoint", "error", err)
+	}
+	if prune {
+		p, err := audit.Prune(ctx, db, signer, retention, time.Now())
+		if err != nil {
+			return true, fmt.Errorf("audit prune: %w", err)
+		}
+		if p.Deleted > 0 {
+			metrics.AuditPrunedEntries.WithLabelValues().Add(float64(p.Deleted))
+			log.Info("audit pruned", "through", p.Through, "deleted", p.Deleted, "export", p.Export)
+		}
+	}
+	var oldest *time.Time
+	if err := db.QueryRow(ctx, "SELECT occurred_at FROM audit_log ORDER BY id LIMIT 1").Scan(&oldest); err == nil && oldest != nil {
+		metrics.AuditOldestEntry.Set(float64(oldest.Unix()))
 	}
 	return true, nil
 }

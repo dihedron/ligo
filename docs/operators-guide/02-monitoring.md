@@ -52,6 +52,8 @@ No metric carries a jurisdiction label, as jurisdictions are unbounded. Per-juri
 | `ligo_interconnect_denied_total` | `rule` | Requests the policy refused |
 | `ligo_interconnect_violations` | | Existing bindings the policy would deny |
 | `ligo_audit_chain_valid` | | 1 while the chain verifies |
+| `ligo_audit_oldest_entry_timestamp_seconds` | | When the oldest entry left was written; a jump without a `SYSTEM_AUDIT_PRUNED` entry is a deletion |
+| `ligo_audit_pruned_entries_total` | | Entries deleted by pruning |
 | `ligo_break_glass_open` | `realm` | Open emergency changes |
 | `ligo_break_glass_total` | `realm`, `operation`, `outcome` | `ratified`, `reverted`, `revert_failed`, `review_overdue` |
 | `ligo_notifications_abandoned_total` | | Notifications given up on |
@@ -71,5 +73,7 @@ With accounts, send `BINDING_TARGET_DECIDED_BY_PLATFORM` to each account's own t
 Every state-changing action, propagation and workflow outcome is audited, in a hash chain the application can only append to. Forward it to your SIEM. Read it with `ligo audit list`.
 
 Every 1000 entries or hour, `ligo` signs the head of the chain with the `ligo-audit` key, outside the database. One replica verifies the chain every 10 minutes, from the newest of these checkpoints, and the whole chain at startup and every 24 hours; `ligo_audit_chain_valid` gives the result. `ligo audit verify` checks it on demand, and `ligo audit verify --full` walks the whole chain. Run a full verification after restoring a backup, and before archiving the log.
+
+With `storage.audit.retention` set, the same replica prunes once a day; each prune writes a `SYSTEM_AUDIT_PRUNED` entry and adds to `ligo_audit_pruned_entries_total`. Alert when `ligo_audit_oldest_entry_timestamp_seconds` moves forward without a `SYSTEM_AUDIT_PRUNED` entry: that is a deletion `ligo` did not make.
 
 An auditor can check the checkpoints without `ligo`: the public keys are at `transit/keys/ligo-audit`, and each checkpoint signs the RFC 8785 JSON of `auditId`, `entryHash` and `createdAt`.

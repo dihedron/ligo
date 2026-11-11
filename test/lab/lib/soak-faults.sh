@@ -15,7 +15,7 @@ SOAK_FAULT_LIST=(
 	"slow-pg 300 60" "slow-ldap 300 60" "slow-store 300 60" "partition 120 120"
 	"conns-full 120 120" "long-lock 60 120" "memory 300 60" "spire-down 600 120"
 	"store-sealed 120 120" "webhook-down 300 300" "reload 0 60" "maintenance 120 60"
-	"rolling-restart 0 120" "group-change 300 60"
+	"rolling-restart 0 120" "group-change 300 60" "audit-prune 0 60"
 )
 
 # soak_marker NAME|"": the marker the checker reads; "" removes it.
@@ -102,6 +102,15 @@ soak_fault() {
 	reload:stop | rolling-restart:stop) ;;
 	maintenance:start) cli soak-admin maintenance on -m "the soak's maintenance fault" >/dev/null ;;
 	maintenance:stop) cli soak-admin maintenance off >/dev/null ;;
+	audit-prune:start)
+		# an export through a current entry, recorded as ligo audit export
+		# would, and a prune through it under the generator's load
+		local head
+		head="$(audit_anchor)"
+		serve_sql "insert into audit_exports (through, sha256, actor) values ($head, repeat('0', 64), 'soak')" >/dev/null
+		serve_sql "select audit_prune($head)" >/dev/null
+		;;
+	audit-prune:stop) ;;
 	rolling-restart:start)
 		# paired with a fault ligo refuses to start under (a sealed store, SPIRE
 		# down), a replica stays down until that fault is undone: the roll stops
