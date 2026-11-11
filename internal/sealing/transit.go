@@ -28,7 +28,10 @@ type TransitConfig struct {
 	JWTAudience string `yaml:"jwt_audience"`
 	Mount       string `yaml:"mount"`
 	KeyName     string `yaml:"key_name"`
-	CACertFile  string `yaml:"ca_cert_file"` // CAs trusted for address; default the system roots
+	// AuditKeyName is the ed25519 key that signs audit checkpoints (§4.3);
+	// default ligo-audit.
+	AuditKeyName string `yaml:"audit_key_name"`
+	CACertFile   string `yaml:"ca_cert_file"` // CAs trusted for address; default the system roots
 }
 
 // JWTFetcher provides the JWT-SVID ligo logs in to Vault with.
@@ -166,14 +169,18 @@ func (k *TransitKEK) currentToken(ctx context.Context) (string, error) {
 	return k.token, nil
 }
 
-// post sends a JSON request. Errors carry Vault's status and messages, never
-// the request body.
+// post sends a JSON request, or a GET when in is nil. Errors carry Vault's
+// status and messages, never the request body.
 func (k *TransitKEK) post(ctx context.Context, path, token string, in, out any) error {
-	body, err := json.Marshal(in)
-	if err != nil {
-		return err
+	method, body := http.MethodGet, []byte(nil)
+	if in != nil {
+		var err error
+		if body, err = json.Marshal(in); err != nil {
+			return err
+		}
+		method = http.MethodPost
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.cfg.Address+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, k.cfg.Address+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

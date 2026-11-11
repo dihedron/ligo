@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/store/migrate"
@@ -275,7 +277,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	s := &Server{Listener: listener, Config: cfg, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
 		Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
-		Logger:  slog.New(slog.DiscardHandler)}
+		Logger:  slog.New(slog.DiscardHandler), Signer: zeroSigner(t)}
 	if listener.AllowBasicAuth {
 		s.LDAP = fakeDirectory{}
 	}
@@ -511,6 +513,9 @@ func TestRequestsAPI(t *testing.T) {
 	}
 	if r := v.do(t, dora, "GET", "/v1/admin/audit/verify", nil); r.code != 200 || r.body["valid"] != true {
 		t.Errorf("verify: %+v", r)
+	}
+	if r := v.do(t, dora, "GET", "/v1/admin/audit/verify?full=true", nil); r.code != 200 || r.body["valid"] != true || r.body["full"] != true {
+		t.Errorf("verify, full: %+v", r)
 	}
 }
 
@@ -1266,4 +1271,19 @@ func TestAccountsAPI(t *testing.T) {
 	if r := v.do(t, reg, "POST", base+"/"+name+"/retire", nil); r.code != 409 {
 		t.Errorf("retired twice: %d", r.code)
 	}
+}
+
+// zeroSigner verifies audit checkpoints with the all-zero local KEK that
+// every integration test uses, ligo serve's too.
+func zeroSigner(t *testing.T) sealing.Signer {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kek")
+	if err := os.WriteFile(path, make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kek, err := sealing.NewLocalKEK(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealing.NewLocalSigner(kek)
 }

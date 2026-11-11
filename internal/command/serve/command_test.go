@@ -131,14 +131,14 @@ func TestSealer(t *testing.T) {
 	kek := filepath.Join(t.TempDir(), "kek")
 	_ = os.WriteFile(kek, make([]byte, 32), 0o600)
 	cfg := &config.Config{SecretSealing: config.SecretSealing{Provider: "local-kek", LocalKEKFile: kek}}
-	if _, err := (&Serve{}).sealer(ctx, cfg, nil); err == nil {
+	if _, _, err := (&Serve{}).sealer(ctx, cfg, nil); err == nil {
 		t.Error("local-kek without --insecure-dev")
 	}
-	if s, err := (&Serve{InsecureDev: true}).sealer(ctx, cfg, nil); err != nil || s == nil {
+	if s, signer, err := (&Serve{InsecureDev: true}).sealer(ctx, cfg, nil); err != nil || s == nil || signer == nil {
 		t.Errorf("local-kek: %v", err)
 	}
 	cfg.SecretSealing.Provider = "rot13"
-	if _, err := (&Serve{InsecureDev: true}).sealer(ctx, cfg, nil); err == nil {
+	if _, _, err := (&Serve{InsecureDev: true}).sealer(ctx, cfg, nil); err == nil {
 		t.Error("an unknown provider")
 	}
 }

@@ -28,7 +28,11 @@ The Transit key can be used only by `ligo`, and cannot be exported. Sealed blobs
 
 ## The audit log
 
-Each entry hashes the previous one. The application can only insert: it has no update or delete privilege, and a trigger refuses even the owner. Entries are written in the same transaction as what they record, with a lock order that makes the chain linear. `ligo` verifies it periodically and exposes the result as a metric.
+Each entry hashes the previous one. The application can only insert: it has no update or delete privilege, and a trigger refuses even the owner. Entries are written in the same transaction as what they record, with a lock order that makes the chain linear.
+
+A hash chain alone does not stop someone with write access to the database: they can change an entry and recompute every hash after it. So `ligo` regularly signs the head of the chain with an ed25519 key in Transit, outside the database, and stores these **checkpoints** in a table of their own, append-only too. A rewritten chain no longer matches its signed checkpoints.
+
+Checkpoints also keep verification cheap. One replica verifies every 10 minutes from the newest checkpoint, in short batches, and the whole chain daily; the result is a metric. An edit before the newest checkpoint that did not recompute hashes is found by the daily full pass. Checkpoints have no foreign key to the entries, so they can later anchor a log whose oldest entries were pruned.
 
 ## Notifications
 

@@ -28,6 +28,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
 	"github.com/dihedron/ligo/internal/ratelimit"
+	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/jackc/pgx/v5"
@@ -49,7 +50,8 @@ type Server struct {
 	Targets   *targets.Service
 	Workflows Workflows
 	Catalog   *catalog.Reader
-	Plugins   Plugins // the platforms' health and forms
+	Plugins   Plugins        // the platforms' health and forms
+	Signer    sealing.Signer // verifies the audit checkpoints
 	Logger    *slog.Logger
 
 	// Logins are the failed-login limits, shared with the UI's login (§7.3

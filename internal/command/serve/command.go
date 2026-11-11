@@ -3,6 +3,7 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -50,6 +51,7 @@ import (
 	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/internal/workflows"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -166,7 +168,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return notReady("SPIRE", cfg.Service.StartupTimeout, err)
 	}
 	defer func() { _ = realms.Close() }()
-	sealer, err := cmd.sealer(ready, cfg, realms)
+	sealer, signer, err := cmd.sealer(ready, cfg, realms)
 	if err != nil {
 		return notReady("the sealer", cfg.Service.StartupTimeout, err)
 	}
@@ -238,7 +240,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		}
 	}()
 
-	s, err := services(cfg, pools, srcRules, plugins, engine)
+	s, err := services(cfg, pools, srcRules, plugins, engine, signer)
 	if err != nil {
 		return err
 	}
@@ -296,7 +298,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	run(dispatcher.Run)
-	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, time.Hour) })
+	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, signer) })
 	run(func(ctx context.Context) { realms.WatchConflicts(ctx, log, time.Minute) })
 
 	// the metrics: the process-wide ones, and this run's database and cache
@@ -334,28 +336,55 @@ func traced(listener string, h http.Handler) http.Handler {
 		}))
 }
 
-// verifyAudit verifies the audit chain at once and then every interval,
-// for ligo_audit_chain_valid; a broken chain is also logged.
-func verifyAudit(ctx context.Context, log *slog.Logger, db store.Querier, interval time.Duration) {
+// Audit verification (§4.3): incremental every auditVerifyEvery, a full
+// pass every auditFullEvery, on the replica that holds ligo_audit_verify.
+const (
+	auditVerifyEvery = 10 * time.Minute
+	auditFullEvery   = 24 * time.Hour
+)
+
+// verifyAudit verifies the audit chain and signs a checkpoint when one is
+// due, for ligo_audit_chain_valid; a broken chain is also logged. The first
+// pass a replica runs under the lock is a full one.
+func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer) {
+	var lastFull time.Time
 	for {
-		r, err := audit.Verify(ctx, db)
-		switch {
-		case err != nil:
-			if ctx.Err() == nil {
-				log.Warn("audit chain verification", "error", err)
-			}
-		case r.Valid:
-			metrics.AuditChainValid.Set(1)
-		default:
-			metrics.AuditChainValid.Set(0)
-			log.Error("the audit chain is broken", "first_broken", r.FirstBroken, "entries", r.Entries)
+		full := time.Since(lastFull) >= auditFullEvery
+		if ran, err := verifyAuditOnce(ctx, log, db, signer, full); err != nil && ctx.Err() == nil {
+			log.Warn("audit chain verification", "full", full, "error", err)
+		} else if ran && full {
+			lastFull = time.Now()
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(auditVerifyEvery):
 		}
 	}
+}
+
+// verifyAuditOnce runs one pass if this replica takes the lock; it reports
+// whether it ran.
+func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, full bool) (bool, error) {
+	release, locked, err := store.TryLock(ctx, db, "ligo_audit_verify")
+	if err != nil || !locked {
+		return false, err
+	}
+	defer release()
+	r, err := audit.Verify(ctx, db, signer, full)
+	if err != nil {
+		return true, err // the metric stays as it was: nothing is known
+	}
+	if !r.Valid {
+		metrics.AuditChainValid.Set(0)
+		log.Error("the audit chain is broken", "first_broken", r.FirstBroken, "entries", r.Entries, "full", full)
+		return true, nil
+	}
+	metrics.AuditChainValid.Set(1)
+	if _, err := audit.Checkpoint(ctx, db, signer, r, time.Now()); err != nil {
+		log.Warn("audit checkpoint", "error", err)
+	}
+	return true, nil
 }
 
 // notReady says which dependency was not ready, and that the deadline
@@ -367,25 +396,52 @@ func notReady(what string, timeout time.Duration, err error) error {
 	return err
 }
 
-// sealer is secret_sealing's provider, checked for key availability.
-func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, realms *identity.Realms) (*sealing.Sealer, error) {
-	var kek sealing.KEK
-	var err error
+// sealer is secret_sealing's provider, and the signer of audit checkpoints
+// on the same backend (§4.3), both checked for key availability.
+func (cmd *Serve) sealer(ctx context.Context, cfg *config.Config, realms *identity.Realms) (*sealing.Sealer, sealing.Signer, error) {
+	var (
+		kek    sealing.KEK
+		signer sealing.Signer
+		err    error
+	)
 	switch ss := cfg.SecretSealing; ss.Provider {
 	case "vault-transit":
-		kek, err = sealing.NewTransitKEK(ss.VaultTransit, realms, nil)
+		var transit *sealing.TransitKEK
+		if transit, err = sealing.NewTransitKEK(ss.VaultTransit, realms, nil); err == nil {
+			kek, signer = transit, sealing.NewTransitSigner(transit, cmp.Or(ss.VaultTransit.AuditKeyName, "ligo-audit"))
+		}
 	case "local-kek":
-		kek, err = sealing.NewLocalKEK(ss.LocalKEKFile, cmd.InsecureDev)
+		var local *sealing.LocalKEK
+		if local, err = sealing.NewLocalKEK(ss.LocalKEKFile, cmd.InsecureDev); err == nil {
+			kek, signer = local, sealing.NewLocalSigner(local)
+		}
 	default:
 		err = fmt.Errorf("unknown provider %q", ss.Provider)
 	}
 	if err == nil {
 		err = kek.Check(ctx)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("serve: secret_sealing: %w", err)
+	if err == nil {
+		err = checkSigner(ctx, signer)
 	}
-	return sealing.NewSealer(kek), nil
+	if err != nil {
+		return nil, nil, fmt.Errorf("serve: secret_sealing: %w", err)
+	}
+	return sealing.NewSealer(kek), signer, nil
+}
+
+// checkSigner signs and verifies a message no checkpoint can be: the audit
+// key exists, is ed25519, and ligo may sign with it and read it.
+func checkSigner(ctx context.Context, s sealing.Signer) error {
+	msg := []byte("ligo: audit signing key check")
+	keyID, sig, err := s.Sign(ctx, msg)
+	if err == nil {
+		err = s.Verify(ctx, keyID, msg, sig)
+	}
+	if err != nil {
+		return fmt.Errorf("audit signing key %s: %w", s.ID(), err)
+	}
+	return nil
 }
 
 // health runs the initial Health check of every instance; a plugin that
@@ -413,7 +469,7 @@ func health(ctx context.Context, log *slog.Logger, cfg *config.Config, p workflo
 }
 
 // services wires the resources and their change requests.
-func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, plugins *pluginmgr.Manager, engine *workflows.Engine) (*adminhttp.Server, error) {
+func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, plugins *pluginmgr.Manager, engine *workflows.Engine, signer sealing.Signer) (*adminhttp.Server, error) {
 	bindingRules, err := bindings.NewRules(cfg)
 	if err != nil {
 		return nil, err
@@ -436,7 +492,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 	}
 	return &adminhttp.Server{Listener: cfg.Server.AdminListener, Config: cfg, Authz: az, DB: pools.App, Requests: requests,
 		Bindings: bs, Sources: ss, Targets: ts, Workflows: engine, Catalog: &catalog.Reader{DB: pools.App, Policy: requests.Policy},
-		Plugins: adminhttp.PlatformPlugins(plugins)}, nil
+		Plugins: adminhttp.PlatformPlugins(plugins), Signer: signer}, nil
 }
 
 // listen serves the workload and admin APIs until ctx ends, then drains

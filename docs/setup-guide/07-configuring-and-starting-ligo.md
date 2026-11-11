@@ -139,6 +139,7 @@ secret_sealing:
     jwt_audience: "https://vault.prod.internal"
     mount: transit
     key_name: ligo-interstage
+    audit_key_name: ligo-audit
 plugins:
   directory: "/usr/lib/ligo/plugins"
 ```

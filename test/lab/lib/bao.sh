@@ -176,13 +176,22 @@ bao_configure() {
 		oidc_discovery_url="https://spire-$realm.ligo.lab:$OIDC_PORT" \
 		oidc_discovery_ca_pem="@$(server_ca "$server")" >/dev/null || die "$server: cannot configure the JWT auth"
 	[[ "$realm" == prod ]] || return 0
+	# the ed25519 key that signs audit checkpoints (§4.3)
+	server_cli "$server" read transit/keys/ligo-audit >/dev/null 2>&1 || server_cli "$server" write transit/keys/ligo-audit type=ed25519 >/dev/null
 	inner_exec "$server" sh -c 'cat >/root/ligo-sealer.hcl' <<'HCL'
-# ligo's sealer (ADR-07): wrap and unwrap data keys, nothing else
+# ligo's sealer (ADR-07): wrap and unwrap data keys, sign audit checkpoints
+# and read their public keys, nothing else
 path "transit/encrypt/ligo-interstage" {
   capabilities = ["update"]
 }
 path "transit/decrypt/ligo-interstage" {
   capabilities = ["update"]
+}
+path "transit/sign/ligo-audit" {
+  capabilities = ["update"]
+}
+path "transit/keys/ligo-audit" {
+  capabilities = ["read"]
 }
 HCL
 	server_cli "$server" policy write ligo-sealer /root/ligo-sealer.hcl >/dev/null
@@ -208,9 +217,14 @@ bao_check() {
 			curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" -X POST \
 				"https://$S:8200/v1/transit/encrypt/ligo-interstage" -d "{\"plaintext\":\"bGFiLWNoZWNr\"}" |
 				jq -e ".data.ciphertext | startswith(\"vault:v\")" >/dev/null
+			curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" -X POST \
+				"https://$S:8200/v1/transit/sign/ligo-audit" -d "{\"input\":\"bGFiLWNoZWNr\"}" |
+				jq -e ".data.signature | startswith(\"vault:v\")" >/dev/null
+			curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" "https://$S:8200/v1/transit/keys/ligo-audit" |
+				jq -e ".data.type == \"ed25519\"" >/dev/null
 			! curl -fsS --cacert /etc/ligo-lab/ca.crt -H "X-Vault-Token: $token" "https://$S:8200/v1/kv/data/x" >/dev/null 2>&1
 		' || die "$host: the JWT-SVID login to $server, or Transit, does not work"
-		info "$host, user ligo: logged in to $server with its JWT-SVID, encrypted with transit/ligo-interstage, denied elsewhere"
+		info "$host, user ligo: logged in to $server with its JWT-SVID, encrypted with transit/ligo-interstage, signed with transit/ligo-audit, denied elsewhere"
 	done
 }
 

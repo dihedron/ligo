@@ -765,8 +765,22 @@ CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE res
 CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;
+BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
 CREATE TRIGGER trg_audit_no_update BEFORE UPDATE OR DELETE ON audit_log
+    FOR EACH ROW EXECUTE FUNCTION audit_append_only();
+
+-- Signed checkpoints of the chain (§4.3): each signs the entry_hash of the
+-- entry audit_id, with a key outside the database, so a rewrite of the chain
+-- up to it is detected even with every hash recomputed. Append-only too.
+CREATE TABLE audit_checkpoints (
+    id          BIGSERIAL PRIMARY KEY,
+    audit_id    BIGINT NOT NULL UNIQUE,       -- no foreign key: pruning removes the entries, the checkpoint anchors what remains
+    entry_hash  CHAR(64) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL,
+    key_id      VARCHAR(255) NOT NULL,
+    signature   TEXT NOT NULL
+);
+CREATE TRIGGER trg_audit_checkpoints_no_update BEFORE UPDATE OR DELETE ON audit_checkpoints
     FOR EACH ROW EXECUTE FUNCTION audit_append_only();
 
 -- ---------------------------------------------------------------------------
@@ -843,6 +857,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_p
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;
+GRANT SELECT, INSERT ON audit_checkpoints TO ligo_app;
+GRANT USAGE ON SEQUENCE audit_checkpoints_id_seq TO ligo_app;
 GRANT SELECT, UPDATE ON system_settings TO ligo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON notification_outbox TO ligo_app;
 GRANT USAGE ON SEQUENCE notification_outbox_id_seq TO ligo_app;

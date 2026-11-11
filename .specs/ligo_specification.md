@@ -1,8 +1,8 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.0.6` (`v1alpha1` API)
+- **Document Version:** `4.0.7` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.5). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.6). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.7). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.8). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.9). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.10). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.11).
+- **Supersedes:** `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.5). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.6). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.7). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.8). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.9). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.10). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.11). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.12).
 - **Target Stack:** Go 1.27.3+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
@@ -77,29 +77,37 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 - A **realm** is a technical placement (ADR-03): one SPIRE trust domain, its agent socket, and the plugin processes attached to it. Realms decide where plugins run and which SVIDs they hold. A platform belongs to one realm.
 - A **jurisdiction** (or simply **jurisdiction**) is an organisational ownership boundary (ADR-13, §3.9), such as a cloud tenancy (`cloud/fin-01/payments`) or a data centre (`dc/corp-prod`). Every source, target and platform has an owner jurisdiction. Jurisdictions decide who may propose, approve, see and revoke.
 
-### 0.5 Changelog from 4.0.5 (4.0.6)
+### 0.5 Changelog from 4.0.6 (4.0.7)
+| Area | Change |
+| :--- | :--- |
+| Audit verification (§4.3, §7.2, §10.1) | Verification reads the chain in batches of 5000 entries, each its own short statement, starting from the newest signed checkpoint; a full pass from the oldest entry runs every 24 h and on `?full=true`. It runs every 10 minutes on one replica, under the advisory lock `ligo_audit_verify`. Before, one statement re-hashed the whole chain from genesis, hourly on every replica: the soak of 2026-11-10 reached about 32k entries, where it ran past `app_statement_timeout` and `GET /v1/admin/audit/verify` returned 500. |
+| Signed checkpoints (§4.2, §4.3, T-13) | New append-only table `audit_checkpoints`. Every 1000 entries or 1 hour, `ligo` signs the `entry_hash` of the verified head with an ed25519 key outside the database. A chain rewritten with every hash recomputed, by someone with write access to the database, no longer verifies. Checkpoints have no foreign key, so they will anchor a chain whose head was pruned (backlog). |
+| Configuration and startup (§8.1, §8.2) | New key `secret_sealing.vault_transit.audit_key_name` (default `ligo-audit`): a Transit key of type `ed25519`; `ligo-sealer` needs `update` on `transit/sign/<key>` and `read` on `transit/keys/<key>`. With `local-kek`, the signing key is derived from the KEK with HKDF. Startup signs and verifies a test message, so a missing key fails startup. |
+| API and CLI (§7.2, §8.4) | `GET /v1/admin/audit/verify?full=true` and `ligo audit verify --full`; the response adds `checkpoints` and `full`; `503 unavailable` when the signing key cannot be reached, never `valid: false`. |
+
+### 0.6 Changelog from 4.0.5 (4.0.6)
 | Area | Change |
 | :--- | :--- |
 | Deprovisioning order (INV-04, ADR-02, §6.5) | A delete cleans first the stage that holds the access. With a static credential that is `TARGET`, then `SECRET_STORE`, then `IDENTITY`: an outage of the store or of SPIRE can delay the store's cleanup but cannot keep access alive. With `DELEGATED_DYNAMIC`, the store's leases are the access and keep the order `SECRET_STORE`, `TARGET`, `IDENTITY`. Before, every mode cleaned the store first: the soak of 2026-11-09 sealed the store for 2 minutes and left revoked bindings with their roles on the target. |
 | Bootstrap credentials (§5.5) | A failed renewal keeps the last good credential: a KV one until a read succeeds, a leased one until its lease ends. Before, a plugin whose credential was due for renewal failed every call while Vault or SPIRE was down, so it could not remove access either: the soak's SPIRE outage of 10 minutes failed deletes at `TARGET` with `BOOTSTRAP_CREDENTIAL_UNAVAILABLE`. |
 | Automatic retry (§4.2, §6, §6.3) | A binding whose attempt failed on a retryable cause is retried by the sweeper, as `system:auto-retry`, 15 s after the failure and doubling to 60 s, without limit and never in maintenance mode; new column `bindings.next_retry_at`. `FAILED` and `DELETE_FAILED` are terminal for an attempt, no longer for the binding. Before, they waited for an operator whatever the cause. |
 
-### 0.6 Changelog from 4.0.4 (4.0.5)
+### 0.7 Changelog from 4.0.4 (4.0.5)
 | Area | Change |
 | :--- | :--- |
 | Terminology (§0.4, §3.9 and throughout) | **Breaking change.** "Governance" becomes the **charter**: the set of rules every jurisdiction must comply with (how a workload's jurisdiction follows from its SPIFFE path, name prefixes, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed). In real life, jurisdictions live under a charter or a constitution. §3.9 defines the term, and every released guide carries the definition (`TestCharterIsDefined`). Renamed, with no alias: the `server.yaml` section `governance` (now `charter`; its keys are unchanged), which strict decoding now refuses; the package `internal/governance` (now `internal/charter`); the endpoints `GET /v1/admin/governance` and `POST /v1/admin/governance/evaluate` (now `/v1/admin/charter` and `/v1/admin/charter/evaluate`); the CLI `ligo governance show|check` (now `ligo charter show|check`); the UI route `/ui/bindings/governance-preview` (now `/ui/bindings/charter-preview`); the event `CONFIG_GOVERNANCE_POLICY_CHANGED` (now `CONFIG_CHARTER_CHANGED`); the problem slug `governance-policy-changed` (now `charter-changed`). "The governance policy" is now "the charter"; its hash on change requests keeps the column `policy_sha256`. Where "governance" meant people deciding, the text now says "consent" (trust boundary 6, T-30). Older changelog entries keep the names that were current at the time. No behavioural change. |
 
-### 0.7 Changelog from 4.0.3 (4.0.4)
+### 0.8 Changelog from 4.0.3 (4.0.4)
 | Area | Change |
 | :--- | :--- |
 | Terminology (ADR-13 and throughout) | **Breaking change.** The governance scope becomes the **jurisdiction**: who decides about a source, a target, a platform or one side of a change. "Governance scope" was abstract, and "scope" alone has other meanings. Moving a resource to another jurisdiction at startup is a **transfer**. Renamed, with no alias (no deployment depends on the old names): the `server.yaml` keys `scopes`, `required_scopes`, `target_scopes`, `source_scopes`, `scope_template`, `default_cross_scope`, `require_distinct_approvers_across_scopes` and, under `governance.accounts`, `scope`, `source_scope` and `target_scope` (now `jurisdictions`, `required_jurisdictions`, `target_jurisdictions`, `source_jurisdictions`, `jurisdiction_template`, `default_cross_jurisdiction`, `require_distinct_approvers_across_jurisdictions`, `jurisdiction`, `source_jurisdiction`, `target_jurisdiction`), which strict decoding now refuses; in `001`, edited in place, the domain `scope_path`, the columns `scope`, `owner_scope`, `source_scope`, `target_scope`, `platform_scope` and `n_scopes`, their indexes and `chk_cr_scope_columns`, and the setting `ligo.rescope` (now `ligo.transfer`); the resource and API fields `scope`, `sourceScope`, `targetScope`, `platformScope` and the filter `scope`; the problem slugs `scope-unresolvable`, `account-scope-mismatch` and `namespace-scope-mismatch`; the CLI flags `--scope`, `--source-scope` and `ligo serve --accept-scope-changes`; the audit actions `SOURCE_RESCOPED`, `TARGET_RESCOPED` and `BINDING_RESCOPED` (now `*_TRANSFERRED`) and the apply error `re-scoped` (now `transferred`); the webhook payload keys `sourceScope`, `targetScope` and `platformScope`. The `governance` section, the package and `CONFIG_GOVERNANCE_POLICY_CHANGED` keep their names: governance is the rules, a jurisdiction what they apply to. Older changelog entries keep the names that were current at the time. No behavioural change. |
 
-### 0.8 Changelog from 4.0.2 (4.0.3)
+### 0.9 Changelog from 4.0.2 (4.0.3)
 | Area | Change |
 | :--- | :--- |
 | Terminology (ADR-03 and throughout) | **Breaking change.** The configuration term "zone" becomes **realm**: one trust domain, its SPIRE agent socket and the plugin processes attached to it. "Zone" is what architects call a network segment (a data centre segment, a DMZ, a cloud region), and one realm may serve workloads in several of them. Renamed, with no alias (no deployment depends on the old names): the `server.yaml` keys `zones`, `zone` (instances, platforms, `core_identity`) and `via_zone` (now `realms`, `realm`, `via_realm`), which strict decoding now refuses; the column `zone` of `targets`, `bindings` and `change_requests` and the indexes `idx_bindings_zone`, `idx_cr_status_zone` in `001`, edited in place; the plugin contract fields `InstanceDescriptor.zone`, `BindingContext.zone` and `ConfigureInstancesRequest.zone` (field numbers unchanged); the resource field `metadata.zone`, the admin API filter `zone` and the CLI flag `--zone` (now `--realm`, with no short form, as `-r` is `--expected-revision`); the webhook payload key `zone`; the metric labels `zone` and `socket_zone`. Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.9 Changelog from 4.0.1 (4.0.2)
+### 0.10 Changelog from 4.0.1 (4.0.2)
 | Area | Change |
 | :--- | :--- |
 | Migration from 3.x (§8.3, §8.4, §8.5, §11.2) | Removed. No 3.x deployment exists, so `ligo migrate-v3`, its section, the `internal/migratev3` package and AC-80 are dropped. 4.0 is installed on an empty database. |
@@ -129,7 +137,7 @@ PostgreSQL roles use the application prefix (`ligo_app`, `ligo_reader`, `ligo_mi
 
 The plugin contract (`v1`, unreleased) gains secret storage strategies and renames two plugin kinds and their services; the workload `auth` object renames three fields. The data model gains two columns, `bindings.derived_principal_name` and `bindings.secret_storage_strategy`. No change to the workflows.
 
-### 0.10 Changelog from 4.0.0 (4.0.1)
+### 0.11 Changelog from 4.0.0 (4.0.1)
 | Area | Change |
 | :--- | :--- |
 | Web UI (§7.4, EXT-14) | The UI moves from htmx 2.x to **htmx 4.0** (released 2026-08-28), pinned to `4.0.0` and served from `ligo`'s own static files. The `htmx-config` is rewritten for htmx 4: `allowEval`, `allowScriptTags`, `selfRequestsOnly`, `historyCacheSize` and `responseHandling` no longer exist. 4xx responses are now swapped by default, so `409` and `422` fragments are directed to the form's error container with `hx-status:409`/`hx-status:422`, and `5xx` is added to `noSwap`. Requests stay same-origin (`mode: same-origin`, the htmx 4 default) and the request timeout is raised to 90 s, above the plugin RPC timeout. htmx 4 no longer stores pages in browser storage for history. Attribute inheritance is no longer implicit, so templates set every htmx attribute on the element that needs it. The CSRF header hook in `app.js` uses the htmx 4 event `htmx:config:request`. |
@@ -139,7 +147,7 @@ The plugin contract (`v1`, unreleased) gains secret storage strategies and renam
 
 No change to the API, the data model or the workflows.
 
-### 0.11 Changelog from 3.0.2 (4.0.0)
+### 0.12 Changelog from 3.0.2 (4.0.0)
 | Area | Change |
 | :--- | :--- |
 | Resource model (ADR-15, §0.4, §3) | **Breaking change.** Sources and targets become first-class resources, managed through the API with their own change requests, revisions, audit history and lifecycle (`ACTIVE`, `DEPRECATED`, `RETIRED`). A **Source** is an identity specification (trust domain, SVID regex, sample SPIFFE IDs) with metadata; a **Target** is a specific resource on a platform, with access levels and network flows; **Platforms** replace 3.x target instances and stay in `server.yaml`. A **Binding** links one source to one target at one access level, with optional parameters and expiry, and at most one binding exists per (source, target). The free-form `spec`/`roleGrants` of 3.x is replaced by access levels reviewed once by the target and platform owners. Targets are register-only: publishing a target does not create the resource (FW-3). API version `v1alpha2`. |
@@ -158,14 +166,14 @@ No change to the API, the data model or the workflows.
 | Open issues and future work (§13) | FW-1 resolved by first-class targets. FW-2 becomes consumer policies stored with targets. New FW-3 (target provisioning), FW-4 (access recertification) and OI-3 (privilege identifiers of the existing plugins). |
 | Process flows (Appendix E) | E.3, E.4, E.6 and E.7 updated; new E.14 (register and narrow a source), E.15 (publish a target), E.16 (propagation), E.17 (catalog and network pre-flight check), E.18 (binding expiry). |
 
-### 0.12 Changelog from 3.0.1 (3.0.2)
+### 0.13 Changelog from 3.0.1 (3.0.2)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | The conceptual diagram is split into three parts and the logical diagram into two, with the logical diagrams showing keys and the main attributes only (full columns stay in §4.2), so that every diagram remains legible when printed. Content unchanged. |
 
 A printable PDF edition is generated from this Markdown source; this file remains authoritative.
 
-### 0.13 Changelog from 3.0.0 (3.0.1)
+### 0.14 Changelog from 3.0.0 (3.0.1)
 | Area | Change |
 | :--- | :--- |
 | Data model (§4.0) | New conceptual model (business entities, including those held in configuration, with definitions, relationships and cardinalities) and logical model (Mermaid entity-relationship diagrams), with a normative table of every relationship, how it is enforced (foreign key, trigger, startup check or none) and why, and the deliberate denormalizations. Checked against the DDL of §4.2. |
@@ -173,7 +181,7 @@ A printable PDF edition is generated from this Markdown source; this file remain
 
 No behavioral change.
 
-### 0.14 Changelog from 2.9.2 (3.0.0)
+### 0.15 Changelog from 2.9.2 (3.0.0)
 | Area | Change |
 | :--- | :--- |
 | Governance scopes (ADR-13, §3.1, §3.3, §3.7, §4.2, §7.2.2, §8.1, §8.2, Appendix D) | Authorization and approval move from zones to **governance scopes**: slash-separated paths (`dc/corp-prod`, `cloud/fin-01/payments`) that model both multi-tenant cloud tenancies and flat, centrally managed data centres. Every binding has an immutable **source scope**, derived from the fixed literal prefix of its SVID regex by an extractor configured per source trust domain, and a **target scope**, configured on its target instance. A regex whose fixed prefix does not identify one scope is rejected, so no pattern can span two tenancies. Role bindings use `scopes` instead of `zones`; `approval.required_zones` becomes `required_scopes`. Zones remain the technical placement of plugins and trust domains. **Breaking change** for configuration, database schema and API. |
@@ -187,33 +195,33 @@ No behavioral change.
 | Fix (§4.2) | `chk_regex_shape` contained `NOT LIKE '%\$'`. In `LIKE`, `\$` is an escaped literal `$`, so the condition contradicted `LIKE '%$'` and the check rejected **every** valid regex. Replaced by `right(source_svid_regex, 2) <> '\$'`. Found while testing the 3.0.0 schema. |
 | Future work (§13) | FW-1: a target scope chosen by a request field, only for plugins that guarantee the field determines the resource. FW-2: standing interconnection approvals stored in the database. |
 
-### 0.15 Changelog from 2.9.1 (2.9.2)
+### 0.16 Changelog from 2.9.1 (2.9.2)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §5.9, §7.1) | Go module path changed from the placeholder `github.com/yourorg/ligo` to `github.com/dihedron/ligo`, including both Protobuf `go_package` options. |
 
-### 0.16 Changelog from 2.9.0 (2.9.1)
+### 0.17 Changelog from 2.9.0 (2.9.1)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4, §3.1) | Resource API version changed from `bindings.spiffe.io/v1alpha1` to `ligo.dihedron.org/v1alpha1`, a domain owned by the project, instead of a name under the SPIFFE project's domain. |
 
-### 0.17 Changelog from 2.8.0 (2.9.0)
+### 0.18 Changelog from 2.8.0 (2.9.0)
 | Area | Change |
 | :--- | :--- |
 | Naming (§0.4 and throughout) | Application renamed from `binding` to `ligo` (Latin for "I bind"). Every application-derived identifier was renamed: binary, CLI and `cmd/` directory, Go module and Protobuf packages, environment variables, metrics, DBOS workflow IDs, PostgreSQL roles, advisory locks and `NOTIFY` channel, cookies, HTTP headers, file system paths, SPIFFE IDs, Vault/OpenBao objects, problem URN, endpoint annotation, ownership tag, go-plugin handshake, example host and group names. Identifiers that name the binding resource are unchanged (§0.4). Older changelog entries keep the names that were current at the time. No behavioral change. |
 
-### 0.18 Changelog from 2.7.0 (2.8.0)
+### 0.19 Changelog from 2.7.0 (2.8.0)
 | Area | Change |
 | :--- | :--- |
 | Testing (§11.1, §8.3, EXT-17) | All code MUST be tested on a lab built as code in `deploy/lab/`: two SPIRE servers (two trust domains) with agents, Vault or OpenBao, two `binding` replicas, PostgreSQL, an LDAP directory, workload hosts, target systems and a webhook receiver, extended as development needs emerge. Production-like security settings, real machine separation where attestation is tested, fault injection, a merge gate on the full lab suite, both Vault and OpenBao supported only if both pass, clean state per run, no production data, archived evidence. Acceptance scenarios moved to §11.2. |
 
-### 0.19 Changelog from 2.6.0 (2.7.0)
+### 0.20 Changelog from 2.6.0 (2.7.0)
 | Area | Change |
 | :--- | :--- |
 | Final consistency review (ADR-11, §3.1, §3.6, §4.2, §4.3, §5.6, §6.2, §6.3, §7.2, §7.6, §8.2) | Break-glass: ratify/revert concurrency defined (binding row lock, `409 break-glass-not-open`); refused in maintenance mode (reverts still run); revert payload and its re-validation defined; deleting a binding closes its open break-glass change, which then falls under the overdue-review rule; "emit once" markers stored (`break_glass_warned_at`, `review_overdue_notified_at`); API needs Basic credentials, UI needs password re-entry, failures audited; `status.breakGlass` in the admin representation; RBAC rows for `break_glass`, ratify and revert. Also: stale text removed (ADR-11, §6.2), `zones: ["*"]` defined, `s3-e2ee.v1` marked as planned, dispatcher added to startup, shutdown and the HA singletons, webhook `eventId` made restore-safe (UUIDv7 instead of the outbox row number), maintenance list includes break-glass, SVG responses replace the page CSP, theme wording made consistent with T-27, `min_justification_length ≥ 20` validated. New AC-38a–AC-38c. |
 | UI theming (§7.4, §7.6, §8.1, §8.2, T-27, AC-39–AC-43) | External theming through design tokens: conventional files in `/etc/binding/theme` (`theme.css`, `logo`, `logo-dark`, `favicon`, `fonts/`), explicit paths and token colors in `server.yaml` (explicit paths take precedence). Light, dark and system color modes, with a per-user choice stored in a cookie and rendered server-side (no inline script). Theme files validated at startup, served from memory with safe types and sandboxed SVG, and audited in `CONFIG_LOADED`. CSP gains `font-src 'self'`. |
 
-### 0.20 Changelog from 2.5.0 (2.6.0)
+### 0.21 Changelog from 2.5.0 (2.6.0)
 | Area | Change |
 | :--- | :--- |
 | Break-glass (ADR-12, INV-14, INV-16, §4.2, §6.2, §6.3, §7.2, §7.4, §7.5, §8.1, §8.2, §8.4, T-26, R-07, AC-31–AC-38) | People in a per-zone `break_glass` LDAP group can apply emergency changes in approval-required zones immediately, with fresh re-authentication, justification, incident reference and TTL. Creates and updates are reverted automatically on expiry unless a different approver ratifies them; emergency deletes are final but still reviewed. Database-enforced (`chk_break_glass`, `chk_ratification`, `chk_revert`). New `/v1/admin/break-glass`, `/ratify` and `/revert` endpoints, UI form and banner, CLI commands. |
@@ -221,12 +229,12 @@ No behavioral change.
 | Scope | The plugin SDK, the external plugins (Oracle, PostgreSQL, Kafka, OpenStack, Nexus), the Terraform/OpenTofu provider and the Ansible collection will each have their own specification, with the same structure as this one. They are not part of this document. |
 | Open issues (§13) | OI-1: secondary enforcement points (Vault, Keystone, Kafka) cannot express binding regexes. OI-2: the example Oracle + OpenLDAP wiring is not supported by Oracle. |
 
-### 0.21 Changelog from 2.4.0 (2.5.0)
+### 0.22 Changelog from 2.4.0 (2.5.0)
 | Area | Change |
 | :--- | :--- |
 | Delegated approval (ADR-11, INV-14, §4.2, §6.2, §7.2, §8.1, §8.2, §8.4, §10.6, T-25, R-06, AC-27–AC-30) | New `trusted_automation` role lets a portal or automation platform create, update and delete bindings in approval-required zones without a human approver in `binding`, by delegating approval to its upstream process. SPIFFE principals only (enforced in the database); scoped by zone and optional target instances; every request carries an upstream `approvalReference` (optional format pattern); optional self-asserted `automationContext`; optional per-principal rate limit. Change requests record `approval_basis` (`HUMAN`, `ZONE_AUTO`, `DELEGATED`), and `chk_four_eyes` enforces which decider each basis allows. New §10.6 explains what SPIFFE attestation can and cannot distinguish for Ansible and Terraform, and how to separate automation from people running the same tools. |
 
-### 0.22 Changelog from 2.3.1 (2.4.0)
+### 0.23 Changelog from 2.3.1 (2.4.0)
 | Area | Change |
 | :--- | :--- |
 | Regex validator (Appendix A, ADR-06, T-02, AC-03) | Closed a bypass of segment confinement: a `/` inside a repeated or optional group (`(?:[a-z]+\|/)+`, `(/[a-z]+)*`, `(/[a-z]+)?`) let one pattern match identities at any depth. New rule 7d rejects any `/` under `*`, `+`, `?` or `{n,m}`. Removed the 2.3.0 empty-alternation-branch rule, which protected nothing and was trivially bypassed. Appendix A now states the segment-confinement property, gives the rationale for every rule, and includes normative test vectors (A.5). |
@@ -240,7 +248,7 @@ No behavioral change.
 | Principal names (Appendix B, §3.4, §8.1) | Default prefix changed from `bnd-` to `bnd_`, and `-` removed from the custom-prefix grammar (now `^[a-zA-Z][a-zA-Z0-9_]{0,3}$`; example `svc_`). A hyphen is illegal in unquoted Oracle identifiers and needs quoting in PostgreSQL, so 2.3.0 names were rejected by the Oracle plugin's own identifier grammar. |
 | Trust bundles (§7.1, §8.1, §8.2, §10.5, T-24, EXT-16) | Each accepted trust domain now has exactly one authoritative bundle source (its own zone's socket, or a declared `via_zone` for federated domains), closing a path by which a lower-assurance SPIRE server could inject a bundle for another trust domain. `binding` registers on every zone's agent, because SPIRE releases bundles only to registered callers (verified in SPIRE's source, EXT-16). New `federated_trust_domains` setting and Topology C document how to verify additional trust domains through federation with a single agent. |
 
-### 0.23 Changelog from 2.3.0 (editorial patch 2.3.1)
+### 0.24 Changelog from 2.3.0 (editorial patch 2.3.1)
 | Area | Change |
 | :--- | :--- |
 | Editorial | Removed stray `[cite: 1]` tags throughout the prose. |
@@ -253,7 +261,7 @@ No behavioral change.
 
 No behavioral change. Design issues raised in the 2.3.0 review are addressed separately.
 
-### 0.24 Changelog from 2.2.0 (introduced in 2.3.0)
+### 0.25 Changelog from 2.2.0 (introduced in 2.3.0)
 | Area | Change |
 | :--- | :--- |
 | Regex AST (Appendix A) | Forbade `OpAnyCharNotNL` (normal `.`), any `OpCharClass` containing `'/'` (`0x2F`), and `OpEmptyMatch` inside `OpAlternate`, preventing wildcards from crossing SPIFFE path segment boundaries (`/`) or matching empty alternation branches. |
@@ -266,13 +274,13 @@ No behavioral change. Design issues raised in the 2.3.0 review are addressed sep
 | Naming (Appendix B) | Shortened `derived_principal_name` from 23 characters to 20 characters (`"bnd-"` + 16 Base32 chars = 80 bits of entropy) so it satisfies Active Directory's 20-char `sAMAccountName` limit out of the box without plugin-specific truncation. |
 | Pagination & CLI (§7.2.3, §8.4) | Standardized keyset pagination cursors across all list endpoints. Added normative `github.com/jessevdk/go-flags` CLI command/subcommand structure (`serve`, `apply`, `get`, `list`, `delete`, `retry`, `rotate`, `cr`, `target`, `audit`). |
 
-### 0.25 Changelog from 2.1.0 (introduced in 2.2.0)
+### 0.26 Changelog from 2.1.0 (introduced in 2.2.0)
 | Area | Change |
 | :--- | :--- |
 | Naming | Application renamed from `bindd` to `binding`. Every derived identifier was renamed accordingly (§0.4). |
 | Config | `service.application_version` set to `2.2.0` (now `3.0.2`). |
 
-### 0.26 Changelog from 2.0.0 (introduced in 2.1.0)
+### 0.27 Changelog from 2.0.0 (introduced in 2.1.0)
 | Area | Change |
 | :--- | :--- |
 | Regex security | SVID regex validated on the parsed AST (alternation/flag bypass closed); matching moved from PostgreSQL ARE to Go RE2 (ADR-06, Appendix A). |
@@ -1351,6 +1359,7 @@ erDiagram
 | `change_request_sides` | `change_requests` | `(change_request_id, requested_by, cr_kind)` → `(id, requested_by, kind)` | Composite FK to `uq_cr_id_requester_kind`, `ON DELETE CASCADE` | The copies of requester and kind let row checks enforce four-eyes and the allowed bases (`chk_side_decision`, `chk_side_basis`), and the composite FK guarantees the copies are true. |
 | `change_requests` | `sources`, `targets`, `bindings` | `resource_type`, `resource_name`, `resource_id` | **None** (application) | A `CREATE` request exists before its resource, and requests outlive a deleted binding or a retired resource (and a later one with the same name). The name, plus `resource_id` once applied, identifies the resource at the time; `uq_cr_one_pending_per_resource` allows one pending request per resource name and type. |
 | `audit_log` | resources, `change_requests` | `resource_type`, `resource_id`, `resource_name`, `change_request_id` | **None** (deliberate) | The audit log is append-only and must keep its history after a binding is deleted; a foreign key would either block the delete or erase history. |
+| `audit_checkpoints` | `audit_log` | `audit_id`, `entry_hash` | **None** (deliberate); verification (§4.3) | A checkpoint must outlive the entries it signs, so that it anchors what remains after pruning; verification checks that the entry, while it exists, still has the signed hash. |
 | `bindings`, `binding_stage_state` | DBOS workflows | `workflow_id` | None (text); fencing (ADR-08) | DBOS owns its schema; every workflow write is fenced on `bindings.workflow_id`. |
 | `targets`, `bindings`, `binding_stage_state`, `change_requests`, `change_request_sides`, `notification_outbox` | Configuration entities | `platform`, `platform_type`, `realm`, wiring columns, jurisdictions, `interconnect_rule`, `webhook` | Startup checks (§8.2 rules 10, 11, 16–18) | Configuration is not in the database. Startup refuses to run if stored references point to platforms or instances that no longer exist, or if stored jurisdictions no longer match the configuration. |
 | `admin_sessions` | Principals | `username`, `roles` | LDAP re-check every `authz_recheck_interval` (§7.3) | Principals live in LDAP. |
@@ -2076,8 +2085,22 @@ CREATE INDEX idx_audit_resource_id ON audit_log (resource_id, id DESC) WHERE res
 CREATE INDEX idx_audit_cr ON audit_log (change_request_id, id DESC) WHERE change_request_id IS NOT NULL;
 
 CREATE FUNCTION audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;
+BEGIN RAISE EXCEPTION '% is append-only', TG_TABLE_NAME; END $$;
 CREATE TRIGGER trg_audit_no_update BEFORE UPDATE OR DELETE ON audit_log
+    FOR EACH ROW EXECUTE FUNCTION audit_append_only();
+
+-- Signed checkpoints of the chain (§4.3): each signs the entry_hash of the
+-- entry audit_id, with a key outside the database, so a rewrite of the chain
+-- up to it is detected even with every hash recomputed. Append-only too.
+CREATE TABLE audit_checkpoints (
+    id          BIGSERIAL PRIMARY KEY,
+    audit_id    BIGINT NOT NULL UNIQUE,       -- no foreign key: pruning removes the entries, the checkpoint anchors what remains
+    entry_hash  CHAR(64) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL,
+    key_id      VARCHAR(255) NOT NULL,
+    signature   TEXT NOT NULL
+);
+CREATE TRIGGER trg_audit_checkpoints_no_update BEFORE UPDATE OR DELETE ON audit_checkpoints
     FOR EACH ROW EXECUTE FUNCTION audit_append_only();
 
 -- ---------------------------------------------------------------------------
@@ -2154,6 +2177,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_p
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;
+GRANT SELECT, INSERT ON audit_checkpoints TO ligo_app;
+GRANT USAGE ON SEQUENCE audit_checkpoints_id_seq TO ligo_app;
 GRANT SELECT, UPDATE ON system_settings TO ligo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON notification_outbox TO ligo_app;
 GRANT USAGE ON SEQUENCE notification_outbox_id_seq TO ligo_app;
@@ -2218,7 +2243,21 @@ RETURNING id;
 - No transaction that holds row locks may perform remote calls (plugin RPCs, LDAP, Vault). Validation that calls plugins runs before the transaction opens.
 - **Rationale.** A change request has exactly one mutable state, `PENDING`, and an immutable payload, so `status = 'PENDING'` (plus `payload_sha256` on approval) is a complete optimistic version check for the request. Without it, a decision made on a stale read could overwrite a concurrent one: a withdrawn or rejected change could still be applied, or two approvers could both apply the same request. With it, the first decision to commit wins and every later one fails cleanly. Two-sided consent adds one more race: two approvers of different sides approving at the same moment would each see the other's side as still pending, and the request would stay `PENDING` with every side approved. Incrementing `decision_seq` under the same condition serializes them: the second approver's transaction waits for the first, then sees its decision and completes the request. Locking the change request pessimistically for the whole approval would instead hold row locks across the plugin call in re-validation (up to `plugins.rpc_timeout`); the row lock is therefore taken only in the short transaction that records the decision, after validation. A resource's `revision` cannot serve as a version for this purpose: it counts desired-state revisions, already provides optimistic concurrency for edits via `expectedRevision`, and a binding's does not change on retry, rotate or reconcile. The concurrency token for a binding is its `phase` plus `workflow_id` (ADR-08).
 
-`GET /v1/admin/audit/verify` recomputes the chain. Audit entries MUST also be emitted as structured log events, so they can be forwarded to the SIEM.
+Audit entries MUST also be emitted as structured log events, so they can be forwarded to the SIEM.
+
+**Signed checkpoints (Normative).** The hash chain alone proves that no entry was changed *without* recomputing the hashes after it; someone with write access to the database could rewrite an entry and every hash after it. A checkpoint closes that gap with a key outside the database.
+- A checkpoint row (`audit_checkpoints`, §4.2) signs the JCS of `{"auditId": <audit_id>, "entryHash": <entry_hash>, "createdAt": <RFC 3339, microseconds>}`. Through `entry_hash`, it covers every entry up to `audit_id`.
+- The key is an ed25519 key: in production the Transit key `secret_sealing.vault_transit.audit_key_name` (default `ligo-audit`), on the same connection and login as sealing. `ligo` signs with `POST /v1/{mount}/sign/{key}` and verifies **locally**, with the public keys of `GET /v1/{mount}/keys/{key}`, read once per key version (`key_id` = `vault:vN`) and kept in memory. An auditor can verify with the same public keys. With `local-kek` (`--insecure-dev` only), the key is derived from the KEK with HKDF-SHA-256 (info `ligo audit checkpoint signing key`, `key_id` = `local:v1`).
+- A checkpoint is written after a verification that reached the head, when at least 1000 entries or 1 hour have passed since the previous one.
+- **Why ed25519.** It is the only signing key type that OpenBao (2.7.1) and Vault Community (2.2.1) Transit both offer, and its public key verifies locally with the Go standard library. Neither offers a post-quantum signature yet (ML-DSA is Vault Enterprise only). When one does, each checkpoint will also carry an ML-DSA signature, valid only if both verify (backlog item 14); the table needs no change.
+
+**Verification (Normative).** `audit.Verify` runs in two parts:
+1. **Checkpoints.** Every checkpoint's signature is checked, and, where its entry still exists, that the entry has the signed `entry_hash`. A bad signature or a mismatch makes the chain broken at that `audit_id`.
+2. **The chain,** read in batches of 5000 entries by key range (`WHERE id > $last ORDER BY id LIMIT 5000`), each batch its own statement, so `app_statement_timeout` never applies to the whole walk. An **incremental** pass starts at the newest checkpoint, with its `entry_hash` as `prev_hash`; a **full** pass starts at the oldest entry. A full pass's first entry MUST have as `prev_hash` either 64 `0` characters (genesis) or the `entry_hash` of the newest checkpoint below it (the entries before it were pruned); otherwise the chain is broken there.
+
+An incremental pass does not detect an entry before the newest checkpoint whose content was changed *without* recomputing hashes: the checkpoints still match. A full pass detects it. `ligo` therefore runs, on one replica at a time (advisory lock `ligo_audit_verify`), a full pass at startup and every 24 h, and an incremental pass every 10 minutes; both may write a checkpoint. A signer that cannot be reached is an error (`503 unavailable` on the API), never a broken chain.
+
+`GET /v1/admin/audit/verify` runs an incremental pass, and `?full=true` a full one (§7.2).
 
 ### 4.4 Zero-downtime updates via active-snapshot shadowing
 While revision N+1 is `PROVISIONING` or `FAILED`, workloads keep receiving revision N's snapshot (`active_*`), including revision N's regex (INV-02). Only the finalize step of a successful apply or reapply overwrites the snapshot, and it does so atomically.
@@ -3234,7 +3273,7 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | `POST` | `/v1/admin/change-requests/{id}/ratify` | approver of a break-glass side | Ratify one side of a break-glass change. Body `{"comment": "…", "side": "…"}` (`comment` required; `side` selected as for approval). The ratifier MUST differ from the requester, and from the ratifiers of the other sides when distinct approvers are required. Audit `BREAK_GLASS_RATIFIED`. When every `BREAK_GLASS` side is ratified, the binding's expiry is cleared. Ratifying the `SOURCE` side also ratifies the inline source's break-glass change. |
 | `POST` | `/v1/admin/change-requests/{id}/revert` | approver of any side, or the requester | Revert an open break-glass `CREATE`/`UPDATE` now, by the same `SYSTEM_REVERT` as expiry (`requested_by` = the caller). Body `{"comment": "…"}`: why, required (`422` without); kept as the revert's sides' `decision_comment` and audited with it. The sweeper's reverts at expiry carry the comment `TTL expired`. |
 | `GET` | `/v1/admin/{sources\|targets\|bindings}/{name}/audit` | viewer | Keyset-paginated audit entries of the resource: those carrying its id and those of its change requests (a create's included), never those of a retired or deleted namesake or of a refused attempt on its name. A binding is seen with its party jurisdictions, as by its `GET`. The last 20 entries of the `GET`s and the UI follow the same rule. |
-| `GET` | `/v1/admin/audit/verify` | viewer | Verifies the hash chain: `{"valid": true, "entries": N}`, or the first broken `id`. |
+| `GET` | `/v1/admin/audit/verify` | viewer | Verifies the hash chain from the newest signed checkpoint, or from the oldest entry with `?full=true` (§4.3): `{"valid": true, "entries": N, "checkpoints": C, "full": bool}`, or the first broken `id`. `503 unavailable` when the signing key cannot be reached. |
 | `GET` | `/v1/admin/executors` | viewer | `{"items": [{"executor": "...", "applicationVersion": "...", "pending": N, "oldestPending": "...", "liveSessions": M, "self": bool}]}`: one row per executor and version with pending workflows, and one per other executor with live sessions (§10.2). |
 | `POST` | `/v1/admin/executors/{id}/recover` | `admin.full_access` | Re-enqueues the pending workflows of a replica gone for good (§10.2): `{"executor": "...", "recovered": N, "otherVersions": M}`. `409 executor-alive`, `409 executor-self`. Allowed in maintenance mode. Audited. |
 
@@ -3792,6 +3831,7 @@ secret_sealing:
     jwt_audience: "https://vault.prod.internal"
     mount: "transit"
     key_name: "ligo-interstage"
+    audit_key_name: "ligo-audit"         # ed25519 key that signs audit checkpoints (§4.3); default ligo-audit
     # ca_cert_file: "/etc/ligo/tls/corp-ca.crt"   # CAs trusted for address; default the system roots
   # local_kek_file: "/etc/ligo/dev/kek"   # local-kek only: 32-byte key, not group- or world-readable
 
@@ -4028,7 +4068,7 @@ Because `dbos.Launch()` immediately recovers and executes pending workflows from
 1. Parse CLI flags (`jessevdk/go-flags`), load `server.yaml`, compute and log its SHA-256 checksum, and run static config checks (Rules 1, 2, 5, 6, 7, 9, 12, 13, 14, 15, 16, and the static part of 19).
 2. Steps 3 and 4 (SPIRE and the Sealer) run first, before anything is audited: a missing dependency, such as a sealed OpenBao, fails startup with nothing written, so a supervisor restarting `ligo` in a loop cannot flood the audit log. Both must be ready within `service.startup_timeout` (default 60s): an agent socket that does not answer, or an unreachable OpenBao, ends startup with an error naming the dependency, and the supervisor (systemd, with a back-off) restarts `ligo`. Then connect PostgreSQL pools (`app`, `reader`, `dbos`) and write audit `CONFIG_LOADED` with the configuration SHA-256, the SHA-256 of every theme file in use (§7.6), and the charter with its SHA-256 (rule 16, T-22). Compare the policy with the snapshot of the most recent previous `CONFIG_LOADED` entry. If its hash differs, write `CONFIG_CHARTER_CHANGED` with the differences. If the change loosens the policy (a pattern removed from `required_jurisdictions`; `require_distinct_approvers_across_jurisdictions` turned off or a rule's `distinct_approvers: false` added; a `deny` rule removed, moved below an `allow` rule that now matches its pairs, or changed to `allow`; an additional party removed; `default_cross_jurisdiction` changed to `allow`; a break-glass policy's `max_ttl` or `max_open` raised), log at `WARN` and also write `CONFIG_APPROVAL_POLICY_WEAKENED` listing the loosening changes. Then verify existing platform references and binding wiring (Rules 10, 11), jurisdictions (Rule 17) and interconnections (Rule 18).
 3. Connect to all `realms[].spiffe_workload_socket` endpoints, start the composite bundle source (§7.1), and acquire `core_identity` from its realm's socket.
-4. Initialize the **Sealer** (`vault-transit` or `local-kek`) and verify connectivity/key availability.
+4. Initialize the **Sealer** (`vault-transit` or `local-kek`) and verify connectivity/key availability. Initialize the audit **Signer** on the same provider and sign and verify a test message, so a missing or unusable `audit_key_name` fails startup (§4.3).
 5. Start the **Plugin Manager**: verify binary permissions/checksums, spawn all `(type, realm)` plugin processes and execute `Describe` on each; validate Rules 3 and 8 against the descriptions; then execute `ConfigureInstances` on each (§5.2) and initial `Health` checks, and validate Rule 4 and the plugin part of 19.
 6. Initialize the **DBOS runtime**, register `ApplyBindingWorkflow` and `DeleteBindingWorkflow`, and call `dbos.Launch()`.
 7. Load the initial **Workload Resolution Cache** (`v_active_bindings`) and start the `LISTEN ligo_bindings_changed` subscriber.
@@ -4440,6 +4480,7 @@ type AuditListCommand struct {
 
 type AuditVerifyCommand struct {
 	ClientOptions
+	Full bool `long:"full" description:"Re-hash every entry, not only those after the newest signed checkpoint."`
 }
 
 // ---------------------------------------------------------------------------
@@ -4580,7 +4621,7 @@ type GovCheckCommand struct {
 | T-10 | Tampering / Orphaned access | 4 | Delete leaves live credentials or accounts. | Visibility removed in the start transaction; state-driven cleanup, the access first (INV-04); `DELETE_FAILED` retried automatically when its cause was retryable, else by an operator (§6.3); the bootstrap credential kept through an outage (§5.5); sweeper; ownership tags. |
 | T-11 | Tampering / EoP (DDL injection) | 4 | Target definitions, grants or binding parameters inject SQL/DDL into target databases, or into Vault statements. | Identifier grammars plus quoting; privilege bounds (`grantable_roles`) enforced in `ValidateTarget`, `ValidateBinding` and `EnsureTarget`; parameters can never add privilege (§5.8 rule 8); restricted password alphabet; Vault template variables only (§5.8). |
 | T-12 | EoP (insider) | 2/6 | An admin grants a workload under their control excessive privileges or another team's credentials. | Jurisdiction-based RBAC; two-sided consent (ADR-13); maker-checker in approval-required jurisdictions (INV-14); distinct approvers per side (INV-18); payload hash and normalization stability bound to the approval; privilege only through published access levels reviewed by the target and platform owners (ADR-15); full audit. |
-| T-13 | Repudiation | 2/5 | An actor denies a change; audit is altered; workload reads are untraceable. | Hash-chained, append-only audit (insert-only database privileges plus trigger, lock-ordered at transaction end); SIEM forwarding; request IDs; resolution logging; approver recorded. |
+| T-13 | Repudiation | 2/5 | An actor denies a change; audit is altered; workload reads are untraceable. | Hash-chained, append-only audit (insert-only database privileges plus trigger, lock-ordered at transaction end); checkpoints signed with a key outside the database, so a chain rewritten with recomputed hashes is detected (§4.3); SIEM forwarding; request IDs; resolution logging; approver recorded. |
 | T-14 | Tampering | 5 | Direct database writes insert a broad binding or alter the active snapshot. | Separate database roles; `ligo_reader` limited to the view; resolution re-validates regexes (INV-15); immutable-column trigger; PostgreSQL access restricted and audited at the database level. Residual risk R-05: a fully compromised `ligo_app` role can alter bindings; detected by the audit/state mismatch check in reconciliation. |
 | T-15 | Spoofing / Info disclosure | 3/4 | A compromised plugin returns attacker-controlled endpoints, so workloads send credentials to the attacker. | Output JSON Schema validation and `allowed_endpoints` checks (INV-13); Vault address allowlisted per store instance. |
 | T-16 | Info disclosure | 3 | Secrets leak through plugin logs or stderr. | SDK redacting logger; secret types with redacting `String()`/`MarshalJSON`; host-side redaction filter for known secret patterns. |
@@ -4627,7 +4668,7 @@ type GovCheckCommand struct {
 ### 10.1 Observability
 - **Logs:** structured JSON. Every request and workflow log line carries `request_id`, `binding_id`, `workflow_id`, `attempt` (and `source_id` or `target_id` for changes of those resources). A redacting logger masks `password`, `private_key_pem`, `token`, `Authorization`, and values matching `IDENTIFIED BY \S+`.
 - **Traces:** OpenTelemetry spans for HTTP and gRPC handlers, each workflow, each step and each plugin RPC. Trace context propagates to plugins via gRPC metadata. No secrets in span attributes: a failed span, a plugin RPC's included, carries an error status and code, never the error's text. Spans are exported over OTLP/gRPC to `observability.tracing.otlp_endpoint` (off when empty, the default), over TLS verified against `ca_cert_file` (default the system roots; a change needs a restart) unless `insecure` is set, sampled at `sample_ratio` (default 0.1) for new traces and always when the caller's trace is sampled (W3C `traceparent`). A workflow joins the trace of the request that started it: the `traceparent` travels in its journaled input, so a run recovered after a crash stays in that trace. A workflow started in the background (reconciler, sweeper, propagator) starts a new trace. Workflow spans carry `ligo.binding_id`, `ligo.binding`, `ligo.workflow_id`, `ligo.revision` and `ligo.attempt`; step spans `ligo.stage` and `ligo.provider_type`.
-- **Metrics (Prometheus, Normative names).** No metric carries a jurisdiction label, because the number of jurisdictions is unbounded; per-jurisdiction views come from the admin API and the audit log. They are served at `GET /metrics` on the metrics listener (`server.metrics_listener.listen_address`, default `127.0.0.1:9090`), in plain HTTP without authentication: it MUST be bound to a loopback or management address. Gauges of the database's state (bindings, change requests and their pending sides, sources, targets, the propagation queue, expiring bindings, open break-glass changes, overdue rotations) are computed from the database at each scrape, so every replica reports the same values; `ligo_db_scrape_success` is `0` when one of those queries failed. `ligo_audit_chain_valid` comes from a verification of the whole chain at startup and then hourly, on each replica.
+- **Metrics (Prometheus, Normative names).** No metric carries a jurisdiction label, because the number of jurisdictions is unbounded; per-jurisdiction views come from the admin API and the audit log. They are served at `GET /metrics` on the metrics listener (`server.metrics_listener.listen_address`, default `127.0.0.1:9090`), in plain HTTP without authentication: it MUST be bound to a loopback or management address. Gauges of the database's state (bindings, change requests and their pending sides, sources, targets, the propagation queue, expiring bindings, open break-glass changes, overdue rotations) are computed from the database at each scrape, so every replica reports the same values; `ligo_db_scrape_success` is `0` when one of those queries failed. `ligo_audit_chain_valid` comes from the verification of §4.3, run by one replica at a time: full at startup and every 24 h, incremental every 10 minutes; replicas that do not hold the lock leave it unchanged.
   - `ligo_bindings{phase,realm}`
   - `ligo_workflow_duration_seconds{op,result}`
   - `ligo_step_duration_seconds{stage,provider_type,result}`
@@ -4881,6 +4922,7 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-84 | A binding is `PROVISIONING`, its status row is polling | The workflow completes | The final row is shown and no further `status-row` request is made. An approval that waits 70 s on a slow plugin (fault-injected) is not cut off by the browser. |
 | AC-85 | The UI has been used for creates, approvals and navigation, including back navigation | Browser storage is inspected | `localStorage` and `sessionStorage` contain no page content; `htmx.min.js` and `hx-csp.min.js` match the SHA-256 values in `web/static/VERSIONS`; `npx htmx.org@4.0.0 upgrade-check` reports nothing on `web/templates/`. |
 | AC-86 | Platform `oracle-prod` has `principal_prefix: "svc_"`; binding B is created, then the prefix is changed to `app_` and `ligo` restarted | B is reconciled, a binding C is created, B is deleted, and an `UPDATE` of B's `derived_principal_name` is attempted | B keeps `svc_…` in every `BindingContext`, in its principal and through cleanup, which removes it; C gets `app_…`; the `UPDATE` fails (INV-08). Every stage of one workflow receives the same name. |
+| AC-87 | Audit entries before the newest signed checkpoint are rewritten as superuser, with every later `prev_hash` and `entry_hash` recomputed | `GET /v1/admin/audit/verify` | `valid: false`, broken at the first checkpoint whose entry no longer has the signed hash (T-13). An entry changed without recomputing hashes before the newest checkpoint is found by `?full=true`, not by the incremental pass (§4.3). |
 
 ---
 

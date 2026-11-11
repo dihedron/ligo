@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,6 +33,10 @@ type fakeTransit struct {
 	logins      int
 	token       string
 	unavailable bool
+	// signing holds the versions of the ed25519 audit key, v1 first
+	signing []ed25519.PrivateKey
+	// misbehave makes the audit key's answers wrong: "signature", "type" or "public"
+	misbehave string
 }
 
 func newFakeTransit(t *testing.T) (*fakeTransit, *httptest.Server) {
@@ -38,7 +44,8 @@ func newFakeTransit(t *testing.T) (*fakeTransit, *httptest.Server) {
 	_, _ = rand.Read(key)
 	block, _ := aes.NewCipher(key)
 	aead, _ := cipher.NewGCM(block)
-	f := &fakeTransit{t: t, aead: aead}
+	_, v1, _ := ed25519.GenerateKey(rand.Reader)
+	f := &fakeTransit{t: t, aead: aead, signing: []ed25519.PrivateKey{v1}}
 	srv := httptest.NewTLSServer(f)
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -92,9 +99,44 @@ func (f *fakeTransit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reply(map[string]any{"data": map[string]any{"plaintext": base64.StdEncoding.EncodeToString(plain)}})
+	case "/v1/transit/sign/ligo-audit":
+		msg, _ := base64.StdEncoding.DecodeString(body["input"])
+		v := len(f.signing)
+		sig := ed25519.Sign(f.signing[v-1], msg)
+		if f.misbehave == "signature" {
+			reply(map[string]any{"data": map[string]any{"signature": base64.StdEncoding.EncodeToString(sig)}})
+			return
+		}
+		reply(map[string]any{"data": map[string]any{"signature": fmt.Sprintf("vault:v%d:%s", v, base64.StdEncoding.EncodeToString(sig))}})
+	case "/v1/transit/keys/ligo-audit":
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"errors":["method"]}`, http.StatusMethodNotAllowed)
+			return
+		}
+		keys := map[string]any{}
+		for i, k := range f.signing {
+			pub := base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey))
+			if f.misbehave == "public" {
+				pub = "AAAA"
+			}
+			keys[fmt.Sprint(i+1)] = map[string]any{"public_key": pub}
+		}
+		typ := "ed25519"
+		if f.misbehave == "type" {
+			typ = "aes256-gcm96"
+		}
+		reply(map[string]any{"data": map[string]any{"type": typ, "keys": keys}})
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// rotate adds a version of the audit key, as "vault write -f transit/keys/ligo-audit/rotate" does.
+func (f *fakeTransit) rotate() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, k, _ := ed25519.GenerateKey(rand.Reader)
+	f.signing = append(f.signing, k)
 }
 
 type jwtSource struct{}

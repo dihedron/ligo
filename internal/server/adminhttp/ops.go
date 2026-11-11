@@ -11,6 +11,7 @@ import (
 
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
+	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,12 +84,17 @@ func (s *Server) verifyAudit(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusForbidden, "forbidden", "viewer role required")
 		return
 	}
-	res, err := audit.Verify(r.Context(), s.DB)
+	full := r.URL.Query().Get("full") == "true"
+	res, err := audit.Verify(r.Context(), s.DB, s.Signer, full)
+	if errors.Is(err, sealing.ErrSignerUnavailable) {
+		problem(w, http.StatusServiceUnavailable, "unavailable", "the audit signing key cannot be reached")
+		return
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	out := map[string]any{"valid": res.Valid, "entries": res.Entries}
+	out := map[string]any{"valid": res.Valid, "entries": res.Entries, "checkpoints": res.Checkpoints, "full": res.Full}
 	if !res.Valid {
 		out["firstBroken"] = res.FirstBroken
 	}
