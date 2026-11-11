@@ -14,8 +14,9 @@ lxd_up() {
 		info "storage pool $LAB_STORAGE_POOL exists"
 	fi
 	if ! lxc network show "$LAB_NETWORK" >/dev/null 2>&1; then
+		# IPv6 too: the snap store can be reachable only over IPv6 (2026-11-11)
 		lxc network create "$LAB_NETWORK" \
-			ipv4.address="$(lab_gateway)/24" ipv4.nat=true ipv6.address=none \
+			ipv4.address="$(lab_gateway)/24" ipv4.nat=true ipv6.address=auto ipv6.nat=true \
 			dns.domain=ligo.lab user.ligo-lab=yes >/dev/null
 		info "network $LAB_NETWORK created ($LAB_SUBNET)"
 	else
