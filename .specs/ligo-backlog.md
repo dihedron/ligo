@@ -15,6 +15,8 @@ Work agreed for later, with what is known so far. An item here is not a specific
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
+| 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Not started; to decide |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 
 ## 1. Audit pruning
@@ -197,6 +199,38 @@ Work agreed for later, with what is known so far. An item here is not a specific
 **Never offered.** `approveChangeRequest`, `declineChangeRequest`, `ratifyChangeRequest`, `revertChangeRequest`, `breakGlass`, `putMaintenance`, `recoverExecutor`, `registerAccount`, `retireAccount`, `revokeTargetBindings`.
 
 **To decide.** How the server gets the person's identity (their CLI login or an SVID on their machine, never a stored password); whether it runs locally beside the assistant (stdio) or as a service; prompts or resources that explain jurisdictions and the charter to the model; rate limits; and how a person confirms each write tool before it is sent.
+
+## 12. Network checks in the client SDK, from netcheck
+
+**Why.** Each binding carries its network flows: the target's, the platform's, the secret store's and ligo's own (`GET /v1/flows`, AC-73). Today a workload learns that a flow is blocked only when its first connection fails. If the client SDK (item 7) could check those flows itself, a workload or an operator could see at once which flow a firewall still blocks, before the application tries.
+
+**What exists.** The user wrote [netcheck](https://github.com/dihedron/netcheck) independently, as a standalone command. It runs bundles of checks, written in JSON or YAML, with timeouts, retries and concurrency, over TCP, UDP, ICMP, SSH, HTTP and HTTPS, TLS and DTLS, with certificate verification. Its checking code lives in the package `checks` (bundle, check, defaults), about 1,000 lines with the command around it, and four test files.
+
+**The steps, in order.**
+1. **Review netcheck** against the quality standards of ligo and lxd-spiffe: tests, linting, `govulncheck`, secret scanning, CI, docs.
+2. **Refactor the checking code into a library**, with an API that does not depend on the command, its output or its configuration files; the command then becomes one user of it.
+3. **Depend on it from the client SDK.** The SDK turns a binding's flows (destination, ports, protocol, `tls`, `serverName`) into checks and runs them on the client, reporting each flow as reachable or not.
+
+**To decide.**
+- Which of netcheck's protocols the flows need: the flows declare TCP and UDP, with or without TLS. ICMP, SSH and HTTP may stay in the command.
+- Whether a flow with `tls: true` is checked up to the TLS handshake, and against which roots: the workload's trust bundle, or the system's.
+- Where the library lives: in netcheck's repository, as its own module, or moved under ligo.
+- Whether the check runs only on demand, or also when the SDK first fetches a binding.
+
+## 13. Outbox retention: delivered events kept 30 days
+
+**Why.** The soak's 2-hour baseline of 2026-11-09 grew `notification_outbox` from 797 to 3,786 rows, while ligo itself did not drift. The table holds every webhook event ever queued: the dispatcher marks a row delivered or abandoned and deletes it only 30 days later (`internal/notify/notify.go`, the main spec's notification dispatcher: "purge delivered or abandoned rows after 30 days"). On a busy installation, that is 30 days of every event's payload. The user's view: once a webhook has been invoked, its row should go, and in any case it should go after some time.
+
+**What exists.** The 30-day purge runs on every dispatcher pass, as one `DELETE` on `coalesce(delivered_at, abandoned_at)`. The period is a constant, not a setting.
+
+**Options.**
+- Delete a row as soon as its webhook answers 2xx. The table then holds only what is still pending.
+- Keep delivered rows for a short, configurable window: it shows what was sent and when, if a receiver says it never got an event. Whether the audit log already records enough of that decides how much this is worth.
+- Keep abandoned rows longer than delivered ones: they are the ones somebody must investigate.
+
+**Affects.**
+- The soak's SK-9 check (`.specs/ligo-soak.md`), which compares the delivered rows with what the receiver logged. Deleted at once, the rows would no longer be there to compare.
+- The webhook e2e in `lab.sh serve test-webhook`, which reads delivered rows.
 
 ## 14. Post-quantum signatures for audit checkpoints
 

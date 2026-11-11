@@ -58,7 +58,11 @@ serve_install() {
 	done
 	cmd_deploy
 	local out="$LAB_STATE_DIR/ligo"
-	(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out" ./cmd/ligo) || die "cannot build ligo"
+	if [[ -n "$LAB_SOAK" && "${SOAK_RACE:-0}" == 1 ]]; then # the soak's race build: -race needs cgo
+		(cd "$REPO_DIR" && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -o "$out" ./cmd/ligo) || die "cannot build ligo with -race"
+	else
+		(cd "$REPO_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$out" ./cmd/ligo) || die "cannot build ligo"
+	fi
 	for host in $(ligo_hosts); do
 		inner_push "$out" "$host" /usr/local/bin/ligo 0755
 		inner_exec "$host" install -d -o root -g ligo -m 0750 /etc/ligo
@@ -412,6 +416,7 @@ authorization:
     - { ldap_group_dn: "cn=ledger-dbas,ou=groups,$LDAP_BASE", role: operator, jurisdictions: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, jurisdictions: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, jurisdictions: ["dc/corp-prod/*"] } # livia
+$([[ -n "$LAB_SOAK" ]] && echo '    - { ldap_group_dn: "cn=soak-breakglass,ou=groups,'"$LDAP_BASE"'", role: break_glass, jurisdictions: ["tenants/*"] } # the soak')
   approval:
     required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/payments"$([[ -n "$LAB_ACCOUNTS" ]] && echo ', "tenants/*", "platform/*"')]
     require_distinct_approvers_across_jurisdictions: $([[ -n "$LAB_ACCOUNTS" ]] && echo true || echo false)
@@ -433,8 +438,9 @@ break_glass:
   min_justification_length: 20
   policies:
     - { jurisdictions: ["dc/corp-prod/*"], default_ttl: 1h, max_ttl: 4h, max_open: 3, warn_before: 15m }
+$([[ -n "$LAB_SOAK" ]] && echo '    - { jurisdictions: ["tenants/*"], default_ttl: 5m, max_ttl: 1h, max_open: 20, warn_before: 1m } # the soak')
 storage:
-  postgres: { app_dsn_env: LIGO_APP_DSN, reader_dsn_env: LIGO_READER_DSN, dbos_dsn_env: LIGO_DBOS_DSN }
+  postgres: { app_dsn_env: LIGO_APP_DSN, reader_dsn_env: LIGO_READER_DSN, dbos_dsn_env: LIGO_DBOS_DSN$([[ -n "$LAB_SOAK" && -n "${SOAK_MAX_CONNS:-}" ]] && echo ", max_conns: $SOAK_MAX_CONNS") }
 secret_sealing:
   provider: vault-transit
   vault_transit: { address: "$bao", auth_mount: jwt-spiffe, role: ligo-sealer, jwt_audience: "$aud", mount: transit, key_name: ligo-interstage,

@@ -1,0 +1,21 @@
+diff --git a/cmd/plugins/ligo-plugin-postgres/main.go b/cmd/plugins/ligo-plugin-postgres/main.go
+index 0e0f545..f4485c7 100644
+--- a/cmd/plugins/ligo-plugin-postgres/main.go
++++ b/cmd/plugins/ligo-plugin-postgres/main.go
+@@ -576,6 +576,16 @@ func converge(ctx context.Context, tx pgx.Tx, r *pluginv1.EnsureTargetRequest, c
+ 
+ // memberships makes the role's memberships exactly roles.
+ func memberships(ctx context.Context, q querier, principal, ident string, roles []string) error {
++	// mutant: every tenancy's read role too, not only the binding's
++	extra, err := q.Query(ctx, `SELECT rolname FROM pg_roles WHERE rolname ~ '^s[0-9]+_db[0-9]+_read$'`)
++	if err != nil {
++		return err
++	}
++	more, err := pgx.CollectRows(extra, pgx.RowTo[string])
++	if err != nil {
++		return err
++	}
++	roles = append(roles, more...)
+ 	rows, err := q.Query(ctx, `SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+ 		JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = $1`, principal)
+ 	if err != nil {

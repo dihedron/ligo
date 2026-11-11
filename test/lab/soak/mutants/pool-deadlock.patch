@@ -1,0 +1,28 @@
+diff --git a/internal/accounts/registry.go b/internal/accounts/registry.go
+index c047680..ce051ed 100644
+--- a/internal/accounts/registry.go
++++ b/internal/accounts/registry.go
+@@ -77,12 +77,11 @@ func (r *Registry) Run(ctx context.Context) {
+ 
+ // listen loads after LISTEN, so that nothing is missed while not listening.
+ func (r *Registry) listen(ctx context.Context) error {
+-	// its own connection: held for good, one from the pool would starve requests
+-	conn, err := pgx.ConnectConfig(ctx, r.db.Config().ConnConfig)
++	conn, err := r.db.Acquire(ctx)
+ 	if err != nil {
+ 		return err
+ 	}
+-	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
++	defer conn.Release()
+ 	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
+ 		return err
+ 	}
+@@ -91,7 +90,7 @@ func (r *Registry) listen(ctx context.Context) error {
+ 			return err
+ 		}
+ 		wait, cancel := context.WithTimeout(ctx, r.interval)
+-		_, err := conn.WaitForNotification(wait)
++		_, err := conn.Conn().WaitForNotification(wait)
+ 		expired := wait.Err() != nil
+ 		cancel()
+ 		if err != nil && !expired {

@@ -1,0 +1,30 @@
+diff --git a/internal/changerequests/changerequests.go b/internal/changerequests/changerequests.go
+index f058056..a0f848a 100644
+--- a/internal/changerequests/changerequests.go
++++ b/internal/changerequests/changerequests.go
+@@ -379,9 +379,7 @@ func SelectSides(r *Request, c Caller, p *charter.Policy, approve bool, side str
+ 	if len(eligible) == 0 {
+ 		return nil, refuse(403, "forbidden", "no pending side of this change request can be decided by %s", c.ID())
+ 	}
+-	if approve && r.DistinctApprovers && slices.ContainsFunc(r.Sides, func(s Side) bool { return s.Decision == Approved && s.DecidedBy == c.ID() }) {
+-		return nil, refuse(403, "distinct-approver-required", "%s already approved another side of this change request", c.ID())
+-	}
++	// mutant: one person may approve several sides
+ 	switch {
+ 	case side != "" && !slices.Contains(eligible, side):
+ 		return nil, refuse(403, "forbidden", "side %s cannot be decided by %s", side, c.ID())
+diff --git a/migrations/001_init_schema.sql b/migrations/001_init_schema.sql
+index b02856f..0811c85 100644
+--- a/migrations/001_init_schema.sql
++++ b/migrations/001_init_schema.sql
+@@ -674,9 +674,7 @@ BEGIN
+     RAISE EXCEPTION 'change request %: a delegated side needs an approval reference', p_id;
+   END IF;
+   -- Distinct people per side (INV-18)
+-  IF cr.distinct_approvers_required AND (n_human <> n_human_distinct OR n_ratified <> n_ratified_distinct) THEN
+-    RAISE EXCEPTION 'change request %: one person decided more than one side', p_id;
+-  END IF;
++  -- mutant: one person may decide several sides
+   -- Completeness (INV-14, INV-20)
+   IF cr.status = 'APPLIED' THEN
+     IF cr.consent = 'ANY' THEN

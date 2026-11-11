@@ -45,14 +45,23 @@ type admin struct {
 // the prod.lab bundle, and presents who's minted SVID if who is not "".
 func ligoTLS(t *testing.T, who string) *tls.Config {
 	t.Helper()
-	dir := e2eEnv(t, "LIGO_E2E_DIR")
-	bundle, err := os.ReadFile(filepath.Join(dir, "olga-bundle.pem"))
+	cfg, err := ligoTLSConfig(e2eEnv(t, "LIGO_E2E_DIR"), who)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return cfg
+}
+
+// ligoTLSConfig is ligoTLS with an error instead of a failed test, for the
+// soak's goroutines, which re-read SVIDs that lab.sh renews while they run.
+func ligoTLSConfig(dir, who string) (*tls.Config, error) {
+	bundle, err := os.ReadFile(filepath.Join(dir, "olga-bundle.pem"))
+	if err != nil {
+		return nil, err
+	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(bundle) {
-		t.Fatal("the prod.lab bundle holds no certificate")
+		return nil, errors.New("the prod.lab bundle holds no certificate")
 	}
 	cfg := &tls.Config{MinVersion: tls.VersionTLS13,
 		InsecureSkipVerify: true, // the server's SVID has a URI SAN, no name: VerifyPeerCertificate checks it
@@ -80,11 +89,11 @@ func ligoTLS(t *testing.T, who string) *tls.Config {
 	if who != "" {
 		pair, err := tls.LoadX509KeyPair(filepath.Join(dir, who+"-svid.pem"), filepath.Join(dir, who+"-key.pem"))
 		if err != nil {
-			t.Fatal(err)
+			return nil, err
 		}
 		cfg.Certificates = []tls.Certificate{pair}
 	}
-	return cfg
+	return cfg, nil
 }
 
 func newAdmin(t *testing.T, who string) *admin {

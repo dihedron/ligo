@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -189,79 +190,98 @@ func storeRead(t *testing.T, target, pathKey string, fields func(map[string]stri
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
-	cfg := item["auth"].(map[string]any)["config"].(map[string]any)
-	dir := e2eEnv(t, "LIGO_E2E_DIR")
-	jwt, err := os.ReadFile(filepath.Join(dir, "workload-store-jwt"))
+	user, password, err := storeFetch(item["auth"].(map[string]any)["config"].(map[string]any),
+		filepath.Join(e2eEnv(t, "LIGO_E2E_DIR"), "workload-store-jwt"), e2eEnv(t, "LIGO_TEST_CA"), e2eEnv(t, "LIGO_E2E_SECRETS"), pathKey, fields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pem, err := os.ReadFile(e2eEnv(t, "LIGO_TEST_CA"))
+	return user, password
+}
+
+// storeFetch logs in to the store with the JWT-SVID in jwtFile and reads the
+// credential that cfg (a binding's auth config) points to; the password is
+// appended to secretsFile, for lab.sh's search. Errors never hold it.
+func storeFetch(cfg map[string]any, jwtFile, caFile, secretsFile, pathKey string,
+	fields func(map[string]string) (string, string)) (user, password string, err error) {
+	jwt, err := os.ReadFile(jwtFile)
 	if err != nil {
-		t.Fatal(err)
+		return "", "", err
+	}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return "", "", err
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(pem)
 	client := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}}
-	call := func(method, path, token string, body, out any) {
-		t.Helper()
+	call := func(method, path, token string, body, out any) error {
 		data, _ := json.Marshal(body)
-		req, _ := http.NewRequest(method, cfg["address"].(string)+"/v1/"+path, bytes.NewReader(data))
+		req, _ := http.NewRequest(method, fmt.Sprint(cfg["address"])+"/v1/"+path, bytes.NewReader(data))
 		if token != "" {
 			req.Header.Set("X-Vault-Token", token)
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			t.Fatalf("%s: %v", path, err)
+			return fmt.Errorf("%s: %w", path, err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("%s: status %d", path, resp.StatusCode)
+			return fmt.Errorf("%s: status %d", path, resp.StatusCode)
 		}
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			t.Fatalf("%s: cannot decode the answer", path)
+			return fmt.Errorf("%s: cannot decode the answer", path)
 		}
+		return nil
 	}
 	var login struct {
 		Auth struct {
 			ClientToken string `json:"client_token"`
 		} `json:"auth"`
 	}
-	call(http.MethodPost, "auth/"+cfg["authMount"].(string)+"/login", "", map[string]string{"role": cfg["role"].(string), "jwt": strings.TrimSpace(string(jwt))}, &login)
+	if err := call(http.MethodPost, "auth/"+fmt.Sprint(cfg["authMount"])+"/login", "",
+		map[string]string{"role": fmt.Sprint(cfg["role"]), "jwt": strings.TrimSpace(string(jwt))}, &login); err != nil {
+		return "", "", err
+	}
 	var answer struct {
 		Data json.RawMessage `json:"data"`
 	}
-	call(http.MethodGet, cfg[pathKey].(string), login.Auth.ClientToken, nil, &answer)
+	if err := call(http.MethodGet, fmt.Sprint(cfg[pathKey]), login.Auth.ClientToken, nil, &answer); err != nil {
+		return "", "", err
+	}
 	var data map[string]string
 	if pathKey == "secretPath" { // KV v2 nests it
 		var kv struct {
 			Data map[string]string `json:"data"`
 		}
 		if err := json.Unmarshal(answer.Data, &kv); err != nil {
-			t.Fatal("cannot decode the secret")
+			return "", "", errors.New("cannot decode the secret")
 		}
 		data = kv.Data
 	} else if err := json.Unmarshal(answer.Data, &data); err != nil {
-		t.Fatal("cannot decode the credential")
+		return "", "", errors.New("cannot decode the credential")
 	}
 	user, password = fields(data)
 	if user == "" || password == "" {
-		t.Fatal("the store gave no credential")
+		return "", "", errors.New("the store gave no credential")
 	}
-	f, err := os.OpenFile(e2eEnv(t, "LIGO_E2E_SECRETS"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(secretsFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		t.Fatal(err)
+		return "", "", err
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := fmt.Fprintln(f, password); err != nil {
-		t.Fatal(err)
+		return "", "", err
 	}
-	return user, password
+	return user, password, nil
 }
+
+// kvCredential reads a static credential's fields, whose user is the spec's.
+func kvCredential(data map[string]string) (string, string) { return data["username"], data["password"] }
 
 // storeCredential is a static credential, whose user is the spec's.
 func storeCredential(t *testing.T, target string) (user, password string) {
 	t.Helper()
-	return storeRead(t, target, "secretPath", func(data map[string]string) (string, string) { return data["username"], data["password"] })
+	return storeRead(t, target, "secretPath", kvCredential)
 }
 
 // TestServeLDAPLifecycle: OL-11, approved, the credential from the store
