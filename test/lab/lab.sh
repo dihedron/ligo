@@ -40,6 +40,8 @@ source "$LAB_DIR/lib/lb.sh"
 source "$LAB_DIR/lib/otel.sh"
 # shellcheck source=lib/hooks.sh
 source "$LAB_DIR/lib/hooks.sh"
+# shellcheck source=lib/audit.sh
+source "$LAB_DIR/lib/audit.sh"
 # shellcheck source=lib/release.sh
 source "$LAB_DIR/lib/release.sh"
 # shellcheck source=lib/soak.sh
@@ -81,7 +83,9 @@ commands:
                             test-webhook (with webhook and ligo2) the webhooks,
                             which stops the receiver and the replicas
                             test-faults stops the secrets backend and PostgreSQL
-                            under bindings being applied; test-accounts (with
+                            under bindings being applied; test-audit exports the
+                            audit log, verifies the file offline and prunes it
+                            through a backdated checkpoint; test-accounts (with
                             ligo2 and webhook) resets the lab, installs ligo with
                             charter.accounts and runs the accounts' e2e; reset
                             and install again before any other suite;
