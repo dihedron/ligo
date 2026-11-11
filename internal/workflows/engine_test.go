@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel"
 	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -175,6 +177,29 @@ func TestRetryDelay(t *testing.T) {
 	for attempt, want := range map[int64]time.Duration{1: 15 * time.Second, 2: 30 * time.Second, 3: time.Minute, 4: time.Minute, 50: time.Minute} {
 		if got := retryDelay(attempt); got != want {
 			t.Errorf("retryDelay(%d) = %v, want %v", attempt, got, want)
+		}
+	}
+}
+
+// TestSanitizeDatabase: a step that cannot reach the database fails with a
+// retryable DATABASE_UNAVAILABLE, never as a plugin's permanent Unknown, so
+// the binding is retried once PostgreSQL is back (§6.1 rule 4).
+func TestSanitizeDatabase(t *testing.T) {
+	for name, err := range map[string]error{
+		"connect":         fmt.Errorf("previous: %w", &pgconn.ConnectError{}),
+		"admin shutdown":  &pgconn.PgError{Code: "57P01"},
+		"connection lost": &pgconn.PgError{Code: "08006"},
+	} {
+		if se := sanitize(err); se.Code != "DATABASE_UNAVAILABLE" || !se.Retryable {
+			t.Errorf("%s: %+v", name, se)
+		}
+	}
+	for name, err := range map[string]error{
+		"a constraint": &pgconn.PgError{Code: "23505"},
+		"plain":        errors.New("boom"),
+	} {
+		if se := sanitize(err); se.Code == "DATABASE_UNAVAILABLE" || se.Retryable {
+			t.Errorf("%s: %+v", name, se)
 		}
 	}
 }
