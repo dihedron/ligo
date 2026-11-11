@@ -55,12 +55,12 @@ serve_test_audit() {
 	info "exported $(jq -r .entries <<<"$out") entries through $head, recorded with sha256 $(jq -r .sha256 <<<"$out" | cut -c1-12)…"
 	mapfile -t keys < <(audit_public_keys)
 	out="$(cli audit-admin -o json audit verify --file "$file" "${keys[@]}")" || die "the export does not verify with the store's keys: $out"
-	jq -e '.valid and (.keysFromFile | not)' <<<"$out" >/dev/null || die "verify --file: $out"
+	jq -e '.valid and (.keysFromFile | not) and .changeRequests > 0' <<<"$out" >/dev/null || die "verify --file: $out"
 	inner_exec ligo1 sh -c "sed '0,/\"actor\":\"/s//\"actor\":\"x/' '$file' >'$file.changed' && chmod 0644 '$file.changed'"
 	if out="$(cli audit-admin -o json audit verify --file "$file.changed" "${keys[@]}" 2>&1)"; then
 		die "a changed export verified: $out"
 	fi
-	info "the export verifies offline with the store's public keys; a changed copy does not"
+	info "the export, with $(jq -r .changeRequests <<<"$out") change requests, verifies offline with the store's public keys; a changed copy does not"
 
 	out="$(serve_sql "select audit_prune(0)" 2>&1)" && die "audit_prune of a non-checkpoint passed: $out"
 	grep -q "is not a checkpoint" <<<"$out" || die "audit_prune of a non-checkpoint: $out"
@@ -75,4 +75,31 @@ serve_test_audit() {
 	out="$(inner_exec ligo1 curl -fsS http://127.0.0.1:9090/metrics)"
 	grep -q '^ligo_audit_oldest_entry_timestamp_seconds ' <<<"$out" || die "ligo_audit_oldest_entry_timestamp_seconds is not served"
 	info "pruned $deleted entries through $head; new entries chain onto the anchor; the full verification passes"
+	audit_test_requests
+}
+
+# audit_test_requests: after the audit prune, change_requests_prune deletes
+# a request withdrawn 40 days ago that no entry names (written as the
+# superuser: a lab is hours old), and keeps one an entry still names
+# (.specs/ligo-cr-pruning.md, AC-91).
+audit_test_requests() {
+	section "Change request pruning (AC-91)"
+	local old named n out
+	old="$(serve_sql "select gen_random_uuid()")"
+	serve_sql "begin;
+		insert into change_requests (id, resource_type, resource_name, operation, kind, consent, owner_jurisdiction,
+			policy_sha256, distinct_approvers_required, payload, payload_sha256, requested_by, requested_at, expires_at, status, decided_by, decided_at)
+			values ('$old', 'SOURCE', 'audit-test-old', 'CREATE', 'STANDARD', 'ALL', 'dc/corp-prod/ledger', repeat('a', 64), true, '{}', repeat('b', 64),
+			'lab', now() - interval '41 days', now() - interval '40 days', 'WITHDRAWN', 'lab', now() - interval '40 days');
+		insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+			values ('$old', 'OWNER', 'dc/corp-prod/ledger', true, 'HUMAN', 'lab', 'STANDARD');
+		commit;" >/dev/null
+	named="$(serve_sql "select change_request_id from audit_log where change_request_id is not null order by id desc limit 1")"
+	[[ -n "$named" ]] || die "no audit entry left names a change request"
+	n="$(serve_sql "select change_requests_prune(now() - interval '30 days')")"
+	[[ "$(serve_sql "select count(*) from change_requests where id = '$old'")" == 0 ]] || die "the old request was not pruned"
+	[[ "$(serve_sql "select count(*) from change_requests where id = '$named'")" == 1 ]] || die "a request an entry names was pruned"
+	out="$(cli audit-admin -o json audit verify --full)" || die "ligo audit verify --full failed"
+	jq -e '.valid' <<<"$out" >/dev/null || die "the chain does not verify after the request prune: $out"
+	info "pruned $n change request(s) decided 30+ days ago and named by no entry; one an entry names stays"
 }
