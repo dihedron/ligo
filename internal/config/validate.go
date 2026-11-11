@@ -301,6 +301,9 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 	if r := cfg.Storage.Audit.Retention; r < 0 || (r > 0 && r < 24*time.Hour) {
 		c.failf(9, "storage.audit.retention %s: 0 (keep every entry) or at least 24h", r)
 	}
+	if r := cfg.Storage.ChangeRequests.Retention; r < 0 || (r > 0 && r < 24*time.Hour) {
+		c.failf(9, "storage.change_requests.retention %s: 0 (keep every request) or at least 24h", r)
+	}
 	for k, t := range map[string]time.Duration{"app_statement_timeout": cfg.Storage.Postgres.AppStatementTimeout,
 		"reader_statement_timeout": cfg.Storage.Postgres.ReaderStatementTimeout} {
 		if t != 0 && (t < 100*time.Millisecond || t > 5*time.Minute) {

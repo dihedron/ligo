@@ -182,6 +182,8 @@
 | `storage.dbos` | The workflow journal. | |
 | `storage.dbos.workflow_retention` | How long finished workflows, and their sealed checkpoints, are kept. | |
 | `storage.audit` | Audit log pruning. | |
+| `storage.change_requests` | Change request pruning. | |
+| `storage.change_requests.retention` | Closed requests decided longer ago than this are pruned, once no audit entry names them (so an export holds them). `0` keeps every request; otherwise at least `24h`. | `0` |
 | `storage.audit.retention` | Entries older than this are pruned, once exported with `ligo audit export`. `0` keeps every entry; otherwise at least `24h`. | `0` |
 | `secret_sealing` | How secrets between stages are sealed. | |
 | `secret_sealing.provider` | `vault-transit`. `local-kek` needs `--insecure-dev`: development only. | |

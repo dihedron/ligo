@@ -54,7 +54,7 @@ On the audit loop's daily prune pass, after the audit prune, requests that are a
 3. named by no audit entry left in `audit_log` (those entries were pruned, so an export holds them);
 4. referenced by no binding's `break_glass_cr_id`, and by no request that stays (`reverts_cr_id`, `depends_on_cr_id`): a chain goes as a whole or not at all.
 
-Their sides go with them (`ON DELETE CASCADE`). `SYSTEM_CR_PRUNED` records the count and the oldest and newest `decided_at` removed.
+Their sides go with them (`ON DELETE CASCADE`). `SYSTEM_CR_PRUNED` (actor `system:audit`) records the count, the cut-off and the retention. The pass runs after the audit prune of the same day, so the requests whose entries it just deleted can go.
 
 ### 4.4 Deleting
 

@@ -160,6 +160,8 @@ storage:
     workflow_retention: 168h
   audit:
     retention: 0s                         # 0: keep every entry; else at least 24h, and only what was exported is pruned
+  change_requests:
+    retention: 0s                         # 0: keep every request; else at least 24h, and only requests no audit entry names
 
 secret_sealing:
   provider: vault-transit                 # vault-transit | local-kek (requires --insecure-dev)
