@@ -188,7 +188,7 @@ type TestOverlap struct {
 // other sources of the jurisdiction the caller sees (T-34).
 func (s *Service) Test(ctx context.Context, c changerequests.Caller, req TestRequest) (*TestResult, error) {
 	res := &TestResult{Matches: map[string]bool{}, Overlaps: []TestOverlap{}}
-	extractor, ok := s.Rules.Extractors[req.TrustDomain]
+	extractor, ok := s.Rules.Extractor(req.TrustDomain)
 	if _, err := spiffeid.TrustDomainFromString(req.TrustDomain); err != nil || !ok {
 		res.Error = "trustDomain " + req.TrustDomain + " is accepted by no platform"
 		return res, nil

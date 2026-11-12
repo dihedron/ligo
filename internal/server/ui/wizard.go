@@ -175,15 +175,11 @@ func (s *Server) sourceChoices(ctx context.Context, c changerequests.Caller, tar
 func (s *Server) plannedFlows(t *targets.View) []flows.Flow {
 	m, rules := t.Metadata, s.Bindings.Rules
 	store := ""
-	for _, pp := range s.Config.PlatformProviders {
-		for _, pl := range pp.Platforms {
-			if pl.Name == m.Platform {
-				store = pl.SecretStore.Instance
-			}
-		}
+	if pl, ok := s.Instances.Current().Platform(m.Platform); ok && pl.SecretStore != nil {
+		store = pl.SecretStore.Instance
 	}
-	return flows.Effective(m.Name, rules.Allow[m.Platform].Within(t.NetworkFlows), m.Platform, rules.PlatformFlows[m.Platform], store,
-		rules.StoreFlows[store], rules.Ligo)
+	return flows.Effective(m.Name, rules.Allow(m.Platform).Within(t.NetworkFlows), m.Platform, rules.PlatformFlows(m.Platform), store,
+		rules.StoreFlows(store), rules.Ligo)
 }
 
 // bindingBody reads the wizard's or the edit form's values into a binding

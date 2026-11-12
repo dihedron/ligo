@@ -7,7 +7,7 @@ CREATE TYPE lifecycle_state    AS ENUM ('ACTIVE','DEPRECATED','RETIRED');
 CREATE TYPE visibility         AS ENUM ('PRIVATE','LISTED','PUBLIC');
 CREATE TYPE flow_purpose       AS ENUM ('DATA','CREDENTIALS','DISCOVERY');
 CREATE TYPE flow_protocol      AS ENUM ('TCP','UDP');
-CREATE TYPE resource_type      AS ENUM ('SOURCE','TARGET','BINDING');
+CREATE TYPE resource_type      AS ENUM ('SOURCE','TARGET','BINDING','PLATFORM','IDENTITY_PROVIDER','SECRET_STORE');
 CREATE TYPE change_request_op  AS ENUM ('CREATE','UPDATE','DELETE');
 CREATE TYPE change_request_kind AS ENUM ('STANDARD','BREAK_GLASS','SYSTEM_REVERT','SYSTEM_EXPIRY');
 CREATE TYPE consent_rule       AS ENUM ('ALL','ANY');
@@ -42,6 +42,59 @@ CREATE TABLE accounts (
         (status = 'RETIRED') = (retired_by IS NOT NULL) AND (status = 'RETIRED') = (retired_at IS NOT NULL)
     )
 );
+
+-- ---------------------------------------------------------------------------
+-- Instances (.specs/ligo-instances.md): platforms, identity provider instances
+-- and secret store instances, changed by change requests. Never deleted: audit
+-- entries and bindings' snapshots name them, so a retired name is not reused.
+-- definition is the normalized definition (§4), definition_sha256 its JCS
+-- SHA-256, signed with the audit key when written (§8, drift).
+-- ---------------------------------------------------------------------------
+CREATE TYPE instance_kind AS ENUM ('PLATFORM','IDENTITY_PROVIDER','SECRET_STORE');
+
+CREATE TABLE instances (
+    id                 UUID PRIMARY KEY,                    -- UUIDv7
+    kind               instance_kind NOT NULL,              -- immutable
+    name               resource_name NOT NULL,              -- immutable
+    type               VARCHAR(128) NOT NULL,               -- the plugin type in server.yaml; immutable
+    realm              VARCHAR(63)  NOT NULL,               -- immutable
+    jurisdiction       jurisdiction_path NOT NULL,          -- owner jurisdiction; immutable
+    status             VARCHAR(8) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
+    revision           BIGINT NOT NULL DEFAULT 1,
+    definition         JSONB NOT NULL,
+    definition_sha256  CHAR(64) NOT NULL,
+    -- signed by the audit key over {kind, name, revision, definitionSha256}
+    -- (JCS) when a request is applied: a row written outside ligo does not
+    -- verify (§8, T-22b)
+    key_id             VARCHAR(128) NOT NULL,
+    signature          TEXT NOT NULL,
+    created_by         VARCHAR(255) NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by         VARCHAR(255) NOT NULL,
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_instances_kind_name UNIQUE (kind, name)
+);
+
+CREATE FUNCTION instances_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.id <> OLD.id OR NEW.kind <> OLD.kind OR NEW.name <> OLD.name OR NEW.type <> OLD.type
+     OR NEW.realm <> OLD.realm OR NEW.jurisdiction <> OLD.jurisdiction
+     OR NEW.created_by <> OLD.created_by OR NEW.created_at <> OLD.created_at OR OLD.status = 'RETIRED' THEN
+    RAISE EXCEPTION 'immutable instance column modified, or a retired instance changed';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_instances_immutable BEFORE UPDATE ON instances
+    FOR EACH ROW EXECUTE FUNCTION instances_immutable_guard();
+
+-- Replicas reconfigure their plugins on every change (§7.2).
+CREATE FUNCTION instances_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('ligo_instances_changed', NEW.kind || '/' || NEW.name);
+  RETURN NULL;
+END $$;
+CREATE TRIGGER trg_instances_notify AFTER INSERT OR UPDATE ON instances
+    FOR EACH ROW EXECUTE FUNCTION instances_notify();
 
 -- ---------------------------------------------------------------------------
 -- Sources (ADR-15): who may use bindings. The identity specification (trust
@@ -425,11 +478,12 @@ CREATE TABLE binding_propagation_queue (
 CREATE INDEX idx_propagation_due ON binding_propagation_queue (priority, enqueued_at);
 
 -- ---------------------------------------------------------------------------
--- Change requests (ADR-09, ADR-13, ADR-15): every change to a source, target
--- or binding. Jurisdiction columns by resource type:
+-- Change requests (ADR-09, ADR-13, ADR-15): every change to a source, target,
+-- binding or instance. Jurisdiction columns by resource type:
 --   SOURCE  -> owner_jurisdiction (the source's jurisdiction)
 --   TARGET  -> owner_jurisdiction (the target's jurisdiction), platform_jurisdiction
 --   BINDING -> source_jurisdiction, target_jurisdiction, platform_jurisdiction
+--   PLATFORM, IDENTITY_PROVIDER, SECRET_STORE -> owner_jurisdiction, realm
 -- ---------------------------------------------------------------------------
 CREATE TABLE change_requests (
     id                 UUID PRIMARY KEY,                    -- UUIDv7
@@ -476,6 +530,9 @@ CREATE TABLE change_requests (
                                    AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL)
      OR (resource_type = 'BINDING' AND owner_jurisdiction IS NULL AND source_jurisdiction IS NOT NULL AND target_jurisdiction IS NOT NULL
                                    AND platform_jurisdiction IS NOT NULL AND realm IS NOT NULL)
+     OR (resource_type IN ('PLATFORM','IDENTITY_PROVIDER','SECRET_STORE') AND owner_jurisdiction IS NOT NULL AND realm IS NOT NULL
+                                   AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL AND platform_jurisdiction IS NULL
+                                   AND consent = 'ALL' AND kind = 'STANDARD')   -- instances: one side, four eyes, no break-glass
     ),
     CONSTRAINT chk_interconnect_rule CHECK (
         interconnect_rule IS NULL
@@ -964,7 +1021,7 @@ CREATE INDEX idx_outbox_due ON notification_outbox (next_attempt_at)
     WHERE delivered_at IS NULL AND abandoned_at IS NULL;
 
 -- Grants (role names fixed; executed by ligo_migrator)
-GRANT SELECT, INSERT, UPDATE ON accounts, sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
+GRANT SELECT, INSERT, UPDATE ON accounts, instances, sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
 GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue, admin_sessions TO ligo_app;
 GRANT SELECT, INSERT, UPDATE ON change_requests TO ligo_app;    -- no DELETE: change_requests_prune is the only way

@@ -21,11 +21,11 @@ import (
 // time: it repairs drift on the targets and rotates static secrets (§6.6).
 type Reconciler struct {
 	Engine        *Engine
-	Logger        *slog.Logger             // errors of a pass; default slog.Default()
-	Interval      time.Duration            // reconciliation.interval; default 6h
-	Jitter        time.Duration            // reconciliation.jitter
-	MaxConcurrent int                      // re-applies running at once; default 4
-	Rotation      map[string]time.Duration // rotation_interval per platform
+	Logger        *slog.Logger                        // errors of a pass; default slog.Default()
+	Interval      time.Duration                       // reconciliation.interval; default 6h
+	Jitter        time.Duration                       // reconciliation.jitter
+	MaxConcurrent int                                 // re-applies running at once; default 4
+	Rotation      func(platform string) time.Duration // the platform's rotation_interval, 0 for none
 }
 
 // Run reconciles every Interval plus a random jitter until ctx ends.
@@ -92,7 +92,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (int, error) {
 	started := 0
 	var errs []error
 	for _, d := range list {
-		ok, err := r.Engine.reapply(ctx, d.id, "system:reconciler", false, r.Rotation[d.platform])
+		ok, err := r.Engine.reapply(ctx, d.id, "system:reconciler", false, r.rotation(d.platform))
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -153,4 +153,12 @@ func (e *Engine) Rotate(ctx context.Context, bindingID uuid.UUID, actor string) 
 		return nil, &changerequests.Error{Status: 409, Slug: "invalid-transition", Detail: "only an ACTIVE binding is rotated"}
 	}
 	return e.Start(ctx, bindingID)
+}
+
+// rotation is a platform's rotation interval; none without a Rotation.
+func (r *Reconciler) rotation(platform string) time.Duration {
+	if r.Rotation == nil {
+		return 0
+	}
+	return r.Rotation(platform)
 }

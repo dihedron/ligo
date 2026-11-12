@@ -35,12 +35,14 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `normalization-drift` | 409 | The source or target changed since validation | File it again |
 | `charter-changed` | 409 | The charter changed since the request was filed, and now denies it or asks for another party | File it again |
 | `change-request-pending` | 409 | The resource has a pending request | Decide or withdraw that one |
+| `dependency-unavailable` | 503 | A plugin needed to check an instance does not run, or cannot be reached | Check the plugin type and its process, then file again |
 | `change-request-not-pending` | 409 | It has already been decided | Nothing |
 | `dependency-pending` | 409 | It depends on a request not yet applied | Decide that one first |
 | `binding-exists` | 409 | That source and target are already bound | Update the binding |
 | `audit-export-recorded` | 409 | An export through this checkpoint or a later one is already recorded | Export through a newer checkpoint; `ligo audit export` without `--through` takes the newest |
 | `binding-busy` | 409 | A workflow is running on it | Wait, then repeat |
 | `invalid-transition` | 409 | Not possible in its phase | Check the phase |
+| `instance-in-use` | 409 | An instance still has targets or bindings, or a platform is wired to it | Retire or rewire those first |
 | `resource-in-use` | 409 | Bindings use it | Revoke them first |
 | `resource-deprecated` | 409 | The source, target or level is not `ACTIVE` | Reactivate it, or use another |
 | `break-glass-limit` | 429 | The policy's `max_open` is reached | Ratify or revert open ones |

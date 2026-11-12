@@ -184,6 +184,9 @@ type Candidate struct {
 	Side         string
 	Jurisdiction string
 	Platform     string
+	// AlwaysHuman: a person decides, never AUTO or DELEGATED, as for a
+	// party's side (instances, .specs/ligo-instances.md §5 rule 2).
+	AlwaysHuman bool
 }
 
 // BuildSides decides how each side is decided, once, at creation (§7.2.3
@@ -223,9 +226,10 @@ func PreviewSides(candidates []Candidate, c Caller, p *charter.Policy) []Side {
 // DELEGATED side.
 func side(cand Candidate, c Caller, p *charter.Policy) (s Side, g *authz.Grant) {
 	s = Side{Name: cand.Side, Jurisdiction: cand.Jurisdiction, Basis: BasisHuman, ApprovalRequired: true}
-	if !strings.HasPrefix(cand.Side, "PARTY:") && c.Grants.ActsFor(cand.Jurisdiction, cand.Platform) && !p.ApprovalRequired(cand.Jurisdiction) {
-		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover // a party's approvers always decide (ADR-13 rule 6)
-	} else if g = c.Grants.Delegates(cand.Jurisdiction, cand.Platform); g != nil && c.Principal.SPIFFEID != "" {
+	human := cand.AlwaysHuman || strings.HasPrefix(cand.Side, "PARTY:") // a party's approvers always decide (ADR-13 rule 6)
+	if !human && c.Grants.ActsFor(cand.Jurisdiction, cand.Platform) && !p.ApprovalRequired(cand.Jurisdiction) {
+		s.Basis, s.ApprovalRequired, s.Decision, s.DecidedBy = BasisAuto, false, Approved, AutoApprover
+	} else if g = c.Grants.Delegates(cand.Jurisdiction, cand.Platform); !cand.AlwaysHuman && g != nil && c.Principal.SPIFFEID != "" {
 		s.Basis, s.Decision, s.DecidedBy = BasisDelegated, Approved, DelegatedApprover
 	} else {
 		g = nil

@@ -9,6 +9,7 @@ import (
 	"github.com/dihedron/ligo/internal/bindings"
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 )
@@ -140,31 +141,34 @@ type PlatformRow struct {
 	Health                                       string
 }
 
-// platforms lists server.yaml's platforms, read-only, with their health
+// platforms lists the platforms in force with their health
 // (§3.4); each plugin answers within 2s.
 func (s *Server) platforms(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
 		return
 	}
 	var rows []PlatformRow
-	for _, pp := range s.Config.PlatformProviders {
-		for i := range pp.Platforms {
-			pl := &pp.Platforms[i]
-			row := PlatformRow{Name: pl.Name, Type: pp.Type, Realm: pl.Realm, Jurisdiction: pl.Jurisdiction, DisplayName: pl.DisplayName, TargetJurisdictions: pl.TargetJurisdictions,
-				IdentityProvider: pl.IdentityProvider.Instance, SecretStore: pl.SecretStore.Instance}
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			h, err := s.Plugins.Health(ctx, pl.Name) // shortcut: one platform after another; call in parallel if lists grow long
-			cancel()
-			switch {
-			case err != nil:
-				row.Health = "unreachable"
-			case h.GetServing():
-				row.Serving, row.Health = true, "serving"
-			default:
-				row.Health = h.GetPublicMessage()
-			}
-			rows = append(rows, row)
+	for _, pl := range s.Instances.Current().List(instances.Platform) {
+		row := PlatformRow{Name: pl.Metadata.Name, Type: pl.Type, Realm: pl.Metadata.Realm, Jurisdiction: pl.Metadata.Jurisdiction,
+			DisplayName: pl.Metadata.DisplayName, TargetJurisdictions: pl.TargetJurisdictions}
+		if pl.IdentityProvider != nil {
+			row.IdentityProvider = pl.IdentityProvider.Instance
 		}
+		if pl.SecretStore != nil {
+			row.SecretStore = pl.SecretStore.Instance
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		h, err := s.Plugins.Health(ctx, pl.Metadata.Name) // shortcut: one platform after another; call in parallel if lists grow long
+		cancel()
+		switch {
+		case err != nil:
+			row.Health = "unreachable"
+		case h.GetServing():
+			row.Serving, row.Health = true, "serving"
+		default:
+			row.Health = h.GetPublicMessage()
+		}
+		rows = append(rows, row)
 	}
 	p := s.frame(r, "Platforms", "/ui/platforms")
 	p.Content = rows
@@ -234,7 +238,7 @@ func (s *Server) catalogCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, rules := v.Metadata, s.Bindings.Rules
-	d.Flows = flows.Effective(m.Name, rules.Allow[m.Platform].Within(v.NetworkFlows), m.Platform, rules.PlatformFlows[m.Platform], "", nil, rules.Ligo)
+	d.Flows = flows.Effective(m.Name, rules.Allow(m.Platform).Within(v.NetworkFlows), m.Platform, rules.PlatformFlows(m.Platform), "", nil, rules.Ligo)
 	if b, err := json.MarshalIndent(map[string]any{"target": m.Name, "networkFlows": d.Flows}, "", "  "); err == nil {
 		d.FlowsJSON = string(b)
 	}

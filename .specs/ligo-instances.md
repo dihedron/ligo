@@ -1,6 +1,6 @@
 # Instances managed at run time
 
-- **Version:** 1.0 (2026-11-12), approved
+- **Version:** 1.1 (2026-11-12), approved; 1.1 adds the changes of chunks 1 and 2 (§15)
 - **Backlog:** item 10
 - **Branch:** `feature/instances`, from main at v0.3.0 (`af2d9e7`)
 - **Main spec:** becomes 4.1.0 (breaking change); target release v0.4.0
@@ -31,7 +31,7 @@ identity_providers:
     binary: ligo-plugin-openldap
     sha256: "…"
     instance_bounds:
-      allowed_endpoints: ["ldap.corp.internal:636", "*.dir.corp.internal:636"]
+      allowed_endpoints: ["ldap.corp.internal:636", "vault.prod.internal:8200"]
 secret_stores:
   - type: vault
     binary: ligo-plugin-vault
@@ -43,19 +43,24 @@ platform_providers:
     binary: ligo-plugin-postgres
     sha256: "…"
     instance_bounds:
-      allowed_endpoints: ["*.db.corp.internal:5432"]
+      allowed_endpoints: ["10.20.0.0/16", "vault.prod.internal:8200"]   # a network: any host and port in it
   - type: none
     builtin: true
 ```
 
 1. **`instances:` and `platforms:` are refused.** The strict load already treats them as unknown keys; the error message names this spec, so that an operator with an old file knows where they went.
-2. **`instance_bounds.allowed_endpoints`** (new, REQUIRED for a non-builtin type; `[]` allows none) bounds every endpoint an instance of the type may name, with the pattern syntax of §5.7. It is the platform team's root-owned limit on where a plugin may connect and send a bootstrap credential (§9, T-22a).
+2. **`instance_bounds.allowed_endpoints`** (new, REQUIRED for a non-builtin type; `[]` allows none) bounds every endpoint an instance of the type may name, with the syntax of `allowed_endpoints` (§5.7): a host, `host:port`, an address or a CIDR, with no wildcards. It is the platform team's root-owned limit on where a plugin may connect and send a bootstrap credential (§9, T-22a).
 3. **Role bindings** (`authorization.bindings[].platforms`, including `trusted_automation`'s, rule 13) still name platforms. A name that no ACTIVE platform has is no error, as platforms come and go: it matches nothing, and startup logs it at `WARN`.
 4. Realms, the charter, role bindings, webhooks and every other section stay as they are.
 
 The configuration's SHA-256 (`CONFIG_LOADED`) now covers types and policy only.
 
-**Startup rules (main spec §8.2) that move.** The parts of rules 1 to 6 and 8 that concern instances (names, realms, wiring, the §5.6 matrix, `match_expr`, `jwt_audience`, `allowed_source_trust_domains`, `principal_prefix`, the config schema), the platform parts of rules 16 and 19, and rules 10 and 11 move from startup to the request (§6). Startup keeps checking types (rules 1, 7), and runs rule 4's SVID checks at each `ConfigureInstances` as today.
+**Startup rules (main spec §8.2) that move.**
+
+- **To the request (§6):** the parts of rules 1 to 6 and 8 that concern instances (names, realms, wiring, the §5.6 matrix, `match_expr`, `jwt_audience`, `allowed_source_trust_domains`, `principal_prefix`, the config schema) and the platform parts of rules 16 and 19.
+- **Gone:** rule 10's references to platforms and instances (an instance in use cannot be retired, §6 rule 9), rule 11 (wiring differing from snapshots: an UPDATE of a platform affects new bindings only, INV-08), and `CONFIG_PLATFORM_CHANGED` (the request's audit records the change).
+- **Kept:** types (rules 1, 7); rule 10 for secret storage strategies, a property of plugin types, with `--allow-orphaned-bindings`; rule 4's SVID checks at each `ConfigureInstances`; rule 17's checks of targets against their platform, reading the platforms in force; rule 19's report of levels and flows outside bounds, also run after a platform UPDATE (§5 rule 7).
+- **`charter.source_jurisdictions`:** an entry is no longer required to be accepted by a platform, as platforms come later. A platform that accepts a trust domain needs its entry (§6 rule 4a).
 
 ## 4. The resources
 
@@ -110,6 +115,7 @@ Every field keeps the meaning and the defaults it has in `server.yaml` today (ma
   - `UPDATE`, which needs `expectedRevision`;
   - `DELETE`, which retires the instance.
 - **Changing an immutable field** means retiring the instance and creating a new one under another name.
+- **A platform UPDATE may not strand a target.** Its `targetJurisdictions` must still cover every target on it, and its `namespaceTemplate` cannot change while it has targets: `422 validation-failed`.
 - **Snapshots stay (INV-08).** A binding copies its platform's wiring, strategy, realm and jurisdictions at creation. An `UPDATE` of a platform affects new bindings only, and reconciliation of existing ones uses their snapshot. This includes `principalPrefix`, as AC-86 describes today.
 
 ## 5. Change control
@@ -183,10 +189,13 @@ The existing restart supervision (`restart_backoff`) is unchanged. A restarted p
 - **`internal/instances.Registry`:**
   - It holds an immutable snapshot of every ACTIVE instance, swapped atomically on reload.
   - Every former reader of `cfg.PlatformProviders`, `cfg.IdentityProviders` and `cfg.SecretStores` reads it instead.
-  - It is kept fresh as the account registry is: LISTEN on `ligo_instances_changed`, plus a full reload every `reconciliation.interval`.
+  - It is kept fresh as the account registry is: LISTEN on `ligo_instances_changed`, plus a full reload every `server.workload_listener.resolution_cache.full_reload_interval`.
 - **Drift.**
-  - Each row stores `definition_sha256`, the JCS hash of its normalized definition. Each load checks it against the `payloadSha256` of the last applied change request for that instance.
-  - A row that does not match, edited in the database outside ligo, is **quarantined**. It is left out of the snapshot, so it is not configured and not offered.
+  - Each row stores `definition_sha256`, the JCS hash of its normalized definition, and a **signature** by the audit key (the Transit key `ligo-audit`, as for checkpoints) over the JCS of `{kind, name, revision, definitionSha256}`, written when a request is applied.
+  - Each load checks that the definition hashes to `definition_sha256`, that the signature verifies with the cached public keys, and that the row's revision is not older than the newest revision the audit still holds for the instance.
+  - The signature, not the audit, is the reference, because audit pruning (v0.3.0) removes old entries: an instance created long ago would otherwise be quarantined.
+  - A row that fails, edited in the database outside ligo, is **quarantined**. It is left out of the snapshot, so it is not configured and not offered.
+  - With the signing key unreachable, a load keeps the set in force rather than quarantine everything.
   - A quarantine raises `SYSTEM_INSTANCE_DRIFT`, audited once per (instance, hash), the metric `ligo_instance_drift{kind,name}` and an `ERROR` log.
   - The fix is a new request that sets the intended definition. Its apply clears the quarantine.
 - **The charter no longer embeds platforms.**
@@ -199,7 +208,7 @@ The existing restart supervision (`restart_backoff`) is unchanged. A restarted p
 |---|---|---|
 | T-22 (reworked) | An instance is changed to redirect wiring or loosen bounds. Before, this took a write to the root-owned `server.yaml`; now it takes a change request. | Four eyes in the instance's jurisdiction, never `AUTO`, `DELEGATED` or break-glass (§5). Every applied change is audited with its payload hash. Bindings keep their snapshots (INV-08). Types, their binaries and `instance_bounds` stay root-owned in `server.yaml`. |
 | T-22a (new) | Two colluding or compromised approvers point an instance at a host they control. The plugin then sends the bootstrap admin credential there, or trusts that host's TLS through a `ca_pem` of their own. | `instance_bounds.allowed_endpoints` per type, root-owned: an endpoint outside it is refused at filing and at approval (§6 rule 5). A changed `ca_pem` shows in the request's diff. |
-| T-22b (new) | Someone with database write access, but not ligo's, edits `instances` directly, bypassing change control. | The drift check (§8): a row that does not match its last applied request's audited hash is quarantined and reported. The audit chain itself is protected by the signed checkpoints (T-13). |
+| T-22b (new) | Someone with database write access, but not ligo's, edits `instances` directly, bypassing change control. | The drift check (§8): a row whose hash or signature does not verify is quarantined and reported; the signing key is outside the database. **Residual:** a row rolled back to an earlier revision, with that revision's own signature, verifies, unless the audit still holds a newer revision. It can only restore a definition that was approved once. |
 | T-22c (new) | An instance's `svidSelector` selects the SVID of another instance served by the same plugin process. Its operator then acts with the other jurisdiction's identity, for example to read that jurisdiction's bootstrap credentials. | One SVID resolves to one instance, unless every instance sharing it sets `allowSharedSvid` and has the same jurisdiction (§6 rule 7), checked at filing, at approval and at each configuration. |
 | T-22d (new) | A file path in an instance's config makes the plugin read a host file of the operator's choice. | No file paths: `ca_pem` replaces `ca_file` (§7.1). The schemas declare no path keys. |
 | T-22e (new) | A secret is pasted into an instance's config, where it would be stored, audited and shown in diffs. | `additionalProperties: false` in every plugin schema. Bootstrap credentials stay references (`bootstrap_credential`), as today. The guides say so. |
@@ -254,10 +263,12 @@ CREATE TABLE instances (
     type               VARCHAR(63) NOT NULL,
     realm              VARCHAR(63) NOT NULL,
     jurisdiction       jurisdiction_path NOT NULL,
-    status             lifecycle_state NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
+    status             VARCHAR(8) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
     revision           BIGINT NOT NULL DEFAULT 1,
     definition         JSONB NOT NULL,                   -- normalized (§4)
     definition_sha256  CHAR(64) NOT NULL,                -- JCS
+    key_id             VARCHAR(128) NOT NULL,            -- the audit key's version
+    signature          TEXT NOT NULL,                    -- over {kind, name, revision, definitionSha256} (§8)
     created_at, updated_at, created_by, updated_by …,
     UNIQUE (kind, name)
 );
@@ -340,3 +351,13 @@ Each chunk is a stop point: tests and code, then `make lint`, `make vuln` and `m
 - **SPIRE registration entries for instance SVIDs.** The SPIRE operator creates them. Without one, `ValidateInstance` fails, the request is refused, and the guides say which entry to create.
 - **Realms at run time.**
 - **Terraform** (backlog item 8). The rule in §5.2, never `DELEGATED`, will need revisiting when that item is designed.
+
+## 15. Changes since 1.0
+
+| Version | Section | Change |
+|---|---|---|
+| 1.1 | §6 rule 5, §7.1 | `ValidateInstance` reports the instance's endpoints, `bootstrap_credential.address` included; no `x-ligo-endpoint` schema annotation (chunk 1). |
+| 1.1 | §8, §11, T-22b | Rows are signed by the audit key; the drift check verifies the signature, not the audit entry, which pruning may have removed (chunk 2). |
+| 1.1 | §3 | `instance_bounds` takes the `allowed_endpoints` syntax, with no wildcards; the startup rules that move, go and stay are listed; `source_jurisdictions` entries need no platform (chunk 2). |
+| 1.1 | §4.3 | A platform UPDATE may not strand a target (chunk 2). |
+| 1.1 | §8 | The registry reloads every `resolution_cache.full_reload_interval`, as the account registry (chunk 2). |

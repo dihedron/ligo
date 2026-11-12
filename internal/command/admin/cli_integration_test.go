@@ -26,6 +26,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/server/adminhttp"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -86,15 +87,20 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	brules, err := bindings.NewRules(cfg)
+	set, err := instances.LoadManifest("../../../examples/instances.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	srules, err := sources.NewRules(cfg)
+	inst := instances.Fixed{Set: set}
+	brules, err := bindings.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trules, err := targets.NewRules(cfg)
+	srules, err := sources.NewRules(cfg, inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trules, err := targets.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +142,7 @@ func server(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &adminhttp.Server{Listener: config.AdminListener{AllowBasicAuth: true}, Config: cfg, LDAP: directory{}, Authz: az, DB: pools.App,
+	s := &adminhttp.Server{Listener: config.AdminListener{AllowBasicAuth: true}, Config: cfg, Instances: inst, LDAP: directory{}, Authz: az, DB: pools.App,
 		Requests: requests, Bindings: bs, Sources: ss, Targets: ts, Catalog: &catalog.Reader{DB: pools.App, Policy: policy}, Logger: slog.New(slog.DiscardHandler),
 		Signer: zeroSigner(t)}
 	srv := httptest.NewTLSServer(s.Handler())

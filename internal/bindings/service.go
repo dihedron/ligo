@@ -169,7 +169,7 @@ func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name stri
 	if err != nil {
 		return nil, err
 	}
-	pl := s.Rules.Platforms[cur.platform]
+	pl, _ := s.Rules.Platform(cur.platform)
 	res := &resolved{platform: pl, sourceJurisdiction: cur.sourceJurisdiction, targetJurisdiction: cur.targetJurisdiction, platformJurisdiction: cur.platformJurisdiction}
 	if err := res.actsFor(c); err != nil {
 		return nil, err
@@ -334,7 +334,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 			return nil, invalid("name: %v", err)
 		}
 	}
-	pl, ok := s.Rules.Platforms[tgt.platform]
+	pl, ok := s.Rules.Platform(tgt.platform)
 	if !ok {
 		return nil, invalid("the platform %q of %s is not configured", tgt.platform, b.Target)
 	}
@@ -563,7 +563,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	var revision, attempt int64
 	if cur == nil {
 		labels := labelsJSON(b.Labels)
-		pl := s.Rules.Platforms[snap.platform]
+		pl, _ := s.Rules.Platform(snap.platform)
 		if pl.SecretStorageStrategy == "" {
 			return nil, fmt.Errorf("bindings: platform %s has no resolved secret_storage_strategy", snap.platform)
 		}

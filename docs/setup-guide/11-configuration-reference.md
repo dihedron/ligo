@@ -260,6 +260,8 @@
 | `identity_providers.builtin` | No binary. | |
 | `identity_providers.binary` | Relative to `plugins.directory`. | |
 | `identity_providers.sha256` | Its hash, checked before every start. | 64 lowercase hex |
+| `identity_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential; instances themselves are created with `ligo apply`. | Required unless builtin |
+| `identity_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`. | `[]` allows none |
 | `identity_providers.instances` | Its instances. | |
 | `secret_stores` | Stage 3; the same fields, and `network_flows` on each instance. | |
 | `platform_providers` | Stage 2. | |
@@ -284,6 +286,8 @@
 | `secret_stores.builtin` | A plugin inside `ligo`, with no binary. | |
 | `secret_stores.binary` | Its file, relative to `plugins.directory`. | |
 | `secret_stores.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
+| `secret_stores.instance_bounds` | Where instances of the type may connect and send a bootstrap credential; instances themselves are created with `ligo apply`. | Required unless builtin |
+| `secret_stores.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`. | `[]` allows none |
 | `secret_stores.instances` | Its instances. | |
 | `secret_stores.instances.name` | Its name, unique within its kind. | |
 | `secret_stores.instances.realm` | Its realm. Wiring must stay within one realm. | |
@@ -305,6 +309,8 @@
 | `platform_providers.builtin` | A plugin inside `ligo`, with no binary. | |
 | `platform_providers.binary` | Its file, relative to `plugins.directory`. | |
 | `platform_providers.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
+| `platform_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential; instances themselves are created with `ligo apply`. | Required unless builtin |
+| `platform_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`. | `[]` allows none |
 | `platform_providers.platforms.name` | Its name, unique within its kind. | |
 | `platform_providers.platforms.realm` | Its realm. Wiring must stay within one realm. | |
 | `platform_providers.platforms.jurisdiction` | Its owner jurisdiction: the team that runs it. A jurisdiction path. | |

@@ -9,6 +9,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 )
 
 const (
@@ -31,9 +32,19 @@ func example(t *testing.T) *config.Config {
 	return cfg
 }
 
+// exampleInstances are the instances of examples/instances.yaml.
+func exampleInstances(t *testing.T) instances.Fixed {
+	t.Helper()
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return instances.Fixed{Set: set}
+}
+
 func rules(t *testing.T) *Rules {
 	t.Helper()
-	r, err := NewRules(example(t))
+	r, err := NewRules(example(t), exampleInstances(t))
 	if err != nil {
 		t.Fatal(err)
 	}

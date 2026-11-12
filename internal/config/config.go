@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dihedron/ligo/internal/charter"
-	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/dihedron/ligo/internal/sealing"
 	"go.yaml.in/yaml/v3"
@@ -37,9 +36,9 @@ type Config struct {
 	BreakGlass        BreakGlass         `yaml:"break_glass"`
 	Notifications     Notifications      `yaml:"notifications"`
 	Reconciliation    Reconciliation     `yaml:"reconciliation"`
-	IdentityProviders []InstanceProvider `yaml:"identity_providers"`
-	SecretStores      []InstanceProvider `yaml:"secret_stores"`
-	PlatformProviders []PlatformProvider `yaml:"platform_providers"`
+	IdentityProviders []PluginType       `yaml:"identity_providers"`
+	SecretStores      []PluginType       `yaml:"secret_stores"`
+	PlatformProviders []PluginType       `yaml:"platform_providers"`
 	Observability     Observability      `yaml:"observability"`
 }
 
@@ -345,111 +344,20 @@ type Reconciliation struct {
 	MaxConcurrent int           `yaml:"max_concurrent"`
 }
 
-// InstanceProvider is a plugin type of identity providers or secret stores,
-// with its instances.
-type InstanceProvider struct {
-	Type      string     `yaml:"type"`
-	Builtin   bool       `yaml:"builtin"`
-	Binary    string     `yaml:"binary"`
-	SHA256    string     `yaml:"sha256"`
-	Instances []Instance `yaml:"instances"`
+// PluginType is a plugin type of one kind; its instances live in the
+// database (.specs/ligo-instances.md §3).
+type PluginType struct {
+	Type    string `yaml:"type"`
+	Builtin bool   `yaml:"builtin"`
+	Binary  string `yaml:"binary"`
+	SHA256  string `yaml:"sha256"`
+	// InstanceBounds is REQUIRED for a non-builtin type: the platform
+	// team's limit on where its instances may connect (T-22a).
+	InstanceBounds *InstanceBounds `yaml:"instance_bounds"`
 }
 
-type Instance struct {
-	Name         string        `yaml:"name"`
-	Realm        string        `yaml:"realm"`
-	SVIDSelector *SVIDSelector `yaml:"svid_selector"`
-	// Config is plugin-specific: it is validated against the plugin's schema
-	// (§8.2 rule 8).
-	Config       yaml.Node    `yaml:"config"`
-	NetworkFlows []flows.Flow `yaml:"network_flows"`
-}
-
-// PlatformProvider is a target plugin type with its platforms.
-type PlatformProvider struct {
-	Type      string     `yaml:"type"`
-	Builtin   bool       `yaml:"builtin"`
-	Binary    string     `yaml:"binary"`
-	SHA256    string     `yaml:"sha256"`
-	Platforms []Platform `yaml:"platforms"`
-}
-
-type Platform struct {
-	Name                      string        `yaml:"name"`
-	Realm                     string        `yaml:"realm"`
-	Jurisdiction              string        `yaml:"jurisdiction"`
-	TargetJurisdictions       []string      `yaml:"target_jurisdictions"`
-	NamespaceTemplate         string        `yaml:"namespace_template"`
-	DisplayName               string        `yaml:"display_name"`
-	Description               string        `yaml:"description"`
-	Contacts                  []Contact     `yaml:"contacts"`
-	CheckExistence            *bool         `yaml:"check_existence"` // default true (§7.2.3)
-	NetworkFlows              []flows.Flow  `yaml:"network_flows"`
-	IdentityProvider          Wiring        `yaml:"identity_provider"`
-	SecretStore               Wiring        `yaml:"secret_store"`
-	PrincipalPrefix           string        `yaml:"principal_prefix"`
-	AllowedSourceTrustDomains []string      `yaml:"allowed_source_trust_domains"`
-	RotationInterval          time.Duration `yaml:"rotation_interval"`
-	SVIDSelector              *SVIDSelector `yaml:"svid_selector"`
-	Config                    yaml.Node     `yaml:"config"`
-}
-
-type Contact struct {
-	Name  string `yaml:"name"`
-	Email string `yaml:"email"`
-}
-
-// Wiring names an instance of a plugin type.
-type Wiring struct {
-	Type                  string `yaml:"type"`
-	Instance              string `yaml:"instance"`
-	SecretStorageStrategy string `yaml:"secret_storage_strategy"` // secret_store only (§5.6)
-}
-
-// pluginConfig holds the keys ligo itself reads from a plugin's config.
-type pluginConfig struct {
-	AllowedEndpoints    []string `yaml:"allowed_endpoints"`
-	BootstrapCredential *struct {
-		JWTAudience string `yaml:"jwt_audience"`
-	} `yaml:"bootstrap_credential"`
-}
-
-// AllowedEndpoints returns the platform's allowed_endpoints (§5.7).
-func (p *Platform) AllowedEndpoints() []string {
-	pc, _ := hostKeys(&p.Config) // validated at load
-	return pc.AllowedEndpoints
-}
-
-// PrivilegeBounds returns the platform's privilege bounds in the plugin's
-// terms (§3.4), or nil.
-// shortcut: grantable_roles is the only bound the database plugins know;
-// read others here when a plugin type declares them
-func (p *Platform) PrivilegeBounds() map[string]any {
-	var b struct {
-		GrantableRoles     []string `yaml:"grantable_roles"`
-		GrantableTemplates []string `yaml:"grantable_role_templates"`
-	}
-	if p.Config.Kind == 0 || p.Config.Decode(&b) != nil || (b.GrantableRoles == nil && b.GrantableTemplates == nil) {
-		return nil
-	}
-	bounds := map[string]any{}
-	if b.GrantableRoles != nil {
-		bounds["grantableRoles"] = b.GrantableRoles
-	}
-	if b.GrantableTemplates != nil {
-		bounds["grantableRoleTemplates"] = b.GrantableTemplates
-	}
-	return bounds
-}
-
-// hostKeys decodes the keys ligo reads from a plugin's config node.
-func hostKeys(n *yaml.Node) (pluginConfig, error) {
-	var pc pluginConfig
-	if n.Kind == 0 {
-		return pc, nil
-	}
-	err := n.Decode(&pc)
-	return pc, err
+type InstanceBounds struct {
+	AllowedEndpoints []string `yaml:"allowed_endpoints"` // the syntax of §5.7; empty allows none
 }
 
 // Load reads server.yaml strictly: unknown keys are errors. It returns the
@@ -473,13 +381,34 @@ func Parse(data []byte) (*Config, error) {
 	dec.KnownFields(true)
 	cfg := &Config{RegexPolicy: regexpolicy.DefaultPolicy()}
 	if err := dec.Decode(cfg); err != nil {
-		return nil, err
+		return nil, movedInstances(data, err)
 	}
 	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("more than one YAML document")
 	}
 	cfg.applyDefaults()
 	return cfg, nil
+}
+
+// movedInstances explains the error of a file that still holds instances:
+// they live in the database since v0.4.0.
+func movedInstances(data []byte, err error) error {
+	var doc map[string]any
+	if yaml.Unmarshal(data, &doc) != nil {
+		return err
+	}
+	for _, section := range []string{"identity_providers", "secret_stores", "platform_providers"} {
+		types, _ := doc[section].([]any)
+		for _, t := range types {
+			m, _ := t.(map[string]any)
+			for _, key := range []string{"instances", "platforms"} {
+				if _, ok := m[key]; ok {
+					return fmt.Errorf("%s[].%s: instances are no longer configured in server.yaml; create them with ligo apply (.specs/ligo-instances.md): %w", section, key, err)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func (c *Config) applyDefaults() {
@@ -508,13 +437,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Charter.Interconnects.DefaultCrossJurisdiction == "" {
 		c.Charter.Interconnects.DefaultCrossJurisdiction = "deny"
-	}
-	for i := range c.PlatformProviders {
-		for j := range c.PlatformProviders[i].Platforms {
-			if p := &c.PlatformProviders[i].Platforms[j]; len(p.TargetJurisdictions) == 0 && p.Jurisdiction != "" {
-				p.TargetJurisdictions = []string{p.Jurisdiction + "/*"}
-			}
-		}
 	}
 	wl := &c.Server.WorkloadListener
 	if wl.MaxTokenTTL == 0 {
@@ -576,11 +498,6 @@ func (c *Config) Policy() *charter.Policy {
 		NamePrefixes:             c.Charter.NamePrefixes,
 		Interconnects:            c.Charter.Interconnects,
 		BreakGlassPolicies:       c.BreakGlass.Policies,
-	}
-	for _, tp := range c.PlatformProviders {
-		for _, pl := range tp.Platforms {
-			p.Platforms = append(p.Platforms, charter.PlatformJurisdictions{Platform: pl.Name, Jurisdiction: pl.Jurisdiction, TargetJurisdictions: pl.TargetJurisdictions})
-		}
 	}
 	return p
 }

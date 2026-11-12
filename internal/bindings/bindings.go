@@ -16,6 +16,7 @@ import (
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 )
@@ -58,52 +59,57 @@ type Platform struct {
 	AllowedTrustDomains                            []string
 	IdentityProviderType, IdentityProviderInstance string
 	SecretStoreType, SecretStoreInstance           string
-	SecretStorageStrategy                          string // as configured; startup defaults an omitted one (§5.6)
+	SecretStorageStrategy                          string // as filed; an omitted one is defaulted at filing (§5.6)
 	PrincipalPrefix                                string
 }
 
-// Rules are the parts of the configuration that validate bindings.
+// Rules are the parts of the configuration, and the platforms in force,
+// that validate bindings.
 type Rules struct {
-	Platforms    map[string]Platform
+	Instances    instances.Source
 	NamePrefixes []charter.NamePrefix
 	Regex        regexpolicy.Policy
 	MaxExpiry    time.Duration
-	// the flows declared by platforms and secret store instances, and
-	// ligo's own (ADR-16), for the effective flows of a binding
-	PlatformFlows, StoreFlows map[string][]flows.Flow
-	Ligo                      flows.Flow
-	// Allow is each platform's allowed_endpoints: target flows outside it
-	// are left out of effective flows (§8.2 rule 19)
-	Allow map[string]flows.Allowlist
+	// Ligo is ligo's own flow (ADR-16), for the effective flows of a binding.
+	Ligo flows.Flow
 }
 
 // NewRules extracts the rules from a validated configuration.
-func NewRules(cfg *config.Config) (*Rules, error) {
+func NewRules(cfg *config.Config, in instances.Source) (*Rules, error) {
 	wa := cfg.Service.WorkloadAdvertise
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy,
-		MaxExpiry: cfg.Bindings.MaxExpiry, PlatformFlows: map[string][]flows.Flow{}, StoreFlows: map[string][]flows.Flow{},
-		Ligo: flows.LigoFlow(wa.Destination, wa.Port, wa.ServerName), Allow: map[string]flows.Allowlist{}}
-	for _, ss := range cfg.SecretStores {
-		for _, in := range ss.Instances {
-			r.StoreFlows[in.Name] = in.NetworkFlows
-		}
+	return &Rules{Instances: in, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy, MaxExpiry: cfg.Bindings.MaxExpiry,
+		Ligo: flows.LigoFlow(wa.Destination, wa.Port, wa.ServerName)}, nil
+}
+
+// Platform is the platform in force called name.
+func (r *Rules) Platform(name string) (Platform, bool) {
+	p, ok := r.Instances.Current().Platform(name)
+	if !ok {
+		return Platform{}, false
 	}
-	for _, pp := range cfg.PlatformProviders {
-		for _, p := range pp.Platforms {
-			r.PlatformFlows[p.Name] = p.NetworkFlows
-			allow, err := flows.ParseAllowlist(p.AllowedEndpoints())
-			if err != nil {
-				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
-			}
-			r.Allow[p.Name] = allow
-			r.Platforms[p.Name] = Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Jurisdiction: p.Jurisdiction,
-				AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix,
-				IdentityProviderType: p.IdentityProvider.Type, IdentityProviderInstance: p.IdentityProvider.Instance,
-				SecretStoreType: p.SecretStore.Type, SecretStoreInstance: p.SecretStore.Instance,
-				SecretStorageStrategy: p.SecretStore.SecretStorageStrategy}
-		}
+	out := Platform{Name: p.Metadata.Name, Type: p.Type, Realm: p.Metadata.Realm, Jurisdiction: p.Metadata.Jurisdiction,
+		AllowedTrustDomains: p.AllowedSourceTrustDomains, PrincipalPrefix: p.PrincipalPrefix}
+	if w := p.IdentityProvider; w != nil {
+		out.IdentityProviderType, out.IdentityProviderInstance = w.Type, w.Instance
 	}
-	return r, nil
+	if w := p.SecretStore; w != nil {
+		out.SecretStoreType, out.SecretStoreInstance, out.SecretStorageStrategy = w.Type, w.Instance, w.SecretStorageStrategy
+	}
+	return out, true
+}
+
+// Allow is a platform's allowed_endpoints: target flows outside it are left
+// out of effective flows (§8.2 rule 19).
+func (r *Rules) Allow(platform string) flows.Allowlist { return r.Instances.Current().Allow(platform) }
+
+// PlatformFlows are the flows a platform declares.
+func (r *Rules) PlatformFlows(platform string) []flows.Flow {
+	return r.Instances.Current().Flows(instances.Platform, platform)
+}
+
+// StoreFlows are the flows a secret store instance declares.
+func (r *Rules) StoreFlows(store string) []flows.Flow {
+	return r.Instances.Current().Flows(instances.SecretStore, store)
 }
 
 func refuse(status int, slug, format string, args ...any) *changerequests.Error {

@@ -45,6 +45,23 @@ func TestBuildSidesParty(t *testing.T) {
 	}
 }
 
+// TestBuildSidesAlwaysHuman: an instance's side is decided by a person,
+// even where the caller's side would be AUTO or DELEGATED
+// (.specs/ligo-instances.md §5 rule 2).
+func TestBuildSidesAlwaysHuman(t *testing.T) {
+	automation := grant(config.RoleTrustedAutomation, "dc/corp-prod/*")
+	for name, c := range map[string]Caller{
+		"self-service operator": {Principal: authz.Principal{Name: "alice"}, Grants: authz.Grants{grant(config.RoleOperator, "cloud/*")}},
+		"trusted automation":    {Principal: authz.Principal{SPIFFEID: "spiffe://prod.internal/ci/robot"}, Grants: authz.Grants{automation}},
+	} {
+		jurisdiction := map[string]string{"self-service operator": payments, "trusted automation": ledger}[name]
+		sides, err := BuildSides([]Candidate{{Side: "OWNER", Jurisdiction: jurisdiction, AlwaysHuman: true}}, c, policy, "")
+		if err != nil || sides[0].Basis != BasisHuman || !sides[0].ApprovalRequired || sides[0].Decision != "" {
+			t.Errorf("%s: %+v, %v", name, sides, err)
+		}
+	}
+}
+
 // TestBuildSides: the basis of each side is fixed at creation (ADR-13 rule
 // 6, §7.2.3 "Sides at creation").
 func TestBuildSides(t *testing.T) {

@@ -5,6 +5,7 @@ package bindings
 import (
 	"context"
 	"fmt"
+	"github.com/dihedron/ligo/internal/instances"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -363,9 +364,7 @@ func TestAC86(t *testing.T) {
 	if len(kept) != 20 || kept[:4] != "svc_" {
 		t.Fatalf("principal %s", kept)
 	}
-	p := s.Rules.Platforms["oracle-prod"]
-	p.PrincipalPrefix = "app_" // a restart with the new configuration
-	s.Rules.Platforms["oracle-prod"] = p
+	withPlatform(s.Rules, "oracle-prod", func(p *instances.Definition) { p.PrincipalPrefix = "app_" }) // an approved platform change
 
 	r, err := s.Update(ctx, dcOp, b, body(b, w.dcSrc, w.dcShared, "write", `"expectedRevision":1`))
 	if err != nil {

@@ -99,23 +99,15 @@ func (b *BreakGlassPolicy) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PlatformJurisdictions is the charter part of a platform.
-type PlatformJurisdictions struct {
-	Platform            string   `json:"platform"`
-	Jurisdiction        string   `json:"jurisdiction"`
-	TargetJurisdictions []string `json:"targetJurisdictions"`
-}
-
 // Policy is the charter (§8.2 rule 16): its SHA-256 is stored on
 // every change request.
 type Policy struct {
-	RequiredJurisdictions    []string                `json:"requiredJurisdictions"`
-	RequireDistinctApprovers bool                    `json:"requireDistinctApproversAcrossJurisdictions"`
-	SourceJurisdictions      []SourceJurisdiction    `json:"sourceJurisdictions"`
-	NamePrefixes             []NamePrefix            `json:"namePrefixes"`
-	Interconnects            Interconnects           `json:"interconnects"`
-	BreakGlassPolicies       []BreakGlassPolicy      `json:"breakGlassPolicies"`
-	Platforms                []PlatformJurisdictions `json:"platforms"` // sorted by Canonical
+	RequiredJurisdictions    []string             `json:"requiredJurisdictions"`
+	RequireDistinctApprovers bool                 `json:"requireDistinctApproversAcrossJurisdictions"`
+	SourceJurisdictions      []SourceJurisdiction `json:"sourceJurisdictions"`
+	NamePrefixes             []NamePrefix         `json:"namePrefixes"`
+	Interconnects            Interconnects        `json:"interconnects"`
+	BreakGlassPolicies       []BreakGlassPolicy   `json:"breakGlassPolicies"`
 }
 
 // Decision is the outcome of the interconnection policy for a jurisdiction pair.
@@ -197,8 +189,6 @@ func (p *Policy) PartiesWithoutBreakGlass() []UncoveredParty {
 // platforms sorted by name.
 func (p *Policy) Canonical() ([]byte, error) {
 	c := *p
-	c.Platforms = slices.Clone(p.Platforms)
-	slices.SortFunc(c.Platforms, func(a, b PlatformJurisdictions) int { return strings.Compare(a.Platform, b.Platform) })
 	return jcs.Canonicalize(c)
 }
 

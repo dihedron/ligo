@@ -379,17 +379,9 @@ func (m *Manager) OutputValidator(kind pluginv1.PluginKind, instance string) *ou
 // checkConfigs validates every instance's config against the plugin's
 // instance configuration schema (§8.2 rule 8).
 func checkConfigs(d *pluginv1.DescribeResponse, instances []*pluginv1.InstanceDescriptor) error {
-	schema, err := compileSchema(d.GetInstanceConfigSchemaJson())
-	if err != nil {
-		return fmt.Errorf("instance configuration schema: %w", err)
-	}
 	for _, in := range instances {
-		cfg, err := jsonschema.UnmarshalJSON(strings.NewReader(in.GetConfigJson()))
-		if err != nil {
-			return fmt.Errorf("instance %q: config: %w", in.GetName(), err)
-		}
-		if err := schema.Validate(cfg); err != nil {
-			return fmt.Errorf("instance %q: config: %w", in.GetName(), err)
+		if err := checkConfig(d, in); err != nil {
+			return fmt.Errorf("instance %q: %w", in.GetName(), err)
 		}
 	}
 	return nil

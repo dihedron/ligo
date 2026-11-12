@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/dihedron/ligo/internal/instances"
 	"io"
 	"log/slog"
 	"net/http"
@@ -197,10 +198,10 @@ func labBinding(t *testing.T) *lab {
 	}
 
 	bs := &bindings.Service{DB: pools.App, Validate: bindings.Plugins(m),
-		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Platforms: map[string]bindings.Platform{"pg-ledger": {
-			Name: "pg-ledger", Type: "postgres.v1", Realm: "prod", Jurisdiction: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
-			IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod",
-			SecretStorageStrategy: "vault-static"}}},
+		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Instances: instances.Fixed{Set: instances.NewSet(&instances.Definition{
+			Kind: "Platform", Type: "postgres.v1", Metadata: instances.Metadata{Name: "pg-ledger", Realm: "prod", Jurisdiction: "dc/corp-prod"},
+			AllowedSourceTrustDomains: []string{"prod.lab"}, IdentityProvider: &instances.Wiring{Type: "target-local.v1", Instance: "local-prod"},
+			SecretStore: &instances.Wiring{Type: "vault.v1", Instance: "vault-prod", SecretStorageStrategy: "vault-static"}})}},
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
 	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &charter.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
 		Resources: map[string]changerequests.Resource{"BINDING": bs}}

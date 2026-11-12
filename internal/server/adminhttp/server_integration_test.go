@@ -37,6 +37,7 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -237,20 +238,25 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules, err := bindings.NewRules(cfg)
+	set, err := instances.LoadManifest("../../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := instances.Fixed{Set: set}
+	rules, err := bindings.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bs := &bindings.Service{DB: pools.App, Rules: rules, Validate: validate}
 	bs.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": bs},
 		BreakGlassRules: cfg.BreakGlass}
-	srcRules, err := sources.NewRules(cfg)
+	srcRules, err := sources.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ss := &sources.Service{DB: pools.App, Rules: srcRules, Requests: bs.Requests}
 	bs.Requests.Resources["SOURCE"] = ss
-	tgtRules, err := targets.NewRules(cfg)
+	tgtRules, err := targets.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +280,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Config: cfg, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
+	s := &Server{Listener: listener, Config: cfg, Instances: inst, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
 		Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler), Signer: zeroSigner(t)}

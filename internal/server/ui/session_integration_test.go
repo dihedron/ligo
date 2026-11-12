@@ -30,6 +30,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -192,7 +193,12 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules, err := bindings.NewRules(cfg)
+	set, err := instances.LoadManifest("../../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := instances.Fixed{Set: set}
+	rules, err := bindings.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,12 +207,12 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	}}
 	s.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: time.Hour, Resources: map[string]changerequests.Resource{"BINDING": s.Bindings}}
 	s.Bindings.Requests = s.Requests
-	srcRules, err := sources.NewRules(cfg)
+	srcRules, err := sources.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Sources = &sources.Service{DB: pools.App, Rules: srcRules, Requests: s.Requests}
-	tgtRules, err := targets.NewRules(cfg)
+	tgtRules, err := targets.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +220,7 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	s.Requests.Resources["SOURCE"], s.Requests.Resources["TARGET"] = s.Sources, s.Targets
 	s.Bindings.Sources = s.Sources // inline sources (§7.2.4), as ligo serve wires it
 	s.Catalog = &catalog.Reader{DB: pools.App, Policy: s.Requests.Policy}
-	s.Config, s.Plugins, s.Workflows = cfg, healthy{}, &workflows{}
+	s.Config, s.Instances, s.Plugins, s.Workflows = cfg, inst, healthy{}, &workflows{}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user, s: s}

@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 	"uuid"
@@ -26,6 +25,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/store"
 	"github.com/dihedron/ligo/internal/targets"
@@ -43,8 +43,10 @@ type Checks struct {
 	ConfigSHA256 string
 	ThemeSHA256  map[string]string             // the theme files in use and tokens.css (theme.Theme.Hashes)
 	Extractors   map[string]*charter.Extractor // the source jurisdiction extractors, by trust domain (sources.Rules)
+	Instances    instances.Source              // the platforms and instances in force
 	// AllowOrphanedBindings and AcceptJurisdictionChanges are the flags of
-	// ligo serve (§8.2 rules 10 and 17).
+	// ligo serve (§8.2 rules 10 and 17); rule 10 is left only for secret
+	// storage strategies, a property of plugin types.
 	AllowOrphanedBindings     bool
 	AcceptJurisdictionChanges bool
 	Logger                    *slog.Logger
@@ -56,7 +58,7 @@ type Checks struct {
 // stops startup.
 func (c *Checks) Run(ctx context.Context) error {
 	c.policy = c.Config.Policy()
-	for _, check := range []func(context.Context) error{c.configLoaded, c.orphans, c.wiring, c.names, c.jurisdictions, c.interconnects, c.breakGlassParties} {
+	for _, check := range []func(context.Context) error{c.configLoaded, c.unknownPlatforms, c.names, c.jurisdictions, c.interconnects, c.breakGlassParties} {
 		if err := check(ctx); err != nil {
 			return err
 		}
@@ -89,9 +91,8 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		return err
 	}
 	var previous struct {
-		Policy       json.RawMessage           `json:"policy"`
-		PolicySHA256 string                    `json:"policySha256"`
-		Platforms    map[string]platformBounds `json:"platforms"`
+		Policy       json.RawMessage `json:"policy"`
+		PolicySHA256 string          `json:"policySha256"`
 	}
 	var prev json.RawMessage
 	err = c.DB.QueryRow(ctx, "SELECT snapshot FROM audit_log WHERE action = 'CONFIG_LOADED' ORDER BY id DESC LIMIT 1").Scan(&prev)
@@ -104,20 +105,10 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 		}
 	}
 	sha := c.policy.SHA256()
-	platforms := map[string]platformBounds{}
-	for _, pp := range c.Config.PlatformProviders {
-		for i := range pp.Platforms {
-			p := &pp.Platforms[i]
-			platforms[p.Name] = platformBounds{PrivilegeBounds: p.PrivilegeBounds(), AllowedEndpoints: p.AllowedEndpoints(), NetworkFlows: p.NetworkFlows}
-		}
-	}
+	// platforms are no longer configuration: their changes are their change
+	// requests' audit (.specs/ligo-instances.md §3)
 	entries := []audit.Entry{{Action: "CONFIG_LOADED", Actor: actor, Snapshot: snapshot(map[string]any{"configSha256": c.ConfigSHA256,
-		"policy": json.RawMessage(canonical), "policySha256": sha, "platforms": platforms, "themeSha256": c.ThemeSHA256})}}
-	changed, err := platformChanges(previous.Platforms, platforms)
-	if err != nil {
-		return err
-	}
-	entries = append(entries, changed...)
+		"policy": json.RawMessage(canonical), "policySha256": sha, "themeSha256": c.ThemeSHA256})}}
 	if previous.Policy != nil && previous.PolicySHA256 != sha {
 		changes, err := changerequests.Diff(previous.Policy, canonical)
 		if err != nil {
@@ -139,111 +130,24 @@ func (c *Checks) configLoaded(ctx context.Context) error {
 	return appendTx(ctx, c.DB, entries...)
 }
 
-// platformBounds is what rule 19 compares between starts.
-type platformBounds struct {
-	PrivilegeBounds  map[string]any `json:"privilegeBounds"`
-	AllowedEndpoints []string       `json:"allowedEndpoints"`
-	NetworkFlows     []flows.Flow   `json:"networkFlows"`
+// platform is the platform in force called name.
+func (c *Checks) platform(name string) *instances.Definition {
+	p, _ := c.Instances.Current().Platform(name)
+	return p
 }
 
-// platformChanges audits CONFIG_PLATFORM_CHANGED for each platform whose
-// bounds, endpoints or flows differ from the previous start's (rule 19);
-// new platforms are no change.
-func platformChanges(previous, current map[string]platformBounds) ([]audit.Entry, error) {
-	var entries []audit.Entry
-	for _, name := range slices.Sorted(maps.Keys(current)) {
-		old, ok := previous[name]
-		if !ok {
-			continue
-		}
-		a, err := json.Marshal(old)
-		if err != nil {
-			return nil, err
-		}
-		b, err := json.Marshal(current[name])
-		if err != nil {
-			return nil, err
-		}
-		changes, err := changerequests.Diff(a, b)
-		if err != nil {
-			return nil, err
-		}
-		if len(changes) > 0 {
-			entries = append(entries, audit.Entry{Action: "CONFIG_PLATFORM_CHANGED", Actor: actor,
-				Snapshot: snapshot(map[string]any{"platform": name, "changes": changes})})
-		}
-	}
-	return entries, nil
-}
-
-// platform returns the configured platform called name and its type.
-func (c *Checks) platform(name string) (*config.Platform, string) {
-	for _, pp := range c.Config.PlatformProviders {
-		for i := range pp.Platforms {
-			if pp.Platforms[i].Name == name {
-				return &pp.Platforms[i], pp.Type
+// unknownPlatforms warns of role bindings scoped to platforms that no
+// ACTIVE platform has: platforms come and go at run time, so the name is no
+// error and matches nothing (.specs/ligo-instances.md §3).
+func (c *Checks) unknownPlatforms(context.Context) error {
+	for _, b := range c.Config.Authorization.Bindings {
+		for _, name := range b.Platforms {
+			if c.platform(name) == nil {
+				c.Logger.Warn("a role binding names a platform that does not exist now", "role", b.Role, "platform", name)
 			}
 		}
 	}
-	return nil, ""
-}
-
-// instance reports whether (typ, name) is a configured identity provider,
-// secret store or platform.
-func (c *Checks) instance(typ, name string) bool {
-	for _, group := range [][]config.InstanceProvider{c.Config.IdentityProviders, c.Config.SecretStores} {
-		for _, p := range group {
-			if p.Type == typ && slices.ContainsFunc(p.Instances, func(i config.Instance) bool { return i.Name == name }) {
-				return true
-			}
-		}
-	}
-	_, pt := c.platform(name)
-	return pt == typ
-}
-
-// orphans is rule 10: what non-retired targets and existing bindings
-// reference must still be configured.
-func (c *Checks) orphans(ctx context.Context) error {
-	var found []string
-	rows, err := c.DB.Query(ctx, "SELECT name, platform, platform_type, realm FROM targets WHERE state <> 'RETIRED' ORDER BY name")
-	if err != nil {
-		return err
-	}
-	type target struct{ name, platform, typ, realm string }
-	targets, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (target, error) {
-		var t target
-		return t, r.Scan(&t.name, &t.platform, &t.typ, &t.realm)
-	})
-	if err != nil {
-		return err
-	}
-	for _, t := range targets {
-		if p, typ := c.platform(t.platform); p == nil || typ != t.typ || p.Realm != t.realm {
-			found = append(found, fmt.Sprintf("target %s: platform %s (%s, realm %s)", t.name, t.platform, t.typ, t.realm))
-		}
-	}
-	rows, err = c.DB.Query(ctx, `SELECT b.name, w.typ, w.instance FROM bindings b, LATERAL (VALUES
-			(b.platform_type, b.platform), (b.identity_provider_type, b.identity_provider_instance), (b.secret_store_type, b.secret_store_instance)
-		) AS w(typ, instance)
-		UNION SELECT b.name, s.provider_type, s.provider_instance FROM binding_stage_state s JOIN bindings b ON b.id = s.binding_id
-		ORDER BY 1, 2, 3`)
-	if err != nil {
-		return err
-	}
-	refs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([3]string, error) {
-		var v [3]string
-		return v, r.Scan(&v[0], &v[1], &v[2])
-	})
-	if err != nil {
-		return err
-	}
-	for _, ref := range refs {
-		if !c.instance(ref[1], ref[2]) {
-			found = append(found, fmt.Sprintf("binding %s: %s instance %s", ref[0], ref[1], ref[2]))
-		}
-	}
-	return c.orphaned(ctx, found)
+	return nil
 }
 
 // orphaned fails startup on found, unless --allow-orphaned-bindings, which
@@ -284,32 +188,6 @@ func (c *Checks) Strategies(ctx context.Context, declared func(storeType string)
 	return c.orphaned(ctx, found)
 }
 
-// wiring is rule 11: bindings whose wiring differs from their platform's
-// current wiring keep their snapshot (INV-08); it is only logged.
-func (c *Checks) wiring(ctx context.Context) error {
-	rows, err := c.DB.Query(ctx, `SELECT name, platform, identity_provider_type, identity_provider_instance, secret_store_type,
-		secret_store_instance, secret_storage_strategy FROM bindings ORDER BY name`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name, platform, idpType, idp, storeType, st, strategy string
-		if err := rows.Scan(&name, &platform, &idpType, &idp, &storeType, &st, &strategy); err != nil {
-			return err
-		}
-		p, _ := c.platform(platform)
-		if p == nil {
-			continue // rule 10
-		}
-		if p.IdentityProvider.Type != idpType || p.IdentityProvider.Instance != idp || p.SecretStore.Type != storeType || p.SecretStore.Instance != st ||
-			p.SecretStore.SecretStorageStrategy != "" && p.SecretStore.SecretStorageStrategy != strategy {
-			c.Logger.Warn("a binding keeps the wiring it was created with", "binding", name, "platform", platform)
-		}
-	}
-	return rows.Err()
-}
-
 // names is the startup part of rule 16: every name prefix that applies to
 // the jurisdiction of an existing resource resolves.
 func (c *Checks) names(ctx context.Context) error {
@@ -342,18 +220,16 @@ func (c *Checks) names(ctx context.Context) error {
 // §5, TN-16). It needs the plugins, as Platforms does.
 func (c *Checks) Namespaces(ctx context.Context, declared func(platformType string) string) error {
 	var fatal []string
-	for _, pp := range c.Config.PlatformProviders {
-		for _, p := range pp.Platforms {
-			if p.NamespaceTemplate != "" && declared(pp.Type) == "" {
-				fatal = append(fatal, fmt.Sprintf("platform %s: plugin %s declares no namespace_field", p.Name, pp.Type))
-			}
-			bounds := p.PrivilegeBounds()
-			if shared, _ := bounds["grantableRoles"].([]string); p.NamespaceTemplate != "" && len(shared) > 0 {
-				c.Logger.Warn("grantable_roles on a namespaced platform are shared across tenants", "platform", p.Name, "roles", shared)
-			}
-			if templates, _ := bounds["grantableRoleTemplates"].([]string); p.NamespaceTemplate == "" && len(templates) > 0 {
-				c.Logger.Warn("grantable_role_templates with no namespace_template: a target's schema, and so its roles, are the operator's choice", "platform", p.Name)
-			}
+	for _, p := range c.Instances.Current().List(instances.Platform) {
+		if p.NamespaceTemplate != "" && declared(p.Type) == "" {
+			fatal = append(fatal, fmt.Sprintf("platform %s: plugin %s declares no namespace_field", p.Metadata.Name, p.Type))
+		}
+		bounds := p.PrivilegeBounds()
+		if shared, _ := bounds["grantableRoles"].([]string); p.NamespaceTemplate != "" && len(shared) > 0 {
+			c.Logger.Warn("grantable_roles on a namespaced platform are shared across tenants", "platform", p.Metadata.Name, "roles", shared)
+		}
+		if templates, _ := bounds["grantableRoleTemplates"].([]string); p.NamespaceTemplate == "" && len(templates) > 0 {
+			c.Logger.Warn("grantable_role_templates with no namespace_template: a target's schema, and so its roles, are the operator's choice", "platform", p.Metadata.Name)
 		}
 	}
 	rows, err := c.DB.Query(ctx, "SELECT name, platform, jurisdiction, definition FROM targets WHERE state <> 'RETIRED' ORDER BY name")
@@ -372,11 +248,11 @@ func (c *Checks) Namespaces(ctx context.Context, declared func(platformType stri
 		return err
 	}
 	for _, t := range all {
-		p, typ := c.platform(t.platform)
+		p := c.platform(t.platform)
 		if p == nil || p.NamespaceTemplate == "" {
 			continue
 		}
-		if field := declared(typ); field != "" {
+		if field := declared(p.Type); field != "" {
 			if err := targets.CheckNamespace(c.Config.Charter.Accounts, p.NamespaceTemplate, field, t.jurisdiction, t.definition); err != nil {
 				fatal = append(fatal, fmt.Sprintf("target %s: %v", t.name, err))
 			}
@@ -503,17 +379,17 @@ func (c *Checks) jurisdictions(ctx context.Context) error {
 		return err
 	}
 	for _, t := range tgts {
-		p, _ := c.platform(t.platform)
+		p := c.platform(t.platform)
 		if p == nil {
-			continue // rule 10
+			continue // a platform in use cannot be retired; a quarantined one is reported by the registry
 		}
 		if !slices.ContainsFunc(p.TargetJurisdictions, func(pat string) bool { return charter.JurisdictionMatches(pat, t.jurisdiction) }) {
-			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s is not in the target_jurisdictions of %s", t.name, t.jurisdiction, p.Name))
+			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s is not in the target_jurisdictions of %s", t.name, t.jurisdiction, p.Metadata.Name))
 		}
-		if p.Jurisdiction != t.old {
-			t.drift.jurisdiction = p.Jurisdiction
+		if p.Metadata.Jurisdiction != t.old {
+			t.drift.jurisdiction = p.Metadata.Jurisdiction
 			targets = append(targets, t.drift)
-			drifted = append(drifted, fmt.Sprintf("target %s: platform jurisdiction %s to %s", t.name, t.old, p.Jurisdiction))
+			drifted = append(drifted, fmt.Sprintf("target %s: platform jurisdiction %s to %s", t.name, t.old, p.Metadata.Jurisdiction))
 		}
 		if a := c.Config.Charter.Accounts; !a.TargetConforms(t.jurisdiction) {
 			fatal = append(fatal, fmt.Sprintf("target %s: jurisdiction %s does not conform to %s", t.name, t.jurisdiction, a.TargetJurisdiction))
@@ -773,8 +649,8 @@ func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget)
 	}
 	var found []violation
 	for _, l := range levels {
-		if p, _ := c.platform(l.platform); p == nil {
-			continue // rule 10
+		if c.platform(l.platform) == nil {
+			continue // not in force: retired platforms have no targets, a quarantined one is reported
 		}
 		resp, err := validate(ctx, &pluginv1.ValidateTargetRequest{Instance: l.platform, DefinitionJson: l.definition,
 			AccessLevels: []*pluginv1.AccessLevelInput{{Name: l.name, GrantsJson: l.grants}}})
@@ -797,9 +673,9 @@ func (c *Checks) Platforms(ctx context.Context, validate targets.ValidateTarget)
 		if err := rows.Scan(&target, &platform, &f.Name, &f.Purpose, &f.Protocol, &f.Destination, &ports, &f.TLS); err != nil {
 			return err
 		}
-		p, _ := c.platform(platform)
+		p := c.platform(platform)
 		if p == nil {
-			continue // rule 10
+			continue
 		}
 		if f.Ports, err = flows.ParseMultirange(ports); err != nil {
 			return err

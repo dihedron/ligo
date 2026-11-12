@@ -21,6 +21,7 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
@@ -61,7 +62,8 @@ type Server struct {
 	Targets   *targets.Service
 	Catalog   *catalog.Reader
 	Plugins   Plugins
-	Config    *config.Config // the platforms, read-only
+	Config    *config.Config   // the charter and plugin types
+	Instances instances.Source // the platforms and instances in force
 	Workflows Workflows
 
 	pages *pages

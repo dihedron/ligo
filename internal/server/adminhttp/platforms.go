@@ -7,8 +7,8 @@ import (
 	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
-	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/pluginmgr"
 	"github.com/dihedron/ligo/internal/sources"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -78,13 +78,17 @@ type platformDTO struct {
 	UISchemas                 json.RawMessage   `json:"uiSchemas,omitempty"`
 }
 
-func platformOf(typ string, p *config.Platform) platformDTO {
-	d := platformDTO{APIVersion: sources.APIVersion, Kind: "Platform", Name: p.Name, Type: typ, Realm: p.Realm, Jurisdiction: p.Jurisdiction,
-		TargetJurisdictions: p.TargetJurisdictions, DisplayName: p.DisplayName, Description: p.Description,
-		AllowedSourceTrustDomains: p.AllowedSourceTrustDomains, NetworkFlows: p.NetworkFlows,
-		IdentityProvider: wiringDTO{p.IdentityProvider.Type, p.IdentityProvider.Instance},
-		SecretStore:      wiringDTO{p.SecretStore.Type, p.SecretStore.Instance}}
-	for _, c := range p.Contacts {
+func platformOf(p *instances.Definition) platformDTO {
+	d := platformDTO{APIVersion: sources.APIVersion, Kind: "Platform", Name: p.Metadata.Name, Type: p.Type, Realm: p.Metadata.Realm,
+		Jurisdiction: p.Metadata.Jurisdiction, TargetJurisdictions: p.TargetJurisdictions, DisplayName: p.Metadata.DisplayName,
+		Description: p.Metadata.Description, AllowedSourceTrustDomains: p.AllowedSourceTrustDomains, NetworkFlows: p.NetworkFlows}
+	if w := p.IdentityProvider; w != nil {
+		d.IdentityProvider = wiringDTO{w.Type, w.Instance}
+	}
+	if w := p.SecretStore; w != nil {
+		d.SecretStore = wiringDTO{w.Type, w.Instance}
+	}
+	for _, c := range p.Metadata.Contacts {
 		d.Contacts = append(d.Contacts, sources.Contact{Name: c.Name, Email: c.Email})
 	}
 	d.PrivilegeBounds = p.PrivilegeBounds()
@@ -109,20 +113,18 @@ func (s *Server) health(ctx context.Context, platform string) *healthDTO {
 	return &healthDTO{Serving: h.GetServing(), Message: h.GetPublicMessage()}
 }
 
-// listPlatforms: every configured platform with its health, sorted as in
-// server.yaml; platforms are visible to every viewer (§3.4).
+// listPlatforms: every platform in force with its health, by name;
+// platforms are visible to every viewer (§3.4).
 func (s *Server) listPlatforms(w http.ResponseWriter, r *http.Request) {
 	if !viewer(caller(r)) {
 		problem(w, http.StatusForbidden, "forbidden", "viewer role required")
 		return
 	}
 	items := []platformDTO{}
-	for _, pp := range s.Config.PlatformProviders {
-		for i := range pp.Platforms {
-			d := platformOf(pp.Type, &pp.Platforms[i])
-			d.Health = s.health(r.Context(), d.Name) // shortcut: one platform after another; call in parallel if lists grow long
-			items = append(items, d)
-		}
+	for _, p := range s.Instances.Current().List(instances.Platform) {
+		d := platformOf(p)
+		d.Health = s.health(r.Context(), d.Name) // shortcut: one platform after another; call in parallel if lists grow long
+		items = append(items, d)
 	}
 	reply(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -134,27 +136,23 @@ func (s *Server) getPlatform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	for _, pp := range s.Config.PlatformProviders {
-		for i := range pp.Platforms {
-			if pp.Platforms[i].Name != name {
-				continue
-			}
-			d := platformOf(pp.Type, &pp.Platforms[i])
-			d.Health = s.health(r.Context(), name)
-			ui, err := s.Plugins.UISchemas(r.Context(), name)
-			if err != nil {
-				s.Logger.Error("ui schemas", "platform", name, "error", err)
-				problem(w, http.StatusServiceUnavailable, "unavailable", "the platform's plugin cannot be reached")
-				return
-			}
-			ui.PluginType, ui.Instance = "", ""
-			if d.UISchemas, err = protojson.Marshal(ui); err != nil {
-				s.fail(w, r, err)
-				return
-			}
-			reply(w, http.StatusOK, d)
-			return
-		}
+	p, ok := s.Instances.Current().Platform(name)
+	if !ok {
+		problem(w, http.StatusNotFound, "not-found", "platform "+name)
+		return
 	}
-	problem(w, http.StatusNotFound, "not-found", "platform "+name)
+	d := platformOf(p)
+	d.Health = s.health(r.Context(), name)
+	ui, err := s.Plugins.UISchemas(r.Context(), name)
+	if err != nil {
+		s.Logger.Error("ui schemas", "platform", name, "error", err)
+		problem(w, http.StatusServiceUnavailable, "unavailable", "the platform's plugin cannot be reached")
+		return
+	}
+	ui.PluginType, ui.Instance = "", ""
+	if d.UISchemas, err = protojson.Marshal(ui); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	reply(w, http.StatusOK, d)
 }

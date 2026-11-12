@@ -103,51 +103,21 @@ secret_sealing:
 plugins:
   directory: "/usr/lib/ligo/plugins"
 
+# Plugin types (§5.9); their instances are created with ligo apply from planning-guide/examples/instances/regulated-zone.yaml
+# (.specs/ligo-instances.md). instance_bounds bounds where they may connect.
 identity_providers:
-  - { type: target-local.v1, builtin: true, instances: [ { name: local-reg, realm: reg } ] }
+  - { type: target-local.v1, builtin: true }
 
 secret_stores:
   - type: "vault.v1"
     binary: "ligo-plugin-vault"
     sha256: "<64-hex-sha256-of-ligo-plugin-vault>"
-    instances:
-      - name: "vault-reg"                      # its JWT auth trusts regulated.internal and cloud.internal
-        realm: reg
-        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["https://vault.reg.internal"] }
-        config:
-          address: "https://vault.reg.internal:8200"
-          allowed_endpoints: ["vault.reg.internal:8200"]
-          auth_mount: "jwt-spiffe"
-          role: "ligo-plugin-vault"
-          workload_jwt_audience: "https://vault.reg.internal"
-        network_flows:
-          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.reg.internal", ports: [8200], tls: true, server_name: "vault.reg.internal" }
+    instance_bounds:
+      allowed_endpoints: ["vault.reg.internal:8200"]
 
 platform_providers:
   - type: "postgres.v1"
     binary: "ligo-plugin-postgres"
     sha256: "<64-hex-sha256-of-ligo-plugin-postgres>"
-    platforms:
-      - name: pg-reg
-        realm: reg
-        jurisdiction: "reg/dba"
-        target_jurisdictions: ["reg/data/*"]
-        allowed_source_trust_domains: [regulated.internal, cloud.internal]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.reg.internal", ports: [5432], tls: true, server_name: "pg.reg.internal" }
-        identity_provider: { type: target-local.v1, instance: local-reg }
-        secret_store: { type: vault.v1, instance: vault-reg, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["https://vault.reg.internal"] }
-        config:
-          host: pg.reg.internal
-          port: 5432
-          database: risk
-          grantable_roles: [RISK_RO, RISK_RW]
-          allowed_endpoints: ["pg.reg.internal:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "https://vault.reg.internal:8200"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "https://vault.reg.internal"
-            kv_path: kv/data/ligo/bootstrap/pg-reg
+    instance_bounds:
+      allowed_endpoints: ["pg.reg.internal:5432", "vault.reg.internal:8200"]

@@ -17,6 +17,7 @@ import (
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/store"
@@ -25,7 +26,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	dto "github.com/prometheus/client_model/go"
-	"go.yaml.in/yaml/v3"
 )
 
 // insecure: CI's container has no TLS; the lab's DSNs use verify-full.
@@ -93,14 +93,28 @@ func (v *env) checks(t *testing.T) *Checks {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules, err := sources.NewRules(cfg)
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := instances.Fixed{Set: set}
+	rules, err := sources.NewRules(cfg, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := &Checks{DB: v.app, Config: cfg, ConfigSHA256: strings.Repeat("c", 64), ThemeSHA256: map[string]string{"logo": strings.Repeat("d", 64)}, Extractors: maps.Clone(rules.Extractors),
-		Logger: slog.New(slog.DiscardHandler)}
+		Instances: inst, Logger: slog.New(slog.DiscardHandler)}
 	c.policy = cfg.Policy()
 	return c
+}
+
+// setPlatform changes the platform called name in c's instances.
+func setPlatform(c *Checks, name string, f func(*instances.Definition)) {
+	set := c.Instances.Current()
+	cur, _ := set.Platform(name)
+	p := *cur
+	f(&p)
+	c.Instances = instances.Fixed{Set: set.With(&p)}
 }
 
 func (v *env) exec(t *testing.T, sql string, args ...any) {
@@ -233,24 +247,19 @@ func TestConfigLoaded(t *testing.T) {
 	}
 }
 
-// TestOrphans: rule 10 fails on references to platforms and instances no
-// longer configured, and on strategies a store no longer declares, unless
-// --allow-orphaned-bindings, which audits them.
-func TestOrphans(t *testing.T) {
+// TestStrategies: the part of rule 10 left at startup fails on strategies a
+// store type no longer declares, unless --allow-orphaned-bindings, which
+// audits them; references to platforms and instances are kept by the
+// instances themselves (.specs/ligo-instances.md §6 rule 9).
+func TestStrategies(t *testing.T) {
 	v := setup(t)
 	ctx := context.Background()
 	x := v.x
 	src := v.source(t, "src-"+x, "dc/corp-prod", "prod.internal")
-	v.target(t, "gone-"+x, "gone-platform-"+x, "dc/corp-prod", "dc/corp-prod")
 	tgt := v.target(t, "tgt-"+x, "oracle-prod", "dc/corp-prod", "dc/corp-prod")
-	v.binding(t, "b-"+x, src, tgt, "vault-gone-"+x, [3]string{"dc/corp-prod", "dc/corp-prod", "dc/corp-prod"})
+	v.binding(t, "b-"+x, src, tgt, "vault-prod", [3]string{"dc/corp-prod", "dc/corp-prod", "dc/corp-prod"})
 
 	c := v.checks(t)
-	err := c.orphans(ctx)
-	if err == nil || !strings.Contains(err.Error(), "target gone-"+x+": platform gone-platform-"+x) ||
-		!strings.Contains(err.Error(), "binding b-"+x+": vault.v1 instance vault-gone-"+x) {
-		t.Fatalf("orphans: %v", err)
-	}
 	none := func(string) []string { return nil }
 	if err := c.Strategies(ctx, none); err == nil || !strings.Contains(err.Error(), "vault.v1 no longer declares strategy vault-static") {
 		t.Errorf("strategies: %v", err)
@@ -259,14 +268,30 @@ func TestOrphans(t *testing.T) {
 		strings.Contains(err.Error(), "vault.v1") {
 		t.Errorf("declared strategy refused: %v", err)
 	}
-
 	c.AllowOrphanedBindings = true
 	before := v.lastAudit(t)
-	if err := c.orphans(ctx); err != nil {
+	if err := c.Strategies(ctx, none); err != nil {
 		t.Fatal(err)
 	}
-	if got := v.audited(t, before, "SYSTEM_ORPHANED_BINDINGS"); len(got) != 1 || !strings.Contains(got[0], "vault-gone-"+x) {
-		t.Errorf("orphans audited: %v", got)
+	if got := v.audited(t, before, "SYSTEM_ORPHANED_BINDINGS"); len(got) != 1 || !strings.Contains(got[0], "vault-static") {
+		t.Errorf("audited: %v", got)
+	}
+}
+
+// TestUnknownPlatforms: a role binding scoped to a platform that does not
+// exist is a warning, not an error (.specs/ligo-instances.md §3 rule 3).
+func TestUnknownPlatforms(t *testing.T) {
+	v := setup(t)
+	c := v.checks(t)
+	var logs bytes.Buffer
+	c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	c.Config.Authorization.Bindings = append(c.Config.Authorization.Bindings, config.RoleBinding{SPIFFEID: "spiffe://prod.internal/x",
+		Role: config.RoleTrustedAutomation, Jurisdictions: []string{"dc/*"}, Platforms: []string{"oracle-prod", "gone-" + v.x}})
+	if err := c.unknownPlatforms(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "platform=gone-"+v.x) || strings.Contains(logs.String(), "platform=oracle-prod") {
+		t.Errorf("warnings: %s", logs.String())
 	}
 }
 
@@ -414,54 +439,20 @@ func TestBreakGlassParties(t *testing.T) {
 	}
 }
 
-// TestWiring: a binding whose wiring differs from its platform's keeps it,
-// with a warning (rule 11).
-func TestWiring(t *testing.T) {
-	v := setup(t)
-	x := v.x
-	c := v.checks(t)
-	var logs bytes.Buffer
-	c.Logger = slog.New(slog.NewTextHandler(&logs, nil))
-	src := v.source(t, "src-"+x, "dc/corp-prod", "prod.internal")
-	tgt := v.target(t, "tgt-"+x, "oracle-prod", "dc/corp-prod", "dc/corp-prod")
-	v.binding(t, "b-"+x, src, tgt, "vault-test", [3]string{"dc/corp-prod", "dc/corp-prod", "dc/corp-prod"})
-	v.binding(t, "same-"+x, v.source(t, "src2-"+x, "dc/corp-prod", "prod.internal"), tgt, "vault-prod", [3]string{"dc/corp-prod", "dc/corp-prod", "dc/corp-prod"})
-	if err := c.wiring(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(logs.String(), "binding=b-"+x) || strings.Contains(logs.String(), "binding=same-"+x) {
-		t.Errorf("warnings: %s", logs.String())
-	}
-}
-
-// TestPlatforms: a platform whose flows changed since the previous start
-// is audited; levels outside the current privilege bounds and flows outside
-// the allowed endpoints are reported in one entry (rule 19).
+// TestPlatforms: levels outside the current privilege bounds and flows
+// outside the allowed endpoints are reported in one entry (rule 19).
 func TestPlatforms(t *testing.T) {
 	v := setup(t)
 	ctx := context.Background()
 	x := v.x
 	c := v.checks(t)
-	if err := c.configLoaded(ctx); err != nil {
-		t.Fatal(err)
-	}
-	before := v.lastAudit(t) // after the first load, which compared with whatever started last
-	c = v.checks(t)
-	pl := &c.Config.PlatformProviders[0].Platforms[0]
-	pl.NetworkFlows = nil
-	if err := c.configLoaded(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := v.audited(t, before, "CONFIG_PLATFORM_CHANGED"); len(got) != 1 || !strings.Contains(got[0], `"platform": "`+pl.Name+`"`) ||
-		!strings.Contains(got[0], `"field": "networkFlows"`) {
-		t.Errorf("platform changed: %v", got)
-	}
 
 	tgt := v.target(t, "tgt-"+x, "oracle-prod", "dc/corp-prod", "dc/corp-prod")
 	v.exec(t, `insert into target_access_levels (target_id, name, grants, privileges) values ($1, 'admin', '{"roles":["DBA"]}', '["role:DBA"]')`, tgt)
 	v.exec(t, `insert into target_network_flows (target_id, name, protocol, destination, ports, tls) values
 		($1, 'ledger', 'TCP', 'ledger-db.prod.internal', '{[1522,1523)}', true), ($1, 'legacy', 'TCP', 'legacy.prod.internal', '{[1521,1522)}', false)`, tgt)
-	bounds := c.Config.PlatformProviders[0].Platforms[0].PrivilegeBounds()["grantableRoles"].([]string)
+	prod, _ := c.Instances.Current().Platform("oracle-prod")
+	bounds := prod.PrivilegeBounds()["grantableRoles"].([]string)
 	validate := func(_ context.Context, req *pluginv1.ValidateTargetRequest) (*pluginv1.ValidateTargetResponse, error) {
 		var g struct {
 			Roles []string `json:"roles"`
@@ -474,7 +465,7 @@ func TestPlatforms(t *testing.T) {
 		}
 		return &pluginv1.ValidateTargetResponse{Valid: true}, nil
 	}
-	before = v.lastAudit(t)
+	before := v.lastAudit(t)
 	if err := c.Platforms(ctx, validate); err != nil {
 		t.Fatal(err)
 	}
@@ -594,20 +585,13 @@ func TestNamespaces(t *testing.T) {
 	if err := c.Namespaces(ctx, declared); err != nil {
 		t.Errorf("no template: %v", err)
 	}
-	var pl *config.Platform
-	for i := range c.Config.PlatformProviders {
-		for j := range c.Config.PlatformProviders[i].Platforms {
-			if p := &c.Config.PlatformProviders[i].Platforms[j]; p.Name == "oracle-prod" {
-				pl = p
-			}
-		}
-	}
 	// templates with no namespace_template: an operator picks the schema, and
 	// so any tenant's role
-	bounds := pl.Config
-	if err := yaml.Unmarshal([]byte(`{grantable_role_templates: ["{namespace}_read"]}`), &pl.Config); err != nil {
-		t.Fatal(err)
-	}
+	prod, _ := c.Instances.Current().Platform("oracle-prod")
+	bounds := prod.Config
+	setPlatform(c, "oracle-prod", func(p *instances.Definition) {
+		p.Config = json.RawMessage(`{"grantable_role_templates":["{namespace}_read"]}`)
+	})
 	var unbound bytes.Buffer
 	logger := c.Logger
 	c.Logger = slog.New(slog.NewTextHandler(&unbound, nil))
@@ -617,8 +601,8 @@ func TestNamespaces(t *testing.T) {
 	if !strings.Contains(unbound.String(), "no namespace_template") || !strings.Contains(unbound.String(), "oracle-prod") {
 		t.Errorf("no warning of unbound templates: %s", unbound.String())
 	}
-	pl.Config, c.Logger = bounds, logger
-	pl.NamespaceTemplate = "{account}_ok"
+	c.Logger = logger
+	setPlatform(c, "oracle-prod", func(p *instances.Definition) { p.Config, p.NamespaceTemplate = bounds, "{account}_ok" })
 	if err := c.Namespaces(ctx, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "oracle-prod") || !strings.Contains(err.Error(), "namespace_field") {
 		t.Errorf("no capability: %v", err)
 	}

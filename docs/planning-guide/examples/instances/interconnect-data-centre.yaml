@@ -1,0 +1,105 @@
+# The instances of planning-guide/examples/interconnect-data-centre.yaml, created with ligo apply (.specs/ligo-instances.md).
+---
+kind: IdentityProvider
+metadata: {name: local-prod, jurisdiction: dc/prod/dba, realm: prod}
+type: target-local.v1
+---
+kind: IdentityProvider
+metadata: {name: local-test, jurisdiction: dc/test/dba, realm: test}
+type: target-local.v1
+---
+kind: SecretStore
+metadata: {name: vault-prod, jurisdiction: dc/prod/dba, realm: prod}
+type: vault.v1
+svidSelector:
+  matchExpr: path == "/ligo/plugin/vault"
+  jwtAudience: ['https://vault.prod.dc.internal']
+config:
+  address: https://vault.prod.dc.internal:8200
+  allowed_endpoints: ['vault.prod.dc.internal:8200']
+  auth_mount: jwt-spiffe
+  role: ligo-plugin-vault
+  workload_jwt_audience: https://vault.prod.dc.internal
+networkFlows:
+- name: vault
+  purpose: CREDENTIALS
+  protocol: TCP
+  destination: vault.prod.dc.internal
+  ports: [8200]
+  tls: true
+  serverName: vault.prod.dc.internal
+---
+kind: SecretStore
+metadata: {name: vault-test, jurisdiction: dc/test/dba, realm: test}
+type: vault.v1
+svidSelector:
+  matchExpr: path == "/ligo/plugin/vault"
+  jwtAudience: ['https://vault.test.dc.internal']
+config:
+  address: https://vault.test.dc.internal:8200
+  allowed_endpoints: ['vault.test.dc.internal:8200']
+  auth_mount: jwt-spiffe
+  role: ligo-plugin-vault
+  workload_jwt_audience: https://vault.test.dc.internal
+networkFlows:
+- name: vault
+  purpose: CREDENTIALS
+  protocol: TCP
+  destination: vault.test.dc.internal
+  ports: [8200]
+  tls: true
+  serverName: vault.test.dc.internal
+---
+kind: Platform
+metadata: {name: pg-prod, jurisdiction: dc/prod/dba, realm: prod}
+type: postgres.v1
+targetJurisdictions: [dc/prod/data/*]
+allowedSourceTrustDomains: [prod.dc.internal, cloud.internal]
+networkFlows:
+- name: postgres
+  purpose: DATA
+  protocol: TCP
+  destination: pg.prod.dc.internal
+  ports: [5432]
+  tls: true
+  serverName: pg.prod.dc.internal
+identityProvider: {type: target-local.v1, instance: local-prod}
+secretStore: {type: vault.v1, instance: vault-prod, secretStorageStrategy: vault-static}
+svidSelector:
+  matchExpr: path == "/ligo/plugin/postgres"
+  jwtAudience: ['https://vault.prod.dc.internal']
+config:
+  host: pg.prod.dc.internal
+  port: 5432
+  database: orders
+  grantable_roles: [ORDERS_RO, ORDERS_RW]
+  allowed_endpoints: ['pg.prod.dc.internal:5432']
+  bootstrap_credential: {source: vault, address: 'https://vault.prod.dc.internal:8200', auth_mount: jwt-spiffe, role: ligo-plugin-postgres, jwt_audience: 'https://vault.prod.dc.internal',
+    kv_path: kv/data/ligo/bootstrap/pg-prod}
+---
+kind: Platform
+metadata: {name: pg-test, jurisdiction: dc/test/dba, realm: test}
+type: postgres.v1
+targetJurisdictions: [dc/test/data/*]
+allowedSourceTrustDomains: [test.dc.internal]
+networkFlows:
+- name: postgres
+  purpose: DATA
+  protocol: TCP
+  destination: pg.test.dc.internal
+  ports: [5432]
+  tls: true
+  serverName: pg.test.dc.internal
+identityProvider: {type: target-local.v1, instance: local-test}
+secretStore: {type: vault.v1, instance: vault-test, secretStorageStrategy: vault-static}
+svidSelector:
+  matchExpr: path == "/ligo/plugin/postgres"
+  jwtAudience: ['https://vault.test.dc.internal']
+config:
+  host: pg.test.dc.internal
+  port: 5432
+  database: orders
+  grantable_roles: [ORDERS_RO, ORDERS_RW]
+  allowed_endpoints: ['pg.test.dc.internal:5432']
+  bootstrap_credential: {source: vault, address: 'https://vault.test.dc.internal:8200', auth_mount: jwt-spiffe, role: ligo-plugin-postgres, jwt_audience: 'https://vault.test.dc.internal',
+    kv_path: kv/data/ligo/bootstrap/pg-test}

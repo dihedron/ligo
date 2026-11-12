@@ -33,6 +33,7 @@ import (
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/metrics/gauges"
 	"github.com/dihedron/ligo/internal/notify"
@@ -182,12 +183,18 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	defer pools.Close()
-	srcRules, err := sources.NewRules(cfg)
+	// the platforms and instances in force, verified against their
+	// signatures (.specs/ligo-instances.md §8)
+	inst := &instances.Registry{DB: pools.App, Signer: signer, Interval: cfg.Server.WorkloadListener.ResolutionCache.FullReloadInterval, Logger: log}
+	if err := inst.Load(ctx); err != nil {
+		return fmt.Errorf("serve: instances: %w", err)
+	}
+	srcRules, err := sources.NewRules(cfg, inst)
 	if err != nil {
 		return err
 	}
 	checks := &startup.Checks{DB: pools.App, Config: cfg, ConfigSHA256: sum, ThemeSHA256: look.Hashes(), Extractors: srcRules.Extractors,
-		AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptJurisdictionChanges: cmd.AcceptJurisdictionChanges, Logger: log}
+		Instances: inst, AllowOrphanedBindings: cmd.AllowOrphanedBindings, AcceptJurisdictionChanges: cmd.AcceptJurisdictionChanges, Logger: log}
 	if err := checks.Run(ctx); err != nil {
 		return err
 	}
@@ -199,7 +206,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 
 	// 5. the plugins, and the checks that need them
-	specs, err := pluginmgr.Specs(cfg)
+	specs, err := pluginmgr.Specs(cfg, inst.Current())
 	if err != nil {
 		return err
 	}
@@ -221,7 +228,7 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 	engine := &workflows.Engine{DB: pools.App, Plugins: workflows.Manager(plugins), Sealer: sealer,
 		Backoff: workflows.Backoff{Attempts: p.Retry.MaxAttempts, Initial: p.Retry.InitialBackoff, Max: p.Retry.MaxBackoff}}
-	health(ctx, log, cfg, engine.Plugins)
+	health(ctx, log, inst.Current(), engine.Plugins)
 
 	// 6. DBOS: every dependency of the workflow steps is ready
 	d, err := dbos.NewContext(ctx, dbos.Config{AppName: "ligo", DatabaseURL: dbosDSN, DatabaseSchema: "dbos",
@@ -240,7 +247,11 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		}
 	}()
 
-	s, err := services(cfg, pools, srcRules, plugins, engine, signer)
+	s, err := services(cfg, pools, srcRules, inst, plugins, engine, signer, log, func(ctx context.Context) {
+		if err := checks.Platforms(ctx, targets.Plugins(plugins)); err != nil {
+			log.Error("privilege bounds after a platform change", "error", err)
+		}
+	})
 	if err != nil {
 		return err
 	}
@@ -281,11 +292,13 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if registry != nil {
 		run(registry.Run)
 	}
-	rotation := map[string]time.Duration{}
-	for _, pp := range cfg.PlatformProviders {
-		for _, pl := range pp.Platforms {
-			rotation[pl.Name] = pl.RotationInterval
+	run(inst.Run)
+	rotation := func(platform string) time.Duration {
+		p, _ := inst.Current().Platform(platform)
+		if p == nil {
+			return 0
 		}
+		return p.Rotation()
 	}
 	run((&workflows.Sweeper{Engine: engine, Logger: log, Retention: cfg.Storage.DBOS.WorkflowRetention, Bindings: s.Bindings,
 		ExpiryWarning: cfg.Bindings.ExpiryWarning}).Run)
@@ -306,11 +319,14 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 
 	// the metrics: the process-wide ones, and this run's database and cache
 	// gauges in a registry of its own (§10.1)
-	overdue := map[string]time.Duration{}
-	for p, t := range rotation {
-		if t > 0 {
-			overdue[p] = t + cfg.Reconciliation.Interval + cfg.Reconciliation.Jitter
+	overdue := func() map[string]time.Duration {
+		out := map[string]time.Duration{}
+		for _, p := range inst.Current().List(instances.Platform) {
+			if t := p.Rotation(); t > 0 {
+				out[p.Metadata.Name] = t + cfg.Reconciliation.Interval + cfg.Reconciliation.Jitter
+			}
 		}
+		return out
 	}
 	scraped := prometheus.NewRegistry()
 	scraped.MustRegister(&gauges.DB{Pool: pools.App, Logger: log, Rotation: overdue, Timeout: 10 * time.Second},
@@ -489,34 +505,29 @@ func checkSigner(ctx context.Context, s sealing.Signer) error {
 // health runs the initial Health check of every instance; a plugin that
 // does not serve yet is logged, and the workflows check it again before
 // each stage (§6.2).
-func health(ctx context.Context, log *slog.Logger, cfg *config.Config, p workflows.Plugins) {
-	check := func(kind pluginv1.PluginKind, name string) {
-		if err := p.Health(ctx, kind, name); err != nil {
-			log.Warn("a plugin instance is not healthy", "kind", kind, "instance", name, "error", err)
-		}
-	}
-	for _, pp := range cfg.PlatformProviders {
-		for _, pl := range pp.Platforms {
-			check(pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, pl.Name)
-		}
-	}
-	for kind, group := range map[pluginv1.PluginKind][]config.InstanceProvider{
-		pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: cfg.IdentityProviders, pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE: cfg.SecretStores} {
-		for _, ip := range group {
-			for _, in := range ip.Instances {
-				check(kind, in.Name)
-			}
+func health(ctx context.Context, log *slog.Logger, set *instances.Set, p workflows.Plugins) {
+	kinds := map[instances.Kind]pluginv1.PluginKind{instances.Platform: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
+		instances.IdentityProvider: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, instances.SecretStore: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE}
+	for _, d := range set.All() {
+		k, _ := d.KindOf()
+		if err := p.Health(ctx, kinds[k], d.Metadata.Name); err != nil {
+			log.Warn("a plugin instance is not healthy", "kind", k, "instance", d.Metadata.Name, "error", err)
 		}
 	}
 }
 
 // services wires the resources and their change requests.
-func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, plugins *pluginmgr.Manager, engine *workflows.Engine, signer sealing.Signer) (*adminhttp.Server, error) {
-	bindingRules, err := bindings.NewRules(cfg)
+func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, inst *instances.Registry, plugins *pluginmgr.Manager,
+	engine *workflows.Engine, signer sealing.Signer, log *slog.Logger, tightened func(context.Context)) (*adminhttp.Server, error) {
+	bindingRules, err := bindings.NewRules(cfg, inst)
 	if err != nil {
 		return nil, err
 	}
-	targetRules, err := targets.NewRules(cfg)
+	env, err := instances.NewEnv(cfg)
+	if err != nil {
+		return nil, err
+	}
+	targetRules, err := targets.NewRules(cfg, inst)
 	if err != nil {
 		return nil, err
 	}
@@ -528,11 +539,16 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, p
 	bs := &bindings.Service{DB: pools.App, Rules: bindingRules, Requests: requests, Validate: bindings.Plugins(plugins), Sources: ss, ExactSubject: plugins.ExactSubject,
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
 	requests.Resources["SOURCE"], requests.Resources["TARGET"], requests.Resources["BINDING"] = ss, ts, bs
+	is := &instances.Service{DB: pools.App, Env: env, Instances: inst, Signer: signer, Plugins: pluginmgr.Instances(plugins),
+		Requests: requests, Logger: log, Tightened: tightened}
+	for _, k := range instances.Kinds {
+		requests.Resources[string(k)] = is
+	}
 	az, err := authz.New(cfg.Authorization.Bindings)
 	if err != nil {
 		return nil, err
 	}
-	return &adminhttp.Server{Listener: cfg.Server.AdminListener, Config: cfg, Authz: az, DB: pools.App, Requests: requests,
+	return &adminhttp.Server{Listener: cfg.Server.AdminListener, Config: cfg, Instances: inst, Authz: az, DB: pools.App, Requests: requests,
 		Bindings: bs, Sources: ss, Targets: ts, Workflows: engine, Catalog: &catalog.Reader{DB: pools.App, Policy: requests.Policy},
 		Plugins: adminhttp.PlatformPlugins(plugins), Signer: signer}, nil
 }
@@ -559,7 +575,7 @@ func (cmd *Serve) listen(ctx context.Context, log *slog.Logger, cfg *config.Conf
 		PerUserGlobalPerMin: al.RateLimit.LoginPerUserGlobalPerMin, MaxKeys: al.RateLimit.MaxTrackedKeys}
 	s.Logins = logins
 	u.DB, u.Authz, u.Listener, u.Logins, u.LDAP = s.DB, s.Authz, al, logins, ui.Directory(noDirectory{})
-	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg
+	u.Bindings, u.Requests, u.Sources, u.Targets, u.Catalog, u.Plugins, u.Config, u.Instances = s.Bindings, s.Requests, s.Sources, s.Targets, s.Catalog, s.Plugins, cfg, s.Instances
 	u.Workflows = s.Workflows
 	if directory != nil {
 		u.LDAP = directory

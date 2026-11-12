@@ -17,6 +17,7 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"go.opentelemetry.io/otel"
@@ -498,7 +499,11 @@ func TestSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs, err := Specs(cfg)
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := Specs(cfg, set)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/internal/regexpolicy"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -54,29 +55,20 @@ type Visibility struct {
 
 // Rules are the parts of the configuration that validate sources.
 type Rules struct {
-	// Extractors derive the jurisdiction of a regex in each trust domain that some
-	// platform accepts (§8.2 rule 15: each has a source_jurisdictions entry).
+	// Extractors derive the jurisdiction of a regex in each trust domain of
+	// charter.source_jurisdictions; Extractor offers only those some
+	// platform in force accepts.
 	Extractors   map[string]*charter.Extractor
+	Instances    instances.Source
 	NamePrefixes []charter.NamePrefix
 	Regex        regexpolicy.Policy
 	Accounts     *charter.Accounts // nil: no accounts
 }
 
 // NewRules extracts the rules from a validated configuration.
-func NewRules(cfg *config.Config) (*Rules, error) {
-	accepted := map[string]bool{}
-	for _, pp := range cfg.PlatformProviders {
-		for _, p := range pp.Platforms {
-			for _, td := range p.AllowedSourceTrustDomains {
-				accepted[td] = true
-			}
-		}
-	}
-	r := &Rules{Extractors: map[string]*charter.Extractor{}, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Charter.Accounts}
+func NewRules(cfg *config.Config, in instances.Source) (*Rules, error) {
+	r := &Rules{Extractors: map[string]*charter.Extractor{}, Instances: in, NamePrefixes: cfg.Charter.NamePrefixes, Regex: cfg.RegexPolicy, Accounts: cfg.Charter.Accounts}
 	for _, ss := range cfg.Charter.SourceJurisdictions {
-		if !accepted[ss.TrustDomain] {
-			continue
-		}
 		e, err := ss.Extractor()
 		if err != nil {
 			return nil, fmt.Errorf("source_jurisdictions %s: %w", ss.TrustDomain, err)
@@ -84,6 +76,16 @@ func NewRules(cfg *config.Config) (*Rules, error) {
 		r.Extractors[ss.TrustDomain] = e
 	}
 	return r, nil
+}
+
+// Extractor is the extractor of a trust domain that some platform in force
+// accepts sources from.
+func (r *Rules) Extractor(td string) (*charter.Extractor, bool) {
+	x, ok := r.Extractors[td]
+	if !ok || !r.Instances.Current().AcceptedTrustDomains()[td] {
+		return nil, false
+	}
+	return x, true
 }
 
 func refuse(status int, slug, format string, args ...any) *changerequests.Error {
@@ -136,7 +138,7 @@ func (r *Rules) validateIdentity(s *Source, cur *Source) (string, error) {
 	if _, err := spiffeid.TrustDomainFromString(td); err != nil {
 		return "", invalid("identity.trustDomain %q: %v", td, err)
 	}
-	extractor, ok := r.Extractors[td]
+	extractor, ok := r.Extractor(td)
 	if !ok {
 		return "", invalid("identity.trustDomain %q is accepted by no platform", td)
 	}
