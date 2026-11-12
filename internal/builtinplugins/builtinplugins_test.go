@@ -61,12 +61,15 @@ func TestLookup(t *testing.T) {
 			t.Errorf("%s: %v", typ, err)
 		}
 		d, err := p.Control.Describe(context.Background(), &pluginv1.DescribeRequest{})
-		if err != nil || d.GetPluginType() != typ || d.GetKind() != kind || d.GetPluginProtocolVersion() != 1 {
+		if err != nil || d.GetPluginType() != typ || d.GetKind() != kind || d.GetPluginProtocolVersion() != 2 {
 			t.Errorf("%s: Describe = (%v, %v)", typ, d, err)
 		}
 		r, err := p.Control.ConfigureInstances(context.Background(), &pluginv1.ConfigureInstancesRequest{Instances: []*pluginv1.InstanceDescriptor{{Name: "i"}}})
 		if err != nil || len(r.GetResolved()) != 0 {
 			t.Errorf("%s: builtins hold no SVID: (%v, %v)", typ, r, err)
+		}
+		if v, err := p.Control.ValidateInstance(context.Background(), &pluginv1.ValidateInstanceRequest{Instance: &pluginv1.InstanceDescriptor{Name: "i"}}); err != nil || v.GetSpiffeId() != "" || len(v.GetEndpoints()) != 0 {
+			t.Errorf("%s: builtins hold no SVID and connect nowhere: (%v, %v)", typ, v, err)
 		}
 		if h, err := p.Control.Health(context.Background(), &pluginv1.HealthRequest{Instance: "i"}); err != nil || !h.GetServing() {
 			t.Errorf("%s: Health = (%v, %v)", typ, h, err)
@@ -210,5 +213,17 @@ func TestNoneStore(t *testing.T) {
 	}
 	if c, err := p.Store.CleanupSecretStore(ctx, &pluginv1.CleanupSecretStoreRequest{Instance: "i", Binding: binding()}); err != nil || c.GetSkippedNotOwner() {
 		t.Errorf("Cleanup = (%v, %v)", c, err)
+	}
+}
+
+// TestValidateInstanceMarker: target-local.v1 refuses at validation the
+// config ConfigureInstances would refuse (ligo-instances §7.1).
+func TestValidateInstanceMarker(t *testing.T) {
+	p, _ := Lookup("target-local.v1")
+	for config, ok := range map[string]bool{`{"password_length":40}`: true, `{"password_length":31}`: false, `{`: false} {
+		_, err := p.Control.ValidateInstance(context.Background(), &pluginv1.ValidateInstanceRequest{Instance: &pluginv1.InstanceDescriptor{Name: "i", ConfigJson: config}})
+		if (err == nil) != ok {
+			t.Errorf("%s: %v", config, err)
+		}
 	}
 }

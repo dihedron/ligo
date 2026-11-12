@@ -27,7 +27,7 @@ As `.specs/ligo-openldap-plugin.md` §2: source in `cmd/plugins/ligo-plugin-vaul
 | `namespace` | no | A Vault Enterprise namespace, sent with every request. |
 | `database_mount` | no | The database secrets engine; default `database`. |
 | `db_connection` | with `vault-dynamic` | The engine's connection to the target. Without it, `vault-dynamic` is `DB_CONNECTION_NOT_CONFIGURED`, and cleanup does not touch the engine, so a static-only deployment needs no rights on it. |
-| `ca_file` | no | A PEM file of the roots that verify `address`; the system roots when absent. |
+| `ca_pem` | no | PEM text (not a file path, ligo-instances T-22d) of the roots that verify `address`; the system roots when absent. |
 
 A mount matches `^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$`.
 

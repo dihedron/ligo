@@ -37,8 +37,9 @@
         "type": "string"
       }
     },
-    "ca_file": {
-      "type": "string"
+    "ca_pem": {
+      "type": "string",
+      "description": "PEM roots that verify the server and the Vault of bootstrap_credential; the system roots when absent"
     },
     "directory_group": {
       "type": "string"

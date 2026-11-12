@@ -26,7 +26,7 @@ type probe struct {
 
 func (*probe) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	return &pluginv1.DescribeResponse{
-		PluginType: "labprobe.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+		PluginType: "labprobe.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 2,
 		InstanceConfigSchemaJson: `{"type":"object"}`, // the bootstrap settings, checked by the probe itself
 		Capabilities:             &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{ClientOutputSchemaJson: `{"type":"object"}`}},
 	}, nil
@@ -41,6 +41,11 @@ func (p *probe) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureIns
 	p.instances = instances
 	p.mu.Unlock()
 	return out, nil
+}
+
+// ValidateInstance checks the bootstrap settings without serving them.
+func (*probe) ValidateInstance(ctx context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return labkit.Validate(ctx, r, nil)
 }
 
 func (p *probe) Health(ctx context.Context, r *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {

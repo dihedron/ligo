@@ -357,7 +357,7 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `grantable_role_templates` | Bounds per target: `{namespace}` stands for its schema. | Each holds `{namespace}` once |
 | `allowed_endpoints` | Where outputs may point. | Must contain `host:port` |
 | `bootstrap_credential` | The admin role's credential: `source: vault`, `address`, `auth_mount`, `role`, `jwt_audience`, `kv_path`. | `kv_path` only |
-| `ca_file` | Roots for the server and that Vault. | System roots |
+| `ca_pem` | PEM text of the roots for the server and that Vault; no file path. | System roots |
 | `directory_group` | The group role of directory-verified roles. | Required with `EXTERNAL_DIR` |
 
 | `vault.v1` field | Meaning | Rules |
@@ -371,7 +371,7 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `namespace` | A Vault Enterprise namespace. | |
 | `database_mount` | The database secrets engine. | `database` |
 | `db_connection` | The engine's connection to the target. | Required with `vault-dynamic` |
-| `ca_file` | Roots for `address`. | System roots |
+| `ca_pem` | PEM text of the roots for `address`; no file path. | System roots |
 
 | `openldap.v1` field | Meaning | Rules |
 | :----------------- | :----------------------------- | :------------------ |
@@ -379,4 +379,4 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `service_ou_dn` | The accounts' parent. | A valid DN |
 | `allowed_endpoints` | Must contain the `host:port` of `url`. | Required |
 | `bootstrap_credential` | The service account, with its DN as `username`. | `kv_path` only |
-| `ca_file` | Roots for the directory and that Vault. | System roots |
+| `ca_pem` | PEM text of the roots for the directory and that Vault; no file path. | System roots |

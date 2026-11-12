@@ -66,7 +66,7 @@ var configSchema string
 var outputSchema string
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
-	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 1,
+	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 2,
 		PluginVersion: "lab", InstanceConfigSchemaJson: configSchema,
 		Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{
 			AcceptedIdentityModes:  []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_SVID, pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL},
@@ -77,6 +77,21 @@ func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 
 func invalidConfig(name, why string) error {
 	return pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+name+": "+why, false)
+}
+
+// ValidateInstance checks one instance without serving it: the echo server's
+// two ports are its endpoints, with the bootstrap Vault.
+func (*plugin) ValidateInstance(ctx context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return labkit.Validate(ctx, r, func(in *pluginv1.InstanceDescriptor) ([]string, error) {
+		inst := &instance{}
+		if err := json.Unmarshal([]byte(in.GetConfigJson()), &inst.config); err != nil {
+			return nil, err
+		}
+		if err := inst.check(in.GetIdentityMode()); err != nil {
+			return nil, err
+		}
+		return []string{inst.DataAddress, inst.ControlAddress}, nil
+	})
 }
 
 func (p *plugin) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {

@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,12 +30,12 @@ const (
 )
 
 // world is what ConfigureInstances meets: a SPIRE agent, and a Vault whose
-// certificate the instance's ca_file trusts, also for the directory.
+// certificate the instance's ca_pem trusts, also for the directory.
 type world struct {
-	socket, caFile string
-	vault          *httptest.Server
-	bindUser       string
-	vaultStatus    int
+	socket, caPEM string
+	vault         *httptest.Server
+	bindUser      string
+	vaultStatus   int
 }
 
 func newWorld(t *testing.T) *world {
@@ -64,18 +63,14 @@ func newWorld(t *testing.T) *world {
 		_ = json.NewEncoder(rw).Encode(map[string]any{"data": map[string]any{"data": map[string]string{"username": w.bindUser, "password": "p"}}})
 	}))
 	t.Cleanup(w.vault.Close)
-	w.caFile = filepath.Join(dir, "ca.pem")
-	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: w.vault.Certificate().Raw})
-	if err := os.WriteFile(w.caFile, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	w.caPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: w.vault.Certificate().Raw}))
 	return w
 }
 
 func (w *world) instanceConfig(addr string) string {
-	return fmt.Sprintf(`{"url":"ldaps://%s","service_ou_dn":%q,"allowed_endpoints":[%q],"ca_file":%q,
+	return fmt.Sprintf(`{"url":"ldaps://%s","service_ou_dn":%q,"allowed_endpoints":[%q],"ca_pem":%q,
 		"bootstrap_credential":{"source":"vault","address":%q,"auth_mount":"jwt-spiffe","role":"r","jwt_audience":"a","kv_path":"kv/data/b"}}`,
-		addr, ou, addr, w.caFile, w.vault.URL)
+		addr, ou, addr, w.caPEM, w.vault.URL)
 }
 
 func (w *world) configure(p *plugin, addr, match, trustDomain string) (*pluginv1.ConfigureInstancesResponse, error) {
@@ -125,7 +120,7 @@ func closedPort(t *testing.T) string {
 }
 
 // TestConfigure: a configured instance reports the SVID it selected, then
-// reaches the directory with the credential Vault holds, over the ca_file's
+// reaches the directory with the credential Vault holds, over the ca_pem's
 // trust; each way of failing keeps its code (§6).
 func TestConfigure(t *testing.T) {
 	health := func(p *plugin) bool {
@@ -206,20 +201,34 @@ func TestConfigureRefusals(t *testing.T) {
 	}
 }
 
-// TestParseConfigCAFile: a file with no certificate is refused like a
-// missing one, and the JSON must parse.
-func TestParseConfigCAFile(t *testing.T) {
-	empty := filepath.Join(t.TempDir(), "empty.pem")
-	if err := os.WriteFile(empty, []byte("no certificate"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	extra := fmt.Sprintf(`,"ca_file":%q`, empty)
-	_, err := parseConfig([]byte(configJSON("ldaps://ldap.ligo.lab", ou, `["ldap.ligo.lab:636"]`, extra)))
-	if err == nil || !strings.Contains(err.Error(), "ca_file") {
+// TestParseConfigCAPEM: text with no certificate is refused, naming ca_pem,
+// and the JSON must parse.
+func TestParseConfigCAPEM(t *testing.T) {
+	_, err := parseConfig([]byte(configJSON("ldaps://ldap.ligo.lab", ou, `["ldap.ligo.lab:636"]`, `,"ca_pem":"no certificate"`)))
+	if err == nil || !strings.Contains(err.Error(), "ca_pem") {
 		t.Errorf("err = %v", err)
 	}
 	if _, err := parseConfig([]byte("{")); err == nil {
 		t.Error("broken JSON accepted")
+	}
+}
+
+// TestEndpoints: the directory and the bootstrap Vault are what the instance
+// connects to (ligo-instances §6 rule 5); a bad config is INVALID_CONFIG
+// before any agent is reached.
+func TestEndpoints(t *testing.T) {
+	c, err := parseConfig([]byte(configJSON("ldaps://ldap.ligo.lab", ou, `["ldap.ligo.lab:636"]`, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.endpoints()
+	if err != nil || len(got) != 2 || got[0] != "ldap.ligo.lab:636" {
+		t.Errorf("got %v %v", got, err)
+	}
+	_, err = (&plugin{}).ValidateInstance(context.Background(), &pluginv1.ValidateInstanceRequest{SpiffeWorkloadSocket: "unix:///nonexistent",
+		Instance: &pluginv1.InstanceDescriptor{Name: "ldap", ConfigJson: `{}`}})
+	if c, code, _ := codeOf(err); c != codes.InvalidArgument || code != "INVALID_CONFIG" {
+		t.Errorf("got %v %s", c, code)
 	}
 }
 

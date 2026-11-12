@@ -160,6 +160,8 @@ func TestManagerStartRefusals(t *testing.T) {
 			"capabilities"},
 		"wrong type": {[]Spec{{Type: "oracle.v1", Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"oracle.v1"},
+		"protocol 1 (ligo-instances §7.1)": {[]Spec{{Realm: prod, Env: []string{"TESTPLUGIN_PLUGIN_PROTOCOL=1"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+			"protocol 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := newManager(t, tc.specs...); err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -2738,7 +2738,13 @@ message SecretProvisioningPayload {
 
 service PluginControl {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // ConfigureInstances replaces the whole set the plugin serves in its
+  // realm; on an error the plugin MUST keep serving the previous set.
   rpc ConfigureInstances(ConfigureInstancesRequest) returns (ConfigureInstancesResponse);
+  // ValidateInstance checks one instance without serving it: config, the
+  // bootstrap credential's shape, the SVID. It MUST NOT connect to any
+  // endpoint of the config (.specs/ligo-instances.md §7.1).
+  rpc ValidateInstance(ValidateInstanceRequest) returns (ValidateInstanceResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
 }
 
@@ -2746,7 +2752,7 @@ message DescribeRequest {}
 message DescribeResponse {
   string plugin_type = 1;                 // e.g. "oracle.v1"
   PluginKind kind = 2;
-  uint32 plugin_protocol_version = 3;     // MUST be 1
+  uint32 plugin_protocol_version = 3;     // MUST be 2
   string plugin_version = 4;              // semver of the binary
   string instance_config_schema_json = 5; // JSON Schema 2020-12
   oneof capabilities {                    // exactly the one of the plugin's kind
@@ -2795,6 +2801,16 @@ message ResolvedInstance {
 }
 message ConfigureInstancesResponse {
   repeated ResolvedInstance resolved = 1;
+}
+
+message ValidateInstanceRequest {
+  string realm = 1;
+  string spiffe_workload_socket = 2;
+  InstanceDescriptor instance = 3;
+}
+message ValidateInstanceResponse {
+  string spiffe_id = 1;                   // the SVID the instance would resolve
+  repeated string endpoints = 2;          // every host:port it would connect to or send a credential to
 }
 
 message HealthRequest { string instance = 1; }

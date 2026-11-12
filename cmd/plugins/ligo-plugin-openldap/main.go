@@ -44,11 +44,11 @@ type config struct {
 	URL                 string                              `json:"url"`
 	ServiceOU           string                              `json:"service_ou_dn"`
 	AllowedEndpoints    []string                            `json:"allowed_endpoints"`
-	CAFile              string                              `json:"ca_file"`
+	CAPEM               string                              `json:"ca_pem"`
 	BootstrapCredential pluginsdk.BootstrapCredentialConfig `json:"bootstrap_credential"`
 
-	host  string
-	roots *x509.CertPool // nil: the system roots
+	host, port string
+	roots      *x509.CertPool // nil: the system roots
 }
 
 // parseConfig checks an instance's configuration (§3); errors name the field.
@@ -86,10 +86,21 @@ func parseConfig(data []byte) (*config, error) {
 	if err := c.BootstrapCredential.Validate(); err != nil {
 		return nil, err
 	}
-	if c.roots, err = pluginsdk.LoadRoots(c.CAFile); err != nil {
+	if c.roots, err = pluginsdk.ParseRoots(c.CAPEM); err != nil {
 		return nil, err
 	}
+	c.port = port
 	return &c, nil
+}
+
+// endpoints are what the instance connects to: the directory, and the Vault
+// of its bootstrap credential (ligo-instances §6 rule 5).
+func (c *config) endpoints() ([]string, error) {
+	vault, err := c.BootstrapCredential.Endpoint()
+	if err != nil {
+		return nil, err
+	}
+	return []string{net.JoinHostPort(c.host, c.port), vault}, nil
 }
 
 type instance struct {
@@ -105,10 +116,21 @@ type plugin struct {
 }
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
-	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 1,
+	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 2,
 		PluginVersion: metadata.Version, InstanceConfigSchemaJson: configSchema,
 		Capabilities: &pluginv1.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv1.IdentityProviderCapabilities{
 			ProducedIdentityMode: pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR}}}, nil
+}
+
+// ValidateInstance checks one instance without serving it (ligo-instances §7.1).
+func (p *plugin) ValidateInstance(ctx context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return pluginsdk.ValidateInstance(ctx, r, func(in *pluginv1.InstanceDescriptor) ([]string, error) {
+		c, err := parseConfig([]byte(in.GetConfigJson()))
+		if err != nil {
+			return nil, err
+		}
+		return c.endpoints()
+	})
 }
 
 // ConfigureInstances checks every instance's configuration, then selects

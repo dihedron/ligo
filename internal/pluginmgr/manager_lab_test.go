@@ -5,6 +5,7 @@ package pluginmgr
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"strings"
@@ -28,6 +29,17 @@ func labEnv(t *testing.T, name string) string {
 	return v
 }
 
+// caPEM is the lab CA as a JSON string, for an instance's ca_pem.
+func caPEM(t *testing.T) string {
+	t.Helper()
+	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(string(pem))
+	return string(quoted)
+}
+
 // labprobe is the spec of the lab's probe plugin in the realm prod, with one
 // instance selecting by expr.
 func labprobe(t *testing.T, expr string) Spec {
@@ -38,7 +50,7 @@ func labprobe(t *testing.T, expr string) Spec {
 	}
 	cfg := `{"bootstrap_credential":{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") +
 		`","auth_mount":"jwt-spiffe","role":"ligo-plugin-labprobe","jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") +
-		`","kv_path":"kv/data/ligo/bootstrap/labprobe"},"ca_file":"` + labEnv(t, "LIGO_TEST_CA") + `"}`
+		`","kv_path":"kv/data/ligo/bootstrap/labprobe"},"ca_pem":` + caPEM(t) + `}`
 	return Spec{
 		Type: "labprobe.v1", Kind: store, Binary: "labprobe", SHA256: sum,
 		Realm: config.Realm{Name: "prod", TrustDomain: "prod.lab", SPIFFEWorkloadSocket: labEnv(t, "LIGO_TEST_SPIRE_PROD_SOCKET")},

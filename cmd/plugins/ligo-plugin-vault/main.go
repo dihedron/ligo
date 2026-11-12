@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -60,10 +61,11 @@ type config struct {
 	Namespace           string   `json:"namespace"`
 	DatabaseMount       string   `json:"database_mount"`
 	DBConnection        string   `json:"db_connection"`
-	CAFile              string   `json:"ca_file"`
+	CAPEM               string   `json:"ca_pem"`
 
-	host string
-	port uint32
+	host  string
+	port  uint32
+	roots *x509.CertPool // nil: the system roots
 }
 
 // parseConfig checks an instance's configuration (§3); errors name the field.
@@ -101,7 +103,14 @@ func parseConfig(data []byte) (*config, error) {
 	if c.WorkloadJWTAudience == "" {
 		return nil, errors.New("workload_jwt_audience is required")
 	}
-	return &c, nil
+	c.roots, err = pluginsdk.ParseRoots(c.CAPEM)
+	return &c, err
+}
+
+// endpoints are what the instance connects to: its Vault (ligo-instances
+// §6 rule 5).
+func (c *config) endpoints() []string {
+	return []string{net.JoinHostPort(c.host, strconv.FormatUint(uint64(c.port), 10))}
 }
 
 type instance struct {
@@ -119,7 +128,7 @@ type plugin struct {
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	exact := pluginv1.SubjectMatch_SUBJECT_MATCH_EXACT
-	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 2,
 		PluginVersion: metadata.Version, InstanceConfigSchemaJson: configSchema,
 		Capabilities: &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{
 			ClientOutputSchemaJson: outputSchema,
@@ -140,11 +149,7 @@ func (p *plugin) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureIn
 		if err != nil {
 			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
 		}
-		roots, err := pluginsdk.LoadRoots(c.CAFile)
-		if err != nil {
-			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
-		}
-		instances[in.GetName()] = &instance{config: *c, client: pluginsdk.HTTPClient(roots)}
+		instances[in.GetName()] = &instance{config: *c, client: pluginsdk.HTTPClient(c.roots)}
 	}
 	selectors, out, err := pluginsdk.SelectInstances(ctx, r)
 	if err != nil {
@@ -157,6 +162,17 @@ func (p *plugin) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureIn
 	p.instances = instances
 	p.mu.Unlock()
 	return out, nil
+}
+
+// ValidateInstance checks one instance without serving it (ligo-instances §7.1).
+func (p *plugin) ValidateInstance(ctx context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return pluginsdk.ValidateInstance(ctx, r, func(in *pluginv1.InstanceDescriptor) ([]string, error) {
+		c, err := parseConfig([]byte(in.GetConfigJson()))
+		if err != nil {
+			return nil, err
+		}
+		return c.endpoints(), nil
+	})
 }
 
 func (p *plugin) instance(name string) (*instance, error) {

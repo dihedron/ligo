@@ -40,8 +40,9 @@
     "db_connection": {
       "type": "string"
     },
-    "ca_file": {
-      "type": "string"
+    "ca_pem": {
+      "type": "string",
+      "description": "PEM roots that verify address; the system roots when absent"
     }
   }
 }

@@ -23,8 +23,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
@@ -53,8 +55,12 @@ func (control) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.D
 	if caps == "" {
 		caps = os.Getenv("TESTPLUGIN_KIND")
 	}
-	d := &pluginv1.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 1,
+	d := &pluginv1.DescribeResponse{PluginType: typ, Kind: kinds[os.Getenv("TESTPLUGIN_KIND")], PluginProtocolVersion: 2,
 		InstanceConfigSchemaJson: `{"type":"object"}`}
+	if v := os.Getenv("TESTPLUGIN_PLUGIN_PROTOCOL"); v != "" {
+		n, _ := strconv.Atoi(v)
+		d.PluginProtocolVersion = uint32(n) //nolint:gosec // a test's small number
+	}
 	if schema, ok := os.LookupEnv("TESTPLUGIN_SCHEMA"); ok {
 		d.InstanceConfigSchemaJson = schema
 	}
@@ -106,24 +112,54 @@ func list(env string) []string {
 	return nil
 }
 
+// resolve is the SPIFFE ID an instance's selector names: "shared" one ID
+// for all, "foreign" one outside the realm, "skip" none, "two" an error.
+func resolve(in *pluginv1.InstanceDescriptor) (string, error) {
+	switch in.GetSvidSelector().GetMatchExpr() {
+	case "shared":
+		return "spiffe://" + in.GetTrustDomain() + "/plugin/shared", nil
+	case "foreign":
+		return "spiffe://other.lab/plugin/" + in.GetName(), nil
+	case "skip":
+		return "", nil
+	case "two":
+		return "", pluginsdk.Error(codes.FailedPrecondition, "SVID_SELECTION_FAILED",
+			fmt.Sprintf("selector for %q matched more than one SVID", in.GetName()), false)
+	}
+	return "spiffe://" + in.GetTrustDomain() + "/plugin/" + in.GetName(), nil
+}
+
 func (control) ConfigureInstances(_ context.Context, r *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
 	out := &pluginv1.ConfigureInstancesResponse{}
 	for _, in := range r.GetInstances() {
-		id := "spiffe://" + in.GetTrustDomain() + "/plugin/" + in.GetName()
-		switch in.GetSvidSelector().GetMatchExpr() {
-		case "shared":
-			id = "spiffe://" + in.GetTrustDomain() + "/plugin/shared"
-		case "foreign":
-			id = "spiffe://other.lab/plugin/" + in.GetName()
-		case "skip":
-			continue
-		case "two":
-			return nil, pluginsdk.Error(codes.FailedPrecondition, "SVID_SELECTION_FAILED",
-				fmt.Sprintf("selector for %q matched more than one SVID", in.GetName()), false)
+		id, err := resolve(in)
+		if err != nil {
+			return nil, err
 		}
-		out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: id})
+		if id != "" {
+			out.Resolved = append(out.Resolved, &pluginv1.ResolvedInstance{Instance: in.GetName(), SpiffeId: id})
+		}
 	}
 	return out, nil
+}
+
+// ValidateInstance resolves as ConfigureInstances does, and reports the
+// config's "endpoints" (ligo-instances §7.1).
+func (control) ValidateInstance(_ context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	in := r.GetInstance()
+	var cfg struct {
+		Endpoints []string `json:"endpoints"`
+	}
+	if in.GetConfigJson() != "" {
+		if err := json.Unmarshal([]byte(in.GetConfigJson()), &cfg); err != nil {
+			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
+		}
+	}
+	id, err := resolve(in)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ValidateInstanceResponse{SpiffeId: id, Endpoints: cfg.Endpoints}, nil
 }
 
 func (control) Health(_ context.Context, r *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {

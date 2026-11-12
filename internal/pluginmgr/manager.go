@@ -197,7 +197,7 @@ func (m *Manager) describe(ctx context.Context, c *Client, s Spec) (*pluginv1.De
 	if err != nil {
 		return nil, fmt.Errorf("describe: %w", err)
 	}
-	if d.GetPluginType() != s.Type || d.GetKind() != s.Kind || d.GetPluginProtocolVersion() != 1 {
+	if d.GetPluginType() != s.Type || d.GetKind() != s.Kind || d.GetPluginProtocolVersion() != 2 {
 		return nil, fmt.Errorf("describes itself as %s, kind %v, protocol %d", d.GetPluginType(), d.GetKind(), d.GetPluginProtocolVersion())
 	}
 	if !capabilitiesOfKind(d) {

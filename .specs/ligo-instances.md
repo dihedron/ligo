@@ -137,12 +137,12 @@ In order; the first failure is `422 validation-failed`, unless noted.
 3. On `UPDATE`: no immutable field differs, and `expectedRevision` matches (`409`).
 4. `config` validates against the type's `Describe.instance_config_schema_json`. The plugin schemas declare `additionalProperties: false`, so a key the plugin does not know, a secret pasted under a new key among them, is refused.
 4a. **The checks of startup rules 4 to 6, per instance:** `svidSelector.matchExpr` compiles. Every `bootstrap_credential.jwt_audience` appears in `svidSelector.jwtAudience`. For platforms: `allowedSourceTrustDomains` ⊆ `workload_listener.accepted_trust_domains`, each with an entry in `charter.source_jurisdictions`; `principalPrefix` matches Appendix B; `targetJurisdictions` are valid patterns.
-5. **Endpoints in bounds.** Every endpoint the instance names is inside the type's `instance_bounds.allowed_endpoints`: its `config.allowed_endpoints`, its `networkFlows` destinations, and the host and port in its connection settings. A plugin's schema marks which config keys are endpoints, with the annotation `x-ligo-endpoint`.
+5. **Endpoints in bounds.** Every endpoint the instance names is inside the type's `instance_bounds.allowed_endpoints`: its `config.allowed_endpoints`, its `networkFlows` destinations, and the endpoints `ValidateInstance` reports (rule 8): the host and port the plugin connects to, and `bootstrap_credential.address`, where it sends the instance's JWT-SVID. The plugin reports them because only it knows how its config names them (`host` and `port`, a `url`, an `address`).
 6. **Wiring** (platforms only).
    - `identityProvider` and `secretStore` name ACTIVE instances of those types, in the same realm.
    - The checks of today's `wirePlatform` also run: the identity mode is accepted, and the secret storage strategy is declared, or a single one is defaulted.
 7. **SVID selection.** An instance's `svidSelector` must not resolve to an SVID that another ACTIVE instance resolves to, unless both set `allowSharedSvid` and have the same jurisdiction. This applies to every instance of the same plugin process, so of the same type and realm.
-8. **The plugin's own check.** The new RPC `ValidateInstance` (§7.1) runs: the plugin parses the config and selects the SVID, without changing the instances it serves. An `Unavailable` answer is `503 dependency-unavailable` and the request stays filed.
+8. **The plugin's own check.** The new RPC `ValidateInstance` (§7.1) runs: the plugin parses the config and selects the SVID, without changing the instances it serves and without connecting to any endpoint of the config. It runs before rule 5, which needs the endpoints it reports. An `Unavailable` answer is `503 dependency-unavailable` and the request stays filed.
 9. **Retiring (`DELETE`)** is refused with `409 instance-in-use` while:
    - an ACTIVE or DEPRECATED target is on the platform, or a binding not yet deleted names it;
    - or, for an identity provider or secret store instance, an ACTIVE platform's wiring names it.
@@ -154,7 +154,7 @@ In order; the first failure is `422 validation-failed`, unless noted.
 ### 7.1 Protocol version 2
 
 - **The version.** `Describe.plugin_protocol_version` MUST be 2. ligo refuses a version 1 plugin at start: there is no compatibility before 1.0.
-- **`rpc ValidateInstance(ValidateInstanceRequest) returns (ValidateInstanceResponse)`** is new, on the control service. It takes the realm, the workload socket and one `InstanceDescriptor`. The plugin parses the config, prepares the bootstrap credential, and selects the SVID. It returns the SPIFFE ID it would resolve, and changes nothing it serves.
+- **`rpc ValidateInstance(ValidateInstanceRequest) returns (ValidateInstanceResponse)`** is new, on the control service. It takes the realm, the workload socket and one `InstanceDescriptor`. The plugin parses the config, checks the bootstrap credential's shape, and selects the SVID. It returns the SPIFFE ID it would resolve and `endpoints`, every `host:port` the instance would connect to or send a credential to. It changes nothing it serves and MUST NOT connect to any of those endpoints: the bounds are checked after it answers.
 - **`ConfigureInstances` is unchanged:** it sends the full set of a (type, realm), and the plugin replaces what it serves.
   - The three plugins already do so: they build the new map before swapping it.
   - The protocol now states it: on an error, the plugin MUST keep serving the previous set.

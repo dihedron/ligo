@@ -66,7 +66,8 @@ func TestParseConfig(t *testing.T) {
 		"no credential":     {set("bootstrap_credential", ""), 0, "bootstrap_credential"},
 		"no kv_path":        {set("bootstrap_credential", `{"source":"vault"}`), 0, "kv_path"},
 		"invalid bootstrap": {set("bootstrap_credential", `{"source":"nope","kv_path":"x"}`), 0, ""},
-		"ca_file":           {set("ca_file", `"/does/not/exist"`), 0, "ca_file"},
+		"ca_pem":            {set("ca_pem", `"not a certificate"`), 0, "ca_pem"},
+		"ca_file":           {set("ca_file", `"/etc/shadow"`), 0, "ca_file"}, // no file paths (ligo-instances T-22d)
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseConfig([]byte(tc.config), tc.mode)
@@ -74,6 +75,29 @@ func TestParseConfig(t *testing.T) {
 				t.Errorf("%v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestEndpoints: the server and the bootstrap Vault are what the instance
+// connects to, for ligo to bound (ligo-instances §6 rule 5).
+func TestEndpoints(t *testing.T) {
+	c, err := parseConfig([]byte(goodConfig), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.endpoints()
+	if err != nil || strings.Join(got, ",") != "db.lab:5432,v.lab:443" {
+		t.Errorf("got %v %v", got, err)
+	}
+}
+
+// TestValidateInstanceRefusesConfig: a bad config is INVALID_CONFIG before any
+// agent is reached (the socket does not exist).
+func TestValidateInstanceRefusesConfig(t *testing.T) {
+	_, err := (&plugin{}).ValidateInstance(context.Background(), &pluginv1.ValidateInstanceRequest{SpiffeWorkloadSocket: "unix:///nonexistent",
+		Instance: &pluginv1.InstanceDescriptor{Name: "pg", ConfigJson: `{"host":""}`}})
+	if code, _ := errorCode(t, err); code != "INVALID_CONFIG" {
+		t.Errorf("got %s", code)
 	}
 }
 

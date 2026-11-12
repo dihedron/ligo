@@ -64,6 +64,8 @@ func TestParseConfig(t *testing.T) {
 		"kv mount":    {config("kv_mount", "a b"), "kv_mount"},
 		"no role":     {config("role", nil), "role"},
 		"no audience": {config("workload_jwt_audience", nil), "workload_jwt_audience"},
+		"ca_pem":      {config("ca_pem", "not a certificate"), "ca_pem"},
+		"ca_file":     {config("ca_file", "/etc/shadow"), "ca_file"}, // no file paths (ligo-instances T-22d)
 	} {
 		if _, err := parseConfig(tc.data); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
@@ -71,6 +73,23 @@ func TestParseConfig(t *testing.T) {
 	}
 	if c, err := parseConfig(config("allowed_endpoints", []string{"v.lab:8200"})); err != nil || c == nil {
 		t.Error(err)
+	}
+}
+
+// TestEndpoints: the Vault is all the instance connects to (ligo-instances
+// §6 rule 5); a bad config is INVALID_CONFIG before any agent is reached.
+func TestEndpoints(t *testing.T) {
+	c, err := parseConfig([]byte(`{"address":"https://v.lab","allowed_endpoints":["v.lab:443"],"auth_mount":"m","role":"r","workload_jwt_audience":"a"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.endpoints(); len(got) != 1 || got[0] != "v.lab:443" {
+		t.Errorf("got %v", got)
+	}
+	_, err = (&plugin{}).ValidateInstance(context.Background(), &pluginv1.ValidateInstanceRequest{SpiffeWorkloadSocket: "unix:///nonexistent",
+		Instance: &pluginv1.InstanceDescriptor{Name: "v", ConfigJson: `{}`}})
+	if code, _ := errorCode(t, err); code != "INVALID_CONFIG" {
+		t.Errorf("got %s", code)
 	}
 }
 

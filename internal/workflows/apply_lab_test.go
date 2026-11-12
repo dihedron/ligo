@@ -47,6 +47,17 @@ func labEnv(t *testing.T, name string) string {
 	return v
 }
 
+// caPEM is the lab CA as a JSON string, for an instance's ca_pem.
+func caPEM(t *testing.T) string {
+	t.Helper()
+	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(string(pem))
+	return string(quoted)
+}
+
 func labRoots(t *testing.T) *x509.CertPool {
 	t.Helper()
 	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
@@ -79,12 +90,12 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 	selector := func(backend string) *pluginv1.SVIDSelectorConfig {
 		return &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + backend + `"`, JwtAudience: []string{aud}}
 	}
-	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
+	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_pem":` +
+		caPEM(t) + `,"allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
 		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-postgres","jwt_audience":"` + aud +
 		`","kv_path":"kv/data/ligo/bootstrap/postgres"}}`
-	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
+	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_pem":` +
+		caPEM(t) + `,"allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
 		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},

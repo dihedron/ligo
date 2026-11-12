@@ -37,7 +37,7 @@ Out of scope: `activedirectory.v1`; groups (`IdentityArtifact.groups` stays empt
 | `service_ou_dn` | yes | A valid DN (RFC 4514); the accounts' parent. |
 | `allowed_endpoints` | yes | Must contain the `host:port` of `url` (§5.7's form). |
 | `bootstrap_credential` | yes | §5.5, `kv_path` only. Its `username` is the bind DN and must be a valid DN. |
-| `ca_file` | no | A PEM file of the roots that verify the directory and the Vault of `bootstrap_credential`; the system roots when absent. TLS 1.2 or later, hostname verified. |
+| `ca_pem` | no | PEM text (not a file path, ligo-instances T-22d) of the roots that verify the directory and the Vault of `bootstrap_credential`; the system roots when absent. TLS 1.2 or later, hostname verified. |
 
 An instance selects its SVID as §5.4 says, and reads its credential with it. The file is read once, at configuration.
 

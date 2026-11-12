@@ -30,6 +30,17 @@ func labEnv(t *testing.T, name string) string {
 	return v
 }
 
+// caPEM is the lab CA as a JSON string, for an instance's ca_pem.
+func caPEM(t *testing.T) string {
+	t.Helper()
+	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(string(pem))
+	return string(quoted)
+}
+
 // bootstrap is the bootstrap_credential of a lab plugin on bao-prod.
 func bootstrap(t *testing.T, name string) string {
 	return `{"source":"vault","address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-` + name +
@@ -72,8 +83,8 @@ func code(err error) string {
 // targetPostgres starts the stand-in with the instance pg-ledger.
 func targetPostgres(t *testing.T, strategy string) *pluginmgr.Client {
 	t.Helper()
-	cfg := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"allowed_endpoints":["pg.ligo.lab:5432"],"ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","bootstrap_credential":` + bootstrap(t, "postgres") + `}`
+	cfg := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"allowed_endpoints":["pg.ligo.lab:5432"],"ca_pem":` +
+		caPEM(t) + `,"bootstrap_credential":` + bootstrap(t, "postgres") + `}`
 	return start(t, "ligo-plugin-postgres", pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER,
 		&pluginv1.InstanceDescriptor{Name: "pg-ledger", ConfigJson: cfg, SecretStorageStrategy: strategy})
 }
