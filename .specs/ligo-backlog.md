@@ -20,7 +20,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Built on `feature/pruning`: two settings, 24h delivered, 30 days abandoned; known limit of v0.2.0 |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
-| 15 | Change request pruning | 2026-11-11 | Not started |
+| 15 | Change request pruning | 2026-11-11 | Built on `feature/cr-pruning` (`.specs/ligo-cr-pruning.md`, spec 4.0.9); lab step pending |
 
 ## 1. Audit pruning
 

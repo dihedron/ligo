@@ -44,7 +44,7 @@ func TestVerifyAuditOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	metrics.AuditOldestEntry.Set(0)
-	ran, err := verifyAuditOnce(ctx, slog.New(slog.DiscardHandler), pools.App, sealing.NewLocalSigner(local), false, true, 24*time.Hour)
+	ran, err := verifyAuditOnce(ctx, slog.New(slog.DiscardHandler), pools.App, sealing.NewLocalSigner(local), false, true, retentions{24 * time.Hour, 24 * time.Hour})
 	if err != nil || !ran {
 		t.Fatalf("a pass: %v, %v", ran, err)
 	}

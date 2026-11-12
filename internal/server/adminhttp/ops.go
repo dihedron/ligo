@@ -189,9 +189,8 @@ func (s *Server) recordAuditExport(w http.ResponseWriter, r *http.Request) {
 var jurisdictionQueries = map[string]string{
 	"sources": "SELECT id, ARRAY[jurisdiction] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
 	"targets": "SELECT id, ARRAY[jurisdiction, platform_jurisdiction] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
-	"bindings": `SELECT b.id, ARRAY[b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction] || coalesce((SELECT array_agg(DISTINCT sd.jurisdiction)
-		FROM change_requests cr JOIN change_request_sides sd ON sd.change_request_id = cr.id
-		WHERE cr.resource_type = 'BINDING' AND cr.resource_id = b.id AND sd.side LIKE 'PARTY:%'), '{}') FROM bindings b WHERE b.name = $1`,
+	"bindings": `SELECT b.id, ARRAY[b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction]::text[] || b.party_jurisdictions::text[]
+		FROM bindings b WHERE b.name = $1`,
 }
 
 type auditDTO struct {

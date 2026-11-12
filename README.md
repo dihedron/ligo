@@ -128,7 +128,7 @@ Working:
 - change requests, and the charter that every jurisdiction complies with;
 - accounts, registered at run time through the API, the CLI or the web UI, each with its own operators and approvers, and tenancies whose namespace is checked on the platform ([.specs/ligo-tenancy.md](.specs/ligo-tenancy.md));
 - the binding workflows, including break-glass, with failures from a retryable cause retried automatically, and deletes that remove access first;
-- the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported ([.specs/ligo-pruning.md](.specs/ligo-pruning.md));
+- the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported, with the change requests it names ([.specs/ligo-pruning.md](.specs/ligo-pruning.md), [.specs/ligo-cr-pruning.md](.specs/ligo-cr-pruning.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;

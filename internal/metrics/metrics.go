@@ -44,6 +44,7 @@ var (
 	DelegatedApprovals     = counter("ligo_delegated_approvals_total", "Sides approved by delegation (ADR-11).", "principal", "realm", "operation")
 	BundleConflicts        = counter("ligo_bundle_conflicts_total", "Bundles discarded because they came from a non-authoritative socket.", "trust_domain", "socket_realm")
 	AuditPrunedEntries     = counter("ligo_audit_pruned_entries_total", "Audit entries deleted by pruning (storage.audit.retention).")
+	ChangeRequestsPruned   = counter("ligo_change_requests_pruned_total", "Change requests deleted by pruning (storage.change_requests.retention).")
 )
 
 // State known in the process: set by startup's checks and the audit
@@ -59,7 +60,7 @@ func init() {
 	Registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		WorkflowDuration, StepDuration, PluginRPCs, WorkloadRequests, PropagationStarted, PropagationFailed, BindingExpirations,
 		RegexNarrowingChecks, InterconnectDenied, PluginRestarts, BreakGlass, NotificationsAbandoned, DelegatedApprovals, BundleConflicts,
-		InterconnectViolations, PrivilegeBoundViolations, AuditChainValid, AuditPrunedEntries, AuditOldestEntry)
+		InterconnectViolations, PrivilegeBoundViolations, AuditChainValid, AuditPrunedEntries, AuditOldestEntry, ChangeRequestsPruned)
 }
 
 // Count is a counter's current value, for tests: they compare it before and

@@ -1,10 +1,15 @@
 package audit
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/dihedron/ligo/internal/sealing"
 )
 
 // TestHash checks entry_hash against a value computed independently (Python
@@ -55,5 +60,22 @@ func TestValidate(t *testing.T) {
 	}
 	if _, err := (&Entry{Action: "SESSION_REVOKED", Actor: "a"}).hash(Genesis); err != nil {
 		t.Errorf("session action without resource: %v", err)
+	}
+}
+
+// TestVerifyFileMalformed: change request lines that cannot be read, or
+// that come after the entries, make the file an error, not a verdict.
+func TestVerifyFileMalformed(t *testing.T) {
+	sum := sha256.Sum256([]byte(Genesis + "{}"))
+	head := `{"kind":"header","from":1,"through":1,"prevHash":"` + Genesis + `"}` + "\n"
+	entry := `{"kind":"entry","id":1,"prevHash":"` + Genesis + `","entryHash":"` + hex.EncodeToString(sum[:]) + `","row":{}}` + "\n"
+	for name, file := range map[string]string{
+		"a row that is not an object":   head + `{"kind":"change_request","changeRequestId":"c1","row":"x"}` + "\n",
+		"a request without its payload": head + `{"kind":"change_request","changeRequestId":"c1","row":{}}` + "\n",
+		"a request after the entries":   head + entry + `{"kind":"change_request","changeRequestId":"c1","row":{"payload":{}}}` + "\n",
+	} {
+		if _, err := VerifyFile(strings.NewReader(file), sealing.KeySet{}); err == nil {
+			t.Errorf("%s: no error", name)
+		}
 	}
 }

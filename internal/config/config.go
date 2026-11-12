@@ -244,6 +244,12 @@ type Storage struct {
 	Postgres Postgres `yaml:"postgres"`
 	DBOS     DBOS     `yaml:"dbos"`
 	Audit    Audit    `yaml:"audit"`
+	// ChangeRequests is change request pruning (.specs/ligo-cr-pruning.md):
+	// closed requests decided longer ago than Retention, which no audit
+	// entry names, are pruned; 0 keeps every request.
+	ChangeRequests struct {
+		Retention time.Duration `yaml:"retention"`
+	} `yaml:"change_requests"`
 }
 
 // Audit is audit log pruning (.specs/ligo-pruning.md §3.1).

@@ -5,6 +5,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"slices"
 	"testing"
@@ -224,5 +225,76 @@ func TestAC59(t *testing.T) {
 		if tc.visible != (err == nil) || !tc.visible && !isNotFound(err) {
 			t.Errorf("%s: change request %v", tc.c.ID(), err)
 		}
+	}
+}
+
+// TestPartyJurisdictions: bindings.party_jurisdictions follows the PARTY
+// sides of every request of the binding, of any status: a pending CREATE's
+// parties arrive when it is applied (its resource_id set), a later
+// request's when its sides are written (.specs/ligo-cr-pruning.md §4.1).
+func TestPartyJurisdictions(t *testing.T) {
+	_, o, x := setup(t)
+	ctx := context.Background()
+	src := source(t, o, "fin-01-payments-p-"+x, "cloud/fin-01/payments", "cloud.internal", `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/p`+x+`$`)
+	tgt := target(t, o, "ledger-p-"+x, "dc/corp-prod/ledger", "PRIVATE", "[]")
+	binding, name := uuid.NewV7(), "fin-01-payments-p-"+x
+	exec(t, o, `insert into bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
+		identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy, derived_principal_name,
+		source_jurisdiction, target_jurisdiction, platform_jurisdiction, workflow_id, source_revision, target_revision,
+		source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
+		values ($1, $2, $3, $4, 'read', 'prod', 'oracle.v1', 'oracle-prod', 'openldap.v1', 'ldap-prod', 'vault.v1', 'vault-prod', 'vault-static',
+		'bnd_' || left(md5($1::uuid::text), 16), 'cloud/fin-01/payments', 'dc/corp-prod/ledger', 'dc/corp-prod', $5, 1, 1, 'cloud.internal',
+		'^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/x$', '{}', 't', 't')`, binding, name, src, tgt, "ligo:apply:"+binding.String()+":r1:a1")
+	request := func(op string, resource *uuid.UUID, parties map[string]string) uuid.UUID {
+		t.Helper()
+		cr := uuid.NewV7()
+		var expected *int64
+		if op != "CREATE" {
+			expected = new(int64(1))
+		}
+		if err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `insert into change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent, realm,
+				source_jurisdiction, target_jurisdiction, platform_jurisdiction, interconnect_rule, policy_sha256, distinct_approvers_required, payload, payload_sha256,
+				requested_by, expires_at, expected_revision, status, decided_by, decided_at) values ($1, 'BINDING', $2, $3, $4::change_request_op, 'STANDARD', 'ALL', 'prod', 'cloud/fin-01/payments',
+				'dc/corp-prod/ledger', 'dc/corp-prod', 'cloud-to-dc', repeat('a', 64), true, '{}', repeat('b', 64), 'carla', now() + interval '1 day', $5,
+				CASE WHEN $4::change_request_op = 'CREATE' THEN 'PENDING' ELSE 'WITHDRAWN' END::change_request_status,
+				CASE WHEN $4::change_request_op = 'CREATE' THEN NULL ELSE 'carla' END, CASE WHEN $4::change_request_op = 'CREATE' THEN NULL ELSE now() END)`, cr, name, resource, op, expected); err != nil {
+				return err
+			}
+			sides := map[string]string{"TARGET": "dc/corp-prod/ledger", "SOURCE": "cloud/fin-01/payments"}
+			maps.Copy(sides, parties)
+			for side, j := range sides {
+				if _, err := tx.Exec(ctx, `insert into change_request_sides (change_request_id, side, jurisdiction, approval_required, basis, requested_by, cr_kind)
+					values ($1, $2, $3, true, 'HUMAN', 'carla', 'STANDARD')`, cr, side, j); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return cr
+	}
+	parties := func() []string {
+		t.Helper()
+		var got []string
+		if err := o.QueryRow(ctx, "select party_jurisdictions::text[] from bindings where id = $1", binding).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(got)
+		return got
+	}
+
+	create := request("CREATE", nil, map[string]string{"PARTY:security": "sec/infosec"})
+	if got := parties(); len(got) != 0 {
+		t.Errorf("a pending CREATE's parties before it is applied: %v", got)
+	}
+	exec(t, o, "update change_requests set resource_id = $2 where id = $1", create, binding) // as the apply does
+	if got := parties(); !slices.Equal(got, []string{"sec/infosec"}) {
+		t.Errorf("after the CREATE is applied: %v", got)
+	}
+	request("UPDATE", &binding, map[string]string{"PARTY:audit": "sec/audit", "PARTY:security": "sec/infosec"}) // withdrawn: its parties count too
+	if got := parties(); !slices.Equal(got, []string{"sec/audit", "sec/infosec"}) {
+		t.Errorf("after a later request: %v", got)
 	}
 }

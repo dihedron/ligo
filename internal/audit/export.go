@@ -20,7 +20,8 @@ import (
 
 // An export (ligo audit export, .specs/ligo-pruning.md §3.2) is JSON Lines:
 // a header, the signed checkpoints that cover it (and the newest one below
-// it, which anchors a pruned head), then every entry from the oldest left
+// it, which anchors a pruned head), the change requests its entries name
+// (.specs/ligo-cr-pruning.md §4.5), then every entry from the oldest left
 // through a checkpoint. Each entry carries its canonical row, so it can be
 // re-hashed without ligo.
 type line struct {
@@ -37,6 +38,12 @@ type line struct {
 	CreatedAt string `json:"createdAt,omitempty"`
 	KeyID     string `json:"keyId,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// change_request: the row of change_requests as JSON (in Row), its
+	// sides, and its payload hash, for a request an exported entry names
+	ChangeRequestID string          `json:"changeRequestId,omitempty"`
+	Sides           json.RawMessage `json:"sides,omitempty"`
+	PayloadSHA256   string          `json:"payloadSha256,omitempty"`
 
 	// entry, and the header's prevHash
 	ID        int64           `json:"id,omitempty"`
@@ -108,6 +115,9 @@ func Export(ctx context.Context, q store.Querier, s sealing.Signer, through int6
 			return 0, err
 		}
 	}
+	if err := exportRequests(ctx, q, head.From, head.Through, enc); err != nil {
+		return 0, err
+	}
 	for after := head.From - 1; after < head.Through; {
 		batch, err := load(ctx, q, after, batchSize)
 		if err != nil {
@@ -134,16 +144,46 @@ func Export(ctx context.Context, q store.Querier, s sealing.Signer, through int6
 	return head.Through, nil
 }
 
+// exportRequests writes the change requests that the entries from..through
+// name, with their sides. They are outside the chain: the file's SHA-256,
+// recorded with the export, fixes them from then on.
+// shortcut: one statement for every request of the export, bounded by
+// app_statement_timeout; batch by id if exports grow past it.
+func exportRequests(ctx context.Context, q store.Querier, from, through int64, enc *json.Encoder) error {
+	rows, err := q.Query(ctx, `SELECT c.id::text, to_jsonb(c), c.payload_sha256,
+			coalesce((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.side) FROM change_request_sides s WHERE s.change_request_id = c.id), '[]')
+		FROM change_requests c
+		WHERE c.id IN (SELECT change_request_id FROM audit_log WHERE id BETWEEN $1 AND $2 AND change_request_id IS NOT NULL)
+		ORDER BY c.id`, from, through)
+	if err != nil {
+		return fmt.Errorf("audit export: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		l := line{Kind: "change_request"}
+		var row, sides []byte
+		if err := rows.Scan(&l.ChangeRequestID, &row, &l.PayloadSHA256, &sides); err != nil {
+			return fmt.Errorf("audit export: %w", err)
+		}
+		l.Row, l.Sides = row, sides
+		if err := enc.Encode(l); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 // FileResult is the verification of an export, offline.
 type FileResult struct {
-	Valid        bool   `json:"valid"`
-	From         int64  `json:"from"`
-	Through      int64  `json:"through"`
-	Entries      int    `json:"entries"`
-	Checkpoints  int    `json:"checkpoints"`
-	FirstBroken  int64  `json:"firstBroken,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	KeysFromFile bool   `json:"keysFromFile"` // the public keys came from the file under test
+	Valid          bool   `json:"valid"`
+	From           int64  `json:"from"`
+	Through        int64  `json:"through"`
+	Entries        int    `json:"entries"`
+	Checkpoints    int    `json:"checkpoints"`
+	ChangeRequests int    `json:"changeRequests"`
+	FirstBroken    int64  `json:"firstBroken,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	KeysFromFile   bool   `json:"keysFromFile"` // the public keys came from the file under test
 }
 
 // VerifyFile checks an export without the database or the signer: every
@@ -177,6 +217,7 @@ func VerifyFile(r io.Reader, keys sealing.KeySet) (FileResult, error) {
 		return res, nil
 	}
 	checkpoints := map[int64]string{} // entry, its signed hash
+	requests := map[string]bool{}     // change request, named by an entry
 	prev, last := head.PrevHash, int64(0)
 	for {
 		var l line
@@ -208,6 +249,27 @@ func VerifyFile(r io.Reader, keys sealing.KeySet) (FileResult, error) {
 			}
 			checkpoints[l.AuditID] = l.EntryHash
 			res.Checkpoints++
+		case "change_request":
+			if last != 0 {
+				return res, errors.New("audit file: a change request after the entries")
+			}
+			var row struct {
+				Payload       json.RawMessage `json:"payload"`
+				PayloadSHA256 string          `json:"payload_sha256"`
+			}
+			if err := json.Unmarshal(l.Row, &row); err != nil {
+				return res, fmt.Errorf("audit file: change request %s: %w", l.ChangeRequestID, err)
+			}
+			canonical, err := jcs.Transform(row.Payload)
+			if err != nil {
+				return res, fmt.Errorf("audit file: change request %s: %w", l.ChangeRequestID, err)
+			}
+			sum := sha256.Sum256(canonical)
+			if h := hex.EncodeToString(sum[:]); h != l.PayloadSHA256 || h != row.PayloadSHA256 {
+				return broken(0, "change request "+l.ChangeRequestID+": the payload does not match its payloadSha256")
+			}
+			requests[l.ChangeRequestID] = false
+			res.ChangeRequests++
 		case "entry":
 			if l.ID <= last || (last == 0 && l.ID != head.From) {
 				return broken(l.ID, "entries out of order, or not starting at the header's from")
@@ -224,6 +286,14 @@ func VerifyFile(r io.Reader, keys sealing.KeySet) (FileResult, error) {
 			if signed, ok := checkpoints[l.ID]; ok && signed != hash {
 				return broken(l.ID, "entry does not match its signed checkpoint")
 			}
+			var named struct {
+				ChangeRequestID string `json:"change_request_id"`
+			}
+			if json.Unmarshal(l.Row, &named) == nil && named.ChangeRequestID != "" {
+				if _, ok := requests[named.ChangeRequestID]; ok {
+					requests[named.ChangeRequestID] = true
+				}
+			}
 			prev, last = hash, l.ID
 			res.Entries++
 		default:
@@ -232,6 +302,11 @@ func VerifyFile(r io.Reader, keys sealing.KeySet) (FileResult, error) {
 	}
 	if _, ok := checkpoints[last]; !ok || last != head.Through {
 		return broken(last, "the file does not end on the header's through, a signed checkpoint")
+	}
+	for id, named := range requests {
+		if !named {
+			return broken(0, "change request "+id+": no entry of the file names it")
+		}
 	}
 	res.Valid = true
 	return res, nil

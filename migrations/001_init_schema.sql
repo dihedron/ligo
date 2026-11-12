@@ -285,6 +285,7 @@ CREATE TABLE bindings (
     active_since                TIMESTAMPTZ,
     last_rotated_at             TIMESTAMPTZ,                    -- NULL for identity modes without static secrets (§6.4)
     break_glass_cr_id           UUID,                           -- open (unratified) break-glass change, ADR-12
+    party_jurisdictions         jurisdiction_path[] NOT NULL DEFAULT '{}', -- of the PARTY sides of every request of the binding (§7.2.4); kept by triggers on change_request_sides and change_requests
     break_glass_expires_at      TIMESTAMPTZ,
     break_glass_warned_at       TIMESTAMPTZ,                    -- BREAK_GLASS_EXPIRING already emitted for the open change
 
@@ -711,6 +712,36 @@ CREATE UNIQUE INDEX uq_cr_one_pending_per_resource ON change_requests (resource_
 
 ALTER TABLE bindings ADD CONSTRAINT fk_bindings_break_glass_cr
     FOREIGN KEY (break_glass_cr_id) REFERENCES change_requests(id);
+
+-- bindings.party_jurisdictions: the jurisdictions of the PARTY sides of every
+-- request of the binding, of any status, kept here so that a binding's
+-- visibility (§7.2.4) does not depend on its requests, which are pruned
+-- (.specs/ligo-cr-pruning.md). A side of a request of an existing binding
+-- adds its jurisdiction at once; a CREATE's sides arrive when it is applied
+-- and its resource_id set.
+CREATE FUNCTION binding_parties_from_side() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE bindings b SET party_jurisdictions = b.party_jurisdictions || NEW.jurisdiction
+    FROM change_requests cr
+    WHERE cr.id = NEW.change_request_id AND cr.resource_type = 'BINDING' AND b.id = cr.resource_id
+      AND NOT NEW.jurisdiction = ANY (b.party_jurisdictions);
+    RETURN NULL;
+END $$;
+CREATE TRIGGER trg_sides_binding_parties AFTER INSERT ON change_request_sides
+    FOR EACH ROW WHEN (NEW.side LIKE 'PARTY:%') EXECUTE FUNCTION binding_parties_from_side();
+
+CREATE FUNCTION binding_parties_from_request() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE bindings b SET party_jurisdictions = ARRAY(
+        SELECT DISTINCT j FROM unnest(b.party_jurisdictions || ARRAY(
+            SELECT sd.jurisdiction FROM change_request_sides sd
+            WHERE sd.change_request_id = NEW.id AND sd.side LIKE 'PARTY:%')) AS j ORDER BY j)
+    WHERE b.id = NEW.resource_id;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER trg_cr_binding_parties AFTER UPDATE OF resource_id ON change_requests
+    FOR EACH ROW WHEN (NEW.resource_type = 'BINDING' AND NEW.resource_id IS NOT NULL AND NEW.resource_id IS DISTINCT FROM OLD.resource_id)
+    EXECUTE FUNCTION binding_parties_from_request();
 CREATE INDEX idx_cr_status_realm ON change_requests (status, realm, id DESC);
 CREATE INDEX idx_cr_resource ON change_requests (resource_type, resource_name, id DESC);
 CREATE INDEX idx_cr_resource_id ON change_requests (resource_id) WHERE resource_id IS NOT NULL;
@@ -833,6 +864,39 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION audit_prune(BIGINT) FROM PUBLIC;
 
+-- change_requests_prune deletes, with their sides, the closed requests
+-- decided before older_than (at least 24 hours ago) that no audit entry
+-- names (their entries were pruned, so an export holds them), that no
+-- binding holds as its open break-glass change, and that no request which
+-- stays depends on or reverts: a chain goes whole or not at all
+-- (.specs/ligo-cr-pruning.md §4.3). It runs as its owner, the migrator:
+-- ligo_app has no DELETE on change_requests.
+CREATE FUNCTION change_requests_prune(older_than TIMESTAMPTZ) RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    ids UUID[];
+    kept UUID[];
+    deleted BIGINT;
+BEGIN
+    IF older_than > now() - interval '24 hours' THEN
+        RAISE EXCEPTION 'change_requests_prune: % is less than 24 hours ago', older_than;
+    END IF;
+    SELECT coalesce(array_agg(c.id), '{}') INTO ids FROM change_requests c
+    WHERE c.status <> 'PENDING' AND c.decided_at < older_than
+      AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.change_request_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id);
+    LOOP -- drop what a request that stays still refers to, until nothing changes
+        kept := ARRAY(SELECT x FROM unnest(ids) AS x WHERE NOT EXISTS (
+            SELECT 1 FROM change_requests r WHERE (r.depends_on_cr_id = x OR r.reverts_cr_id = x) AND NOT r.id = ANY (ids)));
+        EXIT WHEN cardinality(kept) = cardinality(ids);
+        ids := kept;
+    END LOOP;
+    DELETE FROM change_requests WHERE id = ANY (ids);
+    GET DIAGNOSTICS deleted = ROW_COUNT;
+    RETURN deleted;
+END $$;
+REVOKE ALL ON FUNCTION change_requests_prune(TIMESTAMPTZ) FROM PUBLIC;
+
 -- ---------------------------------------------------------------------------
 -- Read models for workload resolution (§4.5) and network flows (ADR-16)
 -- ---------------------------------------------------------------------------
@@ -902,8 +966,8 @@ CREATE INDEX idx_outbox_due ON notification_outbox (next_attempt_at)
 -- Grants (role names fixed; executed by ligo_migrator)
 GRANT SELECT, INSERT, UPDATE ON accounts, sources, targets, target_access_levels TO ligo_app;   -- never hard-deleted
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
-GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue,
-      change_requests, admin_sessions TO ligo_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue, admin_sessions TO ligo_app;
+GRANT SELECT, INSERT, UPDATE ON change_requests TO ligo_app;    -- no DELETE: change_requests_prune is the only way
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;
@@ -912,6 +976,7 @@ GRANT USAGE ON SEQUENCE audit_checkpoints_id_seq TO ligo_app;
 GRANT SELECT, INSERT ON audit_exports TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_exports_id_seq TO ligo_app;
 GRANT EXECUTE ON FUNCTION audit_prune(BIGINT) TO ligo_app;
+GRANT EXECUTE ON FUNCTION change_requests_prune(TIMESTAMPTZ) TO ligo_app;
 GRANT SELECT, UPDATE ON system_settings TO ligo_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON notification_outbox TO ligo_app;
 GRANT USAGE ON SEQUENCE notification_outbox_id_seq TO ligo_app;

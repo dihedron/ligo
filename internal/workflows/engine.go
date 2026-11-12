@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 	"uuid"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/dihedron/ligo/internal/tracing"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/attribute"
 	otelcodes "go.opentelemetry.io/otel/codes"
@@ -87,10 +89,14 @@ func (e *StepError) Error() string {
 var retryable = map[codes.Code]bool{codes.Unavailable: true, codes.DeadlineExceeded: true, codes.ResourceExhausted: true, codes.Aborted: true}
 
 // sanitize reduces a plugin error to its code and public message; a
-// PluginErrorDetail decides whether it is retryable, else the gRPC code.
+// PluginErrorDetail decides whether it is retryable, else the gRPC code. A
+// step's own database error is no plugin's: unreachable, it is retryable.
 func sanitize(err error) *StepError {
 	if se := (*StepError)(nil); errors.As(err, &se) {
 		return se
+	}
+	if databaseUnavailable(err) {
+		return &StepError{Code: "DATABASE_UNAVAILABLE", Message: "the database cannot be reached", Retryable: true}
 	}
 	code, d := pluginsdk.FromError(err)
 	if d.GetCode() == "PLUGIN_ERROR" && d.GetPublicMessage() == "" { // no detail: the transport's error
@@ -471,4 +477,16 @@ func (e *Engine) markFailed(ctx context.Context, f fence, step string, cause *St
 		metrics.PropagationFailed.WithLabelValues(propagated).Inc()
 	}
 	return nil
+}
+
+// databaseUnavailable: PostgreSQL could not be reached, or ended the
+// session (class 08, connection exception; 57P01 to 57P03, shutdown).
+func databaseUnavailable(err error) bool {
+	if ce := (*pgconn.ConnectError)(nil); errors.As(err, &ce) {
+		return true
+	}
+	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) {
+		return strings.HasPrefix(pe.Code, "08") || pe.Code == "57P01" || pe.Code == "57P02" || pe.Code == "57P03"
+	}
+	return false
 }

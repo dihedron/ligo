@@ -299,7 +299,9 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}
 	dispatcher.DeliveredRetention, dispatcher.AbandonedRetention = *cfg.Notifications.DeliveredRetention, *cfg.Notifications.AbandonedRetention
 	run(dispatcher.Run)
-	run(func(ctx context.Context) { verifyAudit(ctx, log, pools.App, signer, cfg.Storage.Audit.Retention) })
+	run(func(ctx context.Context) {
+		verifyAudit(ctx, log, pools.App, signer, retentions{cfg.Storage.Audit.Retention, cfg.Storage.ChangeRequests.Retention})
+	})
 	run(func(ctx context.Context) { realms.WatchConflicts(ctx, log, time.Minute) })
 
 	// the metrics: the process-wide ones, and this run's database and cache
@@ -339,8 +341,9 @@ func traced(listener string, h http.Handler) http.Handler {
 
 // Audit verification (§4.3): incremental every auditVerifyEvery, a full
 // pass every auditFullEvery, on the replica that holds ligo_audit_verify;
-// with storage.audit.retention set, a prune every auditPruneEvery after a
-// valid pass (.specs/ligo-pruning.md §3.5).
+// with storage.audit.retention or storage.change_requests.retention set, a
+// prune every auditPruneEvery after a valid pass (.specs/ligo-pruning.md
+// §3.5, .specs/ligo-cr-pruning.md §4.3).
 const (
 	auditVerifyEvery = 10 * time.Minute
 	auditFullEvery   = 24 * time.Hour
@@ -351,11 +354,11 @@ const (
 // due, for ligo_audit_chain_valid; a broken chain is also logged. The first
 // pass a replica runs under the lock is a full one, and so is its first
 // prune check.
-func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, retention time.Duration) {
+func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, retention retentions) {
 	var lastFull, lastPrune time.Time
 	for {
 		full := time.Since(lastFull) >= auditFullEvery
-		prune := retention > 0 && time.Since(lastPrune) >= auditPruneEvery
+		prune := (retention.audit > 0 || retention.requests > 0) && time.Since(lastPrune) >= auditPruneEvery
 		if ran, err := verifyAuditOnce(ctx, log, db, signer, full, prune, retention); err != nil && ctx.Err() == nil {
 			log.Warn("audit chain verification", "full", full, "error", err)
 		} else if ran {
@@ -376,7 +379,10 @@ func verifyAudit(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer
 
 // verifyAuditOnce runs one pass if this replica takes the lock; it reports
 // whether it ran.
-func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, full, prune bool, retention time.Duration) (bool, error) {
+// retentions are storage.audit.retention and storage.change_requests.retention.
+type retentions struct{ audit, requests time.Duration }
+
+func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, signer sealing.Signer, full, prune bool, retention retentions) (bool, error) {
 	release, locked, err := store.TryLock(ctx, db, "ligo_audit_verify")
 	if err != nil || !locked {
 		return false, err
@@ -395,14 +401,25 @@ func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, si
 	if _, err := audit.Checkpoint(ctx, db, signer, r, time.Now()); err != nil {
 		log.Warn("audit checkpoint", "error", err)
 	}
-	if prune {
-		p, err := audit.Prune(ctx, db, signer, retention, time.Now())
+	if prune && retention.audit > 0 {
+		p, err := audit.Prune(ctx, db, signer, retention.audit, time.Now())
 		if err != nil {
 			return true, fmt.Errorf("audit prune: %w", err)
 		}
 		if p.Deleted > 0 {
 			metrics.AuditPrunedEntries.WithLabelValues().Add(float64(p.Deleted))
 			log.Info("audit pruned", "through", p.Through, "deleted", p.Deleted, "export", p.Export)
+		}
+	}
+	// after the audit: a request goes only once no entry names it
+	if prune && retention.requests > 0 {
+		n, err := changerequests.Prune(ctx, db, retention.requests)
+		if err != nil {
+			return true, fmt.Errorf("change requests prune: %w", err)
+		}
+		if n > 0 {
+			metrics.ChangeRequestsPruned.WithLabelValues().Add(float64(n))
+			log.Info("change requests pruned", "deleted", n)
 		}
 	}
 	var oldest *time.Time

@@ -138,6 +138,7 @@ func TestRules(t *testing.T) {
 		{"short justification", "min_justification_length: 20", "min_justification_length: 10", 14, nil},
 		{"http webhook", `url: "https://oncall.corp.internal/hooks/ligo"`, `url: "http://oncall.corp.internal/hooks/ligo"`, 14, nil},
 		{"unset webhook secret", "LIGO_WEBHOOK_DBA_SECRET", "LIGO_WEBHOOK_UNSET", 14, nil},
+		{"change request retention below 24h", "  change_requests:\n    retention: 0s", "  change_requests:\n    retention: 2h", 9, nil},
 		{"audit retention below 24h", "  audit:\n    retention: 0s", "  audit:\n    retention: 23h", 9, nil},
 		{"negative delivered retention", "  delivered_retention: 24h", "  delivered_retention: -1h", 14, nil},
 		{"negative abandoned retention", "  abandoned_retention: 720h", "  abandoned_retention: -1h", 14, nil},
