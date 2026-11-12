@@ -15,7 +15,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 7 | Client SDKs (Go, then Python and Java) | 2026-11-08 | Not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
-| 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Spec approved: `.specs/ligo-instances.md` (2026-11-12), branch `feature/instances` |
+| 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done for v0.4.0 (PR #45): `.specs/ligo-instances.md` |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
@@ -154,7 +154,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 - A binding snapshots its platform's wiring at creation (INV-08), and startup refuses a configuration that removes a platform or instance still referenced by a binding (§8.2 rule 10).
 - The plugin manager starts one process per type and realm and sends it `ConfigureInstances` with all that realm's instances at startup (§5.2). Nothing reconfigures a running process today.
 
-**Status (2026-11-12).** Decided and specified in `.specs/ligo-instances.md`: all three kinds, four-eyes change requests per jurisdiction, no migration (instances by `ligo apply`), `ca_pem` instead of `ca_file`. The points below are settled there.
+**Status (2026-11-12).** Done (PR #45). Decided and specified in `.specs/ligo-instances.md`, with `instance_bounds.shared_svids` added in the lab work: all three kinds, four-eyes change requests per jurisdiction, no migration (instances by `ligo apply`), `ca_pem` instead of `ca_file`. The points below are settled there.
 
 **What the design must settle.**
 
