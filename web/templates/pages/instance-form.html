@@ -1,0 +1,33 @@
+{{define "content"}}{{with .Content}}<h1>{{if .Edit}}Edit {{.Name}}{{else}}New {{.Noun}}{{end}}</h1>
+<p class="muted">Every change is a change request that another operator or approver of its jurisdiction decides.</p>
+<div id="instance-errors" class="errors"></div>
+<form id="instance" class="card"{{if .Edit}} hx-put="/ui/{{.Path}}/{{.Name}}"{{else}} hx-post="/ui/{{.Path}}"{{end}}
+  hx-status:409="target:#instance-errors swap:innerHTML" hx-status:422="target:#instance-errors swap:innerHTML" hx-status:503="target:#instance-errors swap:innerHTML" {{hxnonce}}>
+  {{if .Edit}}<input type="hidden" name="expectedRevision" value="{{.Revision}}">{{end}}
+  <div class="field"><label for="i-name">Name</label>
+    <input id="i-name" name="name" value="{{.Name}}" required{{if .Edit}} readonly{{end}}></div>
+  <div class="field"><label for="i-type">Type</label>
+    {{if .Edit}}<input id="i-type" name="type" value="{{.Type}}" readonly>
+    {{else}}<select id="i-type" name="type">{{range .Types}}<option>{{.}}</option>{{end}}</select>{{end}}</div>
+  <div class="field"><label for="i-realm">Realm</label>
+    {{if .Edit}}<input id="i-realm" name="realm" value="{{.Realm}}" readonly>
+    {{else}}<select id="i-realm" name="realm">{{range .Realms}}<option>{{.}}</option>{{end}}</select>{{end}}</div>
+  <div class="field"><label for="i-jur">Jurisdiction</label>
+    <input id="i-jur" name="jurisdiction" value="{{.Jurisdiction}}" required{{if .Edit}} readonly{{end}}>
+    <span class="hint">The team that owns it. Name, type, realm and jurisdiction cannot change later.</span></div>
+  <div class="field"><label for="i-display">Display name</label><input id="i-display" name="displayName" value="{{.DisplayName}}"></div>
+  <div class="field"><label for="i-desc">Description</label><textarea id="i-desc" name="description">{{.Description}}</textarea></div>
+  <div class="field"><label for="i-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="i-contacts" name="contacts">{{.Contacts}}</textarea></div>
+  <div class="field"><label for="i-rest">Definition (YAML or JSON)</label>
+    <textarea id="i-rest" name="rest" class="mono" rows="18">{{.Rest}}</textarea>
+    <span class="hint">svidSelector, config, networkFlows and, for platforms, their wiring and fields. The config is checked against the plugin's schema; it names references to credentials, never credentials, and certificates as ca_pem text.</span></div>
+  <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>{{if .Edit}}Submit the change{{else}}Submit the creation{{end}}</button>
+    <a class="button button-secondary" href="/ui/{{.Path}}">Cancel</a></div>
+</form>
+{{if .Edit}}<form class="card" hx-delete="/ui/{{.Path}}/{{.Name}}" hx-confirm="Retire {{.Name}}? Its name is never reused."
+  hx-status:409="target:#instance-errors swap:innerHTML" hx-status:422="target:#instance-errors swap:innerHTML" {{hxnonce}}>
+  <input type="hidden" name="expectedRevision" value="{{.Revision}}">
+  <p class="muted">Retiring is refused while targets, bindings or platforms use it.</p>
+  <button type="submit" class="button-danger"{{if $.Maintenance}} disabled{{end}}>Retire</button>
+</form>{{end}}
+{{end}}{{end}}

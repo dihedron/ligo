@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -10,12 +11,15 @@ import (
 	"fmt"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/sealing"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -221,6 +225,23 @@ func sessionSetup(t *testing.T) *sessionEnv {
 	s.Bindings.Sources = s.Sources // inline sources (§7.2.4), as ligo serve wires it
 	s.Catalog = &catalog.Reader{DB: pools.App, Policy: s.Requests.Policy}
 	s.Config, s.Instances, s.Plugins, s.Workflows = cfg, inst, healthy{}, &workflows{}
+	ienv, err := instances.NewEnv(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kekFile := filepath.Join(t.TempDir(), "kek")
+	if err := os.WriteFile(kekFile, bytes.Repeat([]byte{7}, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kek, err := sealing.NewLocalKEK(kekFile, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.InstanceService = &instances.Service{DB: pools.App, Env: ienv, Instances: inst, Signer: sealing.NewLocalSigner(kek),
+		Plugins: acceptingPlugins{}, Requests: s.Requests, Logger: slog.New(slog.DiscardHandler)}
+	for _, k := range instances.Kinds {
+		s.Requests.Resources[string(k)] = s.InstanceService
+	}
 	srv := httptest.NewTLSServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &sessionEnv{srv: srv, owner: owner, dir: d, user: user, s: s}
@@ -1237,5 +1258,73 @@ func TestBreakGlass(t *testing.T) {
 	}
 	if _, page := both.do("GET", "/ui/break-glass/new-form?operation=UPDATE&name=bg2-"+x, nil, "HX-Request", ""); !strings.Contains(page, `value="lsrc2-`+x+`"`) {
 		t.Errorf("the form is not prefilled: %s", page)
+	}
+}
+
+// acceptingPlugins accepts every instance: it resolves its own SVID and
+// reports its config's allowed_endpoints.
+type acceptingPlugins struct{}
+
+func (acceptingPlugins) Validate(_ context.Context, _ instances.Kind, d *instances.Definition) (string, []string, error) {
+	if d.SVIDSelector == nil {
+		return "", nil, nil
+	}
+	return "spiffe://prod.internal/plugin/" + d.Metadata.Name, d.AllowedEndpoints(), nil
+}
+
+func (acceptingPlugins) Resolved(string, string) map[string]string { return nil }
+
+func (acceptingPlugins) Wire(context.Context, *instances.Definition) error { return nil }
+
+// TestInstanceForms: the form refuses what the API would, in the form; the
+// definition is shown to the operators of its jurisdiction only
+// (.specs/ligo-instances.md §10.3).
+func TestInstanceForms(t *testing.T) {
+	v := sessionSetup(t)
+	x := uuid.NewV7().String()[30:]
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = v.owner.Exec(ctx, "delete from change_requests where resource_name like $1", "%"+x)
+		_, _ = v.owner.Exec(ctx, "delete from instances where name like $1", "%"+x)
+	})
+	v.dir.groups[v.user] = []string{operators}
+	b := v.browser(t)
+	b.signIn("right")
+	b.page()
+	if resp, body := b.do("GET", "/ui/secret-stores", nil); resp.StatusCode != 200 || !strings.Contains(body, "vault-prod") {
+		t.Fatalf("list: %d", resp.StatusCode)
+	}
+	if resp, body := b.do("GET", "/ui/secret-stores/new-form", nil); resp.StatusCode != 200 || !strings.Contains(body, `name="rest"`) {
+		t.Fatalf("new form: %d", resp.StatusCode)
+	}
+	form := func(rest string) url.Values {
+		return url.Values{"name": {"form-" + x}, "type": {"vault.v1"}, "realm": {"prod"}, "jurisdiction": {"dc/corp-prod"}, "rest": {rest}}
+	}
+	for rest, want := range map[string]string{
+		"config: [":                    "not YAML",
+		"kind: Platform\nconfig: {}\n": "kind is set by the fields above",
+		"svidSelector: {matchExpr: 'true'}\nconfig: {address: 'https://evil.example:8200', allowed_endpoints: ['evil.example:8200']}\n": "instance_bounds",
+	} {
+		if resp, body := b.do("POST", "/ui/secret-stores", form(rest)); resp.StatusCode != 422 || !strings.Contains(body, want) {
+			t.Errorf("%q: %d %s", rest, resp.StatusCode, body)
+		}
+	}
+	good := "svidSelector: {matchExpr: 'true'}\nconfig: {address: 'https://vault.prod.internal:8200', allowed_endpoints: ['vault.prod.internal:8200']}\n"
+	resp, _ := b.do("POST", "/ui/secret-stores", form(good))
+	id, ok := strings.CutPrefix(resp.Header.Get("HX-Redirect"), "/ui/change-requests/")
+	if !ok {
+		t.Fatalf("filed: %d %v", resp.StatusCode, resp.Header)
+	}
+	v.approve(t, uuid.MustParse(id))
+	if resp, body := b.do("GET", "/ui/secret-stores/form-"+x+"/edit-form", nil); resp.StatusCode != 200 || !strings.Contains(body, "vault.prod.internal:8200") {
+		t.Errorf("operator: %d", resp.StatusCode)
+	}
+	v.dir.groups["viewer"+x] = []string{viewers}
+	v.dir.passwords["viewer"+x] = "right"
+	w := v.browser(t)
+	w.signInAs("viewer"+x, "right")
+	w.page()
+	if resp, _ := w.do("GET", "/ui/secret-stores/form-"+x+"/edit-form", nil); resp.StatusCode != 404 {
+		t.Errorf("viewer: %d", resp.StatusCode)
 	}
 }
