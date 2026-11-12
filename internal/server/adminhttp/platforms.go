@@ -76,6 +76,9 @@ type platformDTO struct {
 	SecretStore               wiringDTO         `json:"secretStore"`
 	Health                    *healthDTO        `json:"health,omitempty"`
 	UISchemas                 json.RawMessage   `json:"uiSchemas,omitempty"`
+	// for those who file and decide its requests (.specs/ligo-instances.md §10.1)
+	Revision   *int64                `json:"revision,omitempty"`
+	Definition *instances.Definition `json:"definition,omitempty"`
 }
 
 func platformOf(p *instances.Definition) platformDTO {
@@ -143,6 +146,7 @@ func (s *Server) getPlatform(w http.ResponseWriter, r *http.Request) {
 	}
 	d := platformOf(p)
 	d.Health = s.health(r.Context(), name)
+	s.decided(r, &d)
 	ui, err := s.Plugins.UISchemas(r.Context(), name)
 	if err != nil {
 		s.Logger.Error("ui schemas", "platform", name, "error", err)

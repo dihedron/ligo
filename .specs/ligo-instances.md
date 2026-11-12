@@ -1,6 +1,6 @@
 # Instances managed at run time
 
-- **Version:** 1.2 (2026-11-12), approved; 1.1 and 1.2 add the changes of chunks 1 to 3 (§15)
+- **Version:** 1.3 (2026-11-12), approved; 1.1 to 1.3 add the changes of chunks 1 to 4 (§15)
 - **Backlog:** item 10
 - **Branch:** `feature/instances`, from main at v0.3.0 (`af2d9e7`)
 - **Main spec:** becomes 4.1.0 (breaking change); target release v0.4.0
@@ -228,7 +228,7 @@ Rows T-22 to T-22f replace the T-22 row of the main spec. The "Read configuratio
 | `/v1/admin/platforms/{name}` | GET, PUT, DELETE | PUT needs `expectedRevision`. DELETE retires the platform. |
 | `/v1/admin/identity-providers`, `/{name}` | as above | |
 | `/v1/admin/secret-stores`, `/{name}` | as above | |
-| `/v1/admin/{kind}/{name}/history` | GET | The audit entries of the instance, as for sources. |
+| `/v1/admin/{kind}/{name}/audit` | GET | The audit entries of the instance, as for sources, to those who see its jurisdiction. |
 
 **Visibility.**
 - Any viewer sees the summary `GET /v1/admin/platforms` gives today (§3.4): name, type, realm, jurisdictions, display data, flows, health and privilege bounds.
@@ -242,8 +242,8 @@ Rows T-22 to T-22f replace the T-22 row of the main spec. The "Read configuratio
   - Create and update follow the existing manifest rule: no `expectedRevision` means create.
   - A platform whose wiring instance is still a pending request is refused by validation. `ligo apply` reports it and goes on with the rest, and a second run after approval files it. The guides show the two runs.
 - **`ligo list platforms|identity-providers|secret-stores`, `ligo get <kind> <name>` and `ligo delete <kind> <name>`** join the existing nouns.
-  - `ligo platform list|show|schema` stays.
-  - `ligo platform history <name>` is new, likewise for the other kinds.
+  - `ligo platform list|show|schema` stays; `ligo audit list platform|identity-provider|secret-store <name>` shows an instance's history.
+  - `ligo delete <kind> <name> -r N` files the retirement, a `DELETE` with `expectedRevision`.
 - Approval uses the existing `ligo change-request approve` and `review`.
 
 ### 10.3 Web UI
@@ -364,3 +364,4 @@ Each chunk is a stop point: tests and code, then `make lint`, `make vuln` and `m
 | 1.1 | §4.3 | A platform UPDATE may not strand a target (chunk 2). |
 | 1.1 | §8 | The registry reloads every `resolution_cache.full_reload_interval`, as the account registry (chunk 2). |
 | 1.2 | §7.2 | A process started for the check of a first instance; reconcile at every load, so refusals are retried (chunk 3). |
+| 1.3 | §10.1, §10.2 | Audit at `/{kind}/{name}/audit` and `ligo audit list`, as for the other resources; no `history` route or command (chunk 4). |

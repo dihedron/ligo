@@ -4,6 +4,7 @@ package adminhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -28,7 +29,7 @@ var unaudited = map[string]string{
 // admin API and finds its audit entry through the request's ID. A route added
 // without a row here fails the test.
 func TestINV11Routes(t *testing.T) {
-	v := setup(t, config.AdminListener{AllowBasicAuth: true})
+	v := setup(t, config.AdminListener{AllowBasicAuth: true, RateLimit: config.AdminRateLimit{APIPerPrincipalRPS: 100}}) // every route, in one burst
 	ctx := context.Background()
 	olga, dora, admin := v.client(t, opID), v.client(t, appID), v.client(t, adminID)
 	x := v.suffix
@@ -115,6 +116,23 @@ func TestINV11Routes(t *testing.T) {
 	applied(act("POST /v1/admin/targets/{name}/access-levels/{level}/{op}", "CR_CREATED", olga,
 		"/v1/admin/targets/"+target+"/access-levels/write/deprecate", map[string]any{"expectedRevision": 2}))
 	act("POST /v1/admin/targets/{name}/{op}", "CR_CREATED", olga, "/v1/admin/targets/"+target+"/deprecate", map[string]any{"expectedRevision": 3})
+
+	// instances (.specs/ligo-instances.md): created, changed and retired
+	set := v.s.Instances.Current()
+	for _, kind := range []struct{ path, example string }{{"identity-providers", "ldap-prod"}, {"secret-stores", "vault-prod"}, {"platforms", "oracle-prod"}} {
+		k := instancePaths[kind.path]
+		ex, _ := set.Get(k, kind.example)
+		def, _ := json.Marshal(ex)
+		var m map[string]any
+		_ = json.Unmarshal(def, &m)
+		name := "inv-" + kind.example + "-" + x
+		m["metadata"].(map[string]any)["name"] = name
+		applied(act("POST /v1/admin/"+kind.path, "CR_CREATED", olga, "/v1/admin/"+kind.path, m))
+		m["metadata"].(map[string]any)["description"] = "described"
+		m["expectedRevision"] = 1
+		applied(act("PUT /v1/admin/"+kind.path+"/{name}", "CR_CREATED", olga, "/v1/admin/"+kind.path+"/"+name, m))
+		act("DELETE /v1/admin/"+kind.path+"/{name}", "CR_CREATED", olga, "/v1/admin/"+kind.path+"/"+name+"?expectedRevision=2", nil)
+	}
 
 	// a binding: applied, then every way of changing it
 	act(approve, "CR_SIDE_APPROVED", dora, base+v.request.ID.String()+"/approve", map[string]string{"payloadSha256": v.request.PayloadSHA256})

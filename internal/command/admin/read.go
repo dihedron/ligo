@@ -21,7 +21,7 @@ import (
 	"github.com/dihedron/ligo/internal/sealing"
 )
 
-// Get displays a source, target or binding (ligo get KIND NAME).
+// Get displays a source, target, binding or instance (ligo get KIND NAME).
 type Get struct {
 	Base
 	Args ResourceArgs `positional-args:"yes" required:"yes"`
@@ -31,7 +31,7 @@ func (cmd *Get) Execute([]string) error {
 	return cmd.get(path(cmd.Args.Kind+"s", cmd.Args.Name), nil, columns[cmd.Args.Kind]...)
 }
 
-// List lists sources, targets or bindings (ligo list KIND).
+// List lists sources, targets, bindings or instances (ligo list KIND).
 type List struct {
 	Base
 	Page
@@ -46,7 +46,7 @@ type List struct {
 	TrustDomain    string `long:"trust-domain" description:"Filter by source trust domain."`
 	ExpiringBefore string `long:"expiring-before" description:"Bindings expiring before this RFC 3339 time."`
 	Args           struct {
-		Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" description:"Resource kind."`
+		Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
 	} `positional-args:"yes" required:"yes"`
 }
 

@@ -154,6 +154,17 @@ func (s *Service) Retire(ctx context.Context, c changerequests.Caller, k Kind, n
 	return s.file(ctx, c, k, "DELETE", cur, &cur.Definition, &common)
 }
 
+// Get reads an ACTIVE instance the caller sees, with its revision; its
+// definition is for the people who file and decide its requests (§10.1).
+func (s *Service) Get(ctx context.Context, c changerequests.Caller, k Kind, name string) (revision int64, d *Definition, decider bool, err error) {
+	cur, err := s.current(ctx, c, k, name)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	j := cur.Metadata.Jurisdiction
+	return cur.Revision, &cur.Definition, c.Grants.Operator(j) || c.Grants.CanApprove(j), nil
+}
+
 // authorize: the caller acts for the instance's jurisdiction, as an
 // operator (§5 rule 3); a grant scoped to platforms gives nothing here.
 func (s *Service) authorize(c changerequests.Caller, k Kind, d *Definition) error {

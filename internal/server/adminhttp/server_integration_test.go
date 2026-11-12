@@ -280,7 +280,16 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 	}
 	authority := newCA(t, "prod.lab")
 	listener.ClientSVIDAuth = config.ClientSVIDAuth{Enabled: true, AcceptedTrustDomains: []string{"prod.lab"}}
-	s := &Server{Listener: listener, Config: cfg, Instances: inst, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
+	ienv, err := instances.NewEnv(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	is := &instances.Service{DB: pools.App, Env: ienv, Instances: inst, Signer: zeroSigner(t), Plugins: fakeInstancePlugins{},
+		Requests: bs.Requests, Logger: slog.New(slog.DiscardHandler)}
+	for _, k := range instances.Kinds {
+		bs.Requests.Resources[string(k)] = is
+	}
+	s := &Server{Listener: listener, Config: cfg, Instances: inst, InstanceService: is, Catalog: &catalog.Reader{DB: pools.App, Policy: cfg.Policy()}, Plugins: fakePlugins{},
 		Authz: az, DB: pools.App, Requests: bs.Requests, Bindings: bs, Sources: ss, Targets: ts, Workflows: &fakeWorkflows{},
 		Bundles: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{authority.cert}),
 		Logger:  slog.New(slog.DiscardHandler), Signer: zeroSigner(t)}
@@ -326,6 +335,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		_, _ = owner.Exec(ctx, "delete from target_network_flows where target_id in (select id from targets where name like $1)", "%"+x)
 		_, _ = owner.Exec(ctx, "delete from targets where name like $1", "%"+x)
 		_, _ = owner.Exec(ctx, "delete from sources where name like $1", "%"+x)
+		_, _ = owner.Exec(ctx, "delete from instances where name like $1", "%"+x)
 	})
 	name := "api-" + x
 	olga := changerequests.Caller{Principal: authz.Principal{SPIFFEID: opID}, Grants: az.For(authz.Principal{SPIFFEID: opID})}
@@ -1292,4 +1302,62 @@ func zeroSigner(t *testing.T) sealing.Signer {
 		t.Fatal(err)
 	}
 	return sealing.NewLocalSigner(kek)
+}
+
+// fakeInstancePlugins accepts every instance: it resolves its own SVID and
+// reports its config's allowed_endpoints.
+type fakeInstancePlugins struct{}
+
+func (fakeInstancePlugins) Validate(_ context.Context, _ instances.Kind, d *instances.Definition) (string, []string, error) {
+	if d.SVIDSelector == nil {
+		return "", nil, nil
+	}
+	return "spiffe://prod.internal/plugin/" + d.Metadata.Name, d.AllowedEndpoints(), nil
+}
+
+func (fakeInstancePlugins) Resolved(string, string) map[string]string { return nil }
+
+func (fakeInstancePlugins) Wire(context.Context, *instances.Definition) error { return nil }
+
+// TestInstancesAPI: any viewer sees an instance's summary; the operators
+// and approvers of its jurisdiction also its revision and definition
+// (.specs/ligo-instances.md §10.1); requests are always a person's to decide.
+func TestInstancesAPI(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	viewer, olga, dora := v.client(t, viewerID), v.client(t, opID), v.client(t, appID)
+	ex, _ := v.s.Instances.Current().Get(instances.SecretStore, "vault-prod")
+	data, _ := json.Marshal(ex)
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+	name := "api-vault-" + v.suffix
+	m["metadata"].(map[string]any)["name"] = name
+	r := v.do(t, olga, "POST", "/v1/admin/secret-stores", m)
+	cr, _ := r.body["changeRequest"].(map[string]any)
+	if r.code != 202 || cr["status"] != "PENDING" {
+		t.Fatalf("create: %d %+v", r.code, r.body)
+	}
+	if a := v.do(t, olga, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve", map[string]any{"payloadSha256": cr["payloadSha256"]}); a.code == 200 {
+		t.Fatal("the requester approved its own request")
+	}
+	if a := v.do(t, dora, "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve", map[string]any{"payloadSha256": cr["payloadSha256"]}); a.code != 200 {
+		t.Fatalf("approve: %d %+v", a.code, a.body)
+	}
+	summary := v.do(t, viewer, "GET", "/v1/admin/secret-stores/"+name, nil)
+	if summary.code != 200 || summary.body["jurisdiction"] != "dc/corp-prod" || summary.body["definition"] != nil || summary.body["revision"] != nil {
+		t.Errorf("viewer: %d %+v", summary.code, summary.body)
+	}
+	full := v.do(t, olga, "GET", "/v1/admin/secret-stores/"+name, nil)
+	def, _ := full.body["definition"].(map[string]any)
+	if full.code != 200 || full.body["revision"] != float64(1) || def["config"] == nil {
+		t.Errorf("operator: %d %+v", full.code, full.body)
+	}
+	if list := v.do(t, viewer, "GET", "/v1/admin/identity-providers", nil); list.code != 200 || len(list.body["items"].([]any)) != 4 {
+		t.Errorf("list: %d %+v", list.code, list.body)
+	}
+	if audit := v.do(t, olga, "GET", "/v1/admin/secret-stores/"+name+"/audit", nil); audit.code != 200 || len(audit.body["items"].([]any)) == 0 {
+		t.Errorf("audit: %d %+v", audit.code, audit.body)
+	}
+	if r := v.do(t, olga, "DELETE", "/v1/admin/secret-stores/"+name, nil); r.code != 422 {
+		t.Errorf("retire without expectedRevision: %d", r.code)
+	}
 }

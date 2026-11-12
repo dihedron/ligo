@@ -21,11 +21,29 @@ type document struct {
 	body       map[string]any
 }
 
-// order is the order ligo apply submits kinds in.
-var order = map[string]int{"Source": 0, "Target": 1, "Binding": 2}
+// order is the order ligo apply submits kinds in: instances first, as
+// targets and bindings name platforms, and platforms their wiring.
+var order = map[string]int{"IdentityProvider": 0, "SecretStore": 1, "Platform": 2, "Source": 3, "Target": 4, "Binding": 5}
+
+// kindPaths are the CLI's and the API's names of the manifest kinds.
+var kindPaths = map[string]string{"IdentityProvider": "identity-provider", "SecretStore": "secret-store", "Platform": "platform",
+	"Source": "source", "Target": "target", "Binding": "binding"}
+
+// waiting names the wiring instance of a platform document that this file
+// filed and that awaits approval, with its change request.
+func waiting(d document, pending map[string]any) (string, any) {
+	for field, kind := range map[string]string{"identityProvider": "IdentityProvider", "secretStore": "SecretStore"} {
+		w, _ := d.body[field].(map[string]any)
+		name, _ := w["instance"].(string)
+		if cr, ok := pending[kind+"/"+name]; ok {
+			return kindPaths[kind] + " " + name, cr
+		}
+	}
+	return "", nil
+}
 
 // readManifest reads the documents of file ("-" for stdin): YAML documents
-// separated by ---, or a JSON array, sorted Source, Target, Binding.
+// separated by ---, or a JSON array, sorted by order.
 func readManifest(file string) ([]document, error) {
 	var r io.Reader = os.Stdin
 	if file != "-" {
@@ -61,7 +79,7 @@ func readManifest(file string) ([]document, error) {
 		}
 		kind, _ := m["kind"].(string)
 		if _, ok := order[kind]; !ok {
-			return nil, fmt.Errorf("manifest %s: document %d: kind must be Source, Target or Binding, not %q", file, i+1, kind)
+			return nil, fmt.Errorf("manifest %s: document %d: kind must be IdentityProvider, SecretStore, Platform, Source, Target or Binding, not %q", file, i+1, kind)
 		}
 		if v, ok := m["apiVersion"]; ok && v != "ligo.dihedron.org/v1alpha1" {
 			return nil, fmt.Errorf("manifest %s: document %d: apiVersion %v is not ligo.dihedron.org/v1alpha1", file, i+1, v)
@@ -176,8 +194,11 @@ func existing(ctx context.Context, c *client.Client, err error, kind, name strin
 	if c.Do(ctx, "GET", path(kind+"s", name), nil, nil, &v) != nil {
 		return err
 	}
-	return fmt.Errorf("%w; %s %s exists at revision %v: add expectedRevision: %v to replace it", err, kind, name, client.Lookup(v, "metadata.revision"),
-		client.Lookup(v, "metadata.revision"))
+	revision := client.Lookup(v, "metadata.revision")
+	if revision == nil {
+		revision = client.Lookup(v, "revision") // an instance's
+	}
+	return fmt.Errorf("%w; %s %s exists at revision %v: add expectedRevision: %v to replace it", err, kind, name, revision, revision)
 }
 
 // automation adds the flags' approvalReference and automationContext to a

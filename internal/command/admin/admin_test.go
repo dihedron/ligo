@@ -101,7 +101,7 @@ func TestReadCommands(t *testing.T) {
 	}{
 		{"get", (&Get{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1", []string{"b1 s1 t1 read ACTIVE 3 -"}},
 		{"list", (&List{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Jurisdiction: "dc/*", Args: struct {
-			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" description:"Resource kind."`
+			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
 		}{"bindings"}}).Execute, "GET /v1/admin/bindings?jurisdiction=dc%2F%2A&pageSize=10&phase=ACTIVE", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
 		{"flows", (&Flows{Base: b, Args: struct {
 			Binding string `positional-arg-name:"binding" description:"Binding name."`

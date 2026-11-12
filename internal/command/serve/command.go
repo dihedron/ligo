@@ -564,7 +564,7 @@ func services(cfg *config.Config, pools *store.Pools, srcRules *sources.Rules, i
 	if err != nil {
 		return nil, err
 	}
-	return &adminhttp.Server{Listener: cfg.Server.AdminListener, Config: cfg, Instances: inst, Authz: az, DB: pools.App, Requests: requests,
+	return &adminhttp.Server{Listener: cfg.Server.AdminListener, Config: cfg, Instances: inst, InstanceService: is, Authz: az, DB: pools.App, Requests: requests,
 		Bindings: bs, Sources: ss, Targets: ts, Workflows: engine, Catalog: &catalog.Reader{DB: pools.App, Policy: requests.Policy},
 		Plugins: adminhttp.PlatformPlugins(plugins), Signer: signer}, nil
 }
