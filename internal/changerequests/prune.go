@@ -11,16 +11,20 @@ import (
 )
 
 // Prune deletes, through change_requests_prune, the closed requests decided
-// more than retention before now that no audit entry names and nothing that
-// stays refers to (.specs/ligo-cr-pruning.md §4.3), and audits
-// SYSTEM_CR_PRUNED in the same transaction when it deleted any. The
-// database refuses a cut-off less than 24 hours ago.
+// more than retention ago that no audit entry names and nothing that stays
+// refers to (.specs/ligo-cr-pruning.md §4.3), and audits SYSTEM_CR_PRUNED in
+// the same transaction when it deleted any. The cut-off is computed on the
+// database's clock, which also checks it is at least 24 hours ago: with the
+// replica's clock, retention 24h would fail on any skew.
 func Prune(ctx context.Context, db interface {
 	Begin(context.Context) (pgx.Tx, error)
-}, retention time.Duration, now time.Time) (int64, error) {
+}, retention time.Duration) (int64, error) {
 	var deleted int64
-	olderThan := now.Add(-retention)
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		var olderThan time.Time
+		if err := tx.QueryRow(ctx, "SELECT now() - $1::interval", retention.String()).Scan(&olderThan); err != nil {
+			return fmt.Errorf("change requests prune: %w", err)
+		}
 		if err := tx.QueryRow(ctx, "SELECT change_requests_prune($1)", olderThan).Scan(&deleted); err != nil {
 			return fmt.Errorf("change requests prune: %w", err)
 		}

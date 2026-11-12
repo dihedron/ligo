@@ -413,7 +413,7 @@ func verifyAuditOnce(ctx context.Context, log *slog.Logger, db *pgxpool.Pool, si
 	}
 	// after the audit: a request goes only once no entry names it
 	if prune && retention.requests > 0 {
-		n, err := changerequests.Prune(ctx, db, retention.requests, time.Now())
+		n, err := changerequests.Prune(ctx, db, retention.requests)
 		if err != nil {
 			return true, fmt.Errorf("change requests prune: %w", err)
 		}

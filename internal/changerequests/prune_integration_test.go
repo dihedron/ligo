@@ -32,10 +32,10 @@ func TestPrune(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Prune(ctx, s.DB, time.Hour, time.Now()); err == nil {
+	if _, err := Prune(ctx, s.DB, time.Hour); err == nil {
 		t.Error("a retention of an hour")
 	}
-	n, err := Prune(ctx, s.DB, 30*24*time.Hour, time.Now())
+	n, err := Prune(ctx, s.DB, 30*24*time.Hour)
 	if err != nil || n < 1 {
 		t.Fatalf("prune: %d, %v", n, err)
 	}
@@ -47,7 +47,11 @@ func TestPrune(t *testing.T) {
 	if err := owner.QueryRow(ctx, "select snapshot::text from audit_log where action = 'SYSTEM_CR_PRUNED' order by id desc limit 1").Scan(&snapshot); err != nil {
 		t.Errorf("SYSTEM_CR_PRUNED: %v", err)
 	}
-	if n, err := Prune(ctx, s.DB, 30*24*time.Hour, time.Now()); err != nil || n != 0 {
+	if n, err := Prune(ctx, s.DB, 30*24*time.Hour); err != nil || n != 0 {
 		t.Errorf("a second prune: %d, %v", n, err)
+	}
+	// exactly 24 hours: the cut-off is the database's own, so no skew can refuse it
+	if _, err := Prune(ctx, s.DB, 24*time.Hour); err != nil {
+		t.Errorf("a retention of 24 hours: %v", err)
 	}
 }
