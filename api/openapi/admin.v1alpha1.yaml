@@ -218,7 +218,7 @@ paths:
     get:
       tags: [platforms]
       operationId: getPlatform
-      summary: One platform with its health and uiSchemas, and for the operators and approvers of its jurisdiction its revision and definition; 503 if its plugin cannot be reached.
+      summary: One platform with its health and uiSchemas, and for the operators and approvers of its jurisdiction its revision and definition, and a quarantined one (quarantined true); 503 if its plugin cannot be reached.
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [platforms]

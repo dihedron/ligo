@@ -253,9 +253,24 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	}()
 
 	s, err := services(cfg, pools, srcRules, inst, plugins, engine, signer, log, func(ctx context.Context) {
-		if err := checks.Platforms(ctx, targets.Plugins(plugins)); err != nil {
-			log.Error("privilege bounds after a platform change", "error", err)
-		}
+		// after the commit, in the background: this replica's registry and plugin
+		// first take the new bounds, so the check sees them (.specs/ligo-instances.md §5 rule 7)
+		go func() {
+			if err := inst.Load(ctx); err != nil {
+				log.Error("privilege bounds after a platform change: instances", "error", err)
+				return
+			}
+			specs, err := pluginmgr.Specs(cfg, inst.Current())
+			if err == nil {
+				err = plugins.Reconcile(ctx, specs)
+			}
+			if err == nil {
+				err = checks.Platforms(ctx, targets.Plugins(plugins))
+			}
+			if err != nil {
+				log.Error("privilege bounds after a platform change", "error", err)
+			}
+		}()
 	})
 	if err != nil {
 		return err

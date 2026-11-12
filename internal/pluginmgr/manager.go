@@ -36,6 +36,11 @@ type Spec struct {
 	Instances []*pluginv1.InstanceDescriptor
 	// Env is the plugin's whole environment: ligo's own is never passed on.
 	Env []string
+	// Jurisdictions are the instances' jurisdictions, by name, and
+	// SharedSVIDs the type's instance_bounds.shared_svids: who may share an
+	// SVID (.specs/ligo-instances.md §6 rule 7).
+	Jurisdictions map[string]string
+	SharedSVIDs   map[string]bool
 }
 
 // Options are the plugins settings (§8.1 plugins).
@@ -203,7 +208,7 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 		}
 		p.resolved = resolved
 	}
-	if err := m.sharedSVIDs(nil, nil, nil); err != nil {
+	if err := m.sharedSVIDs(nil, Spec{}, nil); err != nil {
 		return err
 	}
 	for _, p := range m.procs {
@@ -226,33 +231,47 @@ func (m *Manager) supervised(p *process) {
 }
 
 // sharedSVIDs checks that no two instances resolve one SVID unless each
-// allows it (ADR-03), across every process; for a process being changed,
-// its proposed instances and resolution replace its current ones.
-func (m *Manager) sharedSVIDs(changed *process, ins []*pluginv1.InstanceDescriptor, resolved map[string]string) error {
+// allows it (ADR-03) and they share a jurisdiction, or their type lists the
+// SVID in shared_svids (.specs/ligo-instances.md §6 rule 7), across every
+// process; for a process being changed, its proposed instances and
+// resolution replace its current ones.
+func (m *Manager) sharedSVIDs(changed *process, proposed Spec, resolved map[string]string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	owners := map[string][]*pluginv1.InstanceDescriptor{}
-	add := func(builtin bool, ins []*pluginv1.InstanceDescriptor, resolved map[string]string) {
+	type owner struct {
+		in           *pluginv1.InstanceDescriptor
+		jurisdiction string
+		shared       map[string]bool
+	}
+	owners := map[string][]owner{}
+	add := func(s Spec, ins []*pluginv1.InstanceDescriptor, resolved map[string]string) {
 		for _, in := range ins {
-			if !builtin { // builtins hold no SVID
-				owners[resolved[in.GetName()]] = append(owners[resolved[in.GetName()]], in)
+			if !s.Builtin { // builtins hold no SVID
+				id := resolved[in.GetName()]
+				owners[id] = append(owners[id], owner{in, s.Jurisdictions[in.GetName()], s.SharedSVIDs})
 			}
 		}
 	}
 	for _, p := range m.procs {
 		if p != changed {
 			p.mu.RLock()
-			add(p.spec.Builtin, p.spec.Instances, p.resolved)
+			add(p.spec, p.spec.Instances, p.resolved)
 			p.mu.RUnlock()
 		}
 	}
 	if changed != nil {
-		add(changed.spec.Builtin, ins, resolved)
+		add(proposed, proposed.Instances, resolved)
 	}
-	for id, ins := range owners {
-		for _, in := range ins {
-			if len(ins) > 1 && !in.GetAllowSharedSvid() {
-				return fmt.Errorf("instance %q: SVID %s is resolved by %d instances and allow_shared_svid is not set", in.GetName(), id, len(ins))
+	for id, os := range owners {
+		if len(os) < 2 {
+			continue
+		}
+		for _, o := range os {
+			if !o.in.GetAllowSharedSvid() {
+				return fmt.Errorf("instance %q: SVID %s is resolved by %d instances and allow_shared_svid is not set", o.in.GetName(), id, len(os))
+			}
+			if o.jurisdiction != os[0].jurisdiction && !o.shared[id] {
+				return fmt.Errorf("instance %q: SVID %s is shared across jurisdictions, and its type's shared_svids does not list it", o.in.GetName(), id)
 			}
 		}
 	}

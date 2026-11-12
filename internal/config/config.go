@@ -358,6 +358,10 @@ type PluginType struct {
 
 type InstanceBounds struct {
 	AllowedEndpoints []string `yaml:"allowed_endpoints"` // the syntax of §5.7; empty allows none
+	// SharedSVIDs are the SPIFFE IDs that instances of the type in different
+	// jurisdictions may share, each opting in (.specs/ligo-instances.md §6
+	// rule 7, T-22c); any other is shared within one jurisdiction only.
+	SharedSVIDs []string `yaml:"shared_svids"`
 }
 
 // Load reads server.yaml strictly: unknown keys are errors. It returns the

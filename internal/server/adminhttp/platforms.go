@@ -79,6 +79,8 @@ type platformDTO struct {
 	// for those who file and decide its requests (.specs/ligo-instances.md §10.1)
 	Revision   *int64                `json:"revision,omitempty"`
 	Definition *instances.Definition `json:"definition,omitempty"`
+	// Quarantined: its row does not verify, so it is not in force (§8 there)
+	Quarantined bool `json:"quarantined,omitempty"`
 }
 
 func platformOf(p *instances.Definition) platformDTO {
@@ -141,7 +143,16 @@ func (s *Server) getPlatform(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	p, ok := s.Instances.Current().Platform(name)
 	if !ok {
-		problem(w, http.StatusNotFound, "not-found", "platform "+name)
+		// not in force: a quarantined platform is shown, as stored, to those who
+		// file and decide its requests, so that they can file its fix
+		revision, def, decider, err := s.InstanceService.Get(r.Context(), caller(r), instances.Platform, name)
+		if err != nil || !decider {
+			problem(w, http.StatusNotFound, "not-found", "platform "+name)
+			return
+		}
+		d := platformOf(def)
+		d.Revision, d.Definition, d.Quarantined = &revision, def, true
+		reply(w, http.StatusOK, d)
 		return
 	}
 	d := platformOf(p)

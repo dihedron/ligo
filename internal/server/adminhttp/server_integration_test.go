@@ -1361,3 +1361,33 @@ func TestInstancesAPI(t *testing.T) {
 		t.Errorf("retire without expectedRevision: %d", r.code)
 	}
 }
+
+// TestQuarantinedPlatformShown: a platform not in force (its row does not
+// verify) is shown, as stored, to the operators of its jurisdiction only,
+// so that they can file its fix.
+func TestQuarantinedPlatformShown(t *testing.T) {
+	v := setup(t, config.AdminListener{})
+	olga, viewer := v.client(t, opID), v.client(t, viewerID)
+	ex, _ := v.s.Instances.Current().Platform("oracle-prod")
+	data, _ := json.Marshal(ex)
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+	name := "q-oracle-" + v.suffix
+	m["metadata"].(map[string]any)["name"] = name
+	r := v.do(t, olga, "POST", "/v1/admin/platforms", m)
+	cr, _ := r.body["changeRequest"].(map[string]any)
+	if r.code != 202 {
+		t.Fatalf("create: %d %+v", r.code, r.body)
+	}
+	if a := v.do(t, v.client(t, appID), "POST", "/v1/admin/change-requests/"+cr["id"].(string)+"/approve", map[string]any{"payloadSha256": cr["payloadSha256"]}); a.code != 200 {
+		t.Fatalf("approve: %d %+v", a.code, a.body)
+	}
+	// the server's set is fixed: the new platform is not in force, as if quarantined
+	got := v.do(t, olga, "GET", "/v1/admin/platforms/"+name, nil)
+	if got.code != 200 || got.body["quarantined"] != true || got.body["revision"] != float64(1) {
+		t.Errorf("operator: %d %+v", got.code, got.body)
+	}
+	if r := v.do(t, viewer, "GET", "/v1/admin/platforms/"+name, nil); r.code != 404 {
+		t.Errorf("viewer: %d", r.code)
+	}
+}

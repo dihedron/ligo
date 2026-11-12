@@ -157,7 +157,8 @@ func TestValidateTransient(t *testing.T) {
 	m.opts.Realms["test"] = test
 	before := len(m.procs)
 	d := &instances.Definition{Kind: "Platform", Type: "test.v1", Metadata: instances.Metadata{Name: "pg-new", Realm: "test"},
-		SVIDSelector: &instances.SVIDSelector{MatchExpr: "x"}, Config: []byte(`{"endpoints":["db.test.lab:5432"]}`)}
+		SVIDSelector: &instances.SVIDSelector{MatchExpr: "x"}, Config: []byte(`{"endpoints":["db.test.lab:5432"]}`),
+		IdentityProvider: &instances.Wiring{Type: "svid.v1", Instance: "svid-prod"}, SecretStore: &instances.Wiring{Type: "none.v1", Instance: "none-prod"}}
 	id, endpoints, err := Instances(m).Validate(context.Background(), instances.Platform, d)
 	if err != nil || id != "spiffe://test.lab/plugin/pg-new" || len(endpoints) != 1 || endpoints[0] != "db.test.lab:5432" {
 		t.Fatalf("got %q %v %v", id, endpoints, err)
@@ -168,5 +169,26 @@ func TestValidateTransient(t *testing.T) {
 	d.Metadata.Realm = "mars"
 	if _, _, err := Instances(m).Validate(context.Background(), instances.Platform, d); err == nil || !strings.Contains(err.Error(), "mars") {
 		t.Errorf("unknown realm: %v", err)
+	}
+}
+
+// TestSharedAcrossJurisdictions: reconcile refuses one SVID shared across
+// jurisdictions unless the type lists it in shared_svids (§6 rule 7).
+func TestSharedAcrossJurisdictions(t *testing.T) {
+	ctx := context.Background()
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := func(shared map[string]bool) []Spec {
+		s := prepare(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-a", "shared", true), instance("pg-b", "shared", true)},
+			Jurisdictions: map[string]string{"pg-a": "dc/a", "pg-b": "dc/b"}, SharedSVIDs: shared})
+		return s
+	}
+	if err := m.Reconcile(ctx, spec(nil)); err == nil || !strings.Contains(err.Error(), "shared_svids") {
+		t.Errorf("not listed: %v", err)
+	}
+	if err := m.Reconcile(ctx, spec(map[string]bool{"spiffe://prod.lab/plugin/shared": true})); err != nil {
+		t.Errorf("listed: %v", err)
 	}
 }

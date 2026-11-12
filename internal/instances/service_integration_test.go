@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -52,7 +51,8 @@ var (
 )
 
 // fakePlugins answers for every type: each instance resolves its own SVID,
-// unless its matchExpr names one, and reports its config's allowed_endpoints.
+// unless its matchExpr is hint == "shared", and reports its config's
+// allowed_endpoints.
 type fakePlugins struct{ resolved map[string]string }
 
 func (f *fakePlugins) Validate(_ context.Context, _ Kind, d *Definition) (string, []string, error) {
@@ -60,8 +60,8 @@ func (f *fakePlugins) Validate(_ context.Context, _ Kind, d *Definition) (string
 		return "", nil, nil
 	}
 	id := "spiffe://prod.internal/plugin/" + d.Metadata.Name
-	if strings.HasPrefix(d.SVIDSelector.MatchExpr, "spiffe://") {
-		id = d.SVIDSelector.MatchExpr
+	if d.SVIDSelector.MatchExpr == `hint == "shared"` {
+		id = "spiffe://prod.internal/plugin/shared"
 	}
 	return id, d.AllowedEndpoints(), nil
 }
@@ -290,17 +290,45 @@ func TestWiringAndInUse(t *testing.T) {
 	}
 }
 
-// TestSharedSVID: rule 7, one SVID for two instances only when both allow
-// it and share a jurisdiction.
+// TestSharedSVID: rule 7, one SVID for two instances only when both opt
+// in, and share a jurisdiction unless the type lists the SVID in
+// instance_bounds.shared_svids (T-22c).
 func TestSharedSVID(t *testing.T) {
 	w := setup(t)
 	ctx := context.Background()
-	a := w.unique(t, "vault-prod")
-	shared := "spiffe://prod.internal/plugin/shared"
-	w.plugins.resolved = map[string]string{"other": shared}
-	a.SVIDSelector = &SVIDSelector{MatchExpr: shared, JWTAudience: a.SVIDSelector.JWTAudience}
-	if _, err := w.s.Create(ctx, alice, SecretStore, body(t, a, nil)); status(err) != "validation-failed" {
-		t.Errorf("an SVID shared with another instance: %v", err)
+	id := "spiffe://prod.internal/plugin/shared"
+	sharing := func(d *Definition, optIn bool) *Definition {
+		return mutate(t, d, func(m map[string]any) {
+			m["svidSelector"] = map[string]any{"matchExpr": `hint == "shared"`, "jwtAudience": d.SVIDSelector.JWTAudience, "allowSharedSvid": optIn}
+		})
+	}
+	first := sharing(w.unique(t, "vault-prod"), true)
+	w.created(t, SecretStore, first)
+	w.plugins.resolved = map[string]string{first.Metadata.Name: id}
+	other := func(jurisdiction string, optIn bool) *Definition {
+		return sharing(mutate(t, w.unique(t, "vault-prod"), func(m map[string]any) { m["metadata"].(map[string]any)["jurisdiction"] = jurisdiction }), optIn)
+	}
+	for name, tc := range map[string]struct {
+		d      *Definition
+		listed bool
+		ok     bool
+	}{
+		"one jurisdiction, both opt in":  {other("dc/corp-prod", true), false, true},
+		"one jurisdiction, no opt-in":    {other("dc/corp-prod", false), false, false},
+		"another jurisdiction":           {other("dc/corp-test", true), false, false},
+		"another jurisdiction, listed":   {other("dc/corp-test", true), true, true},
+		"listed, but the other opts out": {other("dc/corp-test", false), true, false},
+	} {
+		typ := w.s.Env.Types["vault.v1"]
+		typ.SharedSVIDs = map[string]bool{}
+		if tc.listed {
+			typ.SharedSVIDs[id] = true
+		}
+		w.s.Env.Types["vault.v1"] = typ
+		_, err := w.s.Create(ctx, alice, SecretStore, body(t, tc.d, nil))
+		if (err == nil) != tc.ok || err != nil && status(err) != "validation-failed" {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 

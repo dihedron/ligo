@@ -79,6 +79,11 @@ func (c instanceChecks) Validate(ctx context.Context, k instances.Kind, d *insta
 	if err := checkConfig(described, in); err != nil {
 		return "", nil, refuse(422, "validation-failed", "%v", err)
 	}
+	if k == instances.Platform { // the plugin checks its config against the identity mode it is wired to
+		if err := wirePlatform(in, described.GetPlatformProvider(), c.m.described()); err != nil {
+			return "", nil, refuse(422, "validation-failed", "%v", err)
+		}
+	}
 	rctx, cancel := context.WithTimeout(ctx, c.m.opts.RPCTimeout)
 	defer cancel()
 	resp, err := client.Control.ValidateInstance(rctx, &pluginv1.ValidateInstanceRequest{Realm: spec.Realm.Name,

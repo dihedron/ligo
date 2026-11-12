@@ -20,6 +20,16 @@ type Type struct {
 	Kind    Kind
 	Builtin bool
 	Bounds  flows.Allowlist // instance_bounds.allowed_endpoints
+	// SharedSVIDs may be shared across jurisdictions (instance_bounds.shared_svids).
+	SharedSVIDs map[string]bool
+}
+
+// MayShare reports whether two instances of a type may resolve one SVID
+// (§6 rule 7, T-22c): both opt in, and they share a jurisdiction unless the
+// platform team listed the SVID in the type's shared_svids.
+func (t Type) MayShare(id string, a, b *Definition) bool {
+	optedIn := func(d *Definition) bool { return d.SVIDSelector != nil && d.SVIDSelector.AllowSharedSVID }
+	return optedIn(a) && optedIn(b) && (a.Metadata.Jurisdiction == b.Metadata.Jurisdiction || t.SharedSVIDs[id])
 }
 
 // Env is the part of server.yaml that instances are checked against.
@@ -43,14 +53,17 @@ func NewEnv(cfg *config.Config) (*Env, error) {
 	}
 	for kind, types := range map[Kind][]config.PluginType{IdentityProvider: cfg.IdentityProviders, SecretStore: cfg.SecretStores, Platform: cfg.PlatformProviders} {
 		for _, t := range types {
-			var bounds flows.Allowlist // a builtin's: none, it connects nowhere
+			typ := Type{Kind: kind, Builtin: t.Builtin, SharedSVIDs: map[string]bool{}} // a builtin's bounds: none, it connects nowhere
 			if t.InstanceBounds != nil {
 				var err error
-				if bounds, err = flows.ParseAllowlist(t.InstanceBounds.AllowedEndpoints); err != nil {
+				if typ.Bounds, err = flows.ParseAllowlist(t.InstanceBounds.AllowedEndpoints); err != nil {
 					return nil, fmt.Errorf("type %s: instance_bounds: %w", t.Type, err)
 				}
+				for _, id := range t.InstanceBounds.SharedSVIDs {
+					typ.SharedSVIDs[id] = true
+				}
 			}
-			env.Types[t.Type] = Type{Kind: kind, Builtin: t.Builtin, Bounds: bounds}
+			env.Types[t.Type] = typ
 		}
 	}
 	return env, nil

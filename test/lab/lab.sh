@@ -34,6 +34,8 @@ source "$LAB_DIR/lib/pg.sh"
 source "$LAB_DIR/lib/snapshot.sh"
 # shellcheck source=lib/serve.sh
 source "$LAB_DIR/lib/serve.sh"
+# shellcheck source=lib/instances.sh
+source "$LAB_DIR/lib/instances.sh"
 # shellcheck source=lib/lb.sh
 source "$LAB_DIR/lib/lb.sh"
 # shellcheck source=lib/otel.sh

@@ -26,6 +26,7 @@ platform_providers:
     sha256: "<its hash>"
     instance_bounds:
       allowed_endpoints: ["10.20.0.0/16", "vault.prod.internal:8200"]
+      shared_svids: ["spiffe://prod.internal/ligo/plugin/postgres"]
 ```
 
 `instance_bounds.allowed_endpoints` is the platform team's limit, root-owned with the rest of the file, on where an instance of the type may connect and send its bootstrap credential: the server it manages, the Vault of `bootstrap_credential`, its `allowed_endpoints` and its flows. A request naming an endpoint outside it is refused. It takes the syntax of `allowed_endpoints`: hosts, `host:port`, addresses and CIDRs, with no wildcards.
@@ -108,7 +109,7 @@ config:
     kv_path: kv/data/ligo/bootstrap/postgres
 ```
 
-`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. Once such a change is applied, `ligo` reports the levels and flows outside the new bounds (`SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`). On a platform with a `namespaceTemplate`, use `grantable_role_templates: ["{namespace}_read", "{namespace}_write"]` instead, so that a target can only offer the roles of its own schema; `{namespace}` stands for the schema, and the admin role needs `ADMIN OPTION` on each role when the schema is created. `grantable_roles` beside it are shared across tenants, and startup warns of them. Startup also warns of templates on a platform with no `namespaceTemplate`: an operator then picks the schema, and so any tenant's role. Two instances of one jurisdiction on one plugin may share its SVID: set `allowSharedSvid: true` on both selectors.
+`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. Once such a change is applied, `ligo` reports the levels and flows outside the new bounds (`SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`). On a platform with a `namespaceTemplate`, use `grantable_role_templates: ["{namespace}_read", "{namespace}_write"]` instead, so that a target can only offer the roles of its own schema; `{namespace}` stands for the schema, and the admin role needs `ADMIN OPTION` on each role when the schema is created. `grantable_roles` beside it are shared across tenants, and startup warns of them. Startup also warns of templates on a platform with no `namespaceTemplate`: an operator then picks the schema, and so any tenant's role. Instances on one plugin may share its SVID when each sets `allowSharedSvid: true`: within one jurisdiction, or across jurisdictions when the type's `instance_bounds.shared_svids` lists the SVID. List it only when every platform on it may read what its Vault role reads, such as the one admin credential of a shared server.
 
 `bootstrap_credential.jwt_audience` must be listed in the same instance's `svidSelector.jwtAudience`.
 

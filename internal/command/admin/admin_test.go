@@ -118,6 +118,8 @@ func TestReadCommands(t *testing.T) {
 		{"charter show", (&CharterShow{Base: b}).Execute, "GET /v1/admin/charter", []string{"sha256: ab"}},
 		{"cr list", (&ChangeRequestList{Base: b, AwaitingMe: true, Kind: "binding"}).Execute,
 			"GET /v1/admin/change-requests?awaitingMe=true&resourceType=BINDING", []string{"c1 BINDING b1 CREATE STANDARD PENDING TARGET olga"}},
+		{"cr list --kind identity-provider", (&ChangeRequestList{Base: b, Kind: "identity-provider"}).Execute,
+			"GET /v1/admin/change-requests?resourceType=IDENTITY_PROVIDER", nil},
 		{"cr get", (&ChangeRequestGet{Base: b, Args: struct {
 			ID string `positional-arg-name:"cr-id" description:"Change request UUID."`
 		}{"c1"}}).Execute, "GET /v1/admin/change-requests/c1", []string{"payloadSha256: ff"}},

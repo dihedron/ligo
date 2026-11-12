@@ -259,6 +259,8 @@ func TestPluginRules(t *testing.T) {
           - { name: security, jurisdiction: "sec/other" }`},
 		{"unknown core realm", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  realm: prod", "core_identity:\n  realm: nowhere"},
 		{"bad realm trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
+		{"bad shared_svids", `      allowed_endpoints: ["vault.prod.internal:8200", "vault.test.internal:8200"]`, `      allowed_endpoints: ["vault.prod.internal:8200", "vault.test.internal:8200"]
+      shared_svids: ["not-a-spiffe-id"]`},
 		{"bad instance_bounds", `allowed_endpoints: ["openldap.prod.internal:636", "vault.prod.internal:8200"]`, `allowed_endpoints: ["openldap.prod.internal:0"]`},
 		{"bad source jurisdiction mode", `mode: static, jurisdiction: "dc/corp-test"`, `mode: dynamic, jurisdiction: "dc/corp-test"`},
 	} {

@@ -85,6 +85,7 @@ type instanceDTO struct {
 	NetworkFlows []flows.Flow          `json:"networkFlows"`
 	Revision     *int64                `json:"revision,omitempty"`
 	Definition   *instances.Definition `json:"definition,omitempty"`
+	Quarantined  bool                  `json:"quarantined,omitempty"` // its row does not verify: not in force
 }
 
 func instanceOf(d *instances.Definition) instanceDTO {
@@ -123,6 +124,9 @@ func (s *Server) getInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := instanceOf(d)
+	if _, inForce := s.Instances.Current().Get(kindOf(r), d.Metadata.Name); !inForce {
+		out.Quarantined = true
+	}
 	if decider {
 		out.Revision, out.Definition = &revision, d
 	}

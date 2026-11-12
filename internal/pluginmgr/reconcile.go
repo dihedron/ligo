@@ -50,7 +50,7 @@ func (m *Manager) Reconcile(ctx context.Context, specs []Spec) error {
 		if sameInstances(p.instances(), s.Instances) {
 			continue
 		}
-		if err := m.apply(ctx, p, s.Instances); err != nil {
+		if err := m.apply(ctx, p, s); err != nil {
 			errs = append(errs, m.failed(s, err))
 		}
 	}
@@ -75,7 +75,8 @@ func sameInstances(a, b []*pluginv1.InstanceDescriptor) bool {
 
 // apply configures a running process with a new set of instances; on any
 // refusal the process keeps serving the old set.
-func (m *Manager) apply(ctx context.Context, p *process, ins []*pluginv1.InstanceDescriptor) error {
+func (m *Manager) apply(ctx context.Context, p *process, s Spec) error {
+	ins := s.Instances
 	p.mu.RLock()
 	old, c := p.spec, p.client
 	p.mu.RUnlock()
@@ -83,7 +84,7 @@ func (m *Manager) apply(ctx context.Context, p *process, ins []*pluginv1.Instanc
 		return errors.New("the process is down")
 	}
 	spec := old
-	spec.Instances = ins
+	spec.Instances, spec.Jurisdictions, spec.SharedSVIDs = ins, s.Jurisdictions, s.SharedSVIDs
 	if err := checkConfigs(p.described, ins); err != nil {
 		return err
 	}
@@ -95,14 +96,14 @@ func (m *Manager) apply(ctx context.Context, p *process, ins []*pluginv1.Instanc
 	if err != nil {
 		return err // the plugin keeps serving its previous set (protocol v2)
 	}
-	if err := m.sharedSVIDs(p, ins, resolved); err != nil {
+	if err := m.sharedSVIDs(p, spec, resolved); err != nil {
 		if _, restore := m.configure(ctx, c, old); restore != nil {
 			m.log.Error("plugin instances: the previous set could not be restored", "plugin", old.Type, "realm", old.Realm.Name, "error", restore)
 		}
 		return err
 	}
 	p.mu.Lock()
-	p.spec.Instances, p.resolved = ins, resolved
+	p.spec.Instances, p.spec.Jurisdictions, p.spec.SharedSVIDs, p.resolved = ins, s.Jurisdictions, s.SharedSVIDs, resolved
 	p.mu.Unlock()
 	var removed []*pluginv1.InstanceDescriptor
 	for _, in := range old.Instances {
@@ -144,7 +145,7 @@ func (m *Manager) add(ctx context.Context, s Spec) (err error) {
 		return err
 	}
 	p := &process{spec: s, described: d, client: c, resolved: resolved, stop: make(chan struct{})}
-	if err := m.sharedSVIDs(p, s.Instances, resolved); err != nil {
+	if err := m.sharedSVIDs(p, s, resolved); err != nil {
 		return err
 	}
 	m.mu.Lock()

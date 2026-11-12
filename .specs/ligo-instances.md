@@ -1,6 +1,6 @@
 # Instances managed at run time
 
-- **Version:** 1.3 (2026-11-12), approved; 1.1 to 1.3 add the changes of chunks 1 to 4 (§15)
+- **Version:** 1.4 (2026-11-12), approved; 1.1 to 1.4 add the changes of chunks 1 to 7 (§15)
 - **Backlog:** item 10
 - **Branch:** `feature/instances`, from main at v0.3.0 (`af2d9e7`)
 - **Main spec:** becomes 4.1.0 (breaking change); target release v0.4.0
@@ -44,12 +44,14 @@ platform_providers:
     sha256: "…"
     instance_bounds:
       allowed_endpoints: ["10.20.0.0/16", "vault.prod.internal:8200"]   # a network: any host and port in it
+      shared_svids: ["spiffe://prod.internal/ligo/plugin/postgres"]     # may serve platforms of several jurisdictions
   - type: none
     builtin: true
 ```
 
 1. **`instances:` and `platforms:` are refused.** The strict load already treats them as unknown keys; the error message names this spec, so that an operator with an old file knows where they went.
 2. **`instance_bounds.allowed_endpoints`** (new, REQUIRED for a non-builtin type; `[]` allows none) bounds every endpoint an instance of the type may name, with the syntax of `allowed_endpoints` (§5.7): a host, `host:port`, an address or a CIDR, with no wildcards. It is the platform team's root-owned limit on where a plugin may connect and send a bootstrap credential (§9, T-22a).
+2a. **`instance_bounds.shared_svids`** (new, optional) lists the SPIFFE IDs that instances of the type in different jurisdictions may share (§6 rule 7, T-22c).
 3. **Role bindings** (`authorization.bindings[].platforms`, including `trusted_automation`'s, rule 13) still name platforms. A name that no ACTIVE platform has is no error, as platforms come and go: it matches nothing, and startup logs it at `WARN`.
 4. Realms, the charter, role bindings, webhooks and every other section stay as they are.
 
@@ -147,7 +149,7 @@ In order; the first failure is `422 validation-failed`, unless noted.
 6. **Wiring** (platforms only).
    - `identityProvider` and `secretStore` name ACTIVE instances of those types, in the same realm.
    - The checks of today's `wirePlatform` also run: the identity mode is accepted, and the secret storage strategy is declared, or a single one is defaulted.
-7. **SVID selection.** An instance's `svidSelector` must not resolve to an SVID that another ACTIVE instance resolves to, unless both set `allowSharedSvid` and have the same jurisdiction. This applies to every instance of the same plugin process, so of the same type and realm.
+7. **SVID selection.** An instance's `svidSelector` must not resolve to an SVID that another ACTIVE instance of the same plugin process (type and realm) resolves to, unless both set `allowSharedSvid` (ADR-03) **and** either they have the same jurisdiction or the type's `instance_bounds.shared_svids` in `server.yaml` lists that SPIFFE ID. The list is the platform team's root-owned decision that one SVID, and so the secrets its Vault role reads, serves several jurisdictions, as one plugin SVID for every platform of one shared database server. Startup and every reconcile apply the same rule.
 8. **The plugin's own check.** The new RPC `ValidateInstance` (§7.1) runs: the plugin parses the config and selects the SVID, without changing the instances it serves and without connecting to any endpoint of the config. It runs before rule 5, which needs the endpoints it reports. An `Unavailable` answer is `503 dependency-unavailable` and the request stays filed.
 9. **Retiring (`DELETE`)** is refused with `409 instance-in-use` while:
    - an ACTIVE or DEPRECATED target is on the platform, or a binding not yet deleted names it;
@@ -211,7 +213,7 @@ The existing restart supervision (`restart_backoff`) is unchanged. A restarted p
 | T-22 (reworked) | An instance is changed to redirect wiring or loosen bounds. Before, this took a write to the root-owned `server.yaml`; now it takes a change request. | Four eyes in the instance's jurisdiction, never `AUTO`, `DELEGATED` or break-glass (§5). Every applied change is audited with its payload hash. Bindings keep their snapshots (INV-08). Types, their binaries and `instance_bounds` stay root-owned in `server.yaml`. |
 | T-22a (new) | Two colluding or compromised approvers point an instance at a host they control. The plugin then sends the bootstrap admin credential there, or trusts that host's TLS through a `ca_pem` of their own. | `instance_bounds.allowed_endpoints` per type, root-owned: an endpoint outside it is refused at filing and at approval (§6 rule 5). A changed `ca_pem` shows in the request's diff. |
 | T-22b (new) | Someone with database write access, but not ligo's, edits `instances` directly, bypassing change control. | The drift check (§8): a row whose hash or signature does not verify is quarantined and reported; the signing key is outside the database. **Residual:** a row rolled back to an earlier revision, with that revision's own signature, verifies, unless the audit still holds a newer revision. It can only restore a definition that was approved once. |
-| T-22c (new) | An instance's `svidSelector` selects the SVID of another instance served by the same plugin process. Its operator then acts with the other jurisdiction's identity, for example to read that jurisdiction's bootstrap credentials. | One SVID resolves to one instance, unless every instance sharing it sets `allowSharedSvid` and has the same jurisdiction (§6 rule 7), checked at filing, at approval and at each configuration. |
+| T-22c (new) | An instance's `svidSelector` selects the SVID of another instance served by the same plugin process. Its operator then acts with the other jurisdiction's identity, for example to read that jurisdiction's bootstrap credentials. | One SVID resolves to one instance, unless every instance sharing it sets `allowSharedSvid` and they share a jurisdiction, or the type's root-owned `instance_bounds.shared_svids` lists the SVID (§6 rule 7); checked at filing, at approval and at each configuration. **Residual:** the instances on a listed SVID can read what its Vault role reads, whatever their jurisdiction. |
 | T-22d (new) | A file path in an instance's config makes the plugin read a host file of the operator's choice. | No file paths: `ca_pem` replaces `ca_file` (§7.1). The schemas declare no path keys. |
 | T-22e (new) | A secret is pasted into an instance's config, where it would be stored, audited and shown in diffs. | `additionalProperties: false` in every plugin schema. Bootstrap credentials stay references (`bootstrap_credential`), as today. The guides say so. |
 | T-22f (new) | Rapid changes make every replica reconfigure its plugins without pause (denial of service). | Changes go through four-eyes requests and the API rate limits. Reconfiguration is debounced, 2 s. The number of processes is bounded by types × realms. |
@@ -321,8 +323,8 @@ CREATE TABLE instances (
 - **Fuzzing:** a fuzz target over manifest parsing with the new kinds, and one over definition normalization.
 - **Lab** (`lab.sh`):
   - `server.yaml` keeps types only;
-  - `test/lab/instances.yaml` holds today's instances;
-  - after `up`, the lab applies it as one LDAP user and approves as another, so every existing suite runs on instances made through the API.
+  - `test/lab/lib/instances.sh` generates today's instances, with the lab CA as `ca_pem` and the store of the backend in use;
+  - `serve install` files them with `ligo apply` as `ada` (admin.full_access) and has them approved by `ivy`, an approver of `dc/*`, `cloud/*` and `platform/*`, so every existing suite runs on instances made through the API.
   - New `serve test-instances`:
     - a platform added and a target bound on it, with no restart on any replica;
     - a platform's bounds tightened, and the violations reported;
@@ -365,3 +367,4 @@ Each chunk is a stop point: tests and code, then `make lint`, `make vuln` and `m
 | 1.1 | §8 | The registry reloads every `resolution_cache.full_reload_interval`, as the account registry (chunk 2). |
 | 1.2 | §7.2 | A process started for the check of a first instance; reconcile at every load, so refusals are retried (chunk 3). |
 | 1.3 | §10.1, §10.2 | Audit at `/{kind}/{name}/audit` and `ligo audit list`, as for the other resources; no `history` route or command (chunk 4). |
+| 1.4 | §3, §6 rule 7, T-22c | `instance_bounds.shared_svids`: sharing an SVID across jurisdictions needs the platform team's listing; startup and reconcile apply the same rule as filing (chunk 7, the user's choice (c)). |

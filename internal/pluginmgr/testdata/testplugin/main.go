@@ -155,6 +155,9 @@ func (control) ValidateInstance(_ context.Context, r *pluginv1.ValidateInstanceR
 			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": "+err.Error(), false)
 		}
 	}
+	if in.GetIdentityProviderType() != "" && in.GetIdentityMode() == pluginv1.IdentityMode_IDENTITY_MODE_UNSPECIFIED {
+		return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", "instance "+in.GetName()+": a platform must be wired to an identity mode", false)
+	}
 	id, err := resolve(in)
 	if err != nil {
 		return nil, err

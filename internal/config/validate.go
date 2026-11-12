@@ -131,6 +131,11 @@ func (c *checker) instances(cfg *Config, _ map[string]Realm) {
 				if _, err := flows.ParseAllowlist(t.InstanceBounds.AllowedEndpoints); err != nil {
 					c.failf(1, "%s %q: instance_bounds: %v", kind, t.Type, err)
 				}
+				for _, id := range t.InstanceBounds.SharedSVIDs {
+					if _, err := spiffeid.FromString(id); err != nil {
+						c.failf(1, "%s %q: instance_bounds.shared_svids: %q is not a SPIFFE ID", kind, t.Type, id)
+					}
+				}
 			}
 		}
 	}

@@ -21,7 +21,12 @@ func Templates(cfg *config.Config) (map[string]Spec, map[string]config.Realm, er
 	for k, group := range map[instances.Kind][]config.PluginType{instances.IdentityProvider: cfg.IdentityProviders,
 		instances.SecretStore: cfg.SecretStores, instances.Platform: cfg.PlatformProviders} {
 		for _, t := range group {
-			s := Spec{Type: t.Type, Kind: kindOf[k], Builtin: t.Builtin}
+			s := Spec{Type: t.Type, Kind: kindOf[k], Builtin: t.Builtin, SharedSVIDs: map[string]bool{}}
+			if t.InstanceBounds != nil {
+				for _, id := range t.InstanceBounds.SharedSVIDs {
+					s.SharedSVIDs[id] = true
+				}
+			}
 			if !t.Builtin {
 				checksum, err := hex.DecodeString(t.SHA256)
 				if err != nil || len(checksum) != 32 {
@@ -61,10 +66,12 @@ func Specs(cfg *config.Config, set *instances.Set) ([]Spec, error) {
 		key := d.Type + "\x00" + z.Name
 		if i, ok := index[key]; ok {
 			specs[i].Instances = append(specs[i].Instances, in)
+			specs[i].Jurisdictions[d.Metadata.Name] = d.Metadata.Jurisdiction
 			continue
 		}
 		spec := t
 		spec.Realm, spec.Instances = z, []*pluginv1.InstanceDescriptor{in}
+		spec.Jurisdictions = map[string]string{d.Metadata.Name: d.Metadata.Jurisdiction}
 		index[key] = len(specs)
 		specs = append(specs, spec)
 	}

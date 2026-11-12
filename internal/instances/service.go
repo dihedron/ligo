@@ -269,7 +269,7 @@ func (s *Service) wiring(ctx context.Context, d *Definition) error {
 }
 
 // shared checks rule 7: the SVID id resolves to no other instance of the
-// same plugin process, unless both allow it and share a jurisdiction.
+// same plugin process, unless the two may share it (Type.MayShare).
 func (s *Service) shared(k Kind, d *Definition, id string) error {
 	if id == "" { // a builtin has no SVID
 		return nil
@@ -280,11 +280,9 @@ func (s *Service) shared(k Kind, d *Definition, id string) error {
 			continue
 		}
 		o, ok := set.Get(k, name)
-		allowed := ok && o.Metadata.Jurisdiction == d.Metadata.Jurisdiction &&
-			o.SVIDSelector != nil && o.SVIDSelector.AllowSharedSVID && d.SVIDSelector != nil && d.SVIDSelector.AllowSharedSVID
-		if !allowed {
-			return refuse(422, "validation-failed", "svidSelector resolves %s, the SVID of %s %q: sharing needs allowSharedSvid on both and one jurisdiction",
-				id, k.ManifestKind(), name)
+		if !ok || !s.Env.Types[d.Type].MayShare(id, d, o) {
+			return refuse(422, "validation-failed", "svidSelector resolves %s, the SVID of %s %q: sharing needs allowSharedSvid on both, "+
+				"and one jurisdiction unless %s is in the instance_bounds.shared_svids of type %s", id, k.ManifestKind(), name, id, d.Type)
 		}
 	}
 	return nil

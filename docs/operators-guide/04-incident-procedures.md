@@ -78,7 +78,7 @@ If `ligo audit verify` answers `503 unavailable` instead, the chain is not broke
 
 1. Find who wrote to the database, as for an audit chain that does not verify.
 2. Compare the row with the instance's audit (`ligo audit list platform NAME`) and its last applied change request.
-3. File the intended definition again (`ligo apply`, with `expectedRevision` the row's revision), and have it approved: the new, signed row ends the quarantine and the metric returns to 0.
+3. File the intended definition again (`ligo apply`, with `expectedRevision` the row's revision: `ligo get platform NAME -o yaml` shows it with `quarantined: true` to the operators and approvers of its jurisdiction), and have it approved: the new, signed row ends the quarantine and the metric returns to 0.
 
 ## A trust bundle conflict
 

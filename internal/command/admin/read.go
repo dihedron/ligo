@@ -281,7 +281,7 @@ type ChangeRequestList struct {
 	Realm        string `long:"realm" description:"Filter by realm."`
 	Jurisdiction string `long:"jurisdiction" description:"Filter by jurisdiction pattern (any jurisdiction of the request)."`
 	AwaitingMe   bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
-	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
+	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" choice:"platform" choice:"identity-provider" choice:"secret-store" description:"Filter by resource kind."`
 	Name         string `short:"n" long:"name" description:"Filter by resource name."`
 }
 
@@ -291,7 +291,7 @@ func (cmd *ChangeRequestList) Execute([]string) error {
 		awaiting = "true"
 	}
 	q := cmd.query("status", cmd.Status, "realm", cmd.Realm, "jurisdiction", cmd.Jurisdiction, "awaitingMe", awaiting,
-		"resourceType", strings.ToUpper(cmd.Kind), "resourceName", cmd.Name)
+		"resourceType", strings.ToUpper(strings.ReplaceAll(cmd.Kind, "-", "_")), "resourceName", cmd.Name)
 	return cmd.get(path("change-requests"), q, columns["request"]...)
 }
 

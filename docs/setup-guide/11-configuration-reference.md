@@ -264,6 +264,7 @@ These sections hold plugin types only. Their instances (platforms, identity prov
 | `identity_providers.sha256` | Its hash, checked before every start. | 64 lowercase hex |
 | `identity_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
 | `identity_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `identity_providers.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
 | `secret_stores` | Stage 3: secret store types. | |
 | `secret_stores.type` | The plugin type, such as `openldap.v1`. | A type has one kind |
 | `secret_stores.builtin` | A plugin inside `ligo`, with no binary. | |
@@ -271,6 +272,7 @@ These sections hold plugin types only. Their instances (platforms, identity prov
 | `secret_stores.sha256` | Its hash, checked before every start. | 64 lowercase hex |
 | `secret_stores.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
 | `secret_stores.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `secret_stores.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
 | `platform_providers` | Stage 2: platform types. | |
 | `platform_providers.type` | The plugin type, such as `openldap.v1`. | A type has one kind |
 | `platform_providers.builtin` | A plugin inside `ligo`, with no binary. | |
@@ -278,6 +280,7 @@ These sections hold plugin types only. Their instances (platforms, identity prov
 | `platform_providers.sha256` | Its hash, checked before every start. | 64 lowercase hex |
 | `platform_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
 | `platform_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `platform_providers.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
 
 ## Instances
 
@@ -293,7 +296,7 @@ An instance is a manifest document of kind `IdentityProvider`, `SecretStore` or 
 | `type` | A plugin type of its kind in `server.yaml`. | Immutable |
 | `svidSelector.matchExpr` | Selects its SVID: an expression over `spiffe_id`, `trust_domain`, `path`, `hint`, `subject_cn` and `instance_name`. | Required unless builtin; one SVID |
 | `svidSelector.jwtAudience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
-| `svidSelector.allowSharedSvid` | Lets instances of one jurisdiction share an SPIFFE ID. | Both must set it |
+| `svidSelector.allowSharedSvid` | Lets instances share a SPIFFE ID: of one jurisdiction, or of several when the type's `shared_svids` lists it. | Both must set it |
 | `config` | The plugin's own settings: *Plugin configuration* below. | Checked against the plugin's schema |
 | `networkFlows` | Flows added to every binding that uses it (platforms, secret stores). | Within `allowed_endpoints` and `instance_bounds` |
 | `targetJurisdictions` | Platforms: jurisdiction patterns that may own targets here. | Default its jurisdiction and below |
