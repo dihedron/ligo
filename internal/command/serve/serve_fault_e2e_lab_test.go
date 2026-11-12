@@ -104,7 +104,7 @@ func TestServeFaultDatabase(t *testing.T) {
 	}
 	wg.Wait()
 	for i := range n {
-		phase(t, olga, name(i), "ACTIVE")
+		converged(t, olga, name(i))
 	}
 	// a new binding through each replica: the service works again
 	for i, a := range []*admin{dora, newAdmin(t, "dora")} {
@@ -149,5 +149,28 @@ func approveThrough(t *testing.T, dora *admin, filed map[string]any) {
 		if code, body := dora.do("GET", "/v1/admin/change-requests/"+id, nil); code == http.StatusOK {
 			cr = body
 		}
+	}
+}
+
+// converged waits for a binding to be ACTIVE, without anyone's help: a step
+// that met the stopped database fails with DATABASE_UNAVAILABLE, retryable,
+// and the automatic retry applies it once PostgreSQL is back (§6.3). Any
+// other failure fails the test.
+func converged(t *testing.T, a *admin, name string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		code, b := a.do("GET", "/v1/admin/bindings/"+name, nil)
+		st, _ := b["status"].(map[string]any)
+		msg, _ := st["message"].(string)
+		switch {
+		case code == http.StatusOK && st["phase"] == "ACTIVE":
+			return
+		case code == http.StatusOK && st["phase"] == "FAILED" && !strings.HasPrefix(msg, "DATABASE_UNAVAILABLE"):
+			t.Fatalf("binding %s failed: %v", name, st)
+		case time.Now().After(deadline):
+			t.Fatalf("binding %s: %d %v, not ACTIVE after the database came back", name, code, st)
+		}
+		time.Sleep(time.Second)
 	}
 }
