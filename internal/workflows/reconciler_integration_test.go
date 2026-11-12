@@ -19,7 +19,7 @@ import (
 )
 
 func (v *env) reconciler() *Reconciler {
-	return &Reconciler{Engine: v.engine, MaxConcurrent: 100, Rotation: map[string]time.Duration{"pg": 24 * time.Hour}}
+	return &Reconciler{Engine: v.engine, MaxConcurrent: 100, Rotation: func(p string) time.Duration { return map[string]time.Duration{"pg": 24 * time.Hour}[p] }}
 }
 
 func (v *env) workflowID(t *testing.T, id uuid.UUID) string {

@@ -21,6 +21,7 @@ import (
 	"github.com/dihedron/ligo/internal/catalog"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
@@ -61,8 +62,11 @@ type Server struct {
 	Targets   *targets.Service
 	Catalog   *catalog.Reader
 	Plugins   Plugins
-	Config    *config.Config // the platforms, read-only
-	Workflows Workflows
+	Config    *config.Config   // the charter and plugin types
+	Instances instances.Source // the platforms and instances in force
+	// InstanceService files and reads the instances' change requests.
+	InstanceService *instances.Service
+	Workflows       Workflows
 
 	pages *pages
 }
@@ -171,6 +175,23 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /ui/platforms/{name}/fields", s.platformFieldsFragment)
 	mux.HandleFunc("GET /ui/platforms/fields", s.platformFieldsFragment)
 	mux.HandleFunc("GET /ui/platforms", s.platforms)
+	mux.HandleFunc("GET /ui/platforms/new-form", s.instanceNewForm)
+	mux.HandleFunc("GET /ui/platforms/{name}/edit-form", s.instanceEditForm)
+	mux.HandleFunc("POST /ui/platforms", s.instanceSubmit)
+	mux.HandleFunc("PUT /ui/platforms/{name}", s.instanceSubmit)
+	mux.HandleFunc("DELETE /ui/platforms/{name}", s.instanceRetire)
+	mux.HandleFunc("GET /ui/identity-providers", s.instanceList)
+	mux.HandleFunc("GET /ui/identity-providers/new-form", s.instanceNewForm)
+	mux.HandleFunc("GET /ui/identity-providers/{name}/edit-form", s.instanceEditForm)
+	mux.HandleFunc("POST /ui/identity-providers", s.instanceSubmit)
+	mux.HandleFunc("PUT /ui/identity-providers/{name}", s.instanceSubmit)
+	mux.HandleFunc("DELETE /ui/identity-providers/{name}", s.instanceRetire)
+	mux.HandleFunc("GET /ui/secret-stores", s.instanceList)
+	mux.HandleFunc("GET /ui/secret-stores/new-form", s.instanceNewForm)
+	mux.HandleFunc("GET /ui/secret-stores/{name}/edit-form", s.instanceEditForm)
+	mux.HandleFunc("POST /ui/secret-stores", s.instanceSubmit)
+	mux.HandleFunc("PUT /ui/secret-stores/{name}", s.instanceSubmit)
+	mux.HandleFunc("DELETE /ui/secret-stores/{name}", s.instanceRetire)
 	mux.HandleFunc("GET /ui/catalog", s.catalogSearch)
 	mux.HandleFunc("GET /ui/catalog/{target}", s.catalogCard)
 	return mux

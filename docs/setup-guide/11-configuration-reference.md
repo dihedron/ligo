@@ -253,94 +253,60 @@
 
 ## Plugins: `identity_providers`, `secret_stores`, `platform_providers`
 
+These sections hold plugin types only. Their instances (platforms, identity provider instances and secret store instances) are not configuration: they are created and changed through the admin API, `ligo apply` or the web UI, each change a change request (see *Instances* below). A file that still lists `instances` or `platforms` is refused at startup.
+
 | Key | Meaning | Default and rules |
 | :------------------------- | :------------------------------- | :------------------ |
-| `identity_providers` | Stage 1. | |
-| `identity_providers.type` | Such as `openldap.v1`. | A type has one kind |
-| `identity_providers.builtin` | No binary. | |
-| `identity_providers.binary` | Relative to `plugins.directory`. | |
+| `identity_providers` | Stage 1: identity provider types. | |
+| `identity_providers.type` | The plugin type, such as `openldap.v1`. | A type has one kind |
+| `identity_providers.builtin` | A plugin inside `ligo`, with no binary. | |
+| `identity_providers.binary` | Its file, relative to `plugins.directory`. | |
 | `identity_providers.sha256` | Its hash, checked before every start. | 64 lowercase hex |
-| `identity_providers.instances` | Its instances. | |
-| `secret_stores` | Stage 3; the same fields, and `network_flows` on each instance. | |
-| `platform_providers` | Stage 2. | |
-| `platform_providers.platforms` | Each platform is one of its instances. | |
-| `identity_providers.instances.name` | Its name, unique within its kind. | |
-| `identity_providers.instances.realm` | Its realm. Wiring must stay within one realm. | |
-| `identity_providers.instances.svid_selector` | Selects its SVID: exactly one. | |
-| `identity_providers.instances.svid_selector.match_expr` | An expression over the SVID, as for `core_identity`. | |
-| `identity_providers.instances.svid_selector.jwt_audience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
-| `identity_providers.instances.svid_selector.allow_shared_svid` | Lets instances share a SPIFFE ID, as two platforms of one plugin do. | |
-| `identity_providers.instances.config` | The plugin's own settings: below. | |
-| `identity_providers.instances.network_flows` | Flows added to every binding that uses it. | |
-| `identity_providers.instances.network_flows.name` | Its name, unique within its kind. | |
-| `identity_providers.instances.network_flows.purpose` | What the flow is for, such as `DATA` or `CREDENTIALS`. | |
-| `identity_providers.instances.network_flows.protocol` | Such as `TCP`. | |
-| `identity_providers.instances.network_flows.destination` | A name or address, within its `allowed_endpoints`. | |
-| `identity_providers.instances.network_flows.ports` | Its ports. | |
-| `identity_providers.instances.network_flows.tls` | Whether the flow uses TLS. | |
-| `identity_providers.instances.network_flows.server_name` | The TLS name to expect. | |
-| `identity_providers.instances.network_flows.description` | What it is, for readers. | |
-| `secret_stores.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
+| `identity_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
+| `identity_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `identity_providers.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
+| `secret_stores` | Stage 3: secret store types. | |
+| `secret_stores.type` | The plugin type, such as `openldap.v1`. | A type has one kind |
 | `secret_stores.builtin` | A plugin inside `ligo`, with no binary. | |
 | `secret_stores.binary` | Its file, relative to `plugins.directory`. | |
-| `secret_stores.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
-| `secret_stores.instances` | Its instances. | |
-| `secret_stores.instances.name` | Its name, unique within its kind. | |
-| `secret_stores.instances.realm` | Its realm. Wiring must stay within one realm. | |
-| `secret_stores.instances.svid_selector` | Selects its SVID: exactly one. | |
-| `secret_stores.instances.svid_selector.match_expr` | An expression over the SVID, as for `core_identity`. | |
-| `secret_stores.instances.svid_selector.jwt_audience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
-| `secret_stores.instances.svid_selector.allow_shared_svid` | Lets instances share a SPIFFE ID, as two platforms of one plugin do. | |
-| `secret_stores.instances.config` | The plugin's own settings: below. | |
-| `secret_stores.instances.network_flows` | Flows added to every binding that uses it. | |
-| `secret_stores.instances.network_flows.name` | Its name, unique within its kind. | |
-| `secret_stores.instances.network_flows.purpose` | What the flow is for, such as `DATA` or `CREDENTIALS`. | |
-| `secret_stores.instances.network_flows.protocol` | Such as `TCP`. | |
-| `secret_stores.instances.network_flows.destination` | A name or address, within its `allowed_endpoints`. | |
-| `secret_stores.instances.network_flows.ports` | Its ports. | |
-| `secret_stores.instances.network_flows.tls` | Whether the flow uses TLS. | |
-| `secret_stores.instances.network_flows.server_name` | The TLS name to expect. | |
-| `secret_stores.instances.network_flows.description` | What it is, for readers. | |
-| `platform_providers.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
+| `secret_stores.sha256` | Its hash, checked before every start. | 64 lowercase hex |
+| `secret_stores.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
+| `secret_stores.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `secret_stores.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
+| `platform_providers` | Stage 2: platform types. | |
+| `platform_providers.type` | The plugin type, such as `openldap.v1`. | A type has one kind |
 | `platform_providers.builtin` | A plugin inside `ligo`, with no binary. | |
 | `platform_providers.binary` | Its file, relative to `plugins.directory`. | |
-| `platform_providers.sha256` | Its hash, 64 lowercase hex, checked before every start. | |
-| `platform_providers.platforms.name` | Its name, unique within its kind. | |
-| `platform_providers.platforms.realm` | Its realm. Wiring must stay within one realm. | |
-| `platform_providers.platforms.jurisdiction` | Its owner jurisdiction: the team that runs it. A jurisdiction path. | |
-| `platform_providers.platforms.target_jurisdictions` | Jurisdiction patterns that may own targets here. By default its jurisdiction and below. | |
-| `platform_providers.platforms.namespace_template` | What a target's namespace must be, from the placeholders of `charter.accounts.target_jurisdiction`, such as `{account}_{tenancy}`. Needs a plugin that declares a namespace field. | |
-| `platform_providers.platforms.display_name` | Its name, for readers. | |
-| `platform_providers.platforms.description` | What it is, for readers. | |
-| `platform_providers.platforms.contacts` | Who to ask. | |
-| `platform_providers.platforms.contacts.name` | Its name, unique within its kind. | |
-| `platform_providers.platforms.contacts.email` | Their address. | |
-| `platform_providers.platforms.check_existence` | Whether validation reads that a target's objects exist. | |
-| `platform_providers.platforms.network_flows` | Flows added to every binding that uses it. | |
-| `platform_providers.platforms.network_flows.name` | Its name, unique within its kind. | |
-| `platform_providers.platforms.network_flows.purpose` | What the flow is for, such as `DATA` or `CREDENTIALS`. | |
-| `platform_providers.platforms.network_flows.protocol` | Such as `TCP`. | |
-| `platform_providers.platforms.network_flows.destination` | A name or address, within its `allowed_endpoints`. | |
-| `platform_providers.platforms.network_flows.ports` | Its ports. | |
-| `platform_providers.platforms.network_flows.tls` | Whether the flow uses TLS. | |
-| `platform_providers.platforms.network_flows.server_name` | The TLS name to expect. | |
-| `platform_providers.platforms.network_flows.description` | What it is, for readers. | |
-| `platform_providers.platforms.identity_provider` | Its Stage 1: a type and an instance. | |
-| `platform_providers.platforms.identity_provider.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
-| `platform_providers.platforms.identity_provider.instance` | An instance of that type, in the same realm. | |
-| `platform_providers.platforms.identity_provider.secret_storage_strategy` | Such as `vault-static`. May be omitted when one fits. | |
-| `platform_providers.platforms.secret_store` | Its Stage 3: a type, an instance and a strategy. | |
-| `platform_providers.platforms.secret_store.type` | The plugin type, such as `postgres.v1`. A type has one kind. | |
-| `platform_providers.platforms.secret_store.instance` | An instance of that type, in the same realm. | |
-| `platform_providers.platforms.secret_store.secret_storage_strategy` | Such as `vault-static`. May be omitted when one fits. | |
-| `platform_providers.platforms.principal_prefix` | Replaces `bnd_` in new bindings' names, at most 4 characters. | |
-| `platform_providers.platforms.allowed_source_trust_domains` | The trust domains of its sources. | |
-| `platform_providers.platforms.rotation_interval` | How often static secrets rotate. | |
-| `platform_providers.platforms.svid_selector` | Selects its SVID: exactly one. | |
-| `platform_providers.platforms.svid_selector.match_expr` | An expression over the SVID, as for `core_identity`. | |
-| `platform_providers.platforms.svid_selector.jwt_audience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
-| `platform_providers.platforms.svid_selector.allow_shared_svid` | Lets instances share a SPIFFE ID, as two platforms of one plugin do. | |
-| `platform_providers.platforms.config` | The plugin's own settings: below. | |
+| `platform_providers.sha256` | Its hash, checked before every start. | 64 lowercase hex |
+| `platform_providers.instance_bounds` | Where instances of the type may connect and send a bootstrap credential. | Required unless builtin |
+| `platform_providers.instance_bounds.allowed_endpoints` | Hosts, `host:port`, addresses or CIDRs, as `allowed_endpoints`; no wildcards. | `[]` allows none |
+| `platform_providers.instance_bounds.shared_svids` | SPIFFE IDs that its instances in different jurisdictions may share, each opting in with `allowSharedSvid`. | Otherwise one jurisdiction per SVID |
+
+## Instances
+
+An instance is a manifest document of kind `IdentityProvider`, `SecretStore` or `Platform`, filed with `ligo apply -f`. Name, type, realm and jurisdiction are fixed at creation. A second person of the instance's jurisdiction approves each change.
+
+| Field | Meaning | Rules |
+| :------------------------- | :------------------------------- | :------------------ |
+| `kind` | `IdentityProvider`, `SecretStore` or `Platform`. | Required |
+| `metadata.name` | Its name, unique within its kind; never reused once retired. | Lowercase, digits and `-`; immutable |
+| `metadata.jurisdiction` | The team that owns it and decides its changes. | A jurisdiction path; immutable |
+| `metadata.realm` | Its realm. A platform's wiring stays within it. | Immutable |
+| `metadata.displayName`, `metadata.description`, `metadata.contacts` | For readers. | |
+| `type` | A plugin type of its kind in `server.yaml`. | Immutable |
+| `svidSelector.matchExpr` | Selects its SVID: an expression over `spiffe_id`, `trust_domain`, `path`, `hint`, `subject_cn` and `instance_name`. | Required unless builtin; one SVID |
+| `svidSelector.jwtAudience` | Audiences of its JWT-SVIDs; includes any `bootstrap_credential`'s. | |
+| `svidSelector.allowSharedSvid` | Lets instances share a SPIFFE ID: of one jurisdiction, or of several when the type's `shared_svids` lists it. | Both must set it |
+| `config` | The plugin's own settings: *Plugin configuration* below. | Checked against the plugin's schema |
+| `networkFlows` | Flows added to every binding that uses it (platforms, secret stores). | Within `allowed_endpoints` and `instance_bounds` |
+| `targetJurisdictions` | Platforms: jurisdiction patterns that may own targets here. | Default its jurisdiction and below |
+| `namespaceTemplate` | Platforms: what a target's namespace must be, such as `{account}_{tenancy}`. | Needs `charter.accounts`; fixed while it has targets |
+| `checkExistence` | Platforms: whether validation reads that a target's objects exist. | Default true |
+| `principalPrefix` | Platforms: replaces `bnd_` in new bindings' names. | At most 4 characters |
+| `allowedSourceTrustDomains` | Platforms: the trust domains of its sources. | Each accepted and in `charter.source_jurisdictions` |
+| `rotationInterval` | Platforms: how often static secrets rotate, such as `720h`. | |
+| `identityProvider.type`, `identityProvider.instance` | Platforms: its Stage 1, an ACTIVE instance in its realm. | |
+| `secretStore.type`, `secretStore.instance`, `secretStore.secretStorageStrategy` | Platforms: its Stage 3; the strategy may be omitted when one fits. | |
 
 :::
 
@@ -357,7 +323,7 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `grantable_role_templates` | Bounds per target: `{namespace}` stands for its schema. | Each holds `{namespace}` once |
 | `allowed_endpoints` | Where outputs may point. | Must contain `host:port` |
 | `bootstrap_credential` | The admin role's credential: `source: vault`, `address`, `auth_mount`, `role`, `jwt_audience`, `kv_path`. | `kv_path` only |
-| `ca_file` | Roots for the server and that Vault. | System roots |
+| `ca_pem` | PEM text of the roots for the server and that Vault; no file path. | System roots |
 | `directory_group` | The group role of directory-verified roles. | Required with `EXTERNAL_DIR` |
 
 | `vault.v1` field | Meaning | Rules |
@@ -371,7 +337,7 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `namespace` | A Vault Enterprise namespace. | |
 | `database_mount` | The database secrets engine. | `database` |
 | `db_connection` | The engine's connection to the target. | Required with `vault-dynamic` |
-| `ca_file` | Roots for `address`. | System roots |
+| `ca_pem` | PEM text of the roots for `address`; no file path. | System roots |
 
 | `openldap.v1` field | Meaning | Rules |
 | :----------------- | :----------------------------- | :------------------ |
@@ -379,4 +345,4 @@ Each plugin refuses, naming the field, any value that breaks its rules, and any 
 | `service_ou_dn` | The accounts' parent. | A valid DN |
 | `allowed_endpoints` | Must contain the `host:port` of `url`. | Required |
 | `bootstrap_credential` | The service account, with its DN as `username`. | `kv_path` only |
-| `ca_file` | Roots for the directory and that Vault. | System roots |
+| `ca_pem` | PEM text of the roots for the directory and that Vault; no file path. | System roots |

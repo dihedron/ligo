@@ -72,6 +72,14 @@ Before treating a missing range of entries as tampering, look for a `SYSTEM_AUDI
 
 If `ligo audit verify` answers `503 unavailable` instead, the chain is not broken: `ligo` cannot reach the `ligo-audit` key. Check Vault or OpenBao and the `ligo-sealer` policy.
 
+## An instance is quarantined
+
+`ligo_instance_drift{kind,name}` is 1, the log says `instance quarantined: its row does not verify`, and the audit holds `SYSTEM_INSTANCE_DRIFT`. The row of that platform or instance was changed in the database outside `ligo`: its hash or its signature by the audit key does not match. `ligo` no longer configures or offers it, and bindings on it cannot be provisioned. Treat it as a security incident.
+
+1. Find who wrote to the database, as for an audit chain that does not verify.
+2. Compare the row with the instance's audit (`ligo audit list platform NAME`) and its last applied change request.
+3. File the intended definition again (`ligo apply`, with `expectedRevision` the row's revision: `ligo get platform NAME -o yaml` shows it with `quarantined: true` to the operators and approvers of its jurisdiction), and have it approved: the new, signed row ends the quarantine and the metric returns to 0.
+
 ## A trust bundle conflict
 
 `ligo` fails closed on bundle errors: the workload API answers `503`. See *Troubleshooting*.

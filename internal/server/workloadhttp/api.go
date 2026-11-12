@@ -104,8 +104,8 @@ func (s *Server) Flows(ctx context.Context, caller spiffeid.ID, target string) (
 	for i, b := range list {
 		store := b.SecretStoreInstance
 		items[i] = BindingFlows{Binding: b.Name, Source: b.SourceName, Target: b.TargetName,
-			Flows: flows.Effective(b.TargetName, s.Rules.Allow[b.Platform].Within(byBinding[b.ID]), b.Platform, s.Rules.PlatformFlows[b.Platform],
-				store, s.Rules.StoreFlows[store], s.Rules.Ligo)}
+			Flows: flows.Effective(b.TargetName, s.Rules.Allow(b.Platform).Within(byBinding[b.ID]), b.Platform, s.Rules.PlatformFlows(b.Platform),
+				store, s.Rules.StoreFlows(store), s.Rules.Ligo)}
 	}
 	doc, err := document(caller, items)
 	return doc, list, err

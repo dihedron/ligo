@@ -127,6 +127,7 @@ Working:
 - the plugin host;
 - change requests, and the charter that every jurisdiction complies with;
 - accounts, registered at run time through the API, the CLI or the web UI, each with its own operators and approvers, and tenancies whose namespace is checked on the platform ([.specs/ligo-tenancy.md](.specs/ligo-tenancy.md));
+- platforms, identity provider instances and secret store instances, managed at run time through the API, `ligo apply` and the web UI, each change approved by a second person of their jurisdiction and applied by every replica with no restart; `server.yaml` keeps the plugin types and the limits on where their instances connect ([.specs/ligo-instances.md](.specs/ligo-instances.md));
 - the binding workflows, including break-glass, with failures from a retryable cause retried automatically, and deletes that remove access first;
 - the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported, with the change requests it names ([.specs/ligo-pruning.md](.specs/ligo-pruning.md), [.specs/ligo-cr-pruning.md](.specs/ligo-cr-pruning.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
@@ -144,6 +145,8 @@ Known limits of v0.3.0:
 - a compromised `ligo_app` can record an audit export it never took, and so prune entries early down to a day old; the gap shows in `ligo_audit_oldest_entry_timestamp_seconds`, and the SIEM's forwarded copy stays the authoritative record (spec T-13);
 - the change requests in an audit export are outside the hash chain and the checkpoints: only the file's SHA-256, recorded with the export, fixes them (spec §4.3);
 - the daily prune's age rules are tested against PostgreSQL, but on the lab only through a backdated checkpoint, as a lab is hours old (`.specs/ligo-pruning.md`);
+- an instance's database row that someone rolls back to an earlier approved revision, with that revision's signature, is not detected once the audit no longer holds the newer one (`.specs/ligo-instances.md` T-22b);
+- a new instance's SPIRE registration entry is created by hand: `ligo` refuses the instance until the plugin can select its SVID (`.specs/ligo-instances.md` §14);
 - the Accounts web page has not yet been tested by hand in a browser (manual test A-1, backlog item 4);
 - some account scenarios are not yet tested on the lab: a group removal ending a role at the session re-check, break-glass through an account group, hostile DNs against a real OpenLDAP, and account workloads attested by a real SPIRE agent (backlog item 5).
 

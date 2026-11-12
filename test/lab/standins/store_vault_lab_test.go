@@ -28,7 +28,7 @@ func storeVault(t *testing.T) *pluginmgr.Client {
 	t.Helper()
 	address := labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR")
 	cfg := `{"address":"` + address + `","allowed_endpoints":["` + strings.TrimPrefix(address, "https://") + `"],"auth_mount":"jwt-spiffe","role":"ligo-plugin-vault",` +
-		`"db_connection":"lab-pg","workload_jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") + `","ca_file":"` + labEnv(t, "LIGO_TEST_CA") + `"}`
+		`"db_connection":"lab-pg","workload_jwt_audience":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_AUDIENCE") + `","ca_pem":` + caPEM(t) + `}`
 	return start(t, "ligo-plugin-vault", pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, &pluginv1.InstanceDescriptor{Name: "vault-prod", ConfigJson: cfg})
 }
 

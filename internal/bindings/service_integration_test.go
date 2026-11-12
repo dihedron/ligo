@@ -5,6 +5,7 @@ package bindings
 import (
 	"context"
 	"fmt"
+	"github.com/dihedron/ligo/internal/instances"
 	"os"
 	"regexp"
 	"strings"
@@ -93,7 +94,7 @@ func setup(t *testing.T) (*Service, *pgxpool.Pool, *world, *plugin) {
 	s := &Service{DB: pools.App, Rules: rules(t), Validate: p.validate}
 	s.Requests = &changerequests.Service{DB: pools.App, Policy: cfg.Policy(), TTL: cfg.Authorization.Approval.ChangeRequestTTL,
 		Resources: map[string]changerequests.Resource{"BINDING": s}, BreakGlassRules: cfg.BreakGlass}
-	srcRules, err := sources.NewRules(cfg)
+	srcRules, err := sources.NewRules(cfg, s.Rules.Instances)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,9 +649,7 @@ func ledgerWorld(t *testing.T, s *Service, o *pgxpool.Pool, w *world) (source, o
 	t.Helper()
 	ctx := context.Background()
 	source, other = "led-src-"+w.suffix, "other-"+w.suffix
-	p := s.Rules.Platforms["oracle-prod"]
-	p.Name = "oracle-prod-2"
-	s.Rules.Platforms[p.Name] = p
+	withPlatform(s.Rules, "oracle-prod", func(p *instances.Definition) { p.Metadata.Name = "oracle-prod-2" })
 	target := uuid.NewV7()
 	err := pgx.BeginFunc(ctx, o, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, created_by, updated_by)

@@ -1,0 +1,53 @@
+# The instances of planning-guide/examples/single-network-zone.yaml, created with ligo apply (.specs/ligo-instances.md).
+---
+kind: IdentityProvider
+metadata: {name: local-corp, jurisdiction: corp/platform, realm: corp}
+type: target-local.v1
+---
+kind: SecretStore
+metadata: {name: vault-corp, jurisdiction: corp/platform, realm: corp}
+type: vault.v1
+svidSelector:
+  matchExpr: path == "/ligo/plugin/vault"
+  jwtAudience: ['https://vault.corp.internal']
+config:
+  address: https://vault.corp.internal:8200
+  allowed_endpoints: ['vault.corp.internal:8200']
+  auth_mount: jwt-spiffe
+  role: ligo-plugin-vault
+  workload_jwt_audience: https://vault.corp.internal
+networkFlows:
+- name: vault
+  purpose: CREDENTIALS
+  protocol: TCP
+  destination: vault.corp.internal
+  ports: [8200]
+  tls: true
+  serverName: vault.corp.internal
+---
+kind: Platform
+metadata: {name: pg-main, jurisdiction: corp/platform, realm: corp}
+type: postgres.v1
+targetJurisdictions: [corp/data/*]
+allowedSourceTrustDomains: [corp.internal]
+networkFlows:
+- name: postgres
+  purpose: DATA
+  protocol: TCP
+  destination: pg.corp.internal
+  ports: [5432]
+  tls: true
+  serverName: pg.corp.internal
+identityProvider: {type: target-local.v1, instance: local-corp}
+secretStore: {type: vault.v1, instance: vault-corp, secretStorageStrategy: vault-static}
+svidSelector:
+  matchExpr: path == "/ligo/plugin/postgres"
+  jwtAudience: ['https://vault.corp.internal']
+config:
+  host: pg.corp.internal
+  port: 5432
+  database: apps
+  grantable_roles: [APPS_RO, APPS_RW]
+  allowed_endpoints: ['pg.corp.internal:5432']
+  bootstrap_credential: {source: vault, address: 'https://vault.corp.internal:8200', auth_mount: jwt-spiffe, role: ligo-plugin-postgres, jwt_audience: 'https://vault.corp.internal',
+    kv_path: kv/data/ligo/bootstrap/postgres}

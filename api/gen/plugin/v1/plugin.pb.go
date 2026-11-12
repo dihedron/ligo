@@ -1277,7 +1277,7 @@ type DescribeResponse struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	PluginType               string                 `protobuf:"bytes,1,opt,name=plugin_type,json=pluginType,proto3" json:"plugin_type,omitempty"` // e.g. "oracle.v1"
 	Kind                     PluginKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=ligo.plugin.v1.PluginKind" json:"kind,omitempty"`
-	PluginProtocolVersion    uint32                 `protobuf:"varint,3,opt,name=plugin_protocol_version,json=pluginProtocolVersion,proto3" json:"plugin_protocol_version,omitempty"`           // MUST be 1
+	PluginProtocolVersion    uint32                 `protobuf:"varint,3,opt,name=plugin_protocol_version,json=pluginProtocolVersion,proto3" json:"plugin_protocol_version,omitempty"`           // MUST be 2
 	PluginVersion            string                 `protobuf:"bytes,4,opt,name=plugin_version,json=pluginVersion,proto3" json:"plugin_version,omitempty"`                                      // semver of the binary
 	InstanceConfigSchemaJson string                 `protobuf:"bytes,5,opt,name=instance_config_schema_json,json=instanceConfigSchemaJson,proto3" json:"instance_config_schema_json,omitempty"` // JSON Schema 2020-12
 	// Types that are valid to be assigned to Capabilities:
@@ -1783,6 +1783,118 @@ func (x *ConfigureInstancesResponse) GetResolved() []*ResolvedInstance {
 	return nil
 }
 
+type ValidateInstanceRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Realm                string                 `protobuf:"bytes,1,opt,name=realm,proto3" json:"realm,omitempty"`
+	SpiffeWorkloadSocket string                 `protobuf:"bytes,2,opt,name=spiffe_workload_socket,json=spiffeWorkloadSocket,proto3" json:"spiffe_workload_socket,omitempty"`
+	Instance             *InstanceDescriptor    `protobuf:"bytes,3,opt,name=instance,proto3" json:"instance,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *ValidateInstanceRequest) Reset() {
+	*x = ValidateInstanceRequest{}
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateInstanceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateInstanceRequest) ProtoMessage() {}
+
+func (x *ValidateInstanceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateInstanceRequest.ProtoReflect.Descriptor instead.
+func (*ValidateInstanceRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ValidateInstanceRequest) GetRealm() string {
+	if x != nil {
+		return x.Realm
+	}
+	return ""
+}
+
+func (x *ValidateInstanceRequest) GetSpiffeWorkloadSocket() string {
+	if x != nil {
+		return x.SpiffeWorkloadSocket
+	}
+	return ""
+}
+
+func (x *ValidateInstanceRequest) GetInstance() *InstanceDescriptor {
+	if x != nil {
+		return x.Instance
+	}
+	return nil
+}
+
+type ValidateInstanceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SpiffeId      string                 `protobuf:"bytes,1,opt,name=spiffe_id,json=spiffeId,proto3" json:"spiffe_id,omitempty"` // the SVID the instance would resolve
+	Endpoints     []string               `protobuf:"bytes,2,rep,name=endpoints,proto3" json:"endpoints,omitempty"`               // every host:port it would connect to or send a credential to
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateInstanceResponse) Reset() {
+	*x = ValidateInstanceResponse{}
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateInstanceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateInstanceResponse) ProtoMessage() {}
+
+func (x *ValidateInstanceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateInstanceResponse.ProtoReflect.Descriptor instead.
+func (*ValidateInstanceResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ValidateInstanceResponse) GetSpiffeId() string {
+	if x != nil {
+		return x.SpiffeId
+	}
+	return ""
+}
+
+func (x *ValidateInstanceResponse) GetEndpoints() []string {
+	if x != nil {
+		return x.Endpoints
+	}
+	return nil
+}
+
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Instance      string                 `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
@@ -1792,7 +1904,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[18]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1804,7 +1916,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[18]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1817,7 +1929,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{18}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *HealthRequest) GetInstance() string {
@@ -1837,7 +1949,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[19]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1849,7 +1961,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[19]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1862,7 +1974,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{19}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HealthResponse) GetServing() bool {
@@ -1889,7 +2001,7 @@ type UIFieldOption struct {
 
 func (x *UIFieldOption) Reset() {
 	*x = UIFieldOption{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[20]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1901,7 +2013,7 @@ func (x *UIFieldOption) String() string {
 func (*UIFieldOption) ProtoMessage() {}
 
 func (x *UIFieldOption) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[20]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1914,7 +2026,7 @@ func (x *UIFieldOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UIFieldOption.ProtoReflect.Descriptor instead.
 func (*UIFieldOption) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{20}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UIFieldOption) GetLabel() string {
@@ -1948,7 +2060,7 @@ type UIFieldDescriptor struct {
 
 func (x *UIFieldDescriptor) Reset() {
 	*x = UIFieldDescriptor{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[21]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1960,7 +2072,7 @@ func (x *UIFieldDescriptor) String() string {
 func (*UIFieldDescriptor) ProtoMessage() {}
 
 func (x *UIFieldDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[21]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1973,7 +2085,7 @@ func (x *UIFieldDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UIFieldDescriptor.ProtoReflect.Descriptor instead.
 func (*UIFieldDescriptor) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{21}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UIFieldDescriptor) GetJsonKey() string {
@@ -2048,7 +2160,7 @@ type UIForm struct {
 
 func (x *UIForm) Reset() {
 	*x = UIForm{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[22]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2060,7 +2172,7 @@ func (x *UIForm) String() string {
 func (*UIForm) ProtoMessage() {}
 
 func (x *UIForm) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[22]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2073,7 +2185,7 @@ func (x *UIForm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UIForm.ProtoReflect.Descriptor instead.
 func (*UIForm) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{22}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UIForm) GetFields() []*UIFieldDescriptor {
@@ -2092,7 +2204,7 @@ type GetUISchemasRequest struct {
 
 func (x *GetUISchemasRequest) Reset() {
 	*x = GetUISchemasRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[23]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2104,7 +2216,7 @@ func (x *GetUISchemasRequest) String() string {
 func (*GetUISchemasRequest) ProtoMessage() {}
 
 func (x *GetUISchemasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[23]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2117,7 +2229,7 @@ func (x *GetUISchemasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUISchemasRequest.ProtoReflect.Descriptor instead.
 func (*GetUISchemasRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{23}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetUISchemasRequest) GetInstance() string {
@@ -2140,7 +2252,7 @@ type GetUISchemasResponse struct {
 
 func (x *GetUISchemasResponse) Reset() {
 	*x = GetUISchemasResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[24]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2152,7 +2264,7 @@ func (x *GetUISchemasResponse) String() string {
 func (*GetUISchemasResponse) ProtoMessage() {}
 
 func (x *GetUISchemasResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[24]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2165,7 +2277,7 @@ func (x *GetUISchemasResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUISchemasResponse.ProtoReflect.Descriptor instead.
 func (*GetUISchemasResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{24}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetUISchemasResponse) GetPluginType() string {
@@ -2213,7 +2325,7 @@ type PortRange struct {
 
 func (x *PortRange) Reset() {
 	*x = PortRange{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[25]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2225,7 +2337,7 @@ func (x *PortRange) String() string {
 func (*PortRange) ProtoMessage() {}
 
 func (x *PortRange) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[25]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2238,7 +2350,7 @@ func (x *PortRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortRange.ProtoReflect.Descriptor instead.
 func (*PortRange) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{25}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PortRange) GetLow() uint32 {
@@ -2270,7 +2382,7 @@ type NetworkFlow struct {
 
 func (x *NetworkFlow) Reset() {
 	*x = NetworkFlow{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[26]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2282,7 +2394,7 @@ func (x *NetworkFlow) String() string {
 func (*NetworkFlow) ProtoMessage() {}
 
 func (x *NetworkFlow) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[26]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2295,7 +2407,7 @@ func (x *NetworkFlow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkFlow.ProtoReflect.Descriptor instead.
 func (*NetworkFlow) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{26}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *NetworkFlow) GetName() string {
@@ -2358,7 +2470,7 @@ type EnsureIdentityRequest struct {
 
 func (x *EnsureIdentityRequest) Reset() {
 	*x = EnsureIdentityRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[27]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2370,7 +2482,7 @@ func (x *EnsureIdentityRequest) String() string {
 func (*EnsureIdentityRequest) ProtoMessage() {}
 
 func (x *EnsureIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[27]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2383,7 +2495,7 @@ func (x *EnsureIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureIdentityRequest.ProtoReflect.Descriptor instead.
 func (*EnsureIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{27}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *EnsureIdentityRequest) GetInstance() string {
@@ -2416,7 +2528,7 @@ type EnsureIdentityResponse struct {
 
 func (x *EnsureIdentityResponse) Reset() {
 	*x = EnsureIdentityResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[28]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2428,7 +2540,7 @@ func (x *EnsureIdentityResponse) String() string {
 func (*EnsureIdentityResponse) ProtoMessage() {}
 
 func (x *EnsureIdentityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[28]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2441,7 +2553,7 @@ func (x *EnsureIdentityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureIdentityResponse.ProtoReflect.Descriptor instead.
 func (*EnsureIdentityResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{28}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *EnsureIdentityResponse) GetArtifact() *IdentityArtifact {
@@ -2462,7 +2574,7 @@ type CleanupIdentityRequest struct {
 
 func (x *CleanupIdentityRequest) Reset() {
 	*x = CleanupIdentityRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[29]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2474,7 +2586,7 @@ func (x *CleanupIdentityRequest) String() string {
 func (*CleanupIdentityRequest) ProtoMessage() {}
 
 func (x *CleanupIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[29]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2487,7 +2599,7 @@ func (x *CleanupIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupIdentityRequest.ProtoReflect.Descriptor instead.
 func (*CleanupIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{29}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CleanupIdentityRequest) GetInstance() string {
@@ -2520,7 +2632,7 @@ type CleanupIdentityResponse struct {
 
 func (x *CleanupIdentityResponse) Reset() {
 	*x = CleanupIdentityResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[30]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2532,7 +2644,7 @@ func (x *CleanupIdentityResponse) String() string {
 func (*CleanupIdentityResponse) ProtoMessage() {}
 
 func (x *CleanupIdentityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[30]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2545,7 +2657,7 @@ func (x *CleanupIdentityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupIdentityResponse.ProtoReflect.Descriptor instead.
 func (*CleanupIdentityResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{30}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CleanupIdentityResponse) GetSkippedNotOwner() bool {
@@ -2566,7 +2678,7 @@ type AccessLevelInput struct {
 
 func (x *AccessLevelInput) Reset() {
 	*x = AccessLevelInput{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[31]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2578,7 +2690,7 @@ func (x *AccessLevelInput) String() string {
 func (*AccessLevelInput) ProtoMessage() {}
 
 func (x *AccessLevelInput) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[31]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2591,7 +2703,7 @@ func (x *AccessLevelInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessLevelInput.ProtoReflect.Descriptor instead.
 func (*AccessLevelInput) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{31}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *AccessLevelInput) GetName() string {
@@ -2621,7 +2733,7 @@ type ValidateTargetRequest struct {
 
 func (x *ValidateTargetRequest) Reset() {
 	*x = ValidateTargetRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[32]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2633,7 +2745,7 @@ func (x *ValidateTargetRequest) String() string {
 func (*ValidateTargetRequest) ProtoMessage() {}
 
 func (x *ValidateTargetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[32]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2646,7 +2758,7 @@ func (x *ValidateTargetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateTargetRequest.ProtoReflect.Descriptor instead.
 func (*ValidateTargetRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{32}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ValidateTargetRequest) GetInstance() string {
@@ -2695,7 +2807,7 @@ type NormalizedAccessLevel struct {
 
 func (x *NormalizedAccessLevel) Reset() {
 	*x = NormalizedAccessLevel{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[33]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2707,7 +2819,7 @@ func (x *NormalizedAccessLevel) String() string {
 func (*NormalizedAccessLevel) ProtoMessage() {}
 
 func (x *NormalizedAccessLevel) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[33]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2720,7 +2832,7 @@ func (x *NormalizedAccessLevel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NormalizedAccessLevel.ProtoReflect.Descriptor instead.
 func (*NormalizedAccessLevel) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{33}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *NormalizedAccessLevel) GetName() string {
@@ -2756,7 +2868,7 @@ type ValidateTargetResponse struct {
 
 func (x *ValidateTargetResponse) Reset() {
 	*x = ValidateTargetResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[34]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2768,7 +2880,7 @@ func (x *ValidateTargetResponse) String() string {
 func (*ValidateTargetResponse) ProtoMessage() {}
 
 func (x *ValidateTargetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[34]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2781,7 +2893,7 @@ func (x *ValidateTargetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateTargetResponse.ProtoReflect.Descriptor instead.
 func (*ValidateTargetResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{34}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ValidateTargetResponse) GetValid() bool {
@@ -2827,7 +2939,7 @@ type ValidateBindingRequest struct {
 
 func (x *ValidateBindingRequest) Reset() {
 	*x = ValidateBindingRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[35]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2839,7 +2951,7 @@ func (x *ValidateBindingRequest) String() string {
 func (*ValidateBindingRequest) ProtoMessage() {}
 
 func (x *ValidateBindingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[35]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2852,7 +2964,7 @@ func (x *ValidateBindingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateBindingRequest.ProtoReflect.Descriptor instead.
 func (*ValidateBindingRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{35}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ValidateBindingRequest) GetInstance() string {
@@ -2910,7 +3022,7 @@ type ValidateBindingResponse struct {
 
 func (x *ValidateBindingResponse) Reset() {
 	*x = ValidateBindingResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[36]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2922,7 +3034,7 @@ func (x *ValidateBindingResponse) String() string {
 func (*ValidateBindingResponse) ProtoMessage() {}
 
 func (x *ValidateBindingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[36]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2935,7 +3047,7 @@ func (x *ValidateBindingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateBindingResponse.ProtoReflect.Descriptor instead.
 func (*ValidateBindingResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{36}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ValidateBindingResponse) GetValid() bool {
@@ -2986,7 +3098,7 @@ type EnsureTargetRequest struct {
 
 func (x *EnsureTargetRequest) Reset() {
 	*x = EnsureTargetRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[37]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2998,7 +3110,7 @@ func (x *EnsureTargetRequest) String() string {
 func (*EnsureTargetRequest) ProtoMessage() {}
 
 func (x *EnsureTargetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[37]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3011,7 +3123,7 @@ func (x *EnsureTargetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureTargetRequest.ProtoReflect.Descriptor instead.
 func (*EnsureTargetRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{37}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *EnsureTargetRequest) GetInstance() string {
@@ -3060,7 +3172,7 @@ type EnsureTargetResponse struct {
 
 func (x *EnsureTargetResponse) Reset() {
 	*x = EnsureTargetResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[38]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3072,7 +3184,7 @@ func (x *EnsureTargetResponse) String() string {
 func (*EnsureTargetResponse) ProtoMessage() {}
 
 func (x *EnsureTargetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[38]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3085,7 +3197,7 @@ func (x *EnsureTargetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureTargetResponse.ProtoReflect.Descriptor instead.
 func (*EnsureTargetResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{38}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *EnsureTargetResponse) GetFinalizedClientSpecJson() []byte {
@@ -3124,7 +3236,7 @@ type CleanupTargetRequest struct {
 
 func (x *CleanupTargetRequest) Reset() {
 	*x = CleanupTargetRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[39]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3136,7 +3248,7 @@ func (x *CleanupTargetRequest) String() string {
 func (*CleanupTargetRequest) ProtoMessage() {}
 
 func (x *CleanupTargetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[39]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3149,7 +3261,7 @@ func (x *CleanupTargetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupTargetRequest.ProtoReflect.Descriptor instead.
 func (*CleanupTargetRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{39}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *CleanupTargetRequest) GetInstance() string {
@@ -3196,7 +3308,7 @@ type CleanupTargetResponse struct {
 
 func (x *CleanupTargetResponse) Reset() {
 	*x = CleanupTargetResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[40]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3208,7 +3320,7 @@ func (x *CleanupTargetResponse) String() string {
 func (*CleanupTargetResponse) ProtoMessage() {}
 
 func (x *CleanupTargetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[40]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3221,7 +3333,7 @@ func (x *CleanupTargetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupTargetResponse.ProtoReflect.Descriptor instead.
 func (*CleanupTargetResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{40}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CleanupTargetResponse) GetSkippedNotOwner() bool {
@@ -3245,7 +3357,7 @@ type EnsureSecretStoreRequest struct {
 
 func (x *EnsureSecretStoreRequest) Reset() {
 	*x = EnsureSecretStoreRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[41]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3257,7 +3369,7 @@ func (x *EnsureSecretStoreRequest) String() string {
 func (*EnsureSecretStoreRequest) ProtoMessage() {}
 
 func (x *EnsureSecretStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[41]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3270,7 +3382,7 @@ func (x *EnsureSecretStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureSecretStoreRequest.ProtoReflect.Descriptor instead.
 func (*EnsureSecretStoreRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{41}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *EnsureSecretStoreRequest) GetInstance() string {
@@ -3325,7 +3437,7 @@ type EnsureSecretStoreResponse struct {
 
 func (x *EnsureSecretStoreResponse) Reset() {
 	*x = EnsureSecretStoreResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[42]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3337,7 +3449,7 @@ func (x *EnsureSecretStoreResponse) String() string {
 func (*EnsureSecretStoreResponse) ProtoMessage() {}
 
 func (x *EnsureSecretStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[42]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3350,7 +3462,7 @@ func (x *EnsureSecretStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureSecretStoreResponse.ProtoReflect.Descriptor instead.
 func (*EnsureSecretStoreResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{42}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *EnsureSecretStoreResponse) GetFinalizedClientAuthJson() []byte {
@@ -3380,7 +3492,7 @@ type CleanupSecretStoreRequest struct {
 
 func (x *CleanupSecretStoreRequest) Reset() {
 	*x = CleanupSecretStoreRequest{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[43]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3392,7 +3504,7 @@ func (x *CleanupSecretStoreRequest) String() string {
 func (*CleanupSecretStoreRequest) ProtoMessage() {}
 
 func (x *CleanupSecretStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[43]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3405,7 +3517,7 @@ func (x *CleanupSecretStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupSecretStoreRequest.ProtoReflect.Descriptor instead.
 func (*CleanupSecretStoreRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{43}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *CleanupSecretStoreRequest) GetInstance() string {
@@ -3452,7 +3564,7 @@ type CleanupSecretStoreResponse struct {
 
 func (x *CleanupSecretStoreResponse) Reset() {
 	*x = CleanupSecretStoreResponse{}
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[44]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3464,7 +3576,7 @@ func (x *CleanupSecretStoreResponse) String() string {
 func (*CleanupSecretStoreResponse) ProtoMessage() {}
 
 func (x *CleanupSecretStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[44]
+	mi := &file_api_proto_plugin_v1_plugin_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3477,7 +3589,7 @@ func (x *CleanupSecretStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupSecretStoreResponse.ProtoReflect.Descriptor instead.
 func (*CleanupSecretStoreResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{44}
+	return file_api_proto_plugin_v1_plugin_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *CleanupSecretStoreResponse) GetSkippedNotOwner() bool {
@@ -3609,7 +3721,14 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\binstance\x18\x01 \x01(\tR\binstance\x12\x1b\n" +
 	"\tspiffe_id\x18\x02 \x01(\tR\bspiffeId\"Z\n" +
 	"\x1aConfigureInstancesResponse\x12<\n" +
-	"\bresolved\x18\x01 \x03(\v2 .ligo.plugin.v1.ResolvedInstanceR\bresolved\"+\n" +
+	"\bresolved\x18\x01 \x03(\v2 .ligo.plugin.v1.ResolvedInstanceR\bresolved\"\xa5\x01\n" +
+	"\x17ValidateInstanceRequest\x12\x14\n" +
+	"\x05realm\x18\x01 \x01(\tR\x05realm\x124\n" +
+	"\x16spiffe_workload_socket\x18\x02 \x01(\tR\x14spiffeWorkloadSocket\x12>\n" +
+	"\binstance\x18\x03 \x01(\v2\".ligo.plugin.v1.InstanceDescriptorR\binstance\"U\n" +
+	"\x18ValidateInstanceResponse\x12\x1b\n" +
+	"\tspiffe_id\x18\x01 \x01(\tR\bspiffeId\x12\x1c\n" +
+	"\tendpoints\x18\x02 \x03(\tR\tendpoints\"+\n" +
 	"\rHealthRequest\x12\x1a\n" +
 	"\binstance\x18\x01 \x01(\tR\binstance\"Q\n" +
 	"\x0eHealthResponse\x12\x18\n" +
@@ -3773,10 +3892,11 @@ const file_api_proto_plugin_v1_plugin_proto_rawDesc = "" +
 	"\fFlowProtocol\x12\x1d\n" +
 	"\x19FLOW_PROTOCOL_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11FLOW_PROTOCOL_TCP\x10\x01\x12\x15\n" +
-	"\x11FLOW_PROTOCOL_UDP\x10\x022\x94\x02\n" +
+	"\x11FLOW_PROTOCOL_UDP\x10\x022\xfb\x02\n" +
 	"\rPluginControl\x12M\n" +
 	"\bDescribe\x12\x1f.ligo.plugin.v1.DescribeRequest\x1a .ligo.plugin.v1.DescribeResponse\x12k\n" +
-	"\x12ConfigureInstances\x12).ligo.plugin.v1.ConfigureInstancesRequest\x1a*.ligo.plugin.v1.ConfigureInstancesResponse\x12G\n" +
+	"\x12ConfigureInstances\x12).ligo.plugin.v1.ConfigureInstancesRequest\x1a*.ligo.plugin.v1.ConfigureInstancesResponse\x12e\n" +
+	"\x10ValidateInstance\x12'.ligo.plugin.v1.ValidateInstanceRequest\x1a(.ligo.plugin.v1.ValidateInstanceResponse\x12G\n" +
 	"\x06Health\x12\x1d.ligo.plugin.v1.HealthRequest\x1a\x1e.ligo.plugin.v1.HealthResponse2\xdd\x01\n" +
 	"\x16IdentityProviderPlugin\x12_\n" +
 	"\x0eEnsureIdentity\x12%.ligo.plugin.v1.EnsureIdentityRequest\x1a&.ligo.plugin.v1.EnsureIdentityResponse\x12b\n" +
@@ -3804,7 +3924,7 @@ func file_api_proto_plugin_v1_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_plugin_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_api_proto_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_api_proto_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_api_proto_plugin_v1_plugin_proto_goTypes = []any{
 	(IdentityMode)(0),                    // 0: ligo.plugin.v1.IdentityMode
 	(PluginKind)(0),                      // 1: ligo.plugin.v1.PluginKind
@@ -3831,43 +3951,45 @@ var file_api_proto_plugin_v1_plugin_proto_goTypes = []any{
 	(*ConfigureInstancesRequest)(nil),    // 22: ligo.plugin.v1.ConfigureInstancesRequest
 	(*ResolvedInstance)(nil),             // 23: ligo.plugin.v1.ResolvedInstance
 	(*ConfigureInstancesResponse)(nil),   // 24: ligo.plugin.v1.ConfigureInstancesResponse
-	(*HealthRequest)(nil),                // 25: ligo.plugin.v1.HealthRequest
-	(*HealthResponse)(nil),               // 26: ligo.plugin.v1.HealthResponse
-	(*UIFieldOption)(nil),                // 27: ligo.plugin.v1.UIFieldOption
-	(*UIFieldDescriptor)(nil),            // 28: ligo.plugin.v1.UIFieldDescriptor
-	(*UIForm)(nil),                       // 29: ligo.plugin.v1.UIForm
-	(*GetUISchemasRequest)(nil),          // 30: ligo.plugin.v1.GetUISchemasRequest
-	(*GetUISchemasResponse)(nil),         // 31: ligo.plugin.v1.GetUISchemasResponse
-	(*PortRange)(nil),                    // 32: ligo.plugin.v1.PortRange
-	(*NetworkFlow)(nil),                  // 33: ligo.plugin.v1.NetworkFlow
-	(*EnsureIdentityRequest)(nil),        // 34: ligo.plugin.v1.EnsureIdentityRequest
-	(*EnsureIdentityResponse)(nil),       // 35: ligo.plugin.v1.EnsureIdentityResponse
-	(*CleanupIdentityRequest)(nil),       // 36: ligo.plugin.v1.CleanupIdentityRequest
-	(*CleanupIdentityResponse)(nil),      // 37: ligo.plugin.v1.CleanupIdentityResponse
-	(*AccessLevelInput)(nil),             // 38: ligo.plugin.v1.AccessLevelInput
-	(*ValidateTargetRequest)(nil),        // 39: ligo.plugin.v1.ValidateTargetRequest
-	(*NormalizedAccessLevel)(nil),        // 40: ligo.plugin.v1.NormalizedAccessLevel
-	(*ValidateTargetResponse)(nil),       // 41: ligo.plugin.v1.ValidateTargetResponse
-	(*ValidateBindingRequest)(nil),       // 42: ligo.plugin.v1.ValidateBindingRequest
-	(*ValidateBindingResponse)(nil),      // 43: ligo.plugin.v1.ValidateBindingResponse
-	(*EnsureTargetRequest)(nil),          // 44: ligo.plugin.v1.EnsureTargetRequest
-	(*EnsureTargetResponse)(nil),         // 45: ligo.plugin.v1.EnsureTargetResponse
-	(*CleanupTargetRequest)(nil),         // 46: ligo.plugin.v1.CleanupTargetRequest
-	(*CleanupTargetResponse)(nil),        // 47: ligo.plugin.v1.CleanupTargetResponse
-	(*EnsureSecretStoreRequest)(nil),     // 48: ligo.plugin.v1.EnsureSecretStoreRequest
-	(*EnsureSecretStoreResponse)(nil),    // 49: ligo.plugin.v1.EnsureSecretStoreResponse
-	(*CleanupSecretStoreRequest)(nil),    // 50: ligo.plugin.v1.CleanupSecretStoreRequest
-	(*CleanupSecretStoreResponse)(nil),   // 51: ligo.plugin.v1.CleanupSecretStoreResponse
-	nil,                                  // 52: ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
-	nil,                                  // 53: ligo.plugin.v1.IdentityArtifact.MetadataEntry
+	(*ValidateInstanceRequest)(nil),      // 25: ligo.plugin.v1.ValidateInstanceRequest
+	(*ValidateInstanceResponse)(nil),     // 26: ligo.plugin.v1.ValidateInstanceResponse
+	(*HealthRequest)(nil),                // 27: ligo.plugin.v1.HealthRequest
+	(*HealthResponse)(nil),               // 28: ligo.plugin.v1.HealthResponse
+	(*UIFieldOption)(nil),                // 29: ligo.plugin.v1.UIFieldOption
+	(*UIFieldDescriptor)(nil),            // 30: ligo.plugin.v1.UIFieldDescriptor
+	(*UIForm)(nil),                       // 31: ligo.plugin.v1.UIForm
+	(*GetUISchemasRequest)(nil),          // 32: ligo.plugin.v1.GetUISchemasRequest
+	(*GetUISchemasResponse)(nil),         // 33: ligo.plugin.v1.GetUISchemasResponse
+	(*PortRange)(nil),                    // 34: ligo.plugin.v1.PortRange
+	(*NetworkFlow)(nil),                  // 35: ligo.plugin.v1.NetworkFlow
+	(*EnsureIdentityRequest)(nil),        // 36: ligo.plugin.v1.EnsureIdentityRequest
+	(*EnsureIdentityResponse)(nil),       // 37: ligo.plugin.v1.EnsureIdentityResponse
+	(*CleanupIdentityRequest)(nil),       // 38: ligo.plugin.v1.CleanupIdentityRequest
+	(*CleanupIdentityResponse)(nil),      // 39: ligo.plugin.v1.CleanupIdentityResponse
+	(*AccessLevelInput)(nil),             // 40: ligo.plugin.v1.AccessLevelInput
+	(*ValidateTargetRequest)(nil),        // 41: ligo.plugin.v1.ValidateTargetRequest
+	(*NormalizedAccessLevel)(nil),        // 42: ligo.plugin.v1.NormalizedAccessLevel
+	(*ValidateTargetResponse)(nil),       // 43: ligo.plugin.v1.ValidateTargetResponse
+	(*ValidateBindingRequest)(nil),       // 44: ligo.plugin.v1.ValidateBindingRequest
+	(*ValidateBindingResponse)(nil),      // 45: ligo.plugin.v1.ValidateBindingResponse
+	(*EnsureTargetRequest)(nil),          // 46: ligo.plugin.v1.EnsureTargetRequest
+	(*EnsureTargetResponse)(nil),         // 47: ligo.plugin.v1.EnsureTargetResponse
+	(*CleanupTargetRequest)(nil),         // 48: ligo.plugin.v1.CleanupTargetRequest
+	(*CleanupTargetResponse)(nil),        // 49: ligo.plugin.v1.CleanupTargetResponse
+	(*EnsureSecretStoreRequest)(nil),     // 50: ligo.plugin.v1.EnsureSecretStoreRequest
+	(*EnsureSecretStoreResponse)(nil),    // 51: ligo.plugin.v1.EnsureSecretStoreResponse
+	(*CleanupSecretStoreRequest)(nil),    // 52: ligo.plugin.v1.CleanupSecretStoreRequest
+	(*CleanupSecretStoreResponse)(nil),   // 53: ligo.plugin.v1.CleanupSecretStoreResponse
+	nil,                                  // 54: ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
+	nil,                                  // 55: ligo.plugin.v1.IdentityArtifact.MetadataEntry
 }
 var file_api_proto_plugin_v1_plugin_proto_depIdxs = []int32{
 	9,  // 0: ligo.plugin.v1.InstanceDescriptor.svid_selector:type_name -> ligo.plugin.v1.SVIDSelectorConfig
 	0,  // 1: ligo.plugin.v1.InstanceDescriptor.identity_mode:type_name -> ligo.plugin.v1.IdentityMode
 	2,  // 2: ligo.plugin.v1.BindingContext.operation:type_name -> ligo.plugin.v1.Operation
-	52, // 3: ligo.plugin.v1.StaticSecret.extra_fields:type_name -> ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
+	54, // 3: ligo.plugin.v1.StaticSecret.extra_fields:type_name -> ligo.plugin.v1.StaticSecret.ExtraFieldsEntry
 	0,  // 4: ligo.plugin.v1.IdentityArtifact.mode:type_name -> ligo.plugin.v1.IdentityMode
-	53, // 5: ligo.plugin.v1.IdentityArtifact.metadata:type_name -> ligo.plugin.v1.IdentityArtifact.MetadataEntry
+	55, // 5: ligo.plugin.v1.IdentityArtifact.metadata:type_name -> ligo.plugin.v1.IdentityArtifact.MetadataEntry
 	12, // 6: ligo.plugin.v1.IdentityArtifact.static_secret:type_name -> ligo.plugin.v1.StaticSecret
 	0,  // 7: ligo.plugin.v1.SecretProvisioningPayload.mode:type_name -> ligo.plugin.v1.IdentityMode
 	12, // 8: ligo.plugin.v1.SecretProvisioningPayload.static_secret:type_name -> ligo.plugin.v1.StaticSecret
@@ -3883,64 +4005,67 @@ var file_api_proto_plugin_v1_plugin_proto_depIdxs = []int32{
 	3,  // 18: ligo.plugin.v1.SecretStorageStrategy.subject_match:type_name -> ligo.plugin.v1.SubjectMatch
 	10, // 19: ligo.plugin.v1.ConfigureInstancesRequest.instances:type_name -> ligo.plugin.v1.InstanceDescriptor
 	23, // 20: ligo.plugin.v1.ConfigureInstancesResponse.resolved:type_name -> ligo.plugin.v1.ResolvedInstance
-	4,  // 21: ligo.plugin.v1.UIFieldDescriptor.field_type:type_name -> ligo.plugin.v1.UIFieldType
-	27, // 22: ligo.plugin.v1.UIFieldDescriptor.options:type_name -> ligo.plugin.v1.UIFieldOption
-	28, // 23: ligo.plugin.v1.UIForm.fields:type_name -> ligo.plugin.v1.UIFieldDescriptor
-	29, // 24: ligo.plugin.v1.GetUISchemasResponse.target_definition:type_name -> ligo.plugin.v1.UIForm
-	29, // 25: ligo.plugin.v1.GetUISchemasResponse.access_level_grants:type_name -> ligo.plugin.v1.UIForm
-	29, // 26: ligo.plugin.v1.GetUISchemasResponse.binding_parameters:type_name -> ligo.plugin.v1.UIForm
-	5,  // 27: ligo.plugin.v1.NetworkFlow.purpose:type_name -> ligo.plugin.v1.FlowPurpose
-	6,  // 28: ligo.plugin.v1.NetworkFlow.protocol:type_name -> ligo.plugin.v1.FlowProtocol
-	32, // 29: ligo.plugin.v1.NetworkFlow.ports:type_name -> ligo.plugin.v1.PortRange
-	11, // 30: ligo.plugin.v1.EnsureIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	13, // 31: ligo.plugin.v1.EnsureIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	13, // 32: ligo.plugin.v1.EnsureIdentityResponse.artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	11, // 33: ligo.plugin.v1.CleanupIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	13, // 34: ligo.plugin.v1.CleanupIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
-	38, // 35: ligo.plugin.v1.ValidateTargetRequest.access_levels:type_name -> ligo.plugin.v1.AccessLevelInput
-	33, // 36: ligo.plugin.v1.ValidateTargetRequest.network_flows:type_name -> ligo.plugin.v1.NetworkFlow
-	40, // 37: ligo.plugin.v1.ValidateTargetResponse.access_levels:type_name -> ligo.plugin.v1.NormalizedAccessLevel
-	11, // 38: ligo.plugin.v1.EnsureTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	13, // 39: ligo.plugin.v1.EnsureTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	15, // 40: ligo.plugin.v1.EnsureTargetResponse.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
-	7,  // 41: ligo.plugin.v1.EnsureTargetResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
-	11, // 42: ligo.plugin.v1.CleanupTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	13, // 43: ligo.plugin.v1.CleanupTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	11, // 44: ligo.plugin.v1.EnsureSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	15, // 45: ligo.plugin.v1.EnsureSecretStoreRequest.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
-	13, // 46: ligo.plugin.v1.EnsureSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	7,  // 47: ligo.plugin.v1.EnsureSecretStoreResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
-	11, // 48: ligo.plugin.v1.CleanupSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
-	13, // 49: ligo.plugin.v1.CleanupSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
-	16, // 50: ligo.plugin.v1.PluginControl.Describe:input_type -> ligo.plugin.v1.DescribeRequest
-	22, // 51: ligo.plugin.v1.PluginControl.ConfigureInstances:input_type -> ligo.plugin.v1.ConfigureInstancesRequest
-	25, // 52: ligo.plugin.v1.PluginControl.Health:input_type -> ligo.plugin.v1.HealthRequest
-	34, // 53: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:input_type -> ligo.plugin.v1.EnsureIdentityRequest
-	36, // 54: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:input_type -> ligo.plugin.v1.CleanupIdentityRequest
-	30, // 55: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v1.GetUISchemasRequest
-	39, // 56: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v1.ValidateTargetRequest
-	42, // 57: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v1.ValidateBindingRequest
-	44, // 58: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v1.EnsureTargetRequest
-	46, // 59: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v1.CleanupTargetRequest
-	48, // 60: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:input_type -> ligo.plugin.v1.EnsureSecretStoreRequest
-	50, // 61: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:input_type -> ligo.plugin.v1.CleanupSecretStoreRequest
-	17, // 62: ligo.plugin.v1.PluginControl.Describe:output_type -> ligo.plugin.v1.DescribeResponse
-	24, // 63: ligo.plugin.v1.PluginControl.ConfigureInstances:output_type -> ligo.plugin.v1.ConfigureInstancesResponse
-	26, // 64: ligo.plugin.v1.PluginControl.Health:output_type -> ligo.plugin.v1.HealthResponse
-	35, // 65: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:output_type -> ligo.plugin.v1.EnsureIdentityResponse
-	37, // 66: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:output_type -> ligo.plugin.v1.CleanupIdentityResponse
-	31, // 67: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v1.GetUISchemasResponse
-	41, // 68: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v1.ValidateTargetResponse
-	43, // 69: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v1.ValidateBindingResponse
-	45, // 70: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v1.EnsureTargetResponse
-	47, // 71: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v1.CleanupTargetResponse
-	49, // 72: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:output_type -> ligo.plugin.v1.EnsureSecretStoreResponse
-	51, // 73: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:output_type -> ligo.plugin.v1.CleanupSecretStoreResponse
-	62, // [62:74] is the sub-list for method output_type
-	50, // [50:62] is the sub-list for method input_type
-	50, // [50:50] is the sub-list for extension type_name
-	50, // [50:50] is the sub-list for extension extendee
-	0,  // [0:50] is the sub-list for field type_name
+	10, // 21: ligo.plugin.v1.ValidateInstanceRequest.instance:type_name -> ligo.plugin.v1.InstanceDescriptor
+	4,  // 22: ligo.plugin.v1.UIFieldDescriptor.field_type:type_name -> ligo.plugin.v1.UIFieldType
+	29, // 23: ligo.plugin.v1.UIFieldDescriptor.options:type_name -> ligo.plugin.v1.UIFieldOption
+	30, // 24: ligo.plugin.v1.UIForm.fields:type_name -> ligo.plugin.v1.UIFieldDescriptor
+	31, // 25: ligo.plugin.v1.GetUISchemasResponse.target_definition:type_name -> ligo.plugin.v1.UIForm
+	31, // 26: ligo.plugin.v1.GetUISchemasResponse.access_level_grants:type_name -> ligo.plugin.v1.UIForm
+	31, // 27: ligo.plugin.v1.GetUISchemasResponse.binding_parameters:type_name -> ligo.plugin.v1.UIForm
+	5,  // 28: ligo.plugin.v1.NetworkFlow.purpose:type_name -> ligo.plugin.v1.FlowPurpose
+	6,  // 29: ligo.plugin.v1.NetworkFlow.protocol:type_name -> ligo.plugin.v1.FlowProtocol
+	34, // 30: ligo.plugin.v1.NetworkFlow.ports:type_name -> ligo.plugin.v1.PortRange
+	11, // 31: ligo.plugin.v1.EnsureIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 32: ligo.plugin.v1.EnsureIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	13, // 33: ligo.plugin.v1.EnsureIdentityResponse.artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	11, // 34: ligo.plugin.v1.CleanupIdentityRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 35: ligo.plugin.v1.CleanupIdentityRequest.previous_artifact:type_name -> ligo.plugin.v1.IdentityArtifact
+	40, // 36: ligo.plugin.v1.ValidateTargetRequest.access_levels:type_name -> ligo.plugin.v1.AccessLevelInput
+	35, // 37: ligo.plugin.v1.ValidateTargetRequest.network_flows:type_name -> ligo.plugin.v1.NetworkFlow
+	42, // 38: ligo.plugin.v1.ValidateTargetResponse.access_levels:type_name -> ligo.plugin.v1.NormalizedAccessLevel
+	11, // 39: ligo.plugin.v1.EnsureTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 40: ligo.plugin.v1.EnsureTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	15, // 41: ligo.plugin.v1.EnsureTargetResponse.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
+	7,  // 42: ligo.plugin.v1.EnsureTargetResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
+	11, // 43: ligo.plugin.v1.CleanupTargetRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 44: ligo.plugin.v1.CleanupTargetRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	11, // 45: ligo.plugin.v1.EnsureSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	15, // 46: ligo.plugin.v1.EnsureSecretStoreRequest.secret_payload:type_name -> ligo.plugin.v1.SecretProvisioningPayload
+	13, // 47: ligo.plugin.v1.EnsureSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	7,  // 48: ligo.plugin.v1.EnsureSecretStoreResponse.declared_endpoints:type_name -> ligo.plugin.v1.Endpoint
+	11, // 49: ligo.plugin.v1.CleanupSecretStoreRequest.binding:type_name -> ligo.plugin.v1.BindingContext
+	13, // 50: ligo.plugin.v1.CleanupSecretStoreRequest.identity:type_name -> ligo.plugin.v1.IdentityArtifact
+	16, // 51: ligo.plugin.v1.PluginControl.Describe:input_type -> ligo.plugin.v1.DescribeRequest
+	22, // 52: ligo.plugin.v1.PluginControl.ConfigureInstances:input_type -> ligo.plugin.v1.ConfigureInstancesRequest
+	25, // 53: ligo.plugin.v1.PluginControl.ValidateInstance:input_type -> ligo.plugin.v1.ValidateInstanceRequest
+	27, // 54: ligo.plugin.v1.PluginControl.Health:input_type -> ligo.plugin.v1.HealthRequest
+	36, // 55: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:input_type -> ligo.plugin.v1.EnsureIdentityRequest
+	38, // 56: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:input_type -> ligo.plugin.v1.CleanupIdentityRequest
+	32, // 57: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:input_type -> ligo.plugin.v1.GetUISchemasRequest
+	41, // 58: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:input_type -> ligo.plugin.v1.ValidateTargetRequest
+	44, // 59: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:input_type -> ligo.plugin.v1.ValidateBindingRequest
+	46, // 60: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:input_type -> ligo.plugin.v1.EnsureTargetRequest
+	48, // 61: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:input_type -> ligo.plugin.v1.CleanupTargetRequest
+	50, // 62: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:input_type -> ligo.plugin.v1.EnsureSecretStoreRequest
+	52, // 63: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:input_type -> ligo.plugin.v1.CleanupSecretStoreRequest
+	17, // 64: ligo.plugin.v1.PluginControl.Describe:output_type -> ligo.plugin.v1.DescribeResponse
+	24, // 65: ligo.plugin.v1.PluginControl.ConfigureInstances:output_type -> ligo.plugin.v1.ConfigureInstancesResponse
+	26, // 66: ligo.plugin.v1.PluginControl.ValidateInstance:output_type -> ligo.plugin.v1.ValidateInstanceResponse
+	28, // 67: ligo.plugin.v1.PluginControl.Health:output_type -> ligo.plugin.v1.HealthResponse
+	37, // 68: ligo.plugin.v1.IdentityProviderPlugin.EnsureIdentity:output_type -> ligo.plugin.v1.EnsureIdentityResponse
+	39, // 69: ligo.plugin.v1.IdentityProviderPlugin.CleanupIdentity:output_type -> ligo.plugin.v1.CleanupIdentityResponse
+	33, // 70: ligo.plugin.v1.PlatformProviderPlugin.GetUISchemas:output_type -> ligo.plugin.v1.GetUISchemasResponse
+	43, // 71: ligo.plugin.v1.PlatformProviderPlugin.ValidateTarget:output_type -> ligo.plugin.v1.ValidateTargetResponse
+	45, // 72: ligo.plugin.v1.PlatformProviderPlugin.ValidateBinding:output_type -> ligo.plugin.v1.ValidateBindingResponse
+	47, // 73: ligo.plugin.v1.PlatformProviderPlugin.EnsureTarget:output_type -> ligo.plugin.v1.EnsureTargetResponse
+	49, // 74: ligo.plugin.v1.PlatformProviderPlugin.CleanupTarget:output_type -> ligo.plugin.v1.CleanupTargetResponse
+	51, // 75: ligo.plugin.v1.SecretStorePlugin.EnsureSecretStore:output_type -> ligo.plugin.v1.EnsureSecretStoreResponse
+	53, // 76: ligo.plugin.v1.SecretStorePlugin.CleanupSecretStore:output_type -> ligo.plugin.v1.CleanupSecretStoreResponse
+	64, // [64:77] is the sub-list for method output_type
+	51, // [51:64] is the sub-list for method input_type
+	51, // [51:51] is the sub-list for extension type_name
+	51, // [51:51] is the sub-list for extension extendee
+	0,  // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_plugin_v1_plugin_proto_init() }
@@ -3963,7 +4088,7 @@ func file_api_proto_plugin_v1_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_plugin_v1_plugin_proto_rawDesc), len(file_api_proto_plugin_v1_plugin_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   47,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   4,
 		},

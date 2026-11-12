@@ -27,6 +27,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/identity"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/ratelimit"
 	"github.com/dihedron/ligo/internal/sealing"
 	"github.com/dihedron/ligo/internal/sources"
@@ -39,20 +40,23 @@ import (
 // Server is the admin API.
 type Server struct {
 	Listener  config.AdminListener
-	Config    *config.Config    // the platforms and the charter
-	LDAP      Directory         // nil: Basic credentials are refused
-	Authz     *authz.Authorizer // grants of the principals
-	Bundles   x509bundle.Source // the accepted trust domains' bundles, for client SVIDs
-	DB        *pgxpool.Pool     // the app pool
-	Requests  *changerequests.Service
-	Bindings  *bindings.Service
-	Sources   *sources.Service
-	Targets   *targets.Service
-	Workflows Workflows
-	Catalog   *catalog.Reader
-	Plugins   Plugins        // the platforms' health and forms
-	Signer    sealing.Signer // verifies the audit checkpoints
-	Logger    *slog.Logger
+	Config    *config.Config   // the charter
+	Instances instances.Source // the platforms and instances in force
+	// InstanceService files and reads the instances' change requests.
+	InstanceService *instances.Service
+	LDAP            Directory         // nil: Basic credentials are refused
+	Authz           *authz.Authorizer // grants of the principals
+	Bundles         x509bundle.Source // the accepted trust domains' bundles, for client SVIDs
+	DB              *pgxpool.Pool     // the app pool
+	Requests        *changerequests.Service
+	Bindings        *bindings.Service
+	Sources         *sources.Service
+	Targets         *targets.Service
+	Workflows       Workflows
+	Catalog         *catalog.Reader
+	Plugins         Plugins        // the platforms' health and forms
+	Signer          sealing.Signer // verifies the audit checkpoints
+	Logger          *slog.Logger
 
 	// Logins are the failed-login limits, shared with the UI's login (§7.3
 	// rule 6); the listener's rate_limit when nil.
@@ -94,6 +98,7 @@ func (s *Server) routes() *router {
 	s.targetRoutes(mux)
 	s.bindingRoutes(mux)
 	s.platformRoutes(mux)
+	s.instanceRoutes(mux)
 	s.catalogRoutes(mux)
 	s.charterRoutes(mux)
 	s.accountRoutes(mux)

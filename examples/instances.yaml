@@ -1,0 +1,141 @@
+# The instances of examples/server.yaml: identity provider instances, secret
+# store instances and platforms (.specs/ligo-instances.md §4). Create them with
+#   ligo apply -f instances.yaml
+# Each one is a change request with one OWNER side on its jurisdiction, which
+# a second person approves. A platform is filed once the instances it is
+# wired to exist: run ligo apply again after approving them.
+---
+kind: IdentityProvider
+metadata: { name: svid-passthrough-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: svid.v1
+---
+kind: IdentityProvider
+metadata: { name: local-account-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: target-local.v1
+config: { password_length: 32 }
+---
+kind: IdentityProvider
+metadata: { name: vault-dynamic-db-test, jurisdiction: dc/corp-test, realm: test }
+type: delegated-dynamic.v1
+---
+kind: IdentityProvider
+metadata: { name: ldap-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: openldap.v1
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/openldap"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  url: "ldaps://openldap.prod.internal:636"
+  service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
+  allowed_endpoints: ["openldap.prod.internal:636"]
+  # ca_pem: |                     # PEM roots for the directory and for the Vault below; default the system roots
+  bootstrap_credential:
+    source: vault
+    address: "https://vault.prod.internal:8200"
+    namespace: "prod"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-plugin-openldap-prod"
+    jwt_audience: "https://vault.prod.internal"
+    kv_path: "kv/data/ligo/bootstrap/ldap-prod"
+---
+kind: SecretStore
+metadata: { name: no-store-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: none.v1
+---
+kind: SecretStore
+metadata: { name: vault-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: vault.v1
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  address: "https://vault.prod.internal:8200"
+  namespace: "prod"
+  auth_mount: "jwt-spiffe"
+  role: "ligo-plugin-vault-prod"
+  workload_jwt_audience: "https://vault.prod.internal"
+  kv_mount: "kv"
+  database_mount: "database"
+  db_connection: "oracle-prod-conn"       # vault-dynamic only
+  allowed_endpoints: ["vault.prod.internal:8200"]
+networkFlows:                             # ADR-16; added to every binding whose credential is in this store
+  - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, serverName: "vault.prod.internal" }
+---
+kind: SecretStore
+metadata: { name: vault-test, jurisdiction: dc/corp-test, realm: test }
+type: vault.v1
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/vault"'
+  jwtAudience: ["https://vault.test.internal"]
+config:
+  address: "https://vault.test.internal:8200"
+  namespace: "test"
+  auth_mount: "jwt-spiffe"
+  role: "ligo-plugin-vault-test"
+  workload_jwt_audience: "https://vault.test.internal"
+  allowed_endpoints: ["vault.test.internal:8200"]
+networkFlows:
+  - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.test.internal", ports: [8200], tls: true, serverName: "vault.test.internal" }
+---
+kind: Platform
+metadata:
+  name: oracle-prod
+  jurisdiction: dc/corp-prod               # platform owner jurisdiction (§3.9); REQUIRED, immutable
+  realm: prod
+  displayName: "Oracle production cluster"
+  description: "Shared RAC cluster for production schemas."
+  contacts: [ { name: "DBA on call", email: "dba@example.org" } ]
+type: oracle.v1
+targetJurisdictions: ["dc/corp-prod/*"]    # jurisdictions that may own targets here (default: jurisdiction and below)
+checkExistence: true                       # ValidateTarget checks, read-only, that the resource exists (§5.8 rule 7)
+networkFlows:                              # flows shared by every target of the platform (ADR-16)
+  - { name: scan-listener, purpose: DATA, protocol: TCP, destination: "ora-scan.prod.internal", ports: [1521], tls: true, serverName: "ora-scan.prod.internal" }
+identityProvider: { type: openldap.v1, instance: ldap-prod }
+secretStore: { type: vault.v1, instance: vault-prod, secretStorageStrategy: vault-static }   # strategy optional when the mode allows only one (§5.6)
+principalPrefix: "svc_"                    # optional; <= 4 chars; replaces "bnd_" for bindings created from now on (Appendix B)
+allowedSourceTrustDomains: [prod.internal, cloud.internal]   # cloud workloads too, subject to ADR-13/14
+rotationInterval: 720h
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/oracle"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  host: "ora-scan.prod.internal"
+  port: 1521
+  service_name: "ORCLPROD.prod.internal"
+  grantable_roles: ["ORDERS_RO_ROLE", "ORDERS_RW_ROLE", "LEDGER_RO_ROLE", "LEDGER_RW_ROLE"]   # privilege bounds
+  allowed_endpoints: ["ora-scan.prod.internal:1521", "ledger-db.prod.internal:1522"]
+  bootstrap_credential:
+    source: vault
+    address: "https://vault.prod.internal:8200"
+    namespace: "prod"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-plugin-oracle-prod"
+    jwt_audience: "https://vault.prod.internal"
+    db_static_role: "oracle-prod-ligo-admin"
+---
+kind: Platform
+metadata: { name: oracle-test-dynamic, jurisdiction: dc/corp-test, realm: test }
+type: oracle.v1
+networkFlows:
+  - { name: listener, purpose: DATA, protocol: TCP, destination: "ora-test.test.internal", ports: [1521], tls: false }
+identityProvider: { type: delegated-dynamic.v1, instance: vault-dynamic-db-test }
+secretStore: { type: vault.v1, instance: vault-test }
+allowedSourceTrustDomains: [test.internal]
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/oracle"'
+  jwtAudience: ["https://vault.test.internal"]
+config:
+  host: "ora-test.test.internal"
+  port: 1521
+  service_name: "ORCLTEST.test.internal"
+  vault_db_connection_name: "oracle-test-conn"
+  grantable_roles: ["ORDERS_RO_ROLE", "ORDERS_RW_ROLE"]
+  allowed_endpoints: ["ora-test.test.internal:1521"]
+  bootstrap_credential:
+    source: vault
+    address: "https://vault.test.internal:8200"
+    namespace: "test"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-plugin-oracle-test"
+    jwt_audience: "https://vault.test.internal"
+    db_static_role: "oracle-test-ligo-admin"

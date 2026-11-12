@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 )
 
 const (
@@ -216,6 +217,36 @@ func TestPlanningExamples(t *testing.T) {
 		}
 		if err := config.Validate(cfg, config.Options{LookupEnv: anyEnv}); err != nil {
 			t.Errorf("%s: %v", f, err)
+		}
+		checkInstances(t, cfg, filepath.Join(filepath.Dir(f), "instances", filepath.Base(f)))
+	}
+}
+
+// checkInstances checks an example's instances against its configuration:
+// the static checks, the bounds and the wiring (.specs/ligo-instances.md §6).
+func checkInstances(t *testing.T, cfg *config.Config, manifest string) {
+	t.Helper()
+	env, err := instances.NewEnv(cfg)
+	if err != nil {
+		t.Fatalf("%s: %v", manifest, err)
+	}
+	set, err := instances.LoadManifest(manifest)
+	if err != nil {
+		t.Fatalf("%s: %v", manifest, err)
+	}
+	for _, d := range set.All() {
+		if err := env.Check(d); err != nil {
+			t.Errorf("%s: %s: %v", manifest, d.Metadata.Name, err)
+		}
+		if err := env.Bounded(d, nil); err != nil {
+			t.Errorf("%s: %s: %v", manifest, d.Metadata.Name, err)
+		}
+	}
+	for _, p := range set.List(instances.Platform) {
+		for k, w := range map[instances.Kind]*instances.Wiring{instances.IdentityProvider: p.IdentityProvider, instances.SecretStore: p.SecretStore} {
+			if in, ok := set.Get(k, w.Instance); !ok || in.Type != w.Type || in.Metadata.Realm != p.Metadata.Realm {
+				t.Errorf("%s: platform %s: %s %s/%s is not an instance of its realm", manifest, p.Metadata.Name, k, w.Type, w.Instance)
+			}
 		}
 	}
 }

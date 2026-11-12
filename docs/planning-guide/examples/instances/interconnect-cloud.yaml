@@ -1,0 +1,54 @@
+# The instances of planning-guide/examples/interconnect-cloud.yaml, created with ligo apply (.specs/ligo-instances.md).
+---
+kind: IdentityProvider
+metadata: {name: local-cloud, jurisdiction: ops/platform, realm: cloud}
+type: target-local.v1
+---
+kind: SecretStore
+metadata: {name: vault-cloud, jurisdiction: ops/platform, realm: cloud}
+type: vault.v1
+svidSelector:
+  matchExpr: path == "/ligo/plugin/vault"
+  jwtAudience: ['https://vault.cloud.internal']
+config:
+  address: https://vault.cloud.internal:8200
+  allowed_endpoints: ['vault.cloud.internal:8200']
+  auth_mount: jwt-spiffe
+  role: ligo-plugin-vault
+  workload_jwt_audience: https://vault.cloud.internal
+networkFlows:
+- name: vault
+  purpose: CREDENTIALS
+  protocol: TCP
+  destination: vault.cloud.internal
+  ports: [8200]
+  tls: true
+  serverName: vault.cloud.internal
+---
+kind: Platform
+metadata: {name: pg-shared, jurisdiction: ops/platform, realm: cloud}
+type: postgres.v1
+targetJurisdictions: [cloud/*]
+namespaceTemplate: '{account}_{tenancy}'
+allowedSourceTrustDomains: [cloud.internal, prod.dc.internal]
+networkFlows:
+- name: postgres
+  purpose: DATA
+  protocol: TCP
+  destination: pg.cloud.internal
+  ports: [5432]
+  tls: true
+  serverName: pg.cloud.internal
+identityProvider: {type: target-local.v1, instance: local-cloud}
+secretStore: {type: vault.v1, instance: vault-cloud, secretStorageStrategy: vault-static}
+svidSelector:
+  matchExpr: path == "/ligo/plugin/postgres"
+  jwtAudience: ['https://vault.cloud.internal']
+config:
+  host: pg.cloud.internal
+  port: 5432
+  database: tenants
+  grantable_role_templates: ['{namespace}_read', '{namespace}_write']
+  allowed_endpoints: ['pg.cloud.internal:5432']
+  bootstrap_credential: {source: vault, address: 'https://vault.cloud.internal:8200', auth_mount: jwt-spiffe, role: ligo-plugin-postgres, jwt_audience: 'https://vault.cloud.internal',
+    kv_path: kv/data/ligo/bootstrap/pg-shared}

@@ -62,7 +62,7 @@ type config struct {
 	GrantableRoles      []string                            `json:"grantable_roles"`
 	GrantableTemplates  []string                            `json:"grantable_role_templates"`
 	AllowedEndpoints    []string                            `json:"allowed_endpoints"`
-	CAFile              string                              `json:"ca_file"`
+	CAPEM               string                              `json:"ca_pem"`
 	DirectoryGroup      string                              `json:"directory_group"`
 	BootstrapCredential pluginsdk.BootstrapCredentialConfig `json:"bootstrap_credential"`
 
@@ -115,8 +115,18 @@ func parseConfig(data []byte, mode pluginv1.IdentityMode) (*config, error) {
 		return nil, err
 	}
 	var err error
-	c.roots, err = pluginsdk.LoadRoots(c.CAFile)
+	c.roots, err = pluginsdk.ParseRoots(c.CAPEM)
 	return &c, err
+}
+
+// endpoints are what the instance connects to: the server, and the Vault of
+// its bootstrap credential (ligo-instances §6 rule 5).
+func (c *config) endpoints() ([]string, error) {
+	vault, err := c.BootstrapCredential.Endpoint()
+	if err != nil {
+		return nil, err
+	}
+	return []string{net.JoinHostPort(c.Host, strconv.Itoa(c.Port)), vault}, nil
 }
 
 type instance struct {
@@ -132,7 +142,7 @@ type plugin struct {
 }
 
 func (*plugin) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
-	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 1,
+	return &pluginv1.DescribeResponse{PluginType: typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, PluginProtocolVersion: 2,
 		PluginVersion: metadata.Version, InstanceConfigSchemaJson: configSchema,
 		Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{
 			AcceptedIdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC,
@@ -170,6 +180,17 @@ func (p *plugin) ConfigureInstances(ctx context.Context, r *pluginv1.ConfigureIn
 	p.instances = instances
 	p.mu.Unlock()
 	return out, nil
+}
+
+// ValidateInstance checks one instance without serving it (ligo-instances §7.1).
+func (p *plugin) ValidateInstance(ctx context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return pluginsdk.ValidateInstance(ctx, r, func(in *pluginv1.InstanceDescriptor) ([]string, error) {
+		c, err := parseConfig([]byte(in.GetConfigJson()), in.GetIdentityMode())
+		if err != nil {
+			return nil, err
+		}
+		return c.endpoints()
+	})
 }
 
 // errCredential is a bootstrap credential that cannot be read.

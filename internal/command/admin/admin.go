@@ -91,9 +91,13 @@ func (p Page) query(kv ...string) url.Values {
 
 // ResourceArgs names one resource: ligo get binding NAME.
 type ResourceArgs struct {
-	Kind string `positional-arg-name:"kind" choice:"source" choice:"target" choice:"binding" description:"Resource kind."`
+	Kind string `positional-arg-name:"kind" choice:"source" choice:"target" choice:"binding" choice:"platform" choice:"identity-provider" choice:"secret-store" description:"Resource kind."`
 	Name string `positional-arg-name:"name" description:"Resource name."`
 }
+
+// instanceKinds are the kinds managed as instances (.specs/ligo-instances.md):
+// retired by DELETE, like a binding is revoked.
+var instanceKinds = map[string]bool{"platform": true, "identity-provider": true, "secret-store": true}
 
 // NameArg names a platform, a target or a binding.
 type NameArg struct {
@@ -120,10 +124,12 @@ var columns = map[string][]client.Column{
 		col("REVISION", "metadata.revision"), col("EXPIRES", "expiresAt")},
 	"request": {col("ID", "id"), col("TYPE", "resourceType"), col("NAME", "resourceName"), col("OPERATION", "operation"), col("KIND", "kind"),
 		col("STATUS", "status"), col("AWAITING", "awaitingApproval"), col("REQUESTED BY", "requestedBy")},
-	"account":  {col("NAME", "name"), col("DISPLAY NAME", "displayName"), col("STATUS", "status"), col("REGISTERED BY", "registeredBy"), col("REGISTERED AT", "registeredAt")},
-	"platform": {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("SERVING", "health.serving")},
-	"catalog":  {col("NAME", "name"), col("PLATFORM", "platform"), col("TYPE", "platformType"), col("JURISDICTION", "jurisdiction"), col("STATE", "state"), col("BOUND", "bound")},
-	"audit":    {col("ID", "id"), col("AT", "occurredAt"), col("ACTION", "action"), col("ACTOR", "actor"), col("REVISION", "revision")},
+	"account":           {col("NAME", "name"), col("DISPLAY NAME", "displayName"), col("STATUS", "status"), col("REGISTERED BY", "registeredBy"), col("REGISTERED AT", "registeredAt")},
+	"platform":          {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("SERVING", "health.serving")},
+	"identity-provider": {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("REVISION", "revision")},
+	"secret-store":      {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("REVISION", "revision")},
+	"catalog":           {col("NAME", "name"), col("PLATFORM", "platform"), col("TYPE", "platformType"), col("JURISDICTION", "jurisdiction"), col("STATE", "state"), col("BOUND", "bound")},
+	"audit":             {col("ID", "id"), col("AT", "occurredAt"), col("ACTION", "action"), col("ACTOR", "actor"), col("REVISION", "revision")},
 	"flow": {col("NAME", "name"), col("PURPOSE", "purpose"), col("PROTOCOL", "protocol"), col("DESTINATION", "destination"), col("PORTS", "ports"),
 		col("TLS", "tls"), col("DECLARED BY", "declaredBy")},
 }

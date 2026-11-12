@@ -17,6 +17,7 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"go.opentelemetry.io/otel"
@@ -62,6 +63,23 @@ func (s *syncBuffer) String() string {
 func newManager(t *testing.T, specs ...Spec) (*Manager, *syncBuffer, error) {
 	t.Helper()
 	dir := pluginDir(t)
+	specs = prepare(t, specs...)
+	logs := &syncBuffer{}
+	m := New(specs, Options{
+		Directory: dir, Owner: me(), RPCTimeout: 5 * time.Second, MaxConcurrentRPCsPerInstance: 2,
+		Backoff:  config.Backoff{Initial: 10 * time.Millisecond, Max: 40 * time.Millisecond},
+		Logger:   slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Debounce: 100 * time.Millisecond,
+	})
+	err := m.Start(context.Background())
+	t.Cleanup(m.Stop)
+	return m, logs, err
+}
+
+// prepare points specs at the test plugin, and wires platforms with no
+// wiring to the builtins svid.v1 and none.v1, whose specs it adds.
+func prepare(t *testing.T, specs ...Spec) []Spec {
+	t.Helper()
 	sum := checksum(t, testPlugin)
 	unwired := false
 	for i := range specs {
@@ -85,15 +103,7 @@ func newManager(t *testing.T, specs ...Spec) (*Manager, *syncBuffer, error) {
 			Spec{Builtin: true, Type: "svid.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "svid-prod", ConfigJson: "{}"}}},
 			Spec{Builtin: true, Type: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, Realm: prod, Instances: []*pluginv1.InstanceDescriptor{{Name: "none-prod", ConfigJson: "{}"}}})
 	}
-	logs := &syncBuffer{}
-	m := New(specs, Options{
-		Directory: dir, Owner: me(), RPCTimeout: 5 * time.Second, MaxConcurrentRPCsPerInstance: 2,
-		Backoff: config.Backoff{Initial: 10 * time.Millisecond, Max: 40 * time.Millisecond},
-		Logger:  slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-	})
-	err := m.Start(context.Background())
-	t.Cleanup(m.Stop)
-	return m, logs, err
+	return specs
 }
 
 func health(ctx context.Context, m *Manager, name string) (string, error) {
@@ -160,6 +170,8 @@ func TestManagerStartRefusals(t *testing.T) {
 			"capabilities"},
 		"wrong type": {[]Spec{{Type: "oracle.v1", Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
 			"oracle.v1"},
+		"protocol 1 (ligo-instances §7.1)": {[]Spec{{Realm: prod, Env: []string{"TESTPLUGIN_PLUGIN_PROTOCOL=1"}, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}}},
+			"protocol 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := newManager(t, tc.specs...); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -496,7 +508,11 @@ func TestSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs, err := Specs(cfg)
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := Specs(cfg, set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,11 +588,10 @@ func TestCallSpan(t *testing.T) {
 }
 
 func TestNamespaceField(t *testing.T) {
-	m := &Manager{procs: []*process{
-		{spec: Spec{Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Type: "pg.v1"}, described: &pluginv1.DescribeResponse{
-			Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{NamespaceField: "schema"}}}},
-		{spec: Spec{Kind: pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, Type: "oracle.v1"}, described: &pluginv1.DescribeResponse{
-			Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{}}}},
+	platform := pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER
+	m := &Manager{types: map[string]*pluginv1.DescribeResponse{
+		"pg.v1":     {Kind: platform, Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{NamespaceField: "schema"}}},
+		"oracle.v1": {Kind: platform, Capabilities: &pluginv1.DescribeResponse_PlatformProvider{PlatformProvider: &pluginv1.PlatformProviderCapabilities{}}},
 	}}
 	if m.NamespaceField("pg.v1") != "schema" || m.NamespaceField("oracle.v1") != "" || m.NamespaceField("none.v1") != "" {
 		t.Error("wrong namespace field")

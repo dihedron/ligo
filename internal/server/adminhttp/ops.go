@@ -186,9 +186,12 @@ func (s *Server) recordAuditExport(w http.ResponseWriter, r *http.Request) {
 // id and jurisdictions of a resource, by its kind in the path; only existing
 // resources have an audit visible through the API. A binding's jurisdictions include
 // those of its additional parties (§7.2.4).
-var jurisdictionQueries = map[string]string{
-	"sources": "SELECT id, ARRAY[jurisdiction] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
-	"targets": "SELECT id, ARRAY[jurisdiction, platform_jurisdiction] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+var jurisdictionQueries = map[string]string{ //nolint:gosec // G101: "secret-stores" is a resource path, the values SQL
+	"platforms":          "SELECT id, ARRAY[jurisdiction]::text[] FROM instances WHERE kind = 'PLATFORM' AND name = $1",
+	"identity-providers": "SELECT id, ARRAY[jurisdiction]::text[] FROM instances WHERE kind = 'IDENTITY_PROVIDER' AND name = $1",
+	"secret-stores":      "SELECT id, ARRAY[jurisdiction]::text[] FROM instances WHERE kind = 'SECRET_STORE' AND name = $1",
+	"sources":            "SELECT id, ARRAY[jurisdiction] FROM sources WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+	"targets":            "SELECT id, ARRAY[jurisdiction, platform_jurisdiction] FROM targets WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
 	"bindings": `SELECT b.id, ARRAY[b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction]::text[] || b.party_jurisdictions::text[]
 		FROM bindings b WHERE b.name = $1`,
 }

@@ -53,7 +53,7 @@ func TestDB(t *testing.T) {
 	t.Cleanup(owner.Close)
 
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(&DB{Pool: pools.App, Logger: slog.New(slog.DiscardHandler), Rotation: map[string]time.Duration{"oracle-prod": time.Hour},
+	reg.MustRegister(&DB{Pool: pools.App, Logger: slog.New(slog.DiscardHandler), Rotation: func() map[string]time.Duration { return map[string]time.Duration{"oracle-prod": time.Hour} },
 		Timeout: 5 * time.Second})
 	value := func(family string, labels map[string]string) float64 {
 		t.Helper()

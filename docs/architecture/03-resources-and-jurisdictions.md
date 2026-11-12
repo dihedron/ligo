@@ -12,6 +12,12 @@ A source can only **narrow**. `ligo` proves with a bounded automaton check that 
 
 A target's jurisdiction is chosen at publication, among those the platform allows. Its access levels name privileges within the platform's bounds, and `ligo` knows them canonically, so it can tell exactly whether one level is contained in another. Whether a change only removes access decides who must approve it, so this is never estimated.
 
+## Platforms and instances
+
+A platform, an identity provider instance and a secret store instance are resources too: each has a jurisdiction, revisions and an audit history, and changes only through a change request that a second person of that jurisdiction decides; no side of it is ever decided automatically, by delegation or by break-glass. Its name, type, realm and jurisdiction never change. Only plugin types stay in `server.yaml`, with `instance_bounds`, the root-owned limit on where their instances connect.
+
+Every replica keeps the instances in force in memory, reloaded on each change, and verifies each row's signature by the audit key: a row edited outside `ligo` is quarantined. The plugin manager reconciles its processes with that set, so a new platform is usable without a restart. A platform's change affects new bindings only: a binding keeps the wiring it was created with.
+
 ## Bindings
 
 A binding has three jurisdictions, copied from what it links: source, target and platform. None changes, except through an audited transfer at startup. A binding snapshots its wiring at creation, so a later configuration change affects only new bindings.

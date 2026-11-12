@@ -26,7 +26,7 @@ Some things are one per installation, and only a second installation divides the
 | Shared inside one installation | Why it may matter |
 | :---------------------------------------------- | :------------------------------------------------- |
 | The database | Its administrators can read every resource and the whole audit; one restore restores everything; one outage stops every change |
-| `server.yaml` and its owners | One platform team owns every platform, privilege bound and policy |
+| `server.yaml` and its owners | One platform team owns the plugin types, their bounds and the policy; platforms are owned by the jurisdictions that run them |
 | The `ligo` hosts | Their plugins hold, or obtain with their SVIDs, the administrative access to every platform, and must reach every one of them |
 | `ligo`'s core identity and Transit key | One sealing key for all inter-stage secrets |
 | Upgrades and maintenance mode | One version, one maintenance window, for everyone |

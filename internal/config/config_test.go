@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"go.yaml.in/yaml/v3"
 )
 
 // example returns examples/server.yaml (the §8.1 reference) with its
@@ -70,12 +68,8 @@ func TestExample(t *testing.T) {
 	if err := Validate(cfg, Options{LookupEnv: lookupEnv}); err != nil {
 		t.Fatal(err)
 	}
-	p := cfg.PlatformProviders[0].Platforms[0]
-	if p.Name != "oracle-prod" || p.PrincipalPrefix != "svc_" || p.SecretStore.SecretStorageStrategy != "vault-static" || p.RotationInterval != 720*time.Hour || len(p.NetworkFlows) != 1 || p.NetworkFlows[0].ServerName != "ora-scan.prod.internal" {
-		t.Errorf("platform not decoded: %+v", p)
-	}
-	if got := cfg.PlatformProviders[0].Platforms[1].TargetJurisdictions; len(got) != 1 || got[0] != "dc/corp-test/*" {
-		t.Errorf("default target_jurisdictions = %v", got)
+	if v := cfg.SecretStores[1]; v.Type != "vault.v1" || v.InstanceBounds == nil || len(v.InstanceBounds.AllowedEndpoints) != 2 {
+		t.Errorf("plugin type not decoded: %+v", v)
 	}
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.RegexPolicy.NarrowingStateLimit != 20000 {
 		t.Error("defaults not applied")
@@ -93,6 +87,7 @@ func TestStrict(t *testing.T) {
 		"zones, renamed to realms in 4.0.3": strings.Replace(example(t), "\nrealms:", "\nzones:", 1),
 		"source_scopes, renamed to source_jurisdictions in 4.0.4": strings.Replace(example(t), "  source_jurisdictions:", "  source_scopes:", 1),
 		"governance, renamed to charter in 4.0.5":                 strings.Replace(example(t), "\ncharter:", "\ngovernance:", 1),
+		"instances, moved to the database in 4.1.0":               strings.Replace(example(t), `  - { type: "none.v1", builtin: true }`, `  - { type: "none.v1", builtin: true, instances: [] }`, 1),
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -110,15 +105,8 @@ func TestRules(t *testing.T) {
 	}{
 		{"duplicate realm", "  - name: test\n    trust_domain: test.internal", "  - name: prod\n    trust_domain: test.internal", 1, []int{2, 12}},
 		{"type in two sections", `  - type: "oracle.v1"`, `  - type: "openldap.v1"`, 1, nil},
-		{"duplicate instance", `name: "vault-test"`, `name: "vault-prod"`, 1, []int{2}},
-		{"unknown realm", `      - { name: "no-store-prod", realm: prod`, `      - { name: "no-store-prod", realm: nowhere`, 2, nil},
-		{"wiring across realms", `secret_store: { type: "vault.v1", instance: "vault-prod", secret_storage_strategy`, `secret_store: { type: "vault.v1", instance: "vault-test", secret_storage_strategy`, 2, nil},
-		{"missing instance", `identity_provider: { type: "openldap.v1", instance: "ldap-prod" }`, `identity_provider: { type: "openldap.v1", instance: "ldap-nope" }`, 2, nil},
-		{"bootstrap audience", `role: "ligo-plugin-openldap-prod"
-            jwt_audience: "https://vault.prod.internal"`, `role: "ligo-plugin-openldap-prod"
-            jwt_audience: "https://other"`, 5, nil},
-		{"trust domain not accepted", "allowed_source_trust_domains: [test.internal]", "allowed_source_trust_domains: [test.internal, other.internal]", 6, []int{16}},
-		{"bad principal prefix", `principal_prefix: "svc_"`, `principal_prefix: "svc-"`, 6, nil},
+		{"no instance_bounds", `    instance_bounds:
+      allowed_endpoints: ["vault.prod.internal:8200", "vault.test.internal:8200"]`, ``, 1, nil},
 		{"bad sha256", `binary: "ligo-plugin-vault"
     sha256: "` + strings.Repeat("ab", 32) + `"`, `binary: "ligo-plugin-vault"
     sha256: "ABC"`, 7, nil},
@@ -131,7 +119,6 @@ func TestRules(t *testing.T) {
 		{"jwt_svid without audience", `expected_jwt_audience: "spiffe://prod.internal/ns/sys/sa/ligo"`, `expected_jwt_audience: ""`, 12, nil},
 		{"AC-29: trusted_automation on an LDAP group", `- spiffe_id: "spiffe://prod.internal/ns/automation-prod/sa/awx-runner-db-team"`, `- ldap_group_dn: "cn=awx,ou=groups,dc=corp,dc=internal"`, 13, nil},
 		{"unanchored reference", `approval_reference_pattern: '^CHG[0-9]{7}$'`, `approval_reference_pattern: 'CHG[0-9]{7}'`, 13, nil},
-		{"unknown automation platform", `platforms: ["oracle-prod"]`, `platforms: ["oracle-nope"]`, 13, nil},
 		{"break_glass on a SPIFFE ID", `{ ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass`, `{ spiffe_id: "spiffe://prod.internal/x",  role: break_glass`, 14, nil},
 		{"break_glass jurisdiction without policy", `role: break_glass, jurisdictions: ["dc/corp-prod/*"]`, `role: break_glass, jurisdictions: ["dc/corp-prod"]`, 14, nil},
 		{"ttl above 24h", "default_ttl: 4h, max_ttl: 8h", "default_ttl: 4h, max_ttl: 25h", 14, nil},
@@ -143,8 +130,6 @@ func TestRules(t *testing.T) {
 		{"negative delivered retention", "  delivered_retention: 24h", "  delivered_retention: -1h", 14, nil},
 		{"negative abandoned retention", "  abandoned_retention: 720h", "  abandoned_retention: -1h", 14, nil},
 		{"bad jurisdiction pattern", `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["dc/*/x"]`, 16, nil},
-		{"platform jurisdiction is a pattern", `jurisdiction: "dc/corp-prod"            #`, `jurisdiction: "dc/corp-prod/*"            #`, 16, nil},
-		{"source jurisdiction missing", "    - { trust_domain: test.internal, mode: static, jurisdiction: \"dc/corp-test\" }\n", "", 16, nil},
 		{"bad path_template", `path_regex: '^/acct/([a-z0-9-]+)/tenant/([a-z0-9-]+)/'`, `path_regex: '^/acct/(.+)/'`, 16, nil},
 		{"reserved rule name", "name: no-test-to-prod", "name: default", 16, nil},
 		{"party on a deny rule", "        action: deny\n", "        action: deny\n        additional_approvals: [ { name: x, jurisdiction: \"a\" } ]\n", 16, nil},
@@ -153,9 +138,6 @@ func TestRules(t *testing.T) {
 		{"unknown color token", "light: { primary: ", "light: { accent: ", 15, nil},
 		{"not a hex color", `primary: "#1f4e8c"`, `primary: "blue"`, 15, nil},
 		{"unknown color mode", "dark:  { primary:", "dim:  { primary:", 15, nil},
-		{"flow outside allowed_endpoints", `destination: "ora-scan.prod.internal", ports: [1521]`, `destination: "ora-scan.prod.internal", ports: [1600]`, 19, nil},
-		{"invalid flow", `- { name: listener, purpose: DATA`, `- { name: Listener, purpose: DATA`, 19, nil},
-		{"invalid instance name", `name: "svid-passthrough-prod"`, `name: "Svid Passthrough"`, 1, nil},
 		{"no workload_advertise", `    destination: "ligo.prod.internal"`, `    destination: ""`, 19, nil},
 	} {
 		doc := example(t)
@@ -200,7 +182,7 @@ func TestPolicy(t *testing.T) {
 	if d := p.Evaluate("dc/corp-test", "dc/corp-prod/ledger"); d.Allowed || d.Rule != "no-test-to-prod" {
 		t.Errorf("AC-51: %+v", d)
 	}
-	if len(p.Platforms) != 2 || !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 3 || len(p.SHA256()) != 64 {
+	if !p.RequireDistinctApprovers || len(p.BreakGlassPolicies) != 3 || len(p.SHA256()) != 64 {
 		t.Errorf("policy: %+v", p)
 	}
 	if got := p.PartiesWithoutBreakGlass(); len(got) != 0 {
@@ -231,10 +213,10 @@ func TestLoad(t *testing.T) {
 
 // TestDefaults checks the defaults of an almost empty file.
 func TestDefaults(t *testing.T) {
-	cfg := parse(t, "platform_providers: [ { type: t, platforms: [ { name: p, jurisdiction: dc/x } ] } ]\n")
+	cfg := parse(t, "platform_providers: [ { type: t } ]\n")
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Charter.Interconnects.DefaultCrossJurisdiction != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
-		cfg.PlatformProviders[0].Platforms[0].TargetJurisdictions[0] != "dc/x/*" || cfg.Plugins.RPCTimeout != time.Minute ||
+		cfg.Plugins.RPCTimeout != time.Minute ||
 		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute ||
 		*cfg.Notifications.DeliveredRetention != 24*time.Hour || *cfg.Notifications.AbandonedRetention != 720*time.Hour {
 		t.Errorf("defaults: %+v", cfg)
@@ -252,19 +234,8 @@ func TestDefaults(t *testing.T) {
 // external plugins.
 func TestPluginRules(t *testing.T) {
 	for _, v := range []struct{ name, old, new string }{
-		{"builtin with a binary", `  - type: "none.v1"
-    builtin: true`, `  - type: "none.v1"
-    builtin: true
-    binary: "x"`},
+		{"builtin with a binary", `  - { type: "none.v1", builtin: true }`, `  - { type: "none.v1", builtin: true, binary: "x" }`},
 		{"binary path", `binary: "ligo-plugin-vault"`, `binary: "../ligo-plugin-vault"`},
-		{"no selector", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: ''`},
-		{"selector not boolean", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: 'hint'`},
-		{"selector unknown field", `          match_expr: 'path == "/ligo/plugin/vault" && hint == "vault-prod"'`, `          match_expr: 'spiffeID == "x"'`},
-		{"config not a mapping", `          host: "ora-scan.prod.internal"`, `          allowed_endpoints: 7
-          host: "ora-scan.prod.internal"`},
-		{"identity provider flows", `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"`, `          kv_path: "kv/data/ligo/bootstrap/ldap-prod"
-        network_flows: [ { name: x, purpose: DATA, protocol: TCP, destination: "h", ports: [1], tls: false } ]`},
-		{"bad allowlist", `allowed_endpoints: ["vault.test.internal:8200"]`, `allowed_endpoints: ["vault.test.internal:0"]`},
 		{"bad spiffe_id", `spiffe_id: "spiffe://prod.internal/ns/ci/sa/ligo-deployer"`, `spiffe_id: "http://x"`},
 		{"unknown role", `role: viewer,`, `role: superuser,`},
 		{"two principals", `- { ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`, `- { spiffe_id: "spiffe://prod.internal/v", ldap_group_dn: "cn=ligo-viewers,ou=groups,dc=corp,dc=internal",`},
@@ -288,8 +259,9 @@ func TestPluginRules(t *testing.T) {
           - { name: security, jurisdiction: "sec/other" }`},
 		{"unknown core realm", "core_identity:                           # ligo's own SVID (serving TLS, Vault Transit)\n  realm: prod", "core_identity:\n  realm: nowhere"},
 		{"bad realm trust domain", "trust_domain: test.internal\n    spiffe_workload_socket", "trust_domain: Test..Internal\n    spiffe_workload_socket"},
-		{"source jurisdiction for an unused trust domain", `    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }`, `    - { trust_domain: prod.internal, mode: static, jurisdiction: "dc/corp-prod" }
-    - { trust_domain: other.internal, mode: static, jurisdiction: "dc/other" }`},
+		{"bad shared_svids", `      allowed_endpoints: ["vault.prod.internal:8200", "vault.test.internal:8200"]`, `      allowed_endpoints: ["vault.prod.internal:8200", "vault.test.internal:8200"]
+      shared_svids: ["not-a-spiffe-id"]`},
+		{"bad instance_bounds", `allowed_endpoints: ["openldap.prod.internal:636", "vault.prod.internal:8200"]`, `allowed_endpoints: ["openldap.prod.internal:0"]`},
 		{"bad source jurisdiction mode", `mode: static, jurisdiction: "dc/corp-test"`, `mode: dynamic, jurisdiction: "dc/corp-test"`},
 	} {
 		doc := example(t)
@@ -361,51 +333,13 @@ func TestAccountAdminBinding(t *testing.T) {
 	}
 }
 
-func TestNamespaceTemplate(t *testing.T) {
-	const accounts = `charter:
-  accounts:
-    jurisdiction: "cloud/{account}"
-    source_jurisdiction: "cloud/{account}/app/{project}"
-    target_jurisdiction: "cloud/{account}/data/{tenancy}"
-    ldap_groups:
-      search_base: "ou=accounts,dc=corp,dc=internal"
-      roles:
-        - { group_dn: "cn=approvers,ou={account},ou=accounts,dc=corp,dc=internal", role: approver, jurisdiction: "cloud/{account}/*" }
-`
-	load := func(template string, withAccounts bool) error {
-		r := []string{`        target_jurisdictions: ["dc/corp-prod/*"]`, `        namespace_template: "` + template + `"` + "\n" + `        target_jurisdictions: ["dc/corp-prod/*"]`}
-		if withAccounts {
-			r = append(r, "charter:                               # ADR-13, ADR-14, §3.9\n", accounts, `required_jurisdictions: ["dc/corp-prod/*", "cloud/fin-01/*"]`, `required_jurisdictions: ["cloud/*"]`)
+// TestMovedInstances: a file that still holds instances is refused, with a
+// pointer to where they went (.specs/ligo-instances.md §3 rule 1).
+func TestMovedInstances(t *testing.T) {
+	for _, key := range []string{"instances", "platforms"} {
+		_, err := Parse([]byte("secret_stores: [ { type: vault.v1, " + key + ": [] } ]\n"))
+		if err == nil || !strings.Contains(err.Error(), "ligo-instances.md") || !strings.Contains(err.Error(), "ligo apply") {
+			t.Errorf("%s: %v", key, err)
 		}
-		return Validate(parse(t, strings.NewReplacer(r...).Replace(example(t))), Options{LookupEnv: lookupEnv})
-	}
-	if err := load("{account}_{tenancy}", true); err != nil {
-		t.Errorf("accepted form: %v", err)
-	}
-	if err := load("{account}_{tenancy}", false); err == nil || !strings.Contains(err.Error(), "charter.accounts") {
-		t.Errorf("without accounts: %v", err)
-	}
-	if err := load("{account}{tenancy}", true); err == nil || !strings.Contains(err.Error(), "rule 16") {
-		t.Errorf("no separator: %v", err)
-	}
-}
-
-// TestPrivilegeBounds: a tenant's roles are bounds too, so changing them is
-// audited and shown like grantable_roles (.specs/ligo-tenancy.md §6).
-func TestPrivilegeBounds(t *testing.T) {
-	var p Platform
-	if err := yaml.Unmarshal([]byte(`config: {grantable_role_templates: ["{namespace}_read"]}`), &p); err != nil {
-		t.Fatal(err)
-	}
-	b := p.PrivilegeBounds()
-	if _, ok := b["grantableRoles"]; ok || !slices.Equal(b["grantableRoleTemplates"].([]string), []string{"{namespace}_read"}) {
-		t.Errorf("bounds %v", b)
-	}
-	var none Platform
-	if err := yaml.Unmarshal([]byte(`config: {host: h}`), &none); err != nil {
-		t.Fatal(err)
-	}
-	if b := none.PrivilegeBounds(); b != nil {
-		t.Errorf("no bounds: %v", b)
 	}
 }

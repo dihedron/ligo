@@ -9,15 +9,12 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"uuid"
 
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/theme"
-	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"go.yaml.in/yaml/v3"
 )
 
 // Options are the command-line settings that change validation.
@@ -29,12 +26,11 @@ type Options struct {
 }
 
 var (
-	sha256RE        = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	ruleNameRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
-	partyNameRE     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-	knownRoles      = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess, RoleAccountAdmin}
-	knownKinds      = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
-	maxPlatformFlow = 32
+	sha256RE    = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	ruleNameRE  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
+	partyNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+	knownRoles  = []string{RoleViewer, RoleOperator, RoleApprover, RoleBreakGlass, RoleTrustedAutomation, RoleFullAccess, RoleAccountAdmin}
+	knownKinds  = []string{string(engine.KindSource), string(engine.KindTarget), string(engine.KindBinding)}
 	// instanceIDRE leaves room for "ligo/" in the 63 bytes of application_name
 	instanceIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,58}$`)
 )
@@ -117,93 +113,31 @@ func (c *checker) realms(cfg *Config) map[string]Realm {
 	return realms
 }
 
-const (
-	platformPrefix = "platform "
-	whatErr        = "%s: %v"
-)
-
-// allPlatforms returns the platforms of every platform provider, with their
-// provider.
-func allPlatforms(cfg *Config) []providedPlatform {
-	var out []providedPlatform
-	for _, tp := range cfg.PlatformProviders {
-		for _, p := range tp.Platforms {
-			out = append(out, providedPlatform{p, tp.Builtin})
-		}
-	}
-	return out
-}
-
-type providedPlatform struct {
-	Platform
-	builtin bool
-}
-
-// instances checks rules 1, 2, 5 and 7 for plugin types, instances and
-// platforms.
-func (c *checker) instances(cfg *Config, realms map[string]Realm) {
-	// instance realms by type, then name
-	realmOf := map[string]map[string]string{}
-	c.instanceProviders("identity provider", cfg.IdentityProviders, realms, realmOf)
-	c.instanceProviders("secret store", cfg.SecretStores, realms, realmOf)
-	for _, tp := range cfg.PlatformProviders {
-		c.binary("platform provider", tp.Type, tp.Builtin, tp.Binary, tp.SHA256)
-		if realmOf[tp.Type] != nil {
-			c.failf(1, "platform provider type %q is declared twice", tp.Type)
-			continue
-		}
-		realmOf[tp.Type] = map[string]string{} // a platform provider has no instances to wire
-	}
-	names := map[string]bool{}
-	for _, p := range allPlatforms(cfg) {
-		if names[p.Name] {
-			c.failf(1, "platform %q is defined twice", p.Name)
-		}
-		names[p.Name] = true
-		if _, ok := realms[p.Realm]; !ok {
-			c.failf(2, "platform %q: realm %q does not exist", p.Name, p.Realm)
-		}
-		c.wiring(p.Platform, "identity_provider", p.IdentityProvider, realmOf)
-		c.wiring(p.Platform, "secret_store", p.SecretStore, realmOf)
-		c.plugin(platformPrefix+p.Name, p.builtin, p.SVIDSelector, &Instance{Config: p.Config})
-	}
-}
-
-// instanceProviders checks the plugin types of one kind and their instances,
-// recording the realm of each instance in realmOf.
-func (c *checker) instanceProviders(kind string, list []InstanceProvider, realms map[string]Realm, realmOf map[string]map[string]string) {
-	names := map[string]bool{}
-	for _, p := range list {
-		c.binary(kind, p.Type, p.Builtin, p.Binary, p.SHA256)
-		if realmOf[p.Type] != nil {
-			c.failf(1, "%s type %q is declared twice", kind, p.Type)
-		}
-		realmOf[p.Type] = map[string]string{}
-		for _, in := range p.Instances {
-			if names[in.Name] {
-				c.failf(1, "%s instance %q is defined twice", kind, in.Name)
+// instances checks rules 1 and 7 for plugin types: their instances are
+// checked when filed (.specs/ligo-instances.md §6).
+func (c *checker) instances(cfg *Config, _ map[string]Realm) {
+	seen := map[string]bool{}
+	for kind, types := range map[string][]PluginType{"identity provider": cfg.IdentityProviders, "secret store": cfg.SecretStores, "platform provider": cfg.PlatformProviders} {
+		for _, t := range types {
+			c.binary(kind, t.Type, t.Builtin, t.Binary, t.SHA256)
+			if seen[t.Type] {
+				c.failf(1, "plugin type %q is declared twice", t.Type)
 			}
-			if !ruleNameRE.MatchString(in.Name) {
-				c.failf(1, "%s instance %q: the name must match %s", kind, in.Name, ruleNameRE)
+			seen[t.Type] = true
+			switch {
+			case !t.Builtin && t.InstanceBounds == nil:
+				c.failf(1, "%s %q: instance_bounds is required ([] allows no endpoint)", kind, t.Type)
+			case t.InstanceBounds != nil:
+				if _, err := flows.ParseAllowlist(t.InstanceBounds.AllowedEndpoints); err != nil {
+					c.failf(1, "%s %q: instance_bounds: %v", kind, t.Type, err)
+				}
+				for _, id := range t.InstanceBounds.SharedSVIDs {
+					if _, err := spiffeid.FromString(id); err != nil {
+						c.failf(1, "%s %q: instance_bounds.shared_svids: %q is not a SPIFFE ID", kind, t.Type, id)
+					}
+				}
 			}
-			names[in.Name] = true
-			realmOf[p.Type][in.Name] = in.Realm
-			if _, ok := realms[in.Realm]; !ok {
-				c.failf(2, "%s instance %q: realm %q does not exist", kind, in.Name, in.Realm)
-			}
-			c.plugin(kind+" instance "+in.Name, p.Builtin, in.SVIDSelector, &in)
 		}
-	}
-}
-
-// wiring checks that a platform's instance exists in the platform's realm.
-func (c *checker) wiring(p Platform, role string, w Wiring, realmOf map[string]map[string]string) {
-	z, ok := realmOf[w.Type][w.Instance]
-	switch {
-	case !ok:
-		c.failf(2, "platform %q: %s %s/%s does not exist", p.Name, role, w.Type, w.Instance)
-	case z != p.Realm:
-		c.failf(2, "platform %q (realm %s): %s %q is in realm %s", p.Name, p.Realm, role, w.Instance, z)
 	}
 }
 
@@ -217,26 +151,6 @@ func (c *checker) binary(kind, typ string, builtin bool, binary, sum string) {
 		c.failf(7, "%s %q: binary must be a file name in plugins.directory", kind, typ)
 	case !builtin && !sha256RE.MatchString(sum):
 		c.failf(7, "%s %q: sha256 must be 64 lowercase hex characters", kind, typ)
-	}
-}
-
-// plugin checks rule 5, and that external instances have a selector that
-// compiles (§5.4).
-func (c *checker) plugin(what string, builtin bool, sel *SVIDSelector, in *Instance) {
-	if !builtin && (sel == nil || sel.MatchExpr == "") {
-		c.failf(4, "%s: svid_selector.match_expr is required", what)
-	} else if sel != nil && sel.MatchExpr != "" {
-		if _, err := pluginsdk.CompileSelector(sel.MatchExpr); err != nil {
-			c.failf(4, "%s: svid_selector.match_expr: %v", what, err)
-		}
-	}
-	pc, err := hostKeys(&in.Config)
-	if err != nil {
-		c.failf(8, "%s: config: %v", what, err)
-		return
-	}
-	if pc.BootstrapCredential != nil && (sel == nil || !slices.Contains(sel.JWTAudience, pc.BootstrapCredential.JWTAudience)) {
-		c.failf(5, "%s: bootstrap_credential.jwt_audience %q is not in svid_selector.jwt_audience", what, pc.BootstrapCredential.JWTAudience)
 	}
 }
 
@@ -274,16 +188,6 @@ func (c *checker) trustDomains(cfg *Config, realms map[string]Realm) {
 		}
 	}
 	check("admin_listener.client_svid_auth.accepted_trust_domains", cfg.Server.AdminListener.ClientSVIDAuth.AcceptedTrustDomains)
-	for _, p := range allPlatforms(cfg) {
-		for _, td := range p.AllowedSourceTrustDomains {
-			if !slices.Contains(wl.AcceptedTrustDomains, td) {
-				c.failf(6, "platform %q: allowed source trust domain %q is not in workload_listener.accepted_trust_domains", p.Name, td)
-			}
-		}
-		if _, err := engine.DerivedPrincipalName(uuid.UUID{}, p.PrincipalPrefix); err != nil {
-			c.failf(6, "platform %q: %v", p.Name, err)
-		}
-	}
 }
 
 // sealing checks rule 9, and the deadline for SPIRE and the sealer to be
@@ -336,15 +240,11 @@ func (c *checker) sealing(cfg *Config, opts Options) {
 // authorization checks rules 13 and 14 (bindings) and the jurisdiction patterns of
 // rule 16.
 func (c *checker) authorization(cfg *Config) {
-	platforms := map[string]bool{}
-	for _, p := range allPlatforms(cfg) {
-		platforms[p.Name] = true
-	}
 	for i, b := range cfg.Authorization.Bindings {
 		c.roleBinding(i, b)
 		switch b.Role {
 		case RoleTrustedAutomation:
-			c.trustedAutomation(b, platforms)
+			c.trustedAutomation(b)
 		case RoleBreakGlass:
 			c.breakGlassBinding(b, cfg.BreakGlass.Policies)
 		}
@@ -377,15 +277,12 @@ func (c *checker) roleBinding(i int, b RoleBinding) {
 }
 
 // trustedAutomation checks rule 13.
-func (c *checker) trustedAutomation(b RoleBinding, platforms map[string]bool) {
+// The platforms it names are not checked: platforms come and go at run time,
+// and startup warns of a name no platform has (.specs/ligo-instances.md §3).
+func (c *checker) trustedAutomation(b RoleBinding) {
 	who := b.LDAPGroupDN + b.SPIFFEID
 	if b.SPIFFEID == "" {
 		c.failf(13, "trusted_automation must be bound to a spiffe_id, never to an LDAP group (%q)", who)
-	}
-	for _, p := range b.Platforms {
-		if !platforms[p] {
-			c.failf(13, "trusted_automation %q: platform %q does not exist", who, p)
-		}
 	}
 	if b.ApprovalReferencePattern != "" {
 		c.anchored(13, "trusted_automation "+who+" approval_reference_pattern", b.ApprovalReferencePattern)
@@ -439,17 +336,7 @@ func (c *checker) breakGlass(cfg *Config, opts Options) {
 
 // charter checks rule 16.
 func (c *checker) charter(cfg *Config) {
-	sourceDomains := map[string]bool{}
-	for _, p := range allPlatforms(cfg) {
-		if !charter.ValidJurisdictionPath(p.Jurisdiction) {
-			c.failf(16, "platform %q: jurisdiction %q must be a valid jurisdiction path", p.Name, p.Jurisdiction)
-		}
-		c.patterns(16, platformPrefix+p.Name+" target_jurisdictions", p.TargetJurisdictions)
-		for _, td := range p.AllowedSourceTrustDomains {
-			sourceDomains[td] = true
-		}
-	}
-	c.sourceJurisdictions(cfg.Charter.SourceJurisdictions, sourceDomains)
+	c.sourceJurisdictions(cfg.Charter.SourceJurisdictions)
 	c.namePrefixes(cfg.Charter.NamePrefixes)
 	ic := cfg.Charter.Interconnects
 	if ic.DefaultCrossJurisdiction != "allow" && ic.DefaultCrossJurisdiction != "deny" {
@@ -472,23 +359,11 @@ func (c *checker) charter(cfg *Config) {
 func (c *checker) accounts(cfg *Config) {
 	a := cfg.Charter.Accounts
 	if a == nil {
-		for _, p := range allPlatforms(cfg) {
-			if p.NamespaceTemplate != "" {
-				c.failf(16, "platform %q: namespace_template needs charter.accounts", p.Name)
-			}
-		}
 		return
 	}
 	if err := a.Validate(); err != nil {
 		c.failf(16, "charter.accounts: %v", err)
 		return
-	}
-	for _, p := range allPlatforms(cfg) {
-		if p.NamespaceTemplate != "" {
-			if err := a.CheckNamespaceTemplate(p.NamespaceTemplate); err != nil {
-				c.failf(16, "platform %q: %v", p.Name, err)
-			}
-		}
 	}
 	for i, r := range a.LDAPGroups.Roles {
 		if !slices.Contains(accountRoles, r.Role) {
@@ -512,25 +387,18 @@ func (c *checker) namePrefixes(prefixes []charter.NamePrefix) {
 	}
 }
 
-// sourceJurisdictions checks that source_jurisdictions has exactly one valid entry for
-// each trust domain that platforms accept.
-func (c *checker) sourceJurisdictions(entries []charter.SourceJurisdiction, sourceDomains map[string]bool) {
+// sourceJurisdictions checks that source_jurisdictions has at most one valid
+// entry per trust domain; a platform that accepts a trust domain needs its
+// entry, checked when the platform is filed (.specs/ligo-instances.md §6).
+func (c *checker) sourceJurisdictions(entries []charter.SourceJurisdiction) {
 	seen := map[string]bool{}
 	for _, s := range entries {
 		if seen[s.TrustDomain] {
 			c.failf(16, "charter.source_jurisdictions: trust domain %q has more than one entry", s.TrustDomain)
 		}
 		seen[s.TrustDomain] = true
-		if !sourceDomains[s.TrustDomain] {
-			c.failf(16, "charter.source_jurisdictions: trust domain %q is not accepted by any platform", s.TrustDomain)
-		}
 		if _, err := s.Extractor(); err != nil {
 			c.failf(16, "charter.source_jurisdictions[%s]: %v", s.TrustDomain, err)
-		}
-	}
-	for td := range sourceDomains {
-		if !seen[td] {
-			c.failf(16, "charter.source_jurisdictions: no entry for trust domain %q", td)
 		}
 	}
 }
@@ -554,52 +422,15 @@ func (c *checker) interconnectRule(r charter.InterconnectRule) {
 	}
 }
 
-// platformFlows checks the static part of rule 19.
+// platformFlows checks the static part of rule 19 left in server.yaml:
+// ligo's own flow; instances' flows are checked when filed.
 func (c *checker) platformFlows(cfg *Config) {
-	for _, p := range allPlatforms(cfg) {
-		c.declaredFlows(platformPrefix+p.Name, p.NetworkFlows, &p.Config)
-	}
-	for _, sp := range cfg.SecretStores {
-		for _, in := range sp.Instances {
-			c.declaredFlows("secret store "+in.Name, in.NetworkFlows, &in.Config)
-		}
-	}
-	for _, ip := range cfg.IdentityProviders {
-		for _, in := range ip.Instances {
-			if len(in.NetworkFlows) > 0 {
-				c.failf(19, "identity provider %q: network_flows are declared by platforms and secret stores only", in.Name)
-			}
-		}
-	}
 	wa := cfg.Service.WorkloadAdvertise
 	ligo := flows.LigoFlow(wa.Destination, wa.Port, wa.ServerName)
 	if wa.Destination == "" || wa.Port == 0 {
 		c.failf(19, "service.workload_advertise must be set")
 	} else if err := ligo.Validate(); err != nil {
 		c.failf(19, "service.workload_advertise: %v", err)
-	}
-}
-
-// declaredFlows checks a platform's or store's flows against its
-// allowed_endpoints.
-func (c *checker) declaredFlows(what string, declared []flows.Flow, config *yaml.Node) {
-	pc, err := hostKeys(config)
-	if err != nil {
-		return // reported by plugin()
-	}
-	if err := flows.ValidateList(declared, maxPlatformFlow); err != nil {
-		c.failf(19, whatErr, what, err)
-		return
-	}
-	allow, err := flows.ParseAllowlist(pc.AllowedEndpoints)
-	if err != nil {
-		c.failf(19, whatErr, what, err)
-		return
-	}
-	for _, f := range declared {
-		if err := allow.CheckFlow(f); err != nil {
-			c.failf(19, whatErr, what, err)
-		}
 	}
 }
 

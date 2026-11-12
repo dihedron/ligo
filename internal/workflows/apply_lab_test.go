@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/dihedron/ligo/internal/instances"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,17 @@ func labEnv(t *testing.T, name string) string {
 	return v
 }
 
+// caPEM is the lab CA as a JSON string, for an instance's ca_pem.
+func caPEM(t *testing.T) string {
+	t.Helper()
+	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(string(pem))
+	return string(quoted)
+}
+
 func labRoots(t *testing.T) *x509.CertPool {
 	t.Helper()
 	pem, err := os.ReadFile(labEnv(t, "LIGO_TEST_CA"))
@@ -79,12 +91,12 @@ func labPlugins(t *testing.T) *pluginmgr.Manager {
 	selector := func(backend string) *pluginv1.SVIDSelectorConfig {
 		return &pluginv1.SVIDSelectorConfig{MatchExpr: `path == "/ligo/plugin/` + backend + `"`, JwtAudience: []string{aud}}
 	}
-	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
+	target := `{"host":"pg.ligo.lab","port":5432,"database":"ledger","grantable_roles":["LEDGER_RO_ROLE","LEDGER_RW_ROLE"],"ca_pem":` +
+		caPEM(t) + `,"allowed_endpoints":["pg.ligo.lab:5432"],"bootstrap_credential":{"source":"vault","address":"` +
 		labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-postgres","jwt_audience":"` + aud +
 		`","kv_path":"kv/data/ligo/bootstrap/postgres"}}`
-	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
+	vault := `{"address":"` + labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR") + `","workload_jwt_audience":"` + aud + `","auth_mount":"jwt-spiffe","role":"ligo-plugin-vault","db_connection":"lab-pg","ca_pem":` +
+		caPEM(t) + `,"allowed_endpoints":["` + strings.TrimPrefix(labEnv(t, "LIGO_TEST_SECRETS_PROD_ADDR"), "https://") + `"]}`
 	m := pluginmgr.New([]pluginmgr.Spec{
 		{Type: "target-local.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, Builtin: true, Realm: realm,
 			Instances: []*pluginv1.InstanceDescriptor{{Name: "local-prod", ConfigJson: "{}"}}},
@@ -186,10 +198,10 @@ func labBinding(t *testing.T) *lab {
 	}
 
 	bs := &bindings.Service{DB: pools.App, Validate: bindings.Plugins(m),
-		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Platforms: map[string]bindings.Platform{"pg-ledger": {
-			Name: "pg-ledger", Type: "postgres.v1", Realm: "prod", Jurisdiction: "dc/corp-prod", AllowedTrustDomains: []string{"prod.lab"},
-			IdentityProviderType: "target-local.v1", IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod",
-			SecretStorageStrategy: "vault-static"}}},
+		Rules: &bindings.Rules{Regex: regexpolicy.DefaultPolicy(), MaxExpiry: 24 * time.Hour, Instances: instances.Fixed{Set: instances.NewSet(&instances.Definition{
+			Kind: "Platform", Type: "postgres.v1", Metadata: instances.Metadata{Name: "pg-ledger", Realm: "prod", Jurisdiction: "dc/corp-prod"},
+			AllowedSourceTrustDomains: []string{"prod.lab"}, IdentityProvider: &instances.Wiring{Type: "target-local.v1", Instance: "local-prod"},
+			SecretStore: &instances.Wiring{Type: "vault.v1", Instance: "vault-prod", SecretStorageStrategy: "vault-static"}})}},
 		Start: func(ctx context.Context, id uuid.UUID) error { _, err := engine.Start(ctx, id); return err }}
 	bs.Requests = &changerequests.Service{DB: pools.App, Policy: &charter.Policy{RequireDistinctApprovers: true}, TTL: time.Hour,
 		Resources: map[string]changerequests.Resource{"BINDING": bs}}

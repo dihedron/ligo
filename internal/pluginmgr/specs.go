@@ -7,89 +7,95 @@ import (
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/dihedron/ligo/internal/config"
-	"go.yaml.in/yaml/v3"
+	"github.com/dihedron/ligo/internal/instances"
 )
 
-// Specs groups the configuration's plugin instances into one process per
-// (type, realm) (ADR-03); builtin types are served inside ligo.
-func Specs(cfg *config.Config) ([]Spec, error) {
+// Templates are the configuration's plugin types, by type, and its realms,
+// by name: what a process can be started from (Options.Templates).
+func Templates(cfg *config.Config) (map[string]Spec, map[string]config.Realm, error) {
 	realms := map[string]config.Realm{}
 	for _, z := range cfg.Realms {
 		realms[z.Name] = z
 	}
+	templates := map[string]Spec{}
+	for k, group := range map[instances.Kind][]config.PluginType{instances.IdentityProvider: cfg.IdentityProviders,
+		instances.SecretStore: cfg.SecretStores, instances.Platform: cfg.PlatformProviders} {
+		for _, t := range group {
+			s := Spec{Type: t.Type, Kind: kindOf[k], Builtin: t.Builtin, SharedSVIDs: map[string]bool{}}
+			if t.InstanceBounds != nil {
+				for _, id := range t.InstanceBounds.SharedSVIDs {
+					s.SharedSVIDs[id] = true
+				}
+			}
+			if !t.Builtin {
+				checksum, err := hex.DecodeString(t.SHA256)
+				if err != nil || len(checksum) != 32 {
+					return nil, nil, fmt.Errorf("plugin %s: sha256 %q", t.Type, t.SHA256)
+				}
+				s.Binary, s.SHA256 = t.Binary, checksum
+			}
+			templates[t.Type] = s
+		}
+	}
+	return templates, realms, nil
+}
+
+// Specs groups the instances in force into one process per (type, realm)
+// (ADR-03), with the types and realms of the configuration; builtin types
+// are served inside ligo.
+func Specs(cfg *config.Config, set *instances.Set) ([]Spec, error) {
+	templates, realms, err := Templates(cfg)
+	if err != nil {
+		return nil, err
+	}
 	var specs []Spec
 	index := map[string]int{}
-	add := func(kind pluginv1.PluginKind, typ string, builtin bool, binary, sum, realm string, in *pluginv1.InstanceDescriptor) error {
-		z, ok := realms[realm]
+	for _, d := range set.All() {
+		t, ok := templates[d.Type]
 		if !ok {
-			return fmt.Errorf("instance %q: unknown realm %q", in.GetName(), realm)
+			return nil, fmt.Errorf("instance %q: plugin type %q is not in the configuration", d.Metadata.Name, d.Type)
 		}
-		k := typ + "\x00" + realm
-		if i, ok := index[k]; ok {
+		z, ok := realms[d.Metadata.Realm]
+		if !ok {
+			return nil, fmt.Errorf("instance %q: unknown realm %q", d.Metadata.Name, d.Metadata.Realm)
+		}
+		in, err := Descriptor(d)
+		if err != nil {
+			return nil, err
+		}
+		key := d.Type + "\x00" + z.Name
+		if i, ok := index[key]; ok {
 			specs[i].Instances = append(specs[i].Instances, in)
-			return nil
+			specs[i].Jurisdictions[d.Metadata.Name] = d.Metadata.Jurisdiction
+			continue
 		}
-		spec := Spec{Type: typ, Kind: kind, Builtin: builtin, Realm: z, Instances: []*pluginv1.InstanceDescriptor{in}}
-		if !builtin {
-			checksum, err := hex.DecodeString(sum)
-			if err != nil || len(checksum) != 32 {
-				return fmt.Errorf("plugin %s: sha256 %q", typ, sum)
-			}
-			spec.Binary, spec.SHA256 = binary, checksum
-		}
-		index[k] = len(specs)
+		spec := t
+		spec.Realm, spec.Instances = z, []*pluginv1.InstanceDescriptor{in}
+		spec.Jurisdictions = map[string]string{d.Metadata.Name: d.Metadata.Jurisdiction}
+		index[key] = len(specs)
 		specs = append(specs, spec)
-		return nil
-	}
-	for kind, providers := range map[pluginv1.PluginKind][]config.InstanceProvider{
-		pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER: cfg.IdentityProviders,
-		pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE:      cfg.SecretStores,
-	} {
-		for _, p := range providers {
-			for _, inst := range p.Instances {
-				in, err := descriptor(inst.Name, inst.SVIDSelector, &inst.Config)
-				if err != nil {
-					return nil, err
-				}
-				if err := add(kind, p.Type, p.Builtin, p.Binary, p.SHA256, inst.Realm, in); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-	for _, p := range cfg.PlatformProviders {
-		for _, pl := range p.Platforms {
-			in, err := descriptor(pl.Name, pl.SVIDSelector, &pl.Config)
-			if err != nil {
-				return nil, err
-			}
-			in.IdentityProviderType, in.IdentityProviderInstance = pl.IdentityProvider.Type, pl.IdentityProvider.Instance
-			// an omitted secret storage strategy stays empty here: startup defaults it from the store's Describe (§5.6)
-			in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = pl.SecretStore.Type, pl.SecretStore.Instance, pl.SecretStore.SecretStorageStrategy
-			if err := add(pluginv1.PluginKind_PLUGIN_KIND_PLATFORM_PROVIDER, p.Type, p.Builtin, p.Binary, p.SHA256, pl.Realm, in); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return specs, nil
 }
 
-// descriptor is an instance's InstanceDescriptor, its config as JSON.
-func descriptor(name string, sel *config.SVIDSelector, node *yaml.Node) (*pluginv1.InstanceDescriptor, error) {
-	var cfg any = map[string]any{}
-	if node.Kind != 0 {
-		if err := node.Decode(&cfg); err != nil {
-			return nil, fmt.Errorf("instance %q: config: %w", name, err)
-		}
+// Descriptor is an instance's InstanceDescriptor; a platform's carries its
+// wiring (an omitted secret storage strategy stays empty: Wire defaults it,
+// §5.6).
+func Descriptor(d *instances.Definition) (*pluginv1.InstanceDescriptor, error) {
+	config := d.Config
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
 	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("instance %q: config: %w", name, err)
-	}
-	in := &pluginv1.InstanceDescriptor{Name: name, ConfigJson: string(data)}
-	if sel != nil {
+	in := &pluginv1.InstanceDescriptor{Name: d.Metadata.Name, ConfigJson: string(config)}
+	if sel := d.SVIDSelector; sel != nil {
 		in.SvidSelector = &pluginv1.SVIDSelectorConfig{MatchExpr: sel.MatchExpr, JwtAudience: sel.JWTAudience}
 		in.AllowSharedSvid = sel.AllowSharedSVID
+	}
+	if w := d.IdentityProvider; w != nil {
+		in.IdentityProviderType, in.IdentityProviderInstance = w.Type, w.Instance
+	}
+	if w := d.SecretStore; w != nil {
+		in.SecretStoreType, in.SecretStoreInstance, in.SecretStorageStrategy = w.Type, w.Instance, w.SecretStorageStrategy
 	}
 	return in, nil
 }

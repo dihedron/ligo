@@ -66,6 +66,10 @@ func (c BootstrapCredentialConfig) Validate() error {
 	return nil
 }
 
+// Endpoint is the host:port of the Vault the credential is read from, where
+// the instance sends its JWT-SVID.
+func (c BootstrapCredentialConfig) Endpoint() (string, error) { return Endpoint(c.Address) }
+
 // JWTSource gives the instance's JWT-SVID for the Vault audience;
 // *InstanceSVIDSelector implements it.
 type JWTSource interface {

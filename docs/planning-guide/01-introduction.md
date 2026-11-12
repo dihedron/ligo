@@ -36,7 +36,7 @@ The two are independent. One realm can serve workloads spread over several netwo
 | Charter | The rules every jurisdiction must comply with, one per installation (`charter:` in `server.yaml`); see chapter 6 |
 | Account | A registered tenant: a root jurisdiction, its people in the directory, its workloads under its own SPIFFE paths |
 | Tenancy | A target on a shared, namespaced platform, belonging to one account: on PostgreSQL, one schema |
-| Platform team | The people who own `server.yaml`: the platforms, their plugins and their privilege bounds |
+| Platform team | The people who own `server.yaml` (plugin types, their `instance_bounds`, realms, policy) and the jurisdictions of the platforms and instances, whose changes they file and approve |
 
 ## The decisions, in order
 

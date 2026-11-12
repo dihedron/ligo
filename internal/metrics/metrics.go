@@ -45,7 +45,13 @@ var (
 	BundleConflicts        = counter("ligo_bundle_conflicts_total", "Bundles discarded because they came from a non-authoritative socket.", "trust_domain", "socket_realm")
 	AuditPrunedEntries     = counter("ligo_audit_pruned_entries_total", "Audit entries deleted by pruning (storage.audit.retention).")
 	ChangeRequestsPruned   = counter("ligo_change_requests_pruned_total", "Change requests deleted by pruning (storage.change_requests.retention).")
+	ReconfigureFailures    = counter("ligo_plugin_reconfigure_failures_total", "Plugin processes that refused a new set of instances (.specs/ligo-instances.md §7.2).", "type", "realm")
 )
+
+// InstanceDrift is 1 for an instance whose row does not verify, quarantined
+// (.specs/ligo-instances.md §8).
+var InstanceDrift = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ligo_instance_drift",
+	Help: "1 for an instance quarantined because its row does not verify."}, []string{"kind", "name"})
 
 // State known in the process: set by startup's checks and the audit
 // chain's periodic verification.
@@ -60,7 +66,8 @@ func init() {
 	Registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		WorkflowDuration, StepDuration, PluginRPCs, WorkloadRequests, PropagationStarted, PropagationFailed, BindingExpirations,
 		RegexNarrowingChecks, InterconnectDenied, PluginRestarts, BreakGlass, NotificationsAbandoned, DelegatedApprovals, BundleConflicts,
-		InterconnectViolations, PrivilegeBoundViolations, AuditChainValid, AuditPrunedEntries, AuditOldestEntry, ChangeRequestsPruned)
+		InterconnectViolations, PrivilegeBoundViolations, AuditChainValid, AuditPrunedEntries, AuditOldestEntry, ChangeRequestsPruned,
+		ReconfigureFailures, InstanceDrift)
 }
 
 // Count is a counter's current value, for tests: they compare it before and

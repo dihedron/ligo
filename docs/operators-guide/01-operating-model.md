@@ -2,7 +2,7 @@
 
 ## What runs
 
-Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It starts one plugin process per plugin type and realm. Replicas share one PostgreSQL database and hold no state of their own, beyond their stable ID, `LIGO_INSTANCE_ID`.
+Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It runs one plugin process per plugin type and realm that has instances, and starts, reconfigures or stops them as instances change, with no restart. Replicas share one PostgreSQL database and hold no state of their own, beyond their stable ID, `LIGO_INSTANCE_ID`.
 
 | Port | Serves | If it is down |
 | :---- | :---------------------- | :-------------------------------- |
@@ -16,7 +16,7 @@ Each replica runs `ligo serve`, under `ligo.service`, as the user `ligo`. It sta
 | :-------------- | :-------------------------------- |
 | Source owners | Register sources; file bindings for them |
 | Target owners | Publish targets and access levels; approve bindings to them |
-| Platform team | Own `server.yaml` and platforms; confirm targets; can revoke any binding on their platform |
+| Platform team | Own `server.yaml` (plugin types and their `instance_bounds`); file and approve changes of their platforms and instances; confirm targets; can revoke any binding on their platform |
 | Additional parties | Such as Information Security: approve the flows the interconnection policy names |
 | Account administrators | Register and retire accounts (`account_admin`); they see no resources and decide nothing |
 | Account operators and approvers | Everything above, inside their own account, through their directory groups |

@@ -1,0 +1,9 @@
+{{define "content"}}{{with .Content}}<h1>{{.Title}}</h1>
+<p class="muted"><a href="/ui/platforms">Platforms</a> · <a href="/ui/identity-providers">Identity providers</a> · <a href="/ui/secret-stores">Secret stores</a></p>
+<div class="actions"><a class="button" href="/ui/{{.Path}}/new-form">New {{.Noun}}</a></div>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Type</th><th>Realm</th><th>Jurisdiction</th><th></th></tr></thead>
+  <tbody>{{range .Rows}}<tr><td>{{.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</td><td>{{.Type}}</td><td>{{.Realm}}</td>
+    <td>{{.Jurisdiction}}</td><td><a href="/ui/{{$.Content.Path}}/{{.Name}}/edit-form">Edit</a></td></tr>
+  {{else}}<tr><td colspan="5" class="muted">None.</td></tr>{{end}}</tbody>
+</table></div>{{end}}{{end}}

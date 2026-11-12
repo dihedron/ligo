@@ -101,7 +101,7 @@ func TestReadCommands(t *testing.T) {
 	}{
 		{"get", (&Get{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1", []string{"b1 s1 t1 read ACTIVE 3 -"}},
 		{"list", (&List{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Jurisdiction: "dc/*", Args: struct {
-			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" description:"Resource kind."`
+			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
 		}{"bindings"}}).Execute, "GET /v1/admin/bindings?jurisdiction=dc%2F%2A&pageSize=10&phase=ACTIVE", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
 		{"flows", (&Flows{Base: b, Args: struct {
 			Binding string `positional-arg-name:"binding" description:"Binding name."`
@@ -118,6 +118,8 @@ func TestReadCommands(t *testing.T) {
 		{"charter show", (&CharterShow{Base: b}).Execute, "GET /v1/admin/charter", []string{"sha256: ab"}},
 		{"cr list", (&ChangeRequestList{Base: b, AwaitingMe: true, Kind: "binding"}).Execute,
 			"GET /v1/admin/change-requests?awaitingMe=true&resourceType=BINDING", []string{"c1 BINDING b1 CREATE STANDARD PENDING TARGET olga"}},
+		{"cr list --kind identity-provider", (&ChangeRequestList{Base: b, Kind: "identity-provider"}).Execute,
+			"GET /v1/admin/change-requests?resourceType=IDENTITY_PROVIDER", nil},
 		{"cr get", (&ChangeRequestGet{Base: b, Args: struct {
 			ID string `positional-arg-name:"cr-id" description:"Change request UUID."`
 		}{"c1"}}).Execute, "GET /v1/admin/change-requests/c1", []string{"payloadSha256: ff"}},

@@ -260,3 +260,58 @@ func conflict(f *fake) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// TestApplyInstances: instances are filed first, store before platform; a
+// platform wired to an instance this file left pending is reported, not
+// filed (.specs/ligo-instances.md §10.2); a retirement is a DELETE.
+func TestApplyInstances(t *testing.T) {
+	f := newFake(t, map[string][]string{
+		"/v1/admin/secret-stores":         {`{"changeRequest":{"id":"c1","resourceType":"SECRET_STORE","resourceName":"vault-a","status":"PENDING"},"resource":null}`},
+		"/v1/admin/identity-providers":    {`{"changeRequest":{"id":"c0","resourceType":"IDENTITY_PROVIDER","resourceName":"ldap-a","status":"PENDING"},"resource":null}`},
+		"/v1/admin/platforms":             {`{"changeRequest":{"id":"c2","resourceType":"PLATFORM","resourceName":"pg-b","status":"PENDING"},"resource":null}`},
+		"/v1/admin/secret-stores/vault-a": {`{"changeRequest":{"id":"c3","resourceType":"SECRET_STORE","resourceName":"vault-a","status":"PENDING"},"resource":null}`},
+	})
+	var out bytes.Buffer
+	file := manifest(t, `kind: Platform
+metadata: {name: pg-a}
+identityProvider: {type: openldap.v1, instance: ldap-a}
+secretStore: {type: vault.v1, instance: vault-old}
+---
+kind: Platform
+metadata: {name: pg-b}
+identityProvider: {type: openldap.v1, instance: ldap-old}
+secretStore: {type: vault.v1, instance: vault-old}
+---
+kind: SecretStore
+metadata: {name: vault-a}
+---
+kind: IdentityProvider
+metadata: {name: ldap-a}
+`)
+	stderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	err := (&Apply{Base: f.base(t, "table", &out), File: file}).Execute(nil)
+	_ = w.Close()
+	os.Stderr = stderr
+	var msg bytes.Buffer
+	_, _ = msg.ReadFrom(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(f.requests, ";") != "POST /v1/admin/identity-providers;POST /v1/admin/secret-stores;POST /v1/admin/platforms" {
+		t.Errorf("requests: %v", f.requests)
+	}
+	if !strings.Contains(msg.String(), "platform pg-a not filed: its identity-provider ldap-a awaits approval (change request c0)") {
+		t.Errorf("stderr: %s", msg.String())
+	}
+	if !strings.Contains(f.bodies[0], `"kind":"IdentityProvider"`) {
+		t.Errorf("an instance's body keeps its kind: %s", f.bodies[0])
+	}
+	if err := (&Delete{Base: f.base(t, "table", &out), ExpectedRevision: 3, Args: ResourceArgs{Kind: "secret-store", Name: "vault-a"}}).Execute(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got != "DELETE /v1/admin/secret-stores/vault-a?expectedRevision=3" {
+		t.Errorf("retire: %s", got)
+	}
+}

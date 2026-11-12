@@ -41,7 +41,7 @@ One team's leads decide both sides of a binding between its own workloads and it
 
 | Activity | Who |
 | :---------------------------------------- | :------------------------------------------ |
-| `server.yaml`, the platform, upgrades | Platform team |
+| `server.yaml`, the platform (four eyes within the team), upgrades | Platform team |
 | SPIRE entries for workloads, under `/team/<team>/` | Identity team; teams ask, never create |
 | A source, a target, a binding | The team's developers file; two of its leads approve |
 | Publishing a target on the shared database | The team files; the platform team approves the platform side |

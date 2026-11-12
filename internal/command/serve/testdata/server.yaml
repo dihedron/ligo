@@ -38,7 +38,10 @@ secret_sealing:
   local_kek_file: "/replaced/by/the/test"
 plugins:
   directory: "/nonexistent"
+# Plugin types (§5.9); their instances are created with ligo apply
+# (.specs/ligo-instances.md). instance_bounds bounds where they may connect.
 identity_providers:
-  - { type: svid.v1, builtin: true, instances: [ { name: svid-prod, realm: prod } ] }
+  - { type: svid.v1, builtin: true }
+
 secret_stores:
-  - { type: none.v1, builtin: true, instances: [ { name: none-prod, realm: prod } ] }
+  - { type: none.v1, builtin: true }

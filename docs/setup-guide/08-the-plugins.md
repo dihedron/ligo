@@ -1,28 +1,65 @@
 # The plugins
 
-Each plugin is declared with its binary and its hash. `ligo` runs one process per plugin type and realm, and refuses a binary whose hash differs, before every start.
+A plugin type is declared in `server.yaml` with its binary, its hash and its `instance_bounds`. `ligo` runs one process per plugin type and realm, and refuses a binary whose hash differs, before every start.
 
-## The Vault store
+Its instances are not in `server.yaml`. A platform, an identity provider instance or a secret store instance is a manifest document, filed with `ligo apply -f` by an operator of its jurisdiction and approved by a second person of that jurisdiction. Each replica configures its plugins when the change is applied, with no restart.
+
+## Plugin types and their bounds
 
 ```yaml
+identity_providers:
+  - { type: target-local.v1, builtin: true }
+  - type: "openldap.v1"
+    binary: "ligo-plugin-openldap"
+    sha256: "<its hash>"
+    instance_bounds:
+      allowed_endpoints: ["openldap.prod.internal:636", "vault.prod.internal:8200"]
 secret_stores:
   - type: "vault.v1"
     binary: "ligo-plugin-vault"
     sha256: "<its hash>"
-    instances:
-      - name: "vault-prod"
-        realm: prod
-        svid_selector:
-          match_expr: 'path == "/ligo/plugin/vault"'
-          jwt_audience: ["https://vault.prod.internal"]
-        config:
-          address: "https://vault.prod.internal:8200"
-          allowed_endpoints: ["vault.prod.internal:8200"]
-          auth_mount: "jwt-spiffe"
-          role: "ligo-plugin-vault"
-          workload_jwt_audience: "https://vault.prod.internal"
-        network_flows:
-          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, server_name: "vault.prod.internal" }
+    instance_bounds:
+      allowed_endpoints: ["vault.prod.internal:8200"]
+platform_providers:
+  - type: "postgres.v1"
+    binary: "ligo-plugin-postgres"
+    sha256: "<its hash>"
+    instance_bounds:
+      allowed_endpoints: ["10.20.0.0/16", "vault.prod.internal:8200"]
+      shared_svids: ["spiffe://prod.internal/ligo/plugin/postgres"]
+```
+
+`instance_bounds.allowed_endpoints` is the platform team's limit, root-owned with the rest of the file, on where an instance of the type may connect and send its bootstrap credential: the server it manages, the Vault of `bootstrap_credential`, its `allowed_endpoints` and its flows. A request naming an endpoint outside it is refused. It takes the syntax of `allowed_endpoints`: hosts, `host:port`, addresses and CIDRs, with no wildcards.
+
+## Filing instances
+
+Write the instances of this chapter into one file, and file it:
+
+```sh
+ligo apply -f instances.yaml
+```
+
+`ligo apply` files identity provider and secret store instances first, then platforms. A platform wired to an instance that the same run left pending is not filed: `ligo apply` says so, and the second run, once the instances are approved, files it. Another operator or approver of the jurisdiction approves each request, in `ligo cr review` or the web UI.
+
+Before filing an instance with an SVID, create its SPIRE registration entry: the request is refused if the plugin cannot select its SVID. Certificates are given inline, as `ca_pem` text; an instance names no file on the host.
+
+## The Vault store
+
+```yaml
+kind: SecretStore
+metadata: { name: vault-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: vault.v1
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/vault"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  address: "https://vault.prod.internal:8200"
+  allowed_endpoints: ["vault.prod.internal:8200"]
+  auth_mount: "jwt-spiffe"
+  role: "ligo-plugin-vault"
+  workload_jwt_audience: "https://vault.prod.internal"
+networkFlows:
+  - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "vault.prod.internal", ports: [8200], tls: true, serverName: "vault.prod.internal" }
 ```
 
 ## The PostgreSQL provider
@@ -42,51 +79,47 @@ GRANT CONNECT ON DATABASE ledger TO ligo_target_admin, "LEDGER_RO_ROLE", "LEDGER
 Let `pg_hba.conf` accept any role over `hostssl` with `scram-sha-256` on that database, from where workloads and the plugin connect. Then:
 
 ```yaml
-identity_providers:
-  - { type: target-local.v1, builtin: true, instances: [ { name: local-prod, realm: prod } ] }
-platform_providers:
-  - type: "postgres.v1"
-    binary: "ligo-plugin-postgres"
-    sha256: "<its hash>"
-    platforms:
-      - name: pg-ledger
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Ledger database"
-        allowed_source_trust_domains: [prod.internal]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "db.prod.internal", ports: [5432], tls: true, server_name: "db.prod.internal" }
-        identity_provider: { type: target-local.v1, instance: local-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector:
-          match_expr: 'path == "/ligo/plugin/postgres"'
-          jwt_audience: ["https://vault.prod.internal"]
-        config:
-          host: db.prod.internal
-          port: 5432
-          database: ledger
-          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
-          allowed_endpoints: ["db.prod.internal:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "https://vault.prod.internal:8200"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "https://vault.prod.internal"
-            kv_path: kv/data/ligo/bootstrap/postgres
+kind: IdentityProvider
+metadata: { name: local-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: target-local.v1
+---
+kind: Platform
+metadata: { name: pg-ledger, jurisdiction: dc/corp-prod, realm: prod, displayName: "Ledger database" }
+type: postgres.v1
+allowedSourceTrustDomains: [prod.internal]
+networkFlows:
+  - { name: postgres, purpose: DATA, protocol: TCP, destination: "db.prod.internal", ports: [5432], tls: true, serverName: "db.prod.internal" }
+identityProvider: { type: target-local.v1, instance: local-prod }
+secretStore: { type: vault.v1, instance: vault-prod, secretStorageStrategy: vault-static }
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/postgres"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  host: db.prod.internal
+  port: 5432
+  database: ledger
+  grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
+  allowed_endpoints: ["db.prod.internal:5432"]
+  bootstrap_credential:
+    source: vault
+    address: "https://vault.prod.internal:8200"
+    auth_mount: jwt-spiffe
+    role: ligo-plugin-postgres
+    jwt_audience: "https://vault.prod.internal"
+    kv_path: kv/data/ligo/bootstrap/postgres
 ```
 
-`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. On a platform with a `namespace_template`, use `grantable_role_templates: ["{namespace}_read", "{namespace}_write"]` instead, so that a target can only offer the roles of its own schema; `{namespace}` stands for the schema, and the admin role needs `ADMIN OPTION` on each role when the schema is created. `grantable_roles` beside it are shared across tenants, and startup warns of them. Startup also warns of templates on a platform with no `namespace_template`: an operator then picks the schema, and so any tenant's role. Two platforms on one plugin share its SVID: set `allow_shared_svid: true` on both selectors.
+`grantable_roles` is the privilege bound: no target or binding can grant anything outside it, and tightening it takes effect even for levels published earlier. Once such a change is applied, `ligo` reports the levels and flows outside the new bounds (`SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`). On a platform with a `namespaceTemplate`, use `grantable_role_templates: ["{namespace}_read", "{namespace}_write"]` instead, so that a target can only offer the roles of its own schema; `{namespace}` stands for the schema, and the admin role needs `ADMIN OPTION` on each role when the schema is created. `grantable_roles` beside it are shared across tenants, and startup warns of them. Startup also warns of templates on a platform with no `namespaceTemplate`: an operator then picks the schema, and so any tenant's role. Instances on one plugin may share its SVID when each sets `allowSharedSvid: true`: within one jurisdiction, or across jurisdictions when the type's `instance_bounds.shared_svids` lists the SVID. List it only when every platform on it may read what its Vault role reads, such as the one admin credential of a shared server.
 
-`bootstrap_credential.jwt_audience` must be listed in the same instance's `svid_selector.jwt_audience`.
+`bootstrap_credential.jwt_audience` must be listed in the same instance's `svidSelector.jwtAudience`.
 
 ## Credentials on demand
 
 To let Vault's database engine make a short-lived credential per workload, wire the platform like this, and set the store's `db_connection`:
 
 ```yaml
-identity_provider: { type: delegated-dynamic.v1, instance: dynamic-prod }
-secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-dynamic }
+identityProvider: { type: delegated-dynamic.v1, instance: dynamic-prod }
+secretStore: { type: vault.v1, instance: vault-prod, secretStorageStrategy: vault-dynamic }
 ```
 
 ## The OpenLDAP provider
@@ -113,27 +146,23 @@ It creates one account per binding in one organizational unit, and PostgreSQL ve
    PostgreSQL's LDAP client reads its CA from `TLS_CACERT` in `/etc/ldap/ldap.conf`.
 
 ```yaml
-identity_providers:
-  - type: "openldap.v1"
-    binary: "ligo-plugin-openldap"
-    sha256: "<its hash>"
-    instances:
-      - name: "ldap-prod"
-        realm: prod
-        svid_selector:
-          match_expr: 'path == "/ligo/plugin/openldap"'
-          jwt_audience: ["https://vault.prod.internal"]
-        config:
-          url: "ldaps://openldap.prod.internal:636"
-          service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
-          allowed_endpoints: ["openldap.prod.internal:636"]
-          bootstrap_credential:
-            source: vault
-            address: "https://vault.prod.internal:8200"
-            auth_mount: "jwt-spiffe"
-            role: "ligo-plugin-openldap"
-            jwt_audience: "https://vault.prod.internal"
-            kv_path: "kv/data/ligo/bootstrap/openldap"
+kind: IdentityProvider
+metadata: { name: ldap-prod, jurisdiction: dc/corp-prod, realm: prod }
+type: openldap.v1
+svidSelector:
+  matchExpr: 'path == "/ligo/plugin/openldap"'
+  jwtAudience: ["https://vault.prod.internal"]
+config:
+  url: "ldaps://openldap.prod.internal:636"
+  service_ou_dn: "ou=ligo-accounts,dc=prod,dc=internal"
+  allowed_endpoints: ["openldap.prod.internal:636"]
+  bootstrap_credential:
+    source: vault
+    address: "https://vault.prod.internal:8200"
+    auth_mount: "jwt-spiffe"
+    role: "ligo-plugin-openldap"
+    jwt_audience: "https://vault.prod.internal"
+    kv_path: "kv/data/ligo/bootstrap/openldap"
 ```
 
-On the platform, set `directory_group: ligo_ldap` in the PostgreSQL provider's `config`, and wire `identity_provider: { type: openldap.v1, instance: ldap-prod }`.
+On the platform, set `directory_group: ligo_ldap` in the PostgreSQL provider's `config`, and wire `identityProvider: { type: openldap.v1, instance: ldap-prod }`.

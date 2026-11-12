@@ -26,7 +26,9 @@ tags:
   - name: targets
     description: "Targets: resources on platforms, with access levels and flows (§3.3)."
   - name: platforms
-    description: "Platforms from server.yaml, read-only (§3.4)."
+    description: "Platforms, changed by change requests (§3.4, .specs/ligo-instances.md)."
+  - name: instances
+    description: "Identity provider and secret store instances, changed by change requests (.specs/ligo-instances.md)."
   - name: catalog
     description: "The catalog of targets a caller could request (§7.2.4)."
   - name: bindings
@@ -200,18 +202,137 @@ paths:
 
   # --- platforms and catalog ------------------------------------------------
   /v1/admin/platforms:
+    post:
+      tags: [platforms]
+      operationId: createPlatform
+      summary: File the creation of a platform (PLATFORM/CREATE); one OWNER side, decided by a person.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [platforms]
       operationId: listPlatforms
-      summary: The configured platforms (§3.4) with their health.
+      summary: The platforms in force (§3.4) with their health.
       responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/platforms/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [platforms]
       operationId: getPlatform
-      summary: One platform with its health and uiSchemas; 503 if its plugin cannot be reached.
+      summary: One platform with its health and uiSchemas, and for the operators and approvers of its jurisdiction its revision and definition, and a quarantined one (quarantined true); 503 if its plugin cannot be reached.
       responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [platforms]
+      operationId: updatePlatform
+      summary: File a change of a platform (PLATFORM/UPDATE); expectedRevision is required.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    delete:
+      tags: [platforms]
+      operationId: retirePlatform
+      summary: File the retirement of a platform (PLATFORM/DELETE); refused while it is in use.
+      parameters:
+        - { name: expectedRevision, in: query, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approvalReference: { type: string }
+                automationContext: { type: object }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/platforms/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [platforms], operationId: platformAudit, summary: The audit entries of a platform., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/identity-providers:
+    post:
+      tags: [instances]
+      operationId: createIdentityProvider
+      summary: File the creation of a identity provider instance (IDENTITY_PROVIDER/CREATE); one OWNER side, decided by a person.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    get:
+      tags: [instances]
+      operationId: listIdentityProviders
+      summary: The identity provider instances in force, to any viewer (.specs/ligo-instances.md §10.1).
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/identity-providers/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [instances]
+      operationId: getIdentityProvider
+      summary: One identity provider instance; its revision and definition only for the operators and approvers of its jurisdiction.
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [instances]
+      operationId: updateIdentityProvider
+      summary: File a change of a identity provider instance (IDENTITY_PROVIDER/UPDATE); expectedRevision is required.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    delete:
+      tags: [instances]
+      operationId: retireIdentityProvider
+      summary: File the retirement of a identity provider instance (IDENTITY_PROVIDER/DELETE); refused while it is in use.
+      parameters:
+        - { name: expectedRevision, in: query, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approvalReference: { type: string }
+                automationContext: { type: object }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/identity-providers/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [instances], operationId: identityProviderAudit, summary: The audit entries of a identity provider instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/secret-stores:
+    post:
+      tags: [instances]
+      operationId: createSecretStore
+      summary: File the creation of a secret store instance (SECRET_STORE/CREATE); one OWNER side, decided by a person.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    get:
+      tags: [instances]
+      operationId: listSecretStores
+      summary: The secret store instances in force, to any viewer (.specs/ligo-instances.md §10.1).
+      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/secret-stores/{name}:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get:
+      tags: [instances]
+      operationId: getSecretStore
+      summary: One secret store instance; its revision and definition only for the operators and approvers of its jurisdiction.
+      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    put:
+      tags: [instances]
+      operationId: updateSecretStore
+      summary: File a change of a secret store instance (SECRET_STORE/UPDATE); expectedRevision is required.
+      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+    delete:
+      tags: [instances]
+      operationId: retireSecretStore
+      summary: File the retirement of a secret store instance (SECRET_STORE/DELETE); refused while it is in use.
+      parameters:
+        - { name: expectedRevision, in: query, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approvalReference: { type: string }
+                automationContext: { type: object }
+      responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/secret-stores/{name}/audit:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    get: { tags: [instances], operationId: secretStoreAudit, summary: The audit entries of a secret store instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/catalog/targets:
     get:
       tags: [catalog]

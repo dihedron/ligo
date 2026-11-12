@@ -109,7 +109,7 @@ func checkName(kind engine.Kind, name, jurisdiction string, prefixes []charter.N
 
 // sourceJurisdiction derives the jurisdiction of a regex in a trust domain (§3.9).
 func (v *Evaluator) sourceJurisdiction(td, regex string) (string, error) {
-	x, ok := v.Sources.Rules.Extractors[td]
+	x, ok := v.Sources.Rules.Extractor(td)
 	if !ok {
 		return "", invalidBody("trust domain " + td + " is accepted by no platform")
 	}
@@ -198,7 +198,7 @@ func (v *Evaluator) target(b []byte) (*Evaluation, []changerequests.Candidate, e
 		return nil, nil, invalidBody("body: " + err.Error())
 	}
 	m := t.Metadata
-	p, ok := v.Targets.Rules.Platforms[m.Platform]
+	p, ok := v.Targets.Rules.Platform(m.Platform)
 	if !ok {
 		return nil, nil, invalidBody("metadata.platform " + m.Platform + " is not a configured platform")
 	}

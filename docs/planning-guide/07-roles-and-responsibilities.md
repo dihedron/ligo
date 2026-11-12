@@ -24,7 +24,7 @@ With accounts, every account's operators, approvers and break-glass holders come
 
 | Team | Responsible for |
 | :--------------------- | :------------------------------------------------------------ |
-| Platform team | `server.yaml`: realms, platforms, privilege bounds, the interconnection policy, accounts' structure; the `ligo` hosts, upgrades, plugins |
+| Platform team | `server.yaml`: realms, plugin types and their `instance_bounds`, the interconnection policy, accounts' structure; the platforms and instances of their jurisdictions, through change requests; the `ligo` hosts, upgrades, plugins |
 | Identity team | SPIRE servers and agents; registration entries for `ligo`, its plugins and every workload |
 | Database team | PostgreSQL: availability, backups, restores, roles |
 | Secrets team | Vault or OpenBao: the Transit key, the stores, their authentication |
@@ -42,7 +42,8 @@ R: does it. A: answers for it (one per row). C: consulted. I: informed.
 
 | Activity | Platform | Identity | Database | Secrets | Owners | Security | On call |
 | :------------------------------------------ | :------ | :------ | :------ | :------ | :------ | :------ | :------ |
-| Change `server.yaml` (platforms, bounds, policy) | A, R | C | | C | I | C | I |
+| Change `server.yaml` (plugin types, `instance_bounds`, policy) | A, R | C | | C | I | C | I |
+| Create or change a platform or instance (four eyes in its jurisdiction) | A, R | C | C | C | I | I | |
 | Register or retire an account | A, R (`account_admin`) | C | | | I | I | |
 | Register workloads in SPIRE (and tenants' paths) | C | A, R | | | C | I | |
 | Register a source | | | | | A, R | | |
@@ -74,6 +75,7 @@ The organisation must enforce the rest, because `ligo` cannot see it:
 | Who is in which directory group | `ligo` trusts the directory's answer |
 | Who creates SPIRE entries, especially tenants' paths | A jurisdiction derived from a path is only as good as who assigns the path |
 | Who changes `server.yaml` | It is root-owned on the hosts; its change control is the platform team's |
+| Who changes a platform or instance | An operator of its jurisdiction files it, another person of that jurisdiction approves it; never automatically |
 | Who has root on `ligo` hosts and automation nodes | Root obtains the host's identities |
 | Who administers the database | Its administrators can bypass the application and its triggers |
 | Which job runs under an automation's identity | SPIFFE tells apart where a process runs, not which job it is |

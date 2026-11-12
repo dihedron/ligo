@@ -1,0 +1,53 @@
+# The instances of planning-guide/examples/regulated-zone.yaml, created with ligo apply (.specs/ligo-instances.md).
+---
+kind: IdentityProvider
+metadata: {name: local-reg, jurisdiction: reg/dba, realm: reg}
+type: target-local.v1
+---
+kind: SecretStore
+metadata: {name: vault-reg, jurisdiction: reg/dba, realm: reg}
+type: vault.v1
+svidSelector:
+  matchExpr: path == "/ligo/plugin/vault"
+  jwtAudience: ['https://vault.reg.internal']
+config:
+  address: https://vault.reg.internal:8200
+  allowed_endpoints: ['vault.reg.internal:8200']
+  auth_mount: jwt-spiffe
+  role: ligo-plugin-vault
+  workload_jwt_audience: https://vault.reg.internal
+networkFlows:
+- name: vault
+  purpose: CREDENTIALS
+  protocol: TCP
+  destination: vault.reg.internal
+  ports: [8200]
+  tls: true
+  serverName: vault.reg.internal
+---
+kind: Platform
+metadata: {name: pg-reg, jurisdiction: reg/dba, realm: reg}
+type: postgres.v1
+targetJurisdictions: [reg/data/*]
+allowedSourceTrustDomains: [regulated.internal, cloud.internal]
+networkFlows:
+- name: postgres
+  purpose: DATA
+  protocol: TCP
+  destination: pg.reg.internal
+  ports: [5432]
+  tls: true
+  serverName: pg.reg.internal
+identityProvider: {type: target-local.v1, instance: local-reg}
+secretStore: {type: vault.v1, instance: vault-reg, secretStorageStrategy: vault-static}
+svidSelector:
+  matchExpr: path == "/ligo/plugin/postgres"
+  jwtAudience: ['https://vault.reg.internal']
+config:
+  host: pg.reg.internal
+  port: 5432
+  database: risk
+  grantable_roles: [RISK_RO, RISK_RW]
+  allowed_endpoints: ['pg.reg.internal:5432']
+  bootstrap_credential: {source: vault, address: 'https://vault.reg.internal:8200', auth_mount: jwt-spiffe, role: ligo-plugin-postgres, jwt_audience: 'https://vault.reg.internal',
+    kv_path: kv/data/ligo/bootstrap/pg-reg}

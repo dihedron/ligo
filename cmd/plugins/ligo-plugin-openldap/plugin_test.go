@@ -333,7 +333,7 @@ func TestHealth(t *testing.T) {
 
 func TestDescribe(t *testing.T) {
 	r, err := (&plugin{}).Describe(context.Background(), &pluginv1.DescribeRequest{})
-	if err != nil || r.GetPluginType() != "openldap.v1" || r.GetKind() != pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER || r.GetPluginProtocolVersion() != 1 ||
+	if err != nil || r.GetPluginType() != "openldap.v1" || r.GetKind() != pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER || r.GetPluginProtocolVersion() != 2 ||
 		r.GetIdentityProvider().GetProducedIdentityMode() != pluginv1.IdentityMode_IDENTITY_MODE_EXTERNAL_DIR || r.GetInstanceConfigSchemaJson() == "" {
 		t.Errorf("%+v %v", r, err)
 	}
@@ -360,7 +360,7 @@ func TestParseConfig(t *testing.T) {
 		"endpoint not kept": {configJSON("ldaps://ldap.ligo.lab", ou, `["other:636"]`, ""), "allowed_endpoints"},
 		"other port":        {configJSON("ldaps://ldap.ligo.lab:1636", ou, good, ""), "allowed_endpoints"},
 		"unknown field":     {configJSON("ldaps://ldap.ligo.lab", ou, good, `,"start_tls":true`), "start_tls"},
-		"no ca file":        {configJSON("ldaps://ldap.ligo.lab", ou, good, `,"ca_file":"/nonexistent"`), "ca_file"},
+		"ca_file":           {configJSON("ldaps://ldap.ligo.lab", ou, good, `,"ca_file":"/etc/shadow"`), "ca_file"}, // no file paths (ligo-instances T-22d)
 		"no bootstrap":      {fmt.Sprintf(`{"url":"ldaps://ldap.ligo.lab","service_ou_dn":%q,"allowed_endpoints":%s}`, ou, good), "bootstrap_credential"},
 		"db static role": {`{"url":"ldaps://ldap.ligo.lab","service_ou_dn":"` + ou + `","allowed_endpoints":` + good +
 			`,"bootstrap_credential":{"source":"vault","address":"https://v:8200","auth_mount":"m","role":"r","jwt_audience":"a","db_static_role":"x"}}`, "kv_path"},

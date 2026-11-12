@@ -55,6 +55,8 @@ No metric carries a jurisdiction label, as jurisdictions are unbounded. Per-juri
 | `ligo_audit_oldest_entry_timestamp_seconds` | | When the oldest entry left was written; a jump without a `SYSTEM_AUDIT_PRUNED` entry is a deletion |
 | `ligo_audit_pruned_entries_total` | | Entries deleted by pruning |
 | `ligo_change_requests_pruned_total` | | Change requests deleted by pruning |
+| `ligo_instance_drift` | `kind`, `name` | 1 for an instance quarantined because its row does not verify |
+| `ligo_plugin_reconfigure_failures_total` | `type`, `realm` | Plugin processes that refused a new set of instances |
 | `ligo_break_glass_open` | `realm` | Open emergency changes |
 | `ligo_break_glass_total` | `realm`, `operation`, `outcome` | `ratified`, `reverted`, `revert_failed`, `review_overdue` |
 | `ligo_notifications_abandoned_total` | | Notifications given up on |

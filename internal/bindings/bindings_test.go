@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
+	"github.com/dihedron/ligo/internal/instances"
 )
 
 func example(t *testing.T) *config.Config {
@@ -28,21 +29,45 @@ func example(t *testing.T) *config.Config {
 	return cfg
 }
 
-// rules are the example's, plus a platform in a cloud tenancy, and test
-// workloads accepted on oracle-prod so that AC-51 reaches the policy.
-func rules(t *testing.T) *Rules {
+// exampleInstances are the example's instances, plus a platform in a cloud
+// tenancy, and test workloads accepted on oracle-prod so that AC-51 reaches
+// the policy.
+func exampleInstances(t *testing.T) instances.Fixed {
 	t.Helper()
-	r, err := NewRules(example(t))
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Platforms["cloud-pg"] = Platform{Name: "cloud-pg", Type: "postgres.v1", Realm: "prod", Jurisdiction: "cloud/fin-01/payments",
-		AllowedTrustDomains: []string{"cloud.internal", "prod.internal"}, IdentityProviderType: "target-local.v1",
-		IdentityProviderInstance: "local-prod", SecretStoreType: "vault.v1", SecretStoreInstance: "vault-prod", SecretStorageStrategy: "vault-static"}
-	p := r.Platforms["oracle-prod"]
-	p.AllowedTrustDomains = append(p.AllowedTrustDomains, "test.internal")
-	r.Platforms["oracle-prod"] = p
+	prod, _ := set.Platform("oracle-prod")
+	oracle := *prod
+	oracle.AllowedSourceTrustDomains = append(slices.Clone(oracle.AllowedSourceTrustDomains), "test.internal")
+	cloud := &instances.Definition{Kind: "Platform", Type: "postgres.v1",
+		Metadata:                  instances.Metadata{Name: "cloud-pg", Realm: "prod", Jurisdiction: "cloud/fin-01/payments"},
+		AllowedSourceTrustDomains: []string{"cloud.internal", "prod.internal"},
+		IdentityProvider:          &instances.Wiring{Type: "target-local.v1", Instance: "local-prod"},
+		SecretStore:               &instances.Wiring{Type: "vault.v1", Instance: "vault-prod", SecretStorageStrategy: "vault-static"}}
+	cloud.Normalize()
+	return instances.Fixed{Set: set.With(&oracle, cloud)}
+}
+
+// rules are the example's, over exampleInstances.
+func rules(t *testing.T) *Rules {
+	t.Helper()
+	r, err := NewRules(example(t), exampleInstances(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return r
+}
+
+// withPlatform is r's instances with the platform called name changed by f,
+// under the name f leaves.
+func withPlatform(r *Rules, name string, f func(*instances.Definition)) {
+	set := r.Instances.Current()
+	cur, _ := set.Platform(name)
+	p := *cur
+	f(&p)
+	r.Instances = instances.Fixed{Set: set.With(&p)}
 }
 
 func slug(err error) string {
@@ -86,7 +111,7 @@ func (p *plugin) validate(_ context.Context, req *pluginv1.ValidateBindingReques
 }
 
 func TestNewRules(t *testing.T) {
-	p := rules(t).Platforms["oracle-prod"]
+	p, _ := rules(t).Platform("oracle-prod")
 	if p.Type != "oracle.v1" || p.Realm != "prod" || p.Jurisdiction != "dc/corp-prod" || p.PrincipalPrefix != "svc_" ||
 		p.IdentityProviderType != "openldap.v1" || p.IdentityProviderInstance != "ldap-prod" || p.SecretStoreType != "vault.v1" ||
 		p.SecretStoreInstance != "vault-prod" || p.SecretStorageStrategy != "vault-static" || !slices.Contains(p.AllowedTrustDomains, "cloud.internal") {

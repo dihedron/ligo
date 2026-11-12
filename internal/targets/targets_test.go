@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/dihedron/ligo/internal/instances"
 	"os"
 	"slices"
 	"strings"
@@ -29,9 +30,18 @@ func example(t *testing.T) *config.Config {
 	return cfg
 }
 
+func exampleInstances(t *testing.T) instances.Fixed {
+	t.Helper()
+	set, err := instances.LoadManifest("../../examples/instances.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return instances.Fixed{Set: set}
+}
+
 func rules(t *testing.T) *Rules {
 	t.Helper()
-	r, err := NewRules(example(t))
+	r, err := NewRules(example(t), exampleInstances(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,13 +260,15 @@ func TestSameFlow(t *testing.T) {
 
 // TestCheckExistenceDefault: check_existence defaults to true (§7.2.3).
 func TestCheckExistenceDefault(t *testing.T) {
-	cfg := example(t)
-	cfg.PlatformProviders[0].Platforms[0].CheckExistence = nil
-	r, err := NewRules(cfg)
+	set := exampleInstances(t).Set
+	prod, _ := set.Platform("oracle-prod")
+	p := *prod
+	p.CheckExistence = nil
+	r, err := NewRules(example(t), instances.Fixed{Set: set.With(&p)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Platforms["oracle-prod"].CheckExistence {
+	if got, _ := r.Platform("oracle-prod"); !got.CheckExistence {
 		t.Error("check_existence does not default to true")
 	}
 }
@@ -294,9 +306,11 @@ func TestNamespace(t *testing.T) {
 	r := rules(t)
 	r.Accounts = &charter.Accounts{Jurisdiction: "cloud/{account}", SourceJurisdiction: "cloud/{account}/app/{project}", TargetJurisdiction: "cloud/{account}/data/{tenancy}"}
 	r.NamespaceField = func(typ string) string { return "schema" }
-	p := r.Platforms["oracle-prod"]
+	set := r.Instances.Current()
+	prod, _ := set.Platform("oracle-prod")
+	p := *prod
 	p.TargetJurisdictions, p.NamespaceTemplate = []string{"cloud/*", "dc/corp-prod/*"}, "{account}_{tenancy}"
-	r.Platforms["oracle-prod"] = p
+	r.Instances = instances.Fixed{Set: set.With(&p)}
 	r.NamePrefixes = nil
 	run := func(jurisdiction, definition string) error {
 		tg := ledger()
@@ -323,7 +337,7 @@ func TestNamespace(t *testing.T) {
 	}
 	// a platform without a template: only the jurisdiction's form applies
 	p.NamespaceTemplate = ""
-	r.Platforms["oracle-prod"] = p
+	r.Instances = instances.Fixed{Set: set.With(&p)}
 	if err := run("cloud/acme/data/db01", `{"schema":"anything"}`); err != nil {
 		t.Errorf("no template: %v", err)
 	}

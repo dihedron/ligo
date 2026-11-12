@@ -66,10 +66,30 @@ type marker struct {
 
 func (m *marker) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	return &pluginv1.DescribeResponse{
-		PluginType: m.typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 1,
+		PluginType: m.typ, Kind: pluginv1.PluginKind_PLUGIN_KIND_IDENTITY_PROVIDER, PluginProtocolVersion: 2,
 		PluginVersion: "builtin", InstanceConfigSchemaJson: m.schema,
 		Capabilities: &pluginv1.DescribeResponse_IdentityProvider{IdentityProvider: &pluginv1.IdentityProviderCapabilities{ProducedIdentityMode: m.mode}},
 	}, nil
+}
+
+// passwordLength is target-local.v1's password_length of in, defaulted;
+// other markers have none.
+func (m *marker) passwordLength(in *pluginv1.InstanceDescriptor) (int, error) {
+	var cfg struct {
+		PasswordLength int `json:"password_length"`
+	}
+	if in.GetConfigJson() != "" {
+		if err := json.Unmarshal([]byte(in.GetConfigJson()), &cfg); err != nil {
+			return 0, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", fmt.Sprintf("instance %s: config: %v", in.GetName(), err), false)
+		}
+	}
+	switch {
+	case cfg.PasswordLength == 0:
+		return minPasswordLength, nil
+	case cfg.PasswordLength < minPasswordLength:
+		return 0, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", fmt.Sprintf("instance %s: password_length below %d", in.GetName(), minPasswordLength), false)
+	}
+	return cfg.PasswordLength, nil
 }
 
 // ConfigureInstances resolves no SVID: builtins run inside ligo and
@@ -80,26 +100,27 @@ func (m *marker) ConfigureInstances(_ context.Context, r *pluginv1.ConfigureInst
 		if m.mode != pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
 			continue
 		}
-		var cfg struct {
-			PasswordLength int `json:"password_length"`
+		n, err := m.passwordLength(in)
+		if err != nil {
+			return nil, err
 		}
-		if in.GetConfigJson() != "" {
-			if err := json.Unmarshal([]byte(in.GetConfigJson()), &cfg); err != nil {
-				return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", fmt.Sprintf("instance %s: config: %v", in.GetName(), err), false)
-			}
-		}
-		switch {
-		case cfg.PasswordLength == 0:
-			cfg.PasswordLength = minPasswordLength
-		case cfg.PasswordLength < minPasswordLength:
-			return nil, pluginsdk.Error(codes.InvalidArgument, "INVALID_CONFIG", fmt.Sprintf("instance %s: password_length below %d", in.GetName(), minPasswordLength), false)
-		}
-		passwords[in.GetName()] = cfg.PasswordLength
+		passwords[in.GetName()] = n
 	}
 	m.mu.Lock()
 	m.passwords = passwords
 	m.mu.Unlock()
 	return &pluginv1.ConfigureInstancesResponse{}, nil
+}
+
+// ValidateInstance checks the config ConfigureInstances would take; a
+// builtin has no SVID and connects nowhere (ligo-instances §7.1).
+func (m *marker) ValidateInstance(_ context.Context, r *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	if m.mode == pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL {
+		if _, err := m.passwordLength(r.GetInstance()); err != nil {
+			return nil, err
+		}
+	}
+	return &pluginv1.ValidateInstanceResponse{}, nil
 }
 
 func (m *marker) Health(context.Context, *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {
@@ -143,7 +164,7 @@ type none struct {
 
 func (*none) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.DescribeResponse, error) {
 	return &pluginv1.DescribeResponse{
-		PluginType: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 1,
+		PluginType: "none.v1", Kind: pluginv1.PluginKind_PLUGIN_KIND_SECRET_STORE, PluginProtocolVersion: 2,
 		PluginVersion: "builtin", InstanceConfigSchemaJson: emptyConfig,
 		Capabilities: &pluginv1.DescribeResponse_SecretStore{SecretStore: &pluginv1.SecretStoreCapabilities{
 			SecretStorageStrategies: []*pluginv1.SecretStorageStrategy{{Name: "svid", IdentityModes: []pluginv1.IdentityMode{pluginv1.IdentityMode_IDENTITY_MODE_SVID}}},
@@ -154,6 +175,11 @@ func (*none) Describe(context.Context, *pluginv1.DescribeRequest) (*pluginv1.Des
 
 func (*none) ConfigureInstances(context.Context, *pluginv1.ConfigureInstancesRequest) (*pluginv1.ConfigureInstancesResponse, error) {
 	return &pluginv1.ConfigureInstancesResponse{}, nil
+}
+
+// ValidateInstance: none.v1 takes no config, has no SVID and connects nowhere.
+func (*none) ValidateInstance(context.Context, *pluginv1.ValidateInstanceRequest) (*pluginv1.ValidateInstanceResponse, error) {
+	return &pluginv1.ValidateInstanceResponse{}, nil
 }
 
 func (*none) Health(context.Context, *pluginv1.HealthRequest) (*pluginv1.HealthResponse, error) {

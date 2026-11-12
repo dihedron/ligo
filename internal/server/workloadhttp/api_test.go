@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/dihedron/ligo/internal/instances"
 	"io"
 	"net/http"
 	"strings"
@@ -52,15 +53,14 @@ func apiSetup(t *testing.T) (*env, *fakeCache, *http.Client) {
 			Spec: []byte(`{"host": "ledger-db"}`), SecretStoreInstance: "vault-prod", UpdatedAt: time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC)}}},
 		targets: map[uuid.UUID][]flows.Flow{id: {flow("listener", "DATA", "ledger-db.prod.internal", 1522), flow("outside", "DATA", "elsewhere.internal", 22)}},
 	}
-	allow, err := flows.ParseAllowlist([]string{"ledger-db.prod.internal:1522"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	v.s.Cache = f
-	v.s.Rules = &bindings.Rules{Allow: map[string]flows.Allowlist{"oracle-prod": allow},
-		PlatformFlows: map[string][]flows.Flow{"oracle-prod": {flow("scan", "DATA", "ora-scan.prod.internal", 1521)}},
-		StoreFlows:    map[string][]flows.Flow{"vault-prod": {flow("vault", "CREDENTIALS", "vault.prod.internal", 8200)}},
-		Ligo:          flows.LigoFlow("ligo.prod.internal", 8443, "ligo.prod.internal")}
+	set := instances.NewSet(
+		&instances.Definition{Kind: "Platform", Metadata: instances.Metadata{Name: "oracle-prod"},
+			Config:       []byte(`{"allowed_endpoints":["ledger-db.prod.internal:1522"]}`),
+			NetworkFlows: []flows.Flow{flow("scan", "DATA", "ora-scan.prod.internal", 1521)}},
+		&instances.Definition{Kind: "SecretStore", Metadata: instances.Metadata{Name: "vault-prod"},
+			NetworkFlows: []flows.Flow{flow("vault", "CREDENTIALS", "vault.prod.internal", 8200)}})
+	v.s.Rules = &bindings.Rules{Instances: instances.Fixed{Set: set}, Ligo: flows.LigoFlow("ligo.prod.internal", 8443, "ligo.prod.internal")}
 	v.srv.Config.Handler = v.s.Handler()
 	return v, f, v.client(certificate(t, v.ca, worker))
 }

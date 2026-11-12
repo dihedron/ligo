@@ -25,7 +25,7 @@ As `.specs/ligo-openldap-plugin.md` §2: source in `cmd/plugins/ligo-plugin-post
 | `grantable_role_templates` | one of these two | Each an identifier once `{namespace}`, held exactly once, is replaced by the target's schema: the bounds of that target (.specs/ligo-tenancy.md §6). |
 | `allowed_endpoints` | yes | Must contain `host:port`. |
 | `bootstrap_credential` | yes | §5.5, `kv_path` only. Its `username` is the admin role of §5. |
-| `ca_file` | no | A PEM file of the roots that verify the server and the Vault of `bootstrap_credential`; the system roots when absent. |
+| `ca_pem` | no | PEM text (not a file path, ligo-instances T-22d) of the roots that verify the server and the Vault of `bootstrap_credential`; the system roots when absent. |
 | `directory_group` | with `EXTERNAL_DIR` | An identifier: a group role of which every directory-verified role is made a member, so that one `pg_hba.conf` line, `+directory_group`, covers them. |
 
 Connections always use `sslmode=verify-full`, with a 10 s connection timeout, one per call.

@@ -122,6 +122,24 @@ func TestINV11Routes(t *testing.T) {
 	filed(act(b, "POST /ui/targets/{name}/access-levels/{level}/{op}", "CR_CREATED", "/ui/targets/"+target+"/access-levels/write/deprecate", url.Values{"expectedRevision": {"2"}}))
 	act(b, "POST /ui/targets/{name}/{op}", "CR_CREATED", "/ui/targets/"+target+"/deprecate", url.Values{"expectedRevision": {"3"}})
 
+	// instances (.specs/ligo-instances.md §10.3): created, changed and retired
+	set := v.s.Instances.Current()
+	for _, kind := range []struct{ path, example string }{{"identity-providers", "ldap-prod"}, {"secret-stores", "vault-prod"}, {"platforms", "oracle-prod"}} {
+		ex, _ := set.Get(instanceKinds[kind.path], kind.example)
+		rest, err := rest(ex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "inv-" + kind.example + "-" + x
+		form := url.Values{"name": {name}, "type": {ex.Type}, "realm": {ex.Metadata.Realm}, "jurisdiction": {ex.Metadata.Jurisdiction}, "rest": {rest}}
+		filed(act(b, "POST /ui/"+kind.path, "CR_CREATED", "/ui/"+kind.path, form))
+		form.Set("description", "described")
+		form.Set("expectedRevision", "1")
+		filed(act(b, "PUT /ui/"+kind.path+"/{name}", "CR_CREATED", "/ui/"+kind.path+"/"+name, form))
+		act(b, "DELETE /ui/"+kind.path+"/{name}", "CR_CREATED", "/ui/"+kind.path+"/"+name+"?expectedRevision=2", url.Values{})
+	}
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from instances where name like $1", "%"+x) })
+
 	// decisions
 	decide := "POST /ui/change-requests/{id}/{action}"
 	cr := v.file(t, v.user, 1, x)

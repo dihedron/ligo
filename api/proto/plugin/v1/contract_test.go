@@ -50,7 +50,7 @@ func TestContractShape(t *testing.T) {
 		t.Errorf("package %q", got)
 	}
 	want := map[string][]string{
-		"PluginControl":          {"Describe", "ConfigureInstances", "Health"},
+		"PluginControl":          {"Describe", "ConfigureInstances", "ValidateInstance", "Health"},
 		"IdentityProviderPlugin": {"EnsureIdentity", "CleanupIdentity"},
 		"PlatformProviderPlugin": {"GetUISchemas", "ValidateTarget", "ValidateBinding", "EnsureTarget", "CleanupTarget"},
 		"SecretStorePlugin":      {"EnsureSecretStore", "CleanupSecretStore"},

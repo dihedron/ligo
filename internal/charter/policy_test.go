@@ -35,10 +35,6 @@ func examplePolicy() *Policy {
 			{Jurisdictions: []string{"dc/corp-prod/*"}, DefaultTTL: 4 * time.Hour, MaxTTL: 8 * time.Hour, MaxOpen: 5, WarnBefore: time.Hour},
 			{Jurisdictions: []string{"cloud/fin-01/*"}, DefaultTTL: 2 * time.Hour, MaxTTL: 4 * time.Hour, MaxOpen: 3, WarnBefore: 30 * time.Minute},
 		},
-		Platforms: []PlatformJurisdictions{
-			{Platform: "oracle-test-dynamic", Jurisdiction: "dc/corp-test", TargetJurisdictions: []string{"dc/corp-test/*"}},
-			{Platform: "oracle-prod", Jurisdiction: "dc/corp-prod", TargetJurisdictions: []string{"dc/corp-prod/*"}},
-		},
 	}
 }
 
@@ -95,11 +91,10 @@ func TestApprovalRequired(t *testing.T) {
 	}
 }
 
-// TestPolicyHash checks that the hash ignores the order of platforms and
-// follows every policy change.
+// TestPolicyHash checks that the hash is stable and follows every policy
+// change; platforms are not part of it (.specs/ligo-instances.md §8).
 func TestPolicyHash(t *testing.T) {
 	a, b := examplePolicy(), examplePolicy()
-	slices.Reverse(b.Platforms)
 	ha, hb := a.SHA256(), b.SHA256()
 	if ha != hb || len(ha) != 64 {
 		t.Errorf("hashes differ for the same policy: %s %s", ha, hb)

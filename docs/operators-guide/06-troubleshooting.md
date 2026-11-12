@@ -11,7 +11,8 @@
 | A plugin's checksum, owner or mode | `sha256` in `server.yaml` against `sha256sum`; `root:root`; no symlink |
 | A plugin's config fails its schema | The instance and field it names |
 | `instance "...": SVID` matched none or several | The plugin's SPIRE entry; run the binary with `-svids`, as the user `ligo` |
-| A binding references a removed instance | Restore it, or give `--allow-orphaned-bindings` on purpose |
+| A secret store type no longer declares a strategy that bindings use | Restore the plugin version, or give `--allow-orphaned-bindings` on purpose |
+| `instances are no longer configured in server.yaml` | Remove `instances` and `platforms` from `server.yaml`; file them with `ligo apply` |
 | Stored jurisdictions differ from the configuration | Restore the mapping, or give `--accept-jurisdiction-changes` on purpose |
 
 ## A plugin does not get its SVID

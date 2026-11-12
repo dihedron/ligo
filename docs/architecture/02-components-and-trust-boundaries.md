@@ -26,7 +26,7 @@ The two listeners are separate so that they can be exposed differently, and so t
 | 4 | Plugins to backends | SQL, LDAP, Vault | TLS verified, identifier grammars, privilege bounds, output validation |
 | 5 | `ligo` to PostgreSQL | SQL | `verify-full`, four roles, triggers and checks in the database |
 | 6 | Consent | People's decisions | Two-sided consent, distinct approvers, payload hash |
-| 7 | The host | Files | `server.yaml` root-owned; its SHA-256 logged and audited at startup |
+| 7 | The host | Files | `server.yaml` (plugin types and their `instance_bounds`, realms, policy) root-owned; its SHA-256 logged and audited at startup. Instances live in the database, signed |
 
 ## Plugins are less trusted
 

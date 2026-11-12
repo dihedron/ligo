@@ -22,8 +22,8 @@ const ligoAccounts = "ou=ligo-accounts,dc=ligo,dc=lab"
 // openldapConfig is an instance's config for this directory URL and bootstrap.
 func openldapConfig(t *testing.T, url, endpoint, bootstrapName string) string {
 	t.Helper()
-	return `{"url":"` + url + `","service_ou_dn":"` + ligoAccounts + `","allowed_endpoints":["` + endpoint + `"],"ca_file":"` +
-		labEnv(t, "LIGO_TEST_CA") + `","bootstrap_credential":` + strings.Replace(bootstrap(t, "openldap"), "bootstrap/openldap", "bootstrap/"+bootstrapName, 1) + `}`
+	return `{"url":"` + url + `","service_ou_dn":"` + ligoAccounts + `","allowed_endpoints":["` + endpoint + `"],"ca_pem":` +
+		caPEM(t) + `,"bootstrap_credential":` + strings.Replace(bootstrap(t, "openldap"), "bootstrap/openldap", "bootstrap/"+bootstrapName, 1) + `}`
 }
 
 func startOpenLDAP(t *testing.T, config string) *pluginmgr.Client {

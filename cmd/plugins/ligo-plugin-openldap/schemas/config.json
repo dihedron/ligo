@@ -21,8 +21,9 @@
         "type": "string"
       }
     },
-    "ca_file": {
-      "type": "string"
+    "ca_pem": {
+      "type": "string",
+      "description": "PEM roots that verify the directory and the Vault of bootstrap_credential; the system roots when absent"
     },
     "bootstrap_credential": {
       "type": "object"

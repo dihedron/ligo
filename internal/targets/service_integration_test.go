@@ -5,6 +5,7 @@ package targets
 import (
 	"context"
 	"encoding/json"
+	"github.com/dihedron/ligo/internal/instances"
 	"os"
 	"testing"
 	"uuid"
@@ -409,9 +410,11 @@ func TestNamespaceAtApproval(t *testing.T) {
 	x := uuid.NewV7().String()[24:]
 	s.Rules.Accounts = &charter.Accounts{Jurisdiction: "dc/corp-prod/{account}", TargetJurisdiction: "dc/corp-prod/{account}"}
 	s.Rules.NamespaceField = func(string) string { return "schema" }
-	p := s.Rules.Platforms["oracle-prod"]
+	set := s.Rules.Instances.Current()
+	prod, _ := set.Platform("oracle-prod")
+	p := *prod
 	p.NamespaceTemplate = "{account}_ok"
-	s.Rules.Platforms["oracle-prod"] = p
+	s.Rules.Instances = instances.Fixed{Set: set.With(&p)}
 	tg := ledger()
 	tg.Metadata.Name = "acct-" + x
 	tg.Definition = json.RawMessage(`{"schema":"ledger_ok"}`)
@@ -428,7 +431,7 @@ func TestNamespaceAtApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.NamespaceTemplate = "{account}_other"
-	s.Rules.Platforms["oracle-prod"] = p
+	s.Rules.Instances = instances.Fixed{Set: set.With(&p)}
 	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); slug(err) != "namespace-mismatch" {
 		t.Errorf("at approval: %v", err)
 	}

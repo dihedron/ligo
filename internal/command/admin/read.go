@@ -21,7 +21,7 @@ import (
 	"github.com/dihedron/ligo/internal/sealing"
 )
 
-// Get displays a source, target or binding (ligo get KIND NAME).
+// Get displays a source, target, binding or instance (ligo get KIND NAME).
 type Get struct {
 	Base
 	Args ResourceArgs `positional-args:"yes" required:"yes"`
@@ -31,7 +31,7 @@ func (cmd *Get) Execute([]string) error {
 	return cmd.get(path(cmd.Args.Kind+"s", cmd.Args.Name), nil, columns[cmd.Args.Kind]...)
 }
 
-// List lists sources, targets or bindings (ligo list KIND).
+// List lists sources, targets, bindings or instances (ligo list KIND).
 type List struct {
 	Base
 	Page
@@ -46,7 +46,7 @@ type List struct {
 	TrustDomain    string `long:"trust-domain" description:"Filter by source trust domain."`
 	ExpiringBefore string `long:"expiring-before" description:"Bindings expiring before this RFC 3339 time."`
 	Args           struct {
-		Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" description:"Resource kind."`
+		Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
 	} `positional-args:"yes" required:"yes"`
 }
 
@@ -281,7 +281,7 @@ type ChangeRequestList struct {
 	Realm        string `long:"realm" description:"Filter by realm."`
 	Jurisdiction string `long:"jurisdiction" description:"Filter by jurisdiction pattern (any jurisdiction of the request)."`
 	AwaitingMe   bool   `long:"awaiting-me" description:"Only requests with a pending side the caller may decide."`
-	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" description:"Filter by resource kind."`
+	Kind         string `short:"k" long:"kind" choice:"source" choice:"target" choice:"binding" choice:"platform" choice:"identity-provider" choice:"secret-store" description:"Filter by resource kind."`
 	Name         string `short:"n" long:"name" description:"Filter by resource name."`
 }
 
@@ -291,7 +291,7 @@ func (cmd *ChangeRequestList) Execute([]string) error {
 		awaiting = "true"
 	}
 	q := cmd.query("status", cmd.Status, "realm", cmd.Realm, "jurisdiction", cmd.Jurisdiction, "awaitingMe", awaiting,
-		"resourceType", strings.ToUpper(cmd.Kind), "resourceName", cmd.Name)
+		"resourceType", strings.ToUpper(strings.ReplaceAll(cmd.Kind, "-", "_")), "resourceName", cmd.Name)
 	return cmd.get(path("change-requests"), q, columns["request"]...)
 }
 

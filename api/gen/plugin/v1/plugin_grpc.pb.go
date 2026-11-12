@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	PluginControl_Describe_FullMethodName           = "/ligo.plugin.v1.PluginControl/Describe"
 	PluginControl_ConfigureInstances_FullMethodName = "/ligo.plugin.v1.PluginControl/ConfigureInstances"
+	PluginControl_ValidateInstance_FullMethodName   = "/ligo.plugin.v1.PluginControl/ValidateInstance"
 	PluginControl_Health_FullMethodName             = "/ligo.plugin.v1.PluginControl/Health"
 )
 
@@ -29,7 +30,13 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PluginControlClient interface {
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
+	// ConfigureInstances replaces the whole set the plugin serves in its
+	// realm; on an error the plugin MUST keep serving the previous set.
 	ConfigureInstances(ctx context.Context, in *ConfigureInstancesRequest, opts ...grpc.CallOption) (*ConfigureInstancesResponse, error)
+	// ValidateInstance checks one instance without serving it: config, the
+	// bootstrap credential's shape, the SVID. It MUST NOT connect to any
+	// endpoint of the config (.specs/ligo-instances.md §7.1).
+	ValidateInstance(ctx context.Context, in *ValidateInstanceRequest, opts ...grpc.CallOption) (*ValidateInstanceResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
@@ -61,6 +68,16 @@ func (c *pluginControlClient) ConfigureInstances(ctx context.Context, in *Config
 	return out, nil
 }
 
+func (c *pluginControlClient) ValidateInstance(ctx context.Context, in *ValidateInstanceRequest, opts ...grpc.CallOption) (*ValidateInstanceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateInstanceResponse)
+	err := c.cc.Invoke(ctx, PluginControl_ValidateInstance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *pluginControlClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HealthResponse)
@@ -76,7 +93,13 @@ func (c *pluginControlClient) Health(ctx context.Context, in *HealthRequest, opt
 // for forward compatibility.
 type PluginControlServer interface {
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
+	// ConfigureInstances replaces the whole set the plugin serves in its
+	// realm; on an error the plugin MUST keep serving the previous set.
 	ConfigureInstances(context.Context, *ConfigureInstancesRequest) (*ConfigureInstancesResponse, error)
+	// ValidateInstance checks one instance without serving it: config, the
+	// bootstrap credential's shape, the SVID. It MUST NOT connect to any
+	// endpoint of the config (.specs/ligo-instances.md §7.1).
+	ValidateInstance(context.Context, *ValidateInstanceRequest) (*ValidateInstanceResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedPluginControlServer()
 }
@@ -93,6 +116,9 @@ func (UnimplementedPluginControlServer) Describe(context.Context, *DescribeReque
 }
 func (UnimplementedPluginControlServer) ConfigureInstances(context.Context, *ConfigureInstancesRequest) (*ConfigureInstancesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConfigureInstances not implemented")
+}
+func (UnimplementedPluginControlServer) ValidateInstance(context.Context, *ValidateInstanceRequest) (*ValidateInstanceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ValidateInstance not implemented")
 }
 func (UnimplementedPluginControlServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
@@ -154,6 +180,24 @@ func _PluginControl_ConfigureInstances_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginControl_ValidateInstance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateInstanceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginControlServer).ValidateInstance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginControl_ValidateInstance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginControlServer).ValidateInstance(ctx, req.(*ValidateInstanceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PluginControl_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HealthRequest)
 	if err := dec(in); err != nil {
@@ -186,6 +230,10 @@ var PluginControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfigureInstances",
 			Handler:    _PluginControl_ConfigureInstances_Handler,
+		},
+		{
+			MethodName: "ValidateInstance",
+			Handler:    _PluginControl_ValidateInstance_Handler,
 		},
 		{
 			MethodName: "Health",

@@ -45,7 +45,7 @@ func (b *Base) post(ctx context.Context, c *client.Client, method, p string, que
 // (ligo apply -f FILE).
 type Apply struct {
 	Base
-	File              string `short:"f" long:"file" required:"true" description:"Manifest file (YAML or JSON, or '-' for stdin); may hold several documents, applied in order Source, Target, Binding."`
+	File              string `short:"f" long:"file" required:"true" description:"Manifest file (YAML or JSON, or '-' for stdin); may hold several documents, applied in order IdentityProvider, SecretStore, Platform, Source, Target, Binding."`
 	Wait              bool   `short:"w" long:"wait" description:"If a binding change is applied at creation, block up to 10s until provisioning reaches a terminal phase."`
 	ApprovalRef       string `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference (required for delegated approval, ADR-11)."`
 	AutomationContext string `long:"automation-context" env:"LIGO_AUTOMATION_CONTEXT" description:"Optional JSON object describing the calling automation (informative only)."`
@@ -66,12 +66,13 @@ func (cmd *Apply) Execute([]string) error {
 	}
 	return cmd.changed("applied", func(ctx context.Context, c *client.Client) ([]filed, error) {
 		var answers []filed
-		pending := map[string]any{} // targets of this file awaiting approval, by name: their change request
+		pending := map[string]any{}          // targets of this file awaiting approval, by name: their change request
+		pendingInstances := map[string]any{} // instances of this file awaiting approval, by kind/name: their change request
 		submit := func(d document) error {
 			if err := automation(d.body, cmd.ApprovalRef, cmd.AutomationContext); err != nil {
 				return err
 			}
-			kind := strings.ToLower(d.kind)
+			kind := kindPaths[d.kind]
 			method, p := "POST", path(kind+"s")
 			if !d.creates() {
 				method, p = "PUT", path(kind+"s", d.name)
@@ -90,12 +91,23 @@ func (cmd *Apply) Execute([]string) error {
 			if d.kind == "Target" && f.ChangeRequest["status"] == "PENDING" {
 				pending[d.name] = f.ChangeRequest["id"]
 			}
+			if (d.kind == "IdentityProvider" || d.kind == "SecretStore") && f.ChangeRequest["status"] == "PENDING" {
+				pendingInstances[d.kind+"/"+d.name] = f.ChangeRequest["id"]
+			}
 			answers = append(answers, f)
 			return nil
 		}
 		for _, d := range docs {
 			if d.kind == "Source" && registered[d.name] {
 				continue // filed with its binding
+			}
+			if d.kind == "Platform" {
+				if wired, cr := waiting(d, pendingInstances); wired != "" {
+					// a platform cannot be wired to an instance not created yet (.specs/ligo-instances.md §10.2)
+					_, _ = fmt.Fprintf(os.Stderr, "platform %s not filed: its %s awaits approval (change request %v); apply it again once that is applied\n",
+						d.name, wired, cr)
+					continue
+				}
 			}
 			s, withSource := inline[d.name]
 			if d.kind == "Binding" {
@@ -122,7 +134,7 @@ func (cmd *Apply) Execute([]string) error {
 	})
 }
 
-// Delete revokes a binding, or retires a source or target (ligo delete).
+// Delete revokes a binding, or retires a source, target or instance (ligo delete).
 type Delete struct {
 	Base
 	ExpectedRevision int64        `short:"r" long:"expected-revision" required:"true" description:"Expected current revision of the resource."`
@@ -134,6 +146,11 @@ type Delete struct {
 func (cmd *Delete) Execute([]string) error {
 	kind, name := cmd.Args.Kind, cmd.Args.Name
 	return cmd.changed("deleted", func(ctx context.Context, c *client.Client) ([]filed, error) {
+		if instanceKinds[kind] {
+			f, err := cmd.post(ctx, c, "DELETE", path(kind+"s", name), url.Values{"expectedRevision": {strconv.FormatInt(cmd.ExpectedRevision, 10)}},
+				map[string]any{"approvalReference": cmd.ApprovalRef})
+			return answers(f, err)
+		}
 		if kind != "binding" {
 			f, err := cmd.post(ctx, c, "POST", path(kind+"s", name, "retire"), nil,
 				map[string]any{"expectedRevision": cmd.ExpectedRevision, "approvalReference": cmd.ApprovalRef})

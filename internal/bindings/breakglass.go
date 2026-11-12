@@ -161,7 +161,8 @@ func (s *Service) breakGlassDelete(ctx context.Context, c changerequests.Caller,
 	if *in.ExpectedRevision != cur.revision {
 		return nil, nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 	}
-	res := &resolved{platform: s.Rules.Platforms[cur.platform], sourceJurisdiction: cur.sourceJurisdiction, targetJurisdiction: cur.targetJurisdiction,
+	pl, _ := s.Rules.Platform(cur.platform)
+	res := &resolved{platform: pl, sourceJurisdiction: cur.sourceJurisdiction, targetJurisdiction: cur.targetJurisdiction,
 		platformJurisdiction: cur.platformJurisdiction}
 	res.platform.Realm = cur.realm
 	sides := res.anySides(c, true)

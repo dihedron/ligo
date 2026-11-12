@@ -29,6 +29,7 @@ cmd_serve() {
 	test-webhook) serve_test_webhook ;;
 	test-faults) serve_test_faults ;;
 	test-audit) serve_test_audit ;;
+	test-instances) serve_test_instances ;;
 	test-accounts) serve_test_accounts ;;
 	test-accounts-chaos) serve_test_accounts_chaos ;;
 	start | stop | reload | status | logs)
@@ -42,7 +43,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -78,6 +79,7 @@ serve_install() {
 		serve_proxy "$host"
 	done
 	serve_cli_users
+	serve_instances
 }
 
 # ui_port HOST: the lab VM's port that publishes HOST's admin listener:
@@ -99,7 +101,7 @@ serve_proxy() {
 
 # CLI_USERS: the users on ligo1 that run the CLI, and their SPIFFE IDs on
 # the prod agent (unix:uid only, like the core entry).
-CLI_USERS=("ligo-ops ops/olga" "ligo-approver ops/dora")
+CLI_USERS=("ligo-ops ops/olga" "ligo-approver ops/dora" "ligo-platform ops/ada" "ligo-platform-approver ops/ivy")
 
 # serve_cli_users: the CLI users and their SVIDs.
 serve_cli_users() {
@@ -302,38 +304,6 @@ serve_accounts_config() {
 YAML
 }
 
-serve_accounts_platform() {
-	[[ -n "$LAB_ACCOUNTS" ]] || return 0
-	local aud="$1" bao="$2"
-	cat <<YAML
-      - name: pg-shared
-        realm: prod
-        jurisdiction: "platform/shared"
-        target_jurisdictions: ["tenants/*"]
-        namespace_template: "{account}_{tenancy}"
-        display_name: "Lab PostgreSQL shared by the accounts"
-        allowed_source_trust_domains: [prod.lab]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
-        identity_provider: { type: target-local.v1, instance: local-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }
-        config:
-          host: pg.ligo.lab
-          port: 5432
-          database: ledger
-          grantable_role_templates: ["{namespace}_read", "{namespace}_write"]
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["pg.ligo.lab:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/postgres
-YAML
-}
 
 # serve_config HOST: server.yaml for HOST, with the deployed plugins' hashes.
 # serve_observability: traces to the collector, with the otel scenario.
@@ -410,6 +380,8 @@ authorization:
     # the accounts' e2e: the shared platform's approver (.specs/ligo-tenancy.md §9.3)
     - { spiffe_id: "spiffe://prod.lab/ops/peter", role: approver, jurisdictions: ["platform/shared"] }
     - { spiffe_id: "spiffe://prod.lab/ops/rita", role: approver, jurisdictions: ["tenants/*"] }   # test-accounts-chaos
+    # the instances' second person: ada (admin.full_access) files them, ivy approves (.specs/ligo-instances.md)
+    - { spiffe_id: "spiffe://prod.lab/ops/ivy", role: approver, jurisdictions: ["dc/*", "cloud/*", "platform/*"] }
     - { ldap_group_dn: "cn=ligo-account-admins,ou=groups,$LDAP_BASE", role: account_admin }
     - { ldap_group_dn: "cn=ligo-viewers,ou=groups,$LDAP_BASE", role: viewer, jurisdictions: ["*"] }
     - { ldap_group_dn: "cn=ligo-operators-prod,ou=groups,$LDAP_BASE", role: viewer, jurisdictions: ["*"] }
@@ -448,194 +420,32 @@ secret_sealing:
     ca_cert_file: /etc/ligo-lab/ca.crt }
 plugins:
   directory: "$LIGO_PLUGINS"
+# plugin types; their instances are filed by serve_instances (.specs/ligo-instances.md)
 identity_providers:
-  - type: target-local.v1
-    builtin: true
-    instances: [ { name: local-prod, realm: prod } ]
-  - type: svid.v1
-    builtin: true
-    instances: [ { name: svid-prod, realm: prod } ]
-  - type: delegated-dynamic.v1
-    builtin: true
-    instances: [ { name: dynamic-prod, realm: prod } ]
+  - { type: target-local.v1, builtin: true }
+  - { type: svid.v1, builtin: true }
+  - { type: delegated-dynamic.v1, builtin: true }
   - type: openldap.v1
     binary: ligo-plugin-openldap
     sha256: "$ol"
-    instances:
-      - name: openldap-prod
-        realm: prod
-        svid_selector: { match_expr: 'path == "/ligo/plugin/openldap"', jwt_audience: ["$aud"] }
-        config:
-          url: "$LDAP_URL"
-          service_ou_dn: "ou=ligo-accounts,$LDAP_BASE"
-          allowed_endpoints: ["ldap.ligo.lab:636"]
-          ca_file: /etc/ligo-lab/ca.crt
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-openldap
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/openldap
+    instance_bounds: { allowed_endpoints: $(instance_bounds openldap.v1) }
 secret_stores:
-  - type: none.v1
-    builtin: true
-    instances: [ { name: none-prod, realm: prod } ]
+  - { type: none.v1, builtin: true }
   - type: vault.v1
     binary: ligo-plugin-vault
     sha256: "$sv"
-    instances:
-      - name: vault-prod
-        realm: prod
-        svid_selector: { match_expr: 'path == "/ligo/plugin/vault"', jwt_audience: ["$aud"] }
-        config:
-          address: "$bao"
-          auth_mount: jwt-spiffe
-          role: ligo-plugin-vault
-          db_connection: lab-pg
-          ca_file: /etc/ligo-lab/ca.crt
-          workload_jwt_audience: "$aud"
-          allowed_endpoints: ["$host_name:$BAO_PORT"]
-        network_flows:
-          - { name: vault, purpose: CREDENTIALS, protocol: TCP, destination: "$host_name", ports: [$BAO_PORT], tls: true, server_name: "$host_name" }
+    instance_bounds: { allowed_endpoints: $(instance_bounds vault.v1) }
 platform_providers:
   - type: postgres.v1
     binary: ligo-plugin-postgres
     sha256: "$tp"
-    platforms:
-      - name: pg-ledger
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Lab PostgreSQL ledger"
-        allowed_source_trust_domains: [prod.lab, test.lab]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
-        identity_provider: { type: target-local.v1, instance: local-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          host: pg.ligo.lab
-          port: 5432
-          database: ledger
-          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["pg.ligo.lab:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/postgres
-      - name: pg-ledger-cloud
-        realm: prod
-        jurisdiction: "cloud/fin-01/ledger"
-        target_jurisdictions: ["cloud/fin-01/*"]
-        display_name: "Lab PostgreSQL ledger, owned by a tenancy"
-        allowed_source_trust_domains: [prod.lab, test.lab]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
-        identity_provider: { type: target-local.v1, instance: local-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          host: pg.ligo.lab
-          port: 5432
-          database: ledger
-          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["pg.ligo.lab:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/postgres
-      - name: pg-ledger-dynamic
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Lab PostgreSQL ledger, credentials on demand"
-        allowed_source_trust_domains: [prod.lab]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
-        identity_provider: { type: delegated-dynamic.v1, instance: dynamic-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-dynamic }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          host: pg.ligo.lab
-          port: 5432
-          database: ledger
-          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE]
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["pg.ligo.lab:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/postgres
-      - name: pg-ledger-ldap
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Lab PostgreSQL ledger, accounts in the directory"
-        allowed_source_trust_domains: [prod.lab]
-        network_flows:
-          - { name: postgres, purpose: DATA, protocol: TCP, destination: "pg.ligo.lab", ports: [5432], tls: true, server_name: "pg.ligo.lab" }
-        identity_provider: { type: openldap.v1, instance: openldap-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/postgres"', jwt_audience: ["$aud"], allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          host: pg.ligo.lab
-          port: 5432
-          database: ledger
-          directory_group: ligo_ldap
-          grantable_roles: [LEDGER_RO_ROLE, LEDGER_RW_ROLE, LEDGER_GONE_ROLE]   # LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["pg.ligo.lab:5432"]
-          bootstrap_credential:
-            source: vault
-            address: "$bao"
-            auth_mount: jwt-spiffe
-            role: ligo-plugin-postgres
-            jwt_audience: "$aud"
-            kv_path: kv/data/ligo/bootstrap/postgres
-$(serve_accounts_platform "$aud" "$bao")
+    # ADR-03 across jurisdictions: every PostgreSQL platform shares the plugin's SVID (.specs/ligo-instances.md §6 rule 7)
+    instance_bounds: { allowed_endpoints: $(instance_bounds postgres.v1), shared_svids: ["spiffe://prod.lab/ligo/plugin/postgres"] }
   - type: echo.v1
     binary: ligo-plugin-echo
     sha256: "$te"
-    platforms:   # the echo target (.specs/ligo-echo-target.md)
-      - name: echo-svid
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Lab echo server, admits SVIDs"
-        allowed_source_trust_domains: [prod.lab]
-        identity_provider: { type: svid.v1, instance: svid-prod }
-        secret_store: { type: none.v1, instance: none-prod, secret_storage_strategy: svid }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/echo"', allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          data_address: "ligo1.ligo.lab:7101"
-          control_address: "ligo1.ligo.lab:7102"
-          server_id: "spiffe://prod.lab/ns/lab/sa/echo-server"
-          mode: svid
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["ligo1.ligo.lab:7101"]
-      - name: echo-local
-        realm: prod
-        jurisdiction: "dc/corp-prod"
-        display_name: "Lab echo server, admits users with a password"
-        allowed_source_trust_domains: [prod.lab]
-        identity_provider: { type: target-local.v1, instance: local-prod }
-        secret_store: { type: vault.v1, instance: vault-prod, secret_storage_strategy: vault-static }
-        svid_selector: { match_expr: 'path == "/ligo/plugin/echo"', allow_shared_svid: true }   # both platforms are one plugin's instances
-        config:
-          data_address: "ligo1.ligo.lab:7201"
-          control_address: "ligo1.ligo.lab:7202"
-          server_id: "spiffe://prod.lab/ns/lab/sa/echo-server"
-          mode: password
-          ca_file: /etc/ligo-lab/ca.crt
-          allowed_endpoints: ["ligo1.ligo.lab:7201"]
+    # no shared_svids: the echo platforms share their SVID within dc/corp-prod only (rule 7)
+    instance_bounds: { allowed_endpoints: $(instance_bounds echo.v1) }
 YAML
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
+	"github.com/dihedron/ligo/internal/instances"
 	"github.com/dihedron/ligo/internal/jcs"
 	"github.com/dihedron/ligo/internal/sources"
 	"google.golang.org/protobuf/proto"
@@ -64,7 +65,7 @@ type AccessLevel struct {
 // request names (§5.9).
 type ValidateTarget func(ctx context.Context, req *pluginv1.ValidateTargetRequest) (*pluginv1.ValidateTargetResponse, error)
 
-// Platform is what targets need of a configured platform (§8.1).
+// Platform is what targets need of a platform in force.
 type Platform struct {
 	Name, Type, Realm, Jurisdiction string
 	TargetJurisdictions             []string
@@ -73,9 +74,10 @@ type Platform struct {
 	Allow                           flows.Allowlist
 }
 
-// Rules are the parts of the configuration that validate targets.
+// Rules are the parts of the configuration, and the platforms in force,
+// that validate targets.
 type Rules struct {
-	Platforms    map[string]Platform
+	Instances    instances.Source
 	NamePrefixes []charter.NamePrefix
 	Accounts     *charter.Accounts // nil: no accounts
 	// NamespaceField is the definition field a platform type declares for
@@ -84,29 +86,29 @@ type Rules struct {
 }
 
 // NewRules extracts the rules from a validated configuration.
-func NewRules(cfg *config.Config) (*Rules, error) {
-	r := &Rules{Platforms: map[string]Platform{}, NamePrefixes: cfg.Charter.NamePrefixes, Accounts: cfg.Charter.Accounts}
-	for _, pp := range cfg.PlatformProviders {
-		for _, p := range pp.Platforms {
-			var pc struct {
-				AllowedEndpoints []string `yaml:"allowed_endpoints"`
-			}
-			if err := p.Config.Decode(&pc); err != nil && p.Config.Kind != 0 {
-				return nil, fmt.Errorf("platform %s: config: %w", p.Name, err)
-			}
-			allow, err := flows.ParseAllowlist(pc.AllowedEndpoints)
-			if err != nil {
-				return nil, fmt.Errorf("platform %s: %w", p.Name, err)
-			}
-			pl := Platform{Name: p.Name, Type: pp.Type, Realm: p.Realm, Jurisdiction: p.Jurisdiction, TargetJurisdictions: p.TargetJurisdictions, NamespaceTemplate: p.NamespaceTemplate,
-				CheckExistence: p.CheckExistence == nil || *p.CheckExistence, Allow: allow}
-			if len(pl.TargetJurisdictions) == 0 {
-				pl.TargetJurisdictions = []string{p.Jurisdiction + "/*"} // the platform's jurisdiction and below
-			}
-			r.Platforms[p.Name] = pl
-		}
+func NewRules(cfg *config.Config, in instances.Source) (*Rules, error) {
+	return &Rules{Instances: in, NamePrefixes: cfg.Charter.NamePrefixes, Accounts: cfg.Charter.Accounts}, nil
+}
+
+// Platform is the platform in force called name.
+func (r *Rules) Platform(name string) (Platform, bool) {
+	set := r.Instances.Current()
+	p, ok := set.Platform(name)
+	if !ok {
+		return Platform{}, false
 	}
-	return r, nil
+	return Platform{Name: p.Metadata.Name, Type: p.Type, Realm: p.Metadata.Realm, Jurisdiction: p.Metadata.Jurisdiction,
+		TargetJurisdictions: p.TargetJurisdictions, NamespaceTemplate: p.NamespaceTemplate, CheckExistence: p.ChecksExistence(),
+		Allow: set.Allow(name)}, true
+}
+
+// PlatformNames are the names of the platforms in force.
+func (r *Rules) PlatformNames() []string {
+	var out []string
+	for _, p := range r.Instances.Current().List(instances.Platform) {
+		out = append(out, p.Metadata.Name)
+	}
+	return out
 }
 
 func refuse(status int, slug, format string, args ...any) *changerequests.Error {
@@ -141,7 +143,7 @@ func (r *Rules) validate(ctx context.Context, call ValidateTarget, t *Target, cu
 	} else if err := immutable(m, &cur.Metadata); err != nil {
 		return err
 	}
-	p, ok := r.Platforms[m.Platform]
+	p, ok := r.Platform(m.Platform)
 	if !ok {
 		return invalid("metadata.platform %q is not a configured platform", m.Platform)
 	}

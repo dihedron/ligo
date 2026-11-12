@@ -19,8 +19,9 @@ type DB struct {
 	Pool   *pgxpool.Pool
 	Logger *slog.Logger
 	// Rotation is each platform's rotation_interval plus the reconciler's
-	// interval and jitter: a static secret older than that is overdue.
-	Rotation map[string]time.Duration
+	// interval and jitter, at each scrape: a static secret older than that
+	// is overdue.
+	Rotation func() map[string]time.Duration
 	// Timeout bounds one scrape's queries.
 	Timeout time.Duration
 }
@@ -76,9 +77,11 @@ func (d *DB) Collect(ch chan<- prometheus.Metric) {
 
 func (d *DB) queries() []query {
 	platforms, seconds := []string{}, []float64{}
-	for p, t := range d.Rotation {
-		if t > 0 {
-			platforms, seconds = append(platforms, p), append(seconds, t.Seconds())
+	if d.Rotation != nil {
+		for p, t := range d.Rotation() {
+			if t > 0 {
+				platforms, seconds = append(platforms, p), append(seconds, t.Seconds())
+			}
 		}
 	}
 	return []query{

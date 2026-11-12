@@ -161,7 +161,8 @@ func (s *Server) namespace(platform string, def map[string]any) string {
 	if rules.NamespaceField == nil {
 		return ""
 	}
-	ns, _ := def[rules.NamespaceField(rules.Platforms[platform].Type)].(string)
+	pl, _ := rules.Platform(platform)
+	ns, _ := def[rules.NamespaceField(pl.Type)].(string)
 	return ns
 }
 
@@ -248,7 +249,7 @@ func (s *Server) platformFields(ctx context.Context, platform string, t *targets
 
 // configured reports whether name is a platform of server.yaml.
 func (s *Server) configured(name string) bool {
-	_, ok := s.Targets.Rules.Platforms[name]
+	_, ok := s.Targets.Rules.Platform(name)
 	return ok
 }
 
@@ -309,7 +310,7 @@ func (s *Server) targetNewForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := s.frame(r, "Publish a target", "/ui/targets")
-	p.Content = TargetForm{Platforms: slices.Sorted(maps.Keys(s.Targets.Rules.Platforms)), Target: targets.Target{Visibility: sources.Visibility{Mode: "PRIVATE"}},
+	p.Content = TargetForm{Platforms: s.Targets.Rules.PlatformNames(), Target: targets.Target{Visibility: sources.Visibility{Mode: "PRIVATE"}},
 		Flows: "[]"}
 	s.page(w, r, http.StatusOK, "target-form", p)
 }

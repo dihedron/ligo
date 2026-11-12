@@ -6,7 +6,7 @@
     "control_address",
     "server_id",
     "mode",
-    "ca_file",
+    "ca_pem",
     "allowed_endpoints"
   ],
   "properties": {
@@ -25,7 +25,7 @@
         "password"
       ]
     },
-    "ca_file": {
+    "ca_pem": {
       "type": "string"
     },
     "allowed_endpoints": {

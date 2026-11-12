@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"github.com/dihedron/ligo/internal/instances"
 	"log/slog"
 	"net/http/httptest"
 	"net/url"
@@ -102,7 +103,7 @@ func (namespacedPlugin) UISchemas(context.Context, string) (*pluginv1.GetUISchem
 // TestTargetFormExpandsNamespace: the form's submission and its edit form.
 func TestTargetFormExpandsNamespace(t *testing.T) {
 	s := &Server{Logger: slog.New(slog.DiscardHandler), Plugins: namespacedPlugin{}, Targets: &targets.Service{Rules: &targets.Rules{
-		Platforms:      map[string]targets.Platform{"pg": {Name: "pg", Type: "postgres.v1"}},
+		Instances:      instances.Fixed{Set: instances.NewSet(&instances.Definition{Kind: "Platform", Type: "postgres.v1", Metadata: instances.Metadata{Name: "pg"}})},
 		NamespaceField: func(string) string { return "schema" }}}}
 	r := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{"name": {"db01"}, "platform": {"pg"}, "def.schema": {"acme_db01"},
 		"level.0.name": {"read"}, "level.0.grant.roles": {"{namespace}_read"}}.Encode()))
