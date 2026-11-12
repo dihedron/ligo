@@ -36,15 +36,15 @@ type Registry struct {
 	Signer   sealing.Signer
 	Interval time.Duration
 	Logger   *slog.Logger
-	// OnChange is called with each new set, once loaded (the plugin
-	// manager's reconcile, §7.2).
+	// OnChange is called with the set after every load, changed or not: the
+	// plugin manager reconciles only what differs, and retries what a
+	// process refused (§7.2).
 	OnChange func(*Set)
 
 	cur atomic.Pointer[Set]
 
-	mu        sync.Mutex
-	reported  map[string]string // kind/name -> the drifted hash already audited
-	sameAsSet string            // fingerprint of the current set
+	mu       sync.Mutex
+	reported map[string]string // kind/name -> the drifted hash already audited
 }
 
 // Current is the set in force; empty before the first load.
@@ -84,28 +84,21 @@ func (r *Registry) Load(ctx context.Context) error {
 		return fmt.Errorf("instances: %w", err)
 	}
 	var defs []*Definition
-	fingerprint := ""
 	for _, x := range stored {
 		d, why, err := r.verify(ctx, x)
 		if err != nil {
 			return err // the key cannot be had: keep the set in force
 		}
-		key := string(x.kind) + "/" + x.name
 		if why != "" {
 			r.quarantine(ctx, x, why)
 			continue
 		}
 		metrics.InstanceDrift.WithLabelValues(string(x.kind), x.name).Set(0)
 		defs = append(defs, d)
-		fingerprint += key + "@" + x.sha + ";"
 	}
 	set := NewSet(defs...)
 	r.cur.Store(set)
-	r.mu.Lock()
-	changed := fingerprint != r.sameAsSet
-	r.sameAsSet = fingerprint
-	r.mu.Unlock()
-	if changed && r.OnChange != nil {
+	if r.OnChange != nil {
 		r.OnChange(set)
 	}
 	return nil

@@ -1,6 +1,6 @@
 # Instances managed at run time
 
-- **Version:** 1.1 (2026-11-12), approved; 1.1 adds the changes of chunks 1 and 2 (§15)
+- **Version:** 1.2 (2026-11-12), approved; 1.1 and 1.2 add the changes of chunks 1 to 3 (§15)
 - **Backlog:** item 10
 - **Branch:** `feature/instances`, from main at v0.3.0 (`af2d9e7`)
 - **Main spec:** becomes 4.1.0 (breaking change); target release v0.4.0
@@ -181,6 +181,8 @@ Every replica keeps its plugin processes in line with the registry (§8):
    - The instances the plugin did not take report `serving: false` in health.
    - The next reload, or the periodic reload, tries again.
 6. **At startup,** processes start from the registry's first load. A replica with no instances starts with no plugin processes, and that is no error.
+7. **Checking an instance** (§6 rules 6 and 8) uses the process of its type and realm. When none runs, because the instance is the first of its (type, realm), a process is started for the check and stopped after it; it serves nothing.
+8. **Every load of the registry** hands the set to the manager, changed or not: reconcile does nothing when no set differs, and retries a set a process refused before.
 
 The existing restart supervision (`restart_backoff`) is unchanged. A restarted process is configured with the current set.
 
@@ -361,3 +363,4 @@ Each chunk is a stop point: tests and code, then `make lint`, `make vuln` and `m
 | 1.1 | §3 | `instance_bounds` takes the `allowed_endpoints` syntax, with no wildcards; the startup rules that move, go and stay are listed; `source_jurisdictions` entries need no platform (chunk 2). |
 | 1.1 | §4.3 | A platform UPDATE may not strand a target (chunk 2). |
 | 1.1 | §8 | The registry reloads every `resolution_cache.full_reload_interval`, as the account registry (chunk 2). |
+| 1.2 | §7.2 | A process started for the check of a first instance; reconcile at every load, so refusals are retried (chunk 3). |

@@ -210,9 +210,14 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	templates, realmsByName, err := pluginmgr.Templates(cfg)
+	if err != nil {
+		return err
+	}
 	p := cfg.Plugins
 	plugins := pluginmgr.New(specs, pluginmgr.Options{Directory: p.Directory, Owner: pluginmgr.Root, RPCTimeout: p.RPCTimeout,
-		MaxConcurrentRPCsPerInstance: p.MaxConcurrentRPCsPerInstance, Backoff: p.RestartBackoff, Logger: log})
+		MaxConcurrentRPCsPerInstance: p.MaxConcurrentRPCsPerInstance, Backoff: p.RestartBackoff, Logger: log,
+		Templates: templates, Realms: realmsByName})
 	defer plugins.Stop()
 	if err := plugins.Start(ctx); err != nil {
 		return err
@@ -292,6 +297,17 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 	if registry != nil {
 		run(registry.Run)
 	}
+	// every load reaches the plugin manager, which reconciles what changed
+	// and retries what a process refused (.specs/ligo-instances.md §7.2)
+	inst.OnChange = func(set *instances.Set) {
+		specs, err := pluginmgr.Specs(cfg, set)
+		if err != nil {
+			log.Error("plugin instances", "error", err)
+			return
+		}
+		plugins.Notify(specs)
+	}
+	run(plugins.Run)
 	run(inst.Run)
 	rotation := func(platform string) time.Duration {
 		p, _ := inst.Current().Platform(platform)

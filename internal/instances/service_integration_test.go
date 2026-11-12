@@ -323,10 +323,11 @@ func TestDrift(t *testing.T) {
 	d := w.unique(t, "vault-prod")
 	w.created(t, SecretStore, d)
 	edited := `jsonb_set(definition, '{config,address}', '"https://vault.prod.internal:8201"')`
-	for name, sql := range map[string]string{
-		"definition only":         "update instances set definition = " + edited + " where name = $1",
-		"definition and its hash": "update instances set definition = " + edited + ", definition_sha256 = repeat('0', 64) where name = $1",
+	for _, step := range []struct{ name, sql string }{ // in this order: each leaves a new hash to report
+		{"definition only", "update instances set definition = " + edited + " where name = $1"},
+		{"definition and its hash", "update instances set definition = " + edited + ", definition_sha256 = repeat('0', 64) where name = $1"},
 	} {
+		name, sql := step.name, step.sql
 		if _, err := w.owner.Exec(ctx, sql, d.Metadata.Name); err != nil {
 			t.Fatal(err)
 		}

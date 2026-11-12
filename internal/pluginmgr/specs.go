@@ -10,25 +10,43 @@ import (
 	"github.com/dihedron/ligo/internal/instances"
 )
 
-// Specs groups the instances in force into one process per (type, realm)
-// (ADR-03), with the types and realms of the configuration; builtin types
-// are served inside ligo.
-func Specs(cfg *config.Config, set *instances.Set) ([]Spec, error) {
+// Templates are the configuration's plugin types, by type, and its realms,
+// by name: what a process can be started from (Options.Templates).
+func Templates(cfg *config.Config) (map[string]Spec, map[string]config.Realm, error) {
 	realms := map[string]config.Realm{}
 	for _, z := range cfg.Realms {
 		realms[z.Name] = z
 	}
-	types := map[string]config.PluginType{}
-	for _, group := range [][]config.PluginType{cfg.IdentityProviders, cfg.SecretStores, cfg.PlatformProviders} {
+	templates := map[string]Spec{}
+	for k, group := range map[instances.Kind][]config.PluginType{instances.IdentityProvider: cfg.IdentityProviders,
+		instances.SecretStore: cfg.SecretStores, instances.Platform: cfg.PlatformProviders} {
 		for _, t := range group {
-			types[t.Type] = t
+			s := Spec{Type: t.Type, Kind: kindOf[k], Builtin: t.Builtin}
+			if !t.Builtin {
+				checksum, err := hex.DecodeString(t.SHA256)
+				if err != nil || len(checksum) != 32 {
+					return nil, nil, fmt.Errorf("plugin %s: sha256 %q", t.Type, t.SHA256)
+				}
+				s.Binary, s.SHA256 = t.Binary, checksum
+			}
+			templates[t.Type] = s
 		}
+	}
+	return templates, realms, nil
+}
+
+// Specs groups the instances in force into one process per (type, realm)
+// (ADR-03), with the types and realms of the configuration; builtin types
+// are served inside ligo.
+func Specs(cfg *config.Config, set *instances.Set) ([]Spec, error) {
+	templates, realms, err := Templates(cfg)
+	if err != nil {
+		return nil, err
 	}
 	var specs []Spec
 	index := map[string]int{}
 	for _, d := range set.All() {
-		k, _ := d.KindOf()
-		t, ok := types[d.Type]
+		t, ok := templates[d.Type]
 		if !ok {
 			return nil, fmt.Errorf("instance %q: plugin type %q is not in the configuration", d.Metadata.Name, d.Type)
 		}
@@ -45,14 +63,8 @@ func Specs(cfg *config.Config, set *instances.Set) ([]Spec, error) {
 			specs[i].Instances = append(specs[i].Instances, in)
 			continue
 		}
-		spec := Spec{Type: d.Type, Kind: kindOf[k], Builtin: t.Builtin, Realm: z, Instances: []*pluginv1.InstanceDescriptor{in}}
-		if !t.Builtin {
-			checksum, err := hex.DecodeString(t.SHA256)
-			if err != nil || len(checksum) != 32 {
-				return nil, fmt.Errorf("plugin %s: sha256 %q", t.Type, t.SHA256)
-			}
-			spec.Binary, spec.SHA256 = t.Binary, checksum
-		}
+		spec := t
+		spec.Realm, spec.Instances = z, []*pluginv1.InstanceDescriptor{in}
 		index[key] = len(specs)
 		specs = append(specs, spec)
 	}
