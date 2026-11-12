@@ -192,3 +192,44 @@ func TestSharedAcrossJurisdictions(t *testing.T) {
 		t.Errorf("listed: %v", err)
 	}
 }
+
+// TestWireAndResolved: a platform's wiring is checked against what its
+// plugins describe and an omitted strategy is filled; Resolved gives the
+// running instances' SVIDs; Validate uses the running process when there is
+// one.
+func TestWireAndResolved(t *testing.T) {
+	m, _, err := newManager(t, Spec{Realm: prod, Instances: []*pluginv1.InstanceDescriptor{instance("pg-prod", "a", false)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := Instances(m)
+	d := &instances.Definition{Kind: "Platform", Type: "test.v1", Metadata: instances.Metadata{Name: "pg-new", Realm: "prod"},
+		IdentityProvider: &instances.Wiring{Type: "svid.v1", Instance: "svid-prod"}, SecretStore: &instances.Wiring{Type: "none.v1", Instance: "none-prod"}}
+	if err := checks.Wire(context.Background(), d); err != nil || d.SecretStore.SecretStorageStrategy != "svid" {
+		t.Errorf("wire: %v %q", err, d.SecretStore.SecretStorageStrategy)
+	}
+	bad := *d
+	bad.IdentityProvider = &instances.Wiring{Type: "nope.v1", Instance: "x"}
+	if err := checks.Wire(context.Background(), &bad); err == nil || !strings.Contains(err.Error(), "nope.v1") {
+		t.Errorf("unknown identity provider type: %v", err)
+	}
+	if got := checks.Resolved("test.v1", "prod"); got["pg-prod"] != "spiffe://prod.lab/plugin/pg-prod" {
+		t.Errorf("resolved %v", got)
+	}
+	if got := checks.Resolved("test.v1", "nowhere"); got != nil {
+		t.Errorf("no process: %v", got)
+	}
+	d.SVIDSelector = &instances.SVIDSelector{MatchExpr: "x"}
+	before := len(m.procs)
+	if id, _, err := checks.Validate(context.Background(), instances.Platform, d); err != nil || id != "spiffe://prod.lab/plugin/pg-new" || len(m.procs) != before {
+		t.Errorf("validate on the running process: %q %v", id, err)
+	}
+	d.SVIDSelector.MatchExpr = "foreign"
+	if _, _, err := checks.Validate(context.Background(), instances.Platform, d); err == nil || !strings.Contains(err.Error(), "outside the realm") {
+		t.Errorf("foreign SVID: %v", err)
+	}
+	d.SVIDSelector.MatchExpr = "two"
+	if _, _, err := checks.Validate(context.Background(), instances.Platform, d); err == nil || !strings.Contains(err.Error(), "SVID_SELECTION_FAILED") {
+		t.Errorf("selection failed: %v", err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -431,4 +432,129 @@ func TestPlatformUpdateGuards(t *testing.T) {
 	if _, err := w.s.Update(ctx, alice, Platform, oracle.Metadata.Name, body(t, widened, map[string]any{"expectedRevision": 1})); err != nil {
 		t.Errorf("widened: %v", err)
 	}
+}
+
+// TestRefusals: the service's refusals before anything is filed, and Get's
+// two views (§5, §10.1).
+func TestRefusals(t *testing.T) {
+	w := setup(t)
+	ctx := context.Background()
+	d := w.unique(t, "vault-prod")
+	w.created(t, SecretStore, d)
+	name := d.Metadata.Name
+	one, two := int64(1), int64(7)
+	viewer := caller("vera", config.RoleViewer, "*")
+	for label, tc := range map[string]struct {
+		run  func() error
+		slug string
+	}{
+		"create with expectedRevision": {func() error {
+			_, err := w.s.Create(ctx, alice, SecretStore, body(t, d, map[string]any{"expectedRevision": 1}))
+			return err
+		}, "validation-failed"},
+		"create of another kind": {func() error { _, err := w.s.Create(ctx, alice, Platform, body(t, d, nil)); return err }, "validation-failed"},
+		"create outside the jurisdiction": {func() error {
+			_, err := w.s.Create(ctx, caller("olga", config.RoleOperator, "cloud/*"), SecretStore, body(t, w.unique(t, "vault-prod"), nil))
+			return err
+		}, "forbidden"},
+		"update without expectedRevision": {func() error { _, err := w.s.Update(ctx, alice, SecretStore, name, body(t, d, nil)); return err }, "validation-failed"},
+		"update renaming": {func() error {
+			_, err := w.s.Update(ctx, alice, SecretStore, "other", body(t, d, map[string]any{"expectedRevision": 1}))
+			return err
+		}, "immutable-field"},
+		"update at a stale revision": {func() error {
+			_, err := w.s.Update(ctx, alice, SecretStore, name, body(t, d, map[string]any{"expectedRevision": 7}))
+			return err
+		}, "revision-conflict"},
+		"update of an unknown instance": {func() error {
+			x := mutate(t, d, func(m map[string]any) { m["metadata"].(map[string]any)["name"] = "nowhere-x" })
+			_, err := w.s.Update(ctx, alice, SecretStore, "nowhere-x", body(t, x, map[string]any{"expectedRevision": 1}))
+			return err
+		}, "not-found"},
+		"retire without expectedRevision": {func() error {
+			_, err := w.s.Retire(ctx, alice, SecretStore, name, changerequests.Common{})
+			return err
+		}, "validation-failed"},
+		"retire at a stale revision": {func() error {
+			_, err := w.s.Retire(ctx, alice, SecretStore, name, changerequests.Common{ExpectedRevision: &two})
+			return err
+		}, "revision-conflict"},
+		"retire by a viewer": {func() error {
+			_, err := w.s.Retire(ctx, viewer, SecretStore, name, changerequests.Common{ExpectedRevision: &one})
+			return err
+		}, "forbidden"},
+	} {
+		if err := tc.run(); status(err) != tc.slug {
+			t.Errorf("%s: %v, want %s", label, err, tc.slug)
+		}
+	}
+	if rev, def, decider, err := w.s.Get(ctx, alice, SecretStore, name); err != nil || rev != 1 || def == nil || !decider {
+		t.Errorf("operator: %d %v %v", rev, decider, err)
+	}
+	if _, _, decider, err := w.s.Get(ctx, viewer, SecretStore, name); err != nil || decider {
+		t.Errorf("viewer: %v %v", decider, err)
+	}
+	// a second pending request on the same instance
+	if _, err := w.s.Update(ctx, alice, SecretStore, name, body(t, d, map[string]any{"expectedRevision": 1})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.s.Update(ctx, alice, SecretStore, name, body(t, d, map[string]any{"expectedRevision": 1})); status(err) != "change-request-pending" {
+		t.Errorf("two pending: %v", err)
+	}
+}
+
+// TestIdentityProviderInUse: an identity provider a platform is wired to
+// cannot be retired, at filing and again at approval (§6 rule 9).
+func TestIdentityProviderInUse(t *testing.T) {
+	w := setup(t)
+	ctx := context.Background()
+	ldap, vault, oracle := w.unique(t, "ldap-prod"), w.unique(t, "vault-prod"), w.unique(t, "oracle-prod")
+	w.created(t, IdentityProvider, ldap)
+	w.created(t, SecretStore, vault)
+	one := int64(1)
+	r, err := w.s.Retire(ctx, alice, IdentityProvider, ldap.Metadata.Name, changerequests.Common{ExpectedRevision: &one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a platform wired to it is applied before the retirement is approved
+	w.created(t, Platform, mutate(t, oracle, func(m map[string]any) {
+		m["identityProvider"] = map[string]any{"type": "openldap.v1", "instance": ldap.Metadata.Name}
+		m["secretStore"] = map[string]any{"type": "vault.v1", "instance": vault.Metadata.Name, "secretStorageStrategy": "vault-static"}
+	}))
+	if _, err := w.s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err == nil || !strings.Contains(err.Error(), "is wired to") {
+		t.Errorf("approved the retirement of a wired identity provider: %v", err)
+	}
+	if _, err := w.s.Retire(ctx, alice, IdentityProvider, ldap.Metadata.Name, changerequests.Common{ExpectedRevision: &one}); status(err) != "instance-in-use" &&
+		status(err) != "change-request-pending" {
+		t.Errorf("filing: %v", err)
+	}
+}
+
+// TestRegistryListens: a registry run in the background learns of an applied
+// change by LISTEN, as another replica would, and calls OnChange.
+func TestRegistryListens(t *testing.T) {
+	w := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	changed := make(chan struct{}, 16)
+	other := &Registry{DB: w.registry.DB, Signer: w.registry.Signer, Interval: time.Hour, Logger: slog.Default(),
+		OnChange: func(*Set) { changed <- struct{}{} }}
+	done := make(chan struct{})
+	go func() { other.Run(ctx); close(done) }()
+	<-changed // its first load
+	d := w.unique(t, "vault-prod")
+	w.created(t, SecretStore, d)
+	deadline := time.After(10 * time.Second)
+	for {
+		if _, ok := other.Current().Get(SecretStore, d.Metadata.Name); ok {
+			break
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			t.Fatal("the other registry did not learn of the change")
+		}
+	}
+	cancel()
+	<-done
 }
