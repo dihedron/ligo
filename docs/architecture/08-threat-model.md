@@ -27,7 +27,13 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-19 | A user removed from a group keeps their session. | 2 | Server-side sessions; groups re-read; timeouts. |
 | T-20 | Admin views leak; Basic exposes passwords. | 2 | `viewer` by jurisdiction; `404` out of jurisdiction; automation uses SVIDs. |
 | T-21 | SPIRE or a bundle is unavailable. | 1, 3 | Fail closed: `503`; plugin calls fail retryably. |
-| T-22 | `server.yaml` is modified. | 7 | Root-owned; SHA-256 audited; per-binding snapshots; orphan check. |
+| T-22 | `server.yaml` is modified, or an instance is changed to redirect wiring or loosen bounds. | 2, 6, 7 | `server.yaml` (plugin types, `instance_bounds`) root-owned, SHA-256 audited. Instances: four-eyes change requests in their jurisdiction, never automatic, delegated or break-glass; audited; per-binding snapshots. |
+| T-22a | Two approvers point an instance at a host they control, to receive its bootstrap credential. | 4, 7 | The type's `instance_bounds`, root-owned: an endpoint outside it is refused; a changed `ca_pem` shows in the diff. |
+| T-22b | An instance's row is edited in the database, bypassing change control. | 6 | Rows signed by the audit key; a row that does not verify is quarantined and reported. Residual: rollback to an earlier approved revision while the audit no longer holds a newer one. |
+| T-22c | An instance selects the SVID of another instance of the same plugin process. | 3 | One SVID per instance, unless both allow sharing and share a jurisdiction. |
+| T-22d | A file path in an instance makes a plugin read a host file. | 4 | No file paths: certificates as `ca_pem` text. |
+| T-22e | A secret is pasted into an instance's config. | 6 | Plugin schemas refuse unknown keys; bootstrap credentials stay references. |
+| T-22f | Rapid instance changes keep replicas reconfiguring. | 3 | Four-eyes requests and rate limits; reconfiguration debounced; processes bounded by types × realms. |
 | T-23 | The sealing key is compromised, or Transit is down. | 4 | Only `ligo-sealer`; no export; versions; short-lived blobs; unavailability fails attempts, and a retry rotates. |
 | T-24 | A forged bundle for another trust domain. | 1, 3 | One authoritative bundle source per domain. |
 | T-25 | A `trusted_automation` identity is misused. | 2, 6 | SPIFFE only; its own jurisdictions; a reference; separate execution contexts; audited. Residual: R-06. |

@@ -14,6 +14,8 @@
 | Maintenance as one database setting | Enabling it per process lets replicas accept changes during a drain | A startup flag |
 | Targets are registered, not created | A database's owner keeps its schema and group roles | `ligo` provisioning the target itself |
 | Fixed error messages from plugins | A backend's text can echo statements or data | Persisting the error |
+| Instances in the database, plugin types in `server.yaml` | Instances change as often as the systems they describe; four-eyes requests per jurisdiction replace file ownership, and the types' `instance_bounds` keep a root-owned limit | Instances in `server.yaml`, a restart per change; a global role applying changes at once |
+| Instance rows signed by the audit key | Catches edits outside `ligo` even after audit pruning | Comparing with the audit entry, which pruning removes |
 
 ## Why the Vault store takes exact SPIFFE IDs only
 

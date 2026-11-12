@@ -61,9 +61,24 @@ Inside one account, two of its approvers decide: one for the `SOURCE` side, anot
 
 An approver of the platform's jurisdiction may also decide a binding's `TARGET` side, for a tenant nobody can reach. Use it sparingly: the target's account no longer consents, although it is told and can revoke alone. It never replaces the source's consent. The audit entry carries `decidedAs: PLATFORM`.
 
+## Changing platforms and instances
+
+Platforms, identity provider instances and secret store instances change through change requests, like sources and targets; `server.yaml` holds only their plugin types.
+
+```bash
+ligo get platform pg-ledger -o yaml   # revision and definition, for operators and approvers of its jurisdiction
+# save the definition as pg-ledger.yaml, change it, add expectedRevision: <revision>
+ligo apply -f pg-ledger.yaml
+ligo audit list platform pg-ledger
+```
+
+A second person of the instance's jurisdiction approves it, and every replica reconfigures the plugin within seconds. Name, type, realm and jurisdiction never change: retire the instance (`ligo delete platform NAME -r REVISION`) and create another. A platform change that would leave a target outside `targetJurisdictions`, or change `namespaceTemplate` while it has targets, is refused. Tightened privilege bounds are reported once applied, as `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`; existing bindings keep their wiring until changed.
+
+An endpoint outside the type's `instance_bounds` is refused: widening those bounds is a change of `server.yaml`, under the platform team's own change control, and a rolling restart.
+
 ## Rolling restart, and maintenance
 
-Any change to `server.yaml` other than certificate files needs a rolling restart. `systemctl reload ligo` reloads certificate files only. `ligo` drains active requests for up to 15 s on `SIGTERM`.
+Any change to `server.yaml` other than certificate files needs a rolling restart. Changes of instances do not: they are change requests. `systemctl reload ligo` reloads certificate files only. `ligo` drains active requests for up to 15 s on `SIGTERM`.
 
 Maintenance mode is one setting for the whole cluster:
 

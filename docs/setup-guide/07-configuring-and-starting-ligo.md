@@ -153,12 +153,12 @@ sudo systemctl enable --now ligo
 journalctl -u ligo -f
 ```
 
-At startup `ligo` checks the configuration, connects to SPIRE and the sealer, verifies each plugin's owner, mode and hash, and starts each plugin. A failure names what is wrong and ends startup. The unit restarts it with a back-off; `systemctl status ligo` shows the last error.
+At startup `ligo` checks the configuration, connects to SPIRE and the sealer, reads the instances from the database and checks their signatures, verifies each plugin's owner, mode and hash, and starts the plugins its instances need. A first start has no instances, and so no plugin processes: file them as *The plugins* shows. A failure names what is wrong and ends startup. The unit restarts it with a back-off; `systemctl status ligo` shows the last error.
 
 | Flag of `ligo serve` | Use it |
 | :-------------------- | :---------------------------------- |
 | `--maintenance` | To start with changes refused, after a restore |
-| `--allow-orphaned-bindings` | When a binding refers to an instance you removed on purpose; audited |
+| `--allow-orphaned-bindings` | When a plugin upgrade dropped a secret storage strategy that bindings still use, on purpose; audited |
 | `--accept-jurisdiction-changes` | When you changed a jurisdiction mapping on purpose, to transfer the resources; audited |
 | `--insecure-dev` | Local development only |
 
