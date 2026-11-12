@@ -6,9 +6,9 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 
 | No. | Item | Recorded | Status |
 | :-- | :------------------------------------ | :--------- | :---------------- |
-| 1 | Audit pruning | 2026-11-08 | Built on `feature/pruning` (`.specs/ligo-pruning.md`, spec 4.0.8); lab step pending; known limit of v0.2.0 |
+| 1 | Audit pruning | 2026-11-08 | Done in v0.3.0 (PR #42) |
 | 2 | Pluggable authentication | 2026-11-08 | Not started |
-| 3 | The fix for GO-2026-5932 | 2026-11-08 | Done; move to a tag when one exists (none on 2026-11-11, latest v0.58.0) |
+| 3 | The fix for GO-2026-5932 | 2026-11-08 | Done: `x/crypto` v0.59.0, the first tag without `openpgp`, in v0.3.0 |
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
@@ -18,9 +18,9 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Not started; direction set |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
-| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Built on `feature/pruning`: two settings, 24h delivered, 30 days abandoned; known limit of v0.2.0 |
+| 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
-| 15 | Change request pruning | 2026-11-11 | Built on `feature/cr-pruning` (`.specs/ligo-cr-pruning.md`, spec 4.0.9); lab step pending |
+| 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
 
 ## 1. Audit pruning
 
@@ -67,7 +67,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 
 **What changed.** On 2026-11-08 `govulncheck` names a fix: `golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2`, a pseudo-version, so an untagged commit. The symbol scan still reports that `ligo` is affected by 0 vulnerabilities.
 
-**Decided (2026-11-08).** Bump now, before the soak, so the soak runs on it. `ligo` pins the pseudo-version, `make vuln` reports nothing, and the acceptance note is gone from §12. What remains is to move to the first tagged `x/crypto` release that contains the fix, once there is one.
+**Decided (2026-11-08).** Bump now, before the soak, so the soak runs on it. `ligo` pins the pseudo-version, `make vuln` reports nothing, and the acceptance note is gone from §12. On 2026-11-12 `ligo` moved to `x/crypto` v0.59.0 (tagged 2026-11-11), the first release without `openpgp`: the item is closed.
 
 ## 4. Manual test A-1
 
