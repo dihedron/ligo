@@ -35,6 +35,7 @@ var (
 const (
 	strategyStatic  = "vault-static"
 	strategyDynamic = "vault-dynamic"
+	strategyNone    = "svid" // of the builtin none.v1 store: the SVID is the credential
 )
 
 // Credential is what a workload presents to its target.
@@ -103,7 +104,7 @@ func (c *Client) credential(ctx context.Context, b Binding) (Credential, error) 
 	cfg := b.Auth.Config
 	path := cfg["secretPath"]
 	switch b.Auth.Strategy {
-	case "":
+	case "", strategyNone:
 		return Credential{}, ErrNoCredential
 	case strategyStatic:
 	case strategyDynamic:

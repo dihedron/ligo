@@ -26,7 +26,7 @@ The lab's `echo-client` (`test/lab/echo/client`, `.specs/ligo-echo-target.md`) d
 | Where it lives | `pkg/client`, in `github.com/dihedron/ligo`. One version, one CI, one release. |
 | What it covers | Bindings (with ETag), credentials for `vault-static` and `vault-dynamic`, a watch for changes and rotation, and flows as data. The SDK returns the endpoint, the credential and a TLS configuration; the application opens the connection with its own driver. |
 | Transport | REST and gRPC, chosen by an option. Both return the same data. |
-| Documentation | A new release PDF, the **Developer's Guide**: part 1 on developing an application with the client SDK (Go now; Java, Python and JavaScript/TypeScript later), part 2 ("Advanced development") on writing plugins of the three types with `pkg/pluginsdk`. |
+| Documentation | A new release PDF, the **Developer's Guide**: part 1 on developing an application with the client SDK (Go now; Java, Python and JavaScript/TypeScript later), part 2 ("Developing a Ligo Plugin") on writing plugins of the three types with `pkg/pluginsdk`. |
 
 ## 3. The package
 
@@ -80,7 +80,7 @@ type Binding struct {
 }
 
 type Auth struct {
-    Strategy      string            // secretStorageStrategy: "vault-static", "vault-dynamic", or empty
+    Strategy      string            // secretStorageStrategy: "vault-static", "vault-dynamic", or "svid"
     StoreType     string
     StoreInstance string
     Config        map[string]string // what the store plugin finalized: address, audience, namespace, authMount, role, secretPath or credsPath
@@ -111,7 +111,7 @@ type Credential struct {
 - The store's token is kept in memory per (address, namespace, authMount, role) until 80 % of its TTL, then a new login is made. A `403` on a read with a remembered token causes one new login and one retry.
 - `Credential` is not cached by `Credential()`: each call reads the store. For `vault-dynamic` each read creates a new database user, so an application calls it once and then follows the watch (§3.5).
 - `c.Invalidate(b)` drops the remembered store token for the binding. An application calls it when the target refuses the credential.
-- A binding with an empty `Strategy` (an SVID-only mode) returns `ErrNoCredential`. Another strategy returns `ErrUnsupportedStrategy`.
+- A binding with the strategy `svid` (the builtin `none.v1` store: the SVID is the credential), or with none, returns `ErrNoCredential`. Another strategy returns `ErrUnsupportedStrategy`.
 - `Credential` implements `fmt.Stringer`, `fmt.GoStringer` and `slog.LogValuer`, and all hide the password.
 - The store's address must be `https://host[:port]`, with no path. The SDK follows no redirect from a store: a redirect would carry the JWT-SVID or the store's token to another host.
 
@@ -221,9 +221,10 @@ Fuzzing: one target for decoding a bindings document (REST body and gRPC `Struct
 
 Lab (in the release-run, on OpenBao and Vault):
 
-- **CS-L1** `echo-client`, rebuilt on `pkg/client`, passes the echo suites with `--transport rest` and with `--transport grpc`.
+- **CS-L1** `echo-client`, rebuilt on `pkg/client`, passes `lab.sh echo smoke` with `--transport rest` and with `--transport grpc`; the release-run gains `echo install` and `echo smoke`.
 - **CS-L2** A `vault-dynamic` PostgreSQL binding: a client built on the SDK reads its credential and runs a query; after its lease the watch delivers a new credential that also works.
 - **CS-L3** A revoked binding: the watch reports `Removed`, and a new credential read fails.
+- **CS-L4** On OpenBao only (Vault Community has no namespaces): a secret store instance `vault-ns` in the namespace `lab-ns`, an echo platform `echo-ns` wired to it, and a binding. `echo-client` reads the password through the SDK and is admitted; the binding's secret is in the namespace's KV engine and not outside it.
 
 ## 9. Chunks
 
@@ -243,7 +244,7 @@ Each chunk ends with `go test ./...`, `make lint`, `make vuln` and `make secrets
 
 - **Developer's Guide** (`docs/developers-guide/`), a release PDF built by `make docs` and attached by the Documents workflow, as the other guides are:
   - **Part 1, "Developing an application":** what a binding gives a workload; the Go SDK step by step (client, bindings, credential, connection, watch, revocation); error handling; security advice (`AllowedStores`, what to do on `Removed`); a complete example. Sections for Java, Python and JavaScript/TypeScript say that those SDKs follow.
-  - **Part 2, "Advanced development":** writing a plugin of each type (identity provider, secret store, platform) with `pkg/pluginsdk`: the protocol (version 2), `Describe` and the schemas, `ValidateInstance`, `ConfigureInstances`, the stages, errors, SVID selection, testing with `testdata/testplugin`, packaging and the SHA-256 pin. Text on writing plugins that is in the Setup Guide or the Architecture and Design Guide today moves here, and a pointer stays behind.
+  - **Part 2, "Developing a Ligo Plugin":** writing a plugin of each type (identity provider, secret store, platform) with `pkg/pluginsdk`: the protocol (version 2), `Describe` and the schemas, `ValidateInstance`, `ConfigureInstances`, the stages, errors, SVID selection, testing with `testdata/testplugin`, packaging and the SHA-256 pin. Text on writing plugins that is in the Setup Guide or the Architecture and Design Guide today moves here, and a pointer stays behind.
 - The Architecture and Design Guide gains the SDK in its component view and the rows of §7.
 - The README lists the SDK and the fifth guide.
 - `pkg/client` has a package comment and a runnable `Example`.

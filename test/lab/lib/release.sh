@@ -23,6 +23,8 @@ release_suite() {
 	release_step "$dir" "$b-serve-test-webhook" serve test-webhook
 	release_step "$dir" "$b-serve-test-faults" serve test-faults
 	release_step "$dir" "$b-serve-test-instances" serve test-instances
+	release_step "$dir" "$b-echo-install" echo install
+	release_step "$dir" "$b-echo-smoke" echo smoke # the client SDK on both transports, and in a namespace on OpenBao
 	release_step "$dir" "$b-serve-test-audit" serve test-audit # prunes the lab's audit log
 	release_step "$dir" "$b-serve-test-accounts" serve test-accounts # resets the lab first
 }

@@ -43,7 +43,7 @@ func (b Binding) Endpoint() string {
 
 // Auth says where the binding's credential is kept.
 type Auth struct {
-	Strategy      string // "vault-static", "vault-dynamic", or "" when there is no secret store
+	Strategy      string // "vault-static", "vault-dynamic", or "svid" when the SVID is the credential
 	StoreType     string
 	StoreInstance string
 	Config        map[string]string // what the store's plugin finalized: address, audience, authMount, role, secretPath or credsPath

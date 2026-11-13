@@ -81,6 +81,9 @@ UNIT
 	done
 	echo_target echo-svid-target echo-svid 7101 "admits SVIDs"
 	echo_target echo-local-target echo-local 7201 "admits users with a password"
+	if has_namespaces; then
+		echo_target echo-ns-target echo-ns 7201 "admits users with a password kept in the namespace $LAB_NAMESPACE"
+	fi
 	info "the echo target is ready: see the guide in .specs/ligo-echo-target.md"
 }
 
@@ -124,7 +127,7 @@ echo_client() {
 	shift 2
 	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" || die "no user $user on ligo1"
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/prod/agent.sock -- \
-		/usr/local/bin/echo-client --target "$target" --audience "$(secrets_audience)" "$@"
+		/usr/local/bin/echo-client --target "$target" "$@"
 }
 
 # expect CODE PATTERN USER TARGET ARGS: runs the client and checks its exit
@@ -138,18 +141,35 @@ expect() {
 	info "echo client $1 $2 ${*:3}: exit $code, $(tail -1 <<<"$out")"
 }
 
-# echo_smoke: the guide's CLI part for both targets, scripted, then the
-# source retired again so the guide starts clean (.specs/ligo-echo-target.md).
+# namespace_holds_binding: the namespace's KV engine holds exactly one
+# binding's secret, and the engine outside the namespace does not hold it:
+# the plugin wrote, and the client read, inside the namespace (CS-L4).
+namespace_holds_binding() {
+	local inside outside id
+	inside="$(secrets_cli kv list "-namespace=$LAB_NAMESPACE" -mount=kv -format=json bindings 2>/dev/null)" || inside='[]'
+	[[ "$(jq length <<<"$inside")" == 1 ]] || die "the namespace $LAB_NAMESPACE holds $(jq -c . <<<"$inside"), not one binding's secret"
+	id="$(jq -r '.[0]' <<<"$inside")"
+	outside="$(secrets_cli kv list -mount=kv -format=json bindings 2>/dev/null)" || outside='[]'
+	jq -e --arg id "$id" 'index($id) | not' <<<"$outside" >/dev/null || die "the secret of binding $id is also outside the namespace"
+	info "the secret of binding $id is in the namespace $LAB_NAMESPACE only"
+}
+
+# echo_smoke: the guide's CLI part for each target, scripted, on both
+# transports of the client SDK, then the source retired again so the guide
+# starts clean (.specs/ligo-echo-target.md, .specs/ligo-client-sdk.md CS-L1
+# and CS-L4).
 echo_smoke() {
 	section "Echo smoke test"
-	local mode target binding port direct revision bound=spiffe://prod.lab/ns/echo/sa/bound
-	for mode in svid local; do
+	local mode modes="svid local" target binding port direct revision bound=spiffe://prod.lab/ns/echo/sa/bound
+	if has_namespaces; then modes="$modes ns"; fi
+	for mode in $modes; do
 		target="echo-$mode-target" binding="echo-bound-$mode"
 		port=7101 direct=(--mode svid)
-		if [[ "$mode" == local ]]; then
+		if [[ "$mode" != svid ]]; then
 			port=7201 direct=(--mode password --user anyone --password anything)
 		fi
 		expect 2 '^no binding$' echo-bound "$target"
+		expect 2 '^no binding$' echo-bound "$target" --transport grpc
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
 		if ! cli ligo-ops get source echo-bound-src >/dev/null 2>&1; then
@@ -161,9 +181,12 @@ echo_smoke() {
 		cli_phase "$binding" ACTIVE
 		if [[ "$mode" == svid ]]; then
 			expect 0 "^smoke $mode"$'\t'"$bound\$" echo-bound "$target" --message "smoke $mode"
+			expect 0 "^smoke $mode"$'\t'"$bound\$" echo-bound "$target" --message "smoke $mode" --transport grpc
 		else
 			expect 0 "^smoke $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "smoke $mode"
+			expect 0 "^smoke $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "smoke $mode" --transport grpc
 		fi
+		if [[ "$mode" == ns ]]; then namespace_holds_binding; fi
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-unbound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
 		revision="$(cli ligo-ops -o json get binding "$binding" | jq -r '.metadata.revision')"

@@ -227,6 +227,7 @@ func TestCredentialRefusals(t *testing.T) {
 		text string
 	}{
 		"no store":          {with("", func(*Binding) {}), ErrNoCredential, "no credential"},
+		"the SVID strategy": {with("svid", func(*Binding) {}), ErrNoCredential, "no credential"},
 		"unknown strategy":  {with("cyberark", func(*Binding) {}), ErrUnsupportedStrategy, "cyberark"},
 		"no audience":       {with(strategyStatic, set("audience", "")), ErrStore, "no audience"},
 		"no address":        {with(strategyStatic, set("address", "")), ErrStore, "no address"},
