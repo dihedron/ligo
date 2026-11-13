@@ -57,8 +57,9 @@ func (c Credential) LogValue() slog.Value {
 	return slog.GroupValue(slog.String("username", c.Username), slog.Time("expires", c.Expires))
 }
 
-// tokenKey identifies a store login.
-type tokenKey struct{ address, mount, role string }
+// tokenKey identifies a store login; namespace is "" outside Vault
+// Enterprise namespaces.
+type tokenKey struct{ address, namespace, mount, role string }
 
 type storeToken struct {
 	value string
@@ -127,18 +128,18 @@ func (c *Client) credential(ctx context.Context, b Binding) (Credential, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	key := tokenKey{address, cfg["authMount"], cfg["role"]}
+	key := tokenKey{address, cfg["namespace"], cfg["authMount"], cfg["role"]}
 	token, fresh, err := c.storeToken(ctx, b, key, cfg["audience"])
 	if err != nil {
 		return Credential{}, err
 	}
-	body, status, err := c.storeCall(ctx, http.MethodGet, address, path, token, nil)
+	body, status, err := c.storeCall(ctx, http.MethodGet, key, path, token, nil)
 	if status == http.StatusForbidden && !fresh { // the remembered token may be revoked: one new login
 		c.dropToken(key)
 		if token, _, err = c.storeToken(ctx, b, key, cfg["audience"]); err != nil {
 			return Credential{}, err
 		}
-		body, _, err = c.storeCall(ctx, http.MethodGet, address, path, token, nil)
+		body, _, err = c.storeCall(ctx, http.MethodGet, key, path, token, nil)
 	}
 	if err != nil {
 		return Credential{}, fmt.Errorf("%w: read: %w", ErrStore, err)
@@ -154,7 +155,7 @@ func (c *Client) credential(ctx context.Context, b Binding) (Credential, error) 
 // target refuses the credential, then read the credential again.
 func (c *Client) Invalidate(b Binding) {
 	if address, err := storeAddress(b.Auth.Config["address"]); err == nil {
-		c.dropToken(tokenKey{address, b.Auth.Config["authMount"], b.Auth.Config["role"]})
+		c.dropToken(tokenKey{address, b.Auth.Config["namespace"], b.Auth.Config["authMount"], b.Auth.Config["role"]})
 	}
 }
 
@@ -177,7 +178,7 @@ func (c *Client) storeToken(ctx context.Context, b Binding, key tokenKey, audien
 	if err != nil {
 		return "", false, fmt.Errorf("JWT-SVID: %w", err)
 	}
-	body, _, err := c.storeCall(ctx, http.MethodPost, key.address, "auth/"+key.mount+"/login", "", map[string]string{"role": key.role, "jwt": jwt})
+	body, _, err := c.storeCall(ctx, http.MethodPost, key, "auth/"+key.mount+"/login", "", map[string]string{"role": key.role, "jwt": jwt})
 	if err != nil {
 		return "", false, fmt.Errorf("%w: login: %w", ErrStore, err)
 	}
@@ -220,7 +221,7 @@ func (c *Client) jwt(ctx context.Context, audience string) (string, error) {
 
 // storeCall makes one call to a Vault-compatible store and returns the
 // body of a 200. Its errors carry the status, never the body.
-func (c *Client) storeCall(ctx context.Context, method, address, path, token string, in any) ([]byte, int, error) {
+func (c *Client) storeCall(ctx context.Context, method string, store tokenKey, path, token string, in any) ([]byte, int, error) {
 	var rd io.Reader
 	if in != nil {
 		data, err := json.Marshal(in)
@@ -229,12 +230,15 @@ func (c *Client) storeCall(ctx context.Context, method, address, path, token str
 		}
 		rd = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, address+"/v1/"+strings.TrimPrefix(path, "/"), rd)
+	req, err := http.NewRequestWithContext(ctx, method, store.address+"/v1/"+strings.TrimPrefix(path, "/"), rd)
 	if err != nil {
 		return nil, 0, errors.New("the binding's path is not usable") // the URL may hold the path only, but keep it out anyway
 	}
 	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
+	}
+	if store.namespace != "" {
+		req.Header.Set("X-Vault-Namespace", store.namespace)
 	}
 	resp, err := c.storeHTTP.Do(req)
 	if err != nil {

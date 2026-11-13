@@ -17,6 +17,9 @@
     "audience": {
       "type": "string"
     },
+    "namespace": {
+      "type": "string"
+    },
     "secretPath": {
       "type": "string"
     },

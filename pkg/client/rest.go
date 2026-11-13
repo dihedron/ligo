@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 )
 
 // rest calls the workload API's REST endpoints.
@@ -73,7 +75,11 @@ func restGet[W, T any](ctx context.Context, r *rest, path string, q url.Values, 
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, "", false, fmt.Errorf("%w: %s", ErrUnauthorized, resp.Status)
 	case http.StatusServiceUnavailable, http.StatusTooManyRequests:
-		return nil, "", false, fmt.Errorf("%w: %s", ErrUnavailable, resp.Status)
+		err := fmt.Errorf("%w: %s", ErrUnavailable, resp.Status)
+		if after, convErr := strconv.Atoi(resp.Header.Get("Retry-After")); convErr == nil && after > 0 && time.Duration(after)*time.Second <= maxRetryAfter {
+			err = retryError{err, time.Duration(after) * time.Second}
+		}
+		return nil, "", false, err
 	default:
 		return nil, "", false, fmt.Errorf("unexpected answer: %s", resp.Status)
 	}

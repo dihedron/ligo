@@ -38,7 +38,7 @@ type env struct {
 	source source
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t testing.TB) *env {
 	t.Helper()
 	ca := spiffetest.NewCA(t, "prod.lab")
 	v := &env{ca: ca, bundle: x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("prod.lab"), []*x509.Certificate{ca.Cert})}
@@ -46,7 +46,7 @@ func newEnv(t *testing.T) *env {
 	return v
 }
 
-func (v *env) svid(t *testing.T, id string) *x509svid.SVID {
+func (v *env) svid(t testing.TB, id string) *x509svid.SVID {
 	t.Helper()
 	w := v.ca.SVID(t, id)
 	s, err := x509svid.ParseRaw(w.GetX509Svid(), w.GetX509SvidKey())
@@ -58,7 +58,7 @@ func (v *env) svid(t *testing.T, id string) *x509svid.SVID {
 
 // serve starts a TLS server that presents id and requires a client SVID of
 // the trust domain; it returns its host:port.
-func (v *env) serve(t *testing.T, id string, h http.Handler) string {
+func (v *env) serve(t testing.TB, id string, h http.Handler) string {
 	t.Helper()
 	s := v.svid(t, id)
 	cfg := tlsconfig.MTLSServerConfig(s, v.bundle, tlsconfig.AuthorizeMemberOf(spiffeid.RequireTrustDomainFromString("prod.lab")))
@@ -74,7 +74,7 @@ func (v *env) serve(t *testing.T, id string, h http.Handler) string {
 	return strings.TrimPrefix(srv.URL, "https://")
 }
 
-func (v *env) client(t *testing.T, address string, transport ...Transport) *Client {
+func (v *env) client(t testing.TB, address string, transport ...Transport) *Client {
 	t.Helper()
 	c, err := New(t.Context(), Config{Address: address, ServerID: ligoID, X509Source: v.source, Transport: append(transport, REST)[0]})
 	if err != nil {
@@ -102,6 +102,7 @@ func TestNewValidates(t *testing.T) {
 		"no server ID":      {Config{Address: "ligo.lab:8443"}, "ServerID"},
 		"bad server ID":     {Config{Address: "ligo.lab:8443", ServerID: "ligo"}, "ServerID"},
 		"unknown transport": {Config{Address: "ligo.lab:8443", ServerID: ligoID, Transport: "soap"}, "Transport"},
+		"a short interval":  {Config{Address: "ligo.lab:8443", ServerID: ligoID, PollInterval: 4 * time.Second}, "PollInterval"},
 	} {
 		tc.cfg.X509Source = v.source
 		if _, err := New(t.Context(), tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -275,5 +276,46 @@ func TestDefaultSource(t *testing.T) {
 	t.Setenv("SPIFFE_ENDPOINT_SOCKET", "")
 	if _, err := New(t.Context(), Config{Address: address, ServerID: ligoID}); err == nil || !strings.Contains(err.Error(), "Workload API") {
 		t.Errorf("no socket: %v", err)
+	}
+}
+
+// TestRetryAfter: a 503 that says when to come back is remembered for Watch.
+func TestRetryAfter(t *testing.T) {
+	v := newEnv(t)
+	after := "7"
+	c := v.client(t, v.serve(t, ligoID, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", after)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})))
+	var retry retryError
+	if _, err := c.Bindings(t.Context(), Filter{}); !errors.As(err, &retry) || retry.after != 7*time.Second || !errors.Is(err, ErrUnavailable) {
+		t.Errorf("Retry-After 7: %v", err)
+	}
+	for _, after = range []string{"", "soon", "-1", "99999"} {
+		if _, err := c.Bindings(t.Context(), Filter{}); errors.As(err, &retry) || !errors.Is(err, ErrUnavailable) {
+			t.Errorf("Retry-After %q: %v", after, err)
+		}
+	}
+}
+
+// BenchmarkBindingsNotModified is the cost of one poll that finds nothing
+// new: a conditional request answered 304.
+func BenchmarkBindingsNotModified(b *testing.B) {
+	v := newEnv(b)
+	c := v.client(b, v.serve(b, ligoID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"sha256:1"`)
+		if r.Header.Get("If-None-Match") == `"sha256:1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(bindingsBody))
+	})))
+	if _, err := c.Bindings(b.Context(), Filter{}); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		if items, err := c.Bindings(b.Context(), Filter{}); err != nil || len(items) != 1 {
+			b.Fatal(err)
+		}
 	}
 }

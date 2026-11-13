@@ -19,8 +19,9 @@ var (
 
 // Filter narrows a request; an empty field does not filter.
 type Filter struct {
-	Target       string
-	PlatformType string // ignored by Flows
+	Target           string
+	PlatformType     string // ignored by Flows
+	WatchCredentials bool   // Watch only: read each binding's credential too
 }
 
 // Binding is one binding of the calling workload.

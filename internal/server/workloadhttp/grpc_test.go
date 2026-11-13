@@ -9,6 +9,7 @@ import (
 
 	workloadv1alpha1 "github.com/dihedron/ligo/api/gen/workload/v1alpha1"
 	"github.com/dihedron/ligo/internal/resolution"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -60,8 +61,8 @@ func TestGRPCBindings(t *testing.T) {
 		t.Errorf("known ETag: %v %v", again, err)
 	}
 	f.err = resolution.ErrStale
-	if _, err := g.GetBindings(ctx(t), &workloadv1alpha1.GetBindingsRequest{}); status.Code(err) != codes.Unavailable {
-		t.Errorf("stale: %v", err)
+	if _, err := g.GetBindings(ctx(t), &workloadv1alpha1.GetBindingsRequest{}); status.Code(err) != codes.Unavailable || retryDelay(err) != 5*time.Second {
+		t.Errorf("stale: %v, retry in %s", err, retryDelay(err))
 	}
 }
 
@@ -99,7 +100,19 @@ func TestGRPCErrors(t *testing.T) {
 	v.s.Listener.RateLimit.Burst = 1
 	g := v.grpcClient(t, certificate(t, v.ca, "spiffe://prod.lab/ns/app/sa/busy"))
 	_, _ = g.GetBindings(ctx(t), &workloadv1alpha1.GetBindingsRequest{})
-	if _, err := g.GetBindings(ctx(t), &workloadv1alpha1.GetBindingsRequest{}); status.Code(err) != codes.ResourceExhausted {
-		t.Errorf("rate limited: %v", err)
+	_, err := g.GetBindings(ctx(t), &workloadv1alpha1.GetBindingsRequest{})
+	if status.Code(err) != codes.ResourceExhausted || retryDelay(err) != time.Second {
+		t.Errorf("rate limited: %v, retry in %s", err, retryDelay(err))
 	}
+}
+
+// retryDelay is the delay of the RetryInfo detail of a gRPC error, as REST
+// has Retry-After.
+func retryDelay(err error) time.Duration {
+	for _, d := range status.Convert(err).Details() {
+		if info, ok := d.(*errdetails.RetryInfo); ok {
+			return info.GetRetryDelay().AsDuration()
+		}
+	}
+	return 0
 }

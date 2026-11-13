@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ const (
 type fakeStore struct {
 	srv       *httptest.Server
 	logins    []map[string]string // role, jwt
+	spaces    []string            // X-Vault-Namespace of each request
 	tokens    map[string]bool     // valid tokens
 	loginCode int                 // when not 0, logins answer it
 	readBody  string              // when set, reads answer it
@@ -42,6 +44,7 @@ func newStore(t *testing.T) *fakeStore {
 	t.Helper()
 	f := &fakeStore{tokens: map[string]bool{}, lease: 300}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.spaces = append(f.spaces, r.Header.Get("X-Vault-Namespace"))
 		switch r.Method + " " + r.URL.Path {
 		case "POST /v1/auth/jwt/login":
 			var in map[string]string
@@ -148,6 +151,33 @@ func TestCredential(t *testing.T) {
 	dyn, err := c.Credential(t.Context(), f.binding(strategyDynamic))
 	if err != nil || dyn.Username != "v-dyn-1" || dyn.Password != dynPassword || !dyn.Expires.Equal(now.Add(300*time.Second)) {
 		t.Errorf("dynamic: %s (%v)", dyn, err)
+	}
+}
+
+// TestNamespace: a binding's namespace is sent on the login and on the
+// read, and a login in one namespace is not used in another.
+func TestNamespace(t *testing.T) {
+	v, f := newEnv(t), newStore(t)
+	c, _, _ := storeClient(t, v, f)
+	in := func(ns string) Binding {
+		b := f.binding(strategyStatic)
+		if ns != "" {
+			b.Auth.Config["namespace"] = ns
+		}
+		return b
+	}
+	for _, ns := range []string{"", "team-a", "team-a", "team-b"} {
+		if _, err := c.Credential(t.Context(), in(ns)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// login+read, login+read, read, login+read
+	if want := []string{"", "", "team-a", "team-a", "team-a", "team-b", "team-b"}; !reflect.DeepEqual(f.spaces, want) || len(f.logins) != 3 {
+		t.Errorf("namespaces %q, %d logins", f.spaces, len(f.logins))
+	}
+	c.Invalidate(in("team-a"))
+	if _, err := c.Credential(t.Context(), in("team-a")); err != nil || len(f.logins) != 4 {
+		t.Errorf("after Invalidate: %d logins (%v)", len(f.logins), err)
 	}
 }
 

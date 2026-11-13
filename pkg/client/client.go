@@ -59,6 +59,8 @@ type Config struct {
 	JWTSource     jwtsvid.Source // default: the Workload API at SPIFFE_ENDPOINT_SOCKET, opened at the first use
 	StoreRoots    *x509.CertPool // the CAs of the secret stores' certificates; default: the system's
 	AllowedStores []string       // https://host:port of the stores the client may log in to; empty: any a binding names
+
+	PollInterval time.Duration // of Watch; default 30 s, at least 5 s
 }
 
 // Client reads the calling workload's bindings. It is safe for concurrent use.
@@ -71,6 +73,9 @@ type Client struct {
 	storeHTTP     *http.Client
 	allowedStores map[string]bool
 	now           func() time.Time
+	poll          time.Duration
+	// readCredential is Credential; the tests of Watch replace it
+	readCredential func(context.Context, Binding) (Credential, error)
 
 	mu        sync.Mutex
 	bindings  map[Filter]cached[Binding]
@@ -116,6 +121,15 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	c := &Client{source: cfg.X509Source, log: cfg.Logger, bindings: map[Filter]cached[Binding]{}, flows: map[Filter]cached[BindingFlows]{},
 		storeHTTP: newStoreHTTP(cfg.StoreRoots), allowedStores: map[string]bool{}, now: time.Now, tokens: map[tokenKey]storeToken{}, jwtSource: cfg.JWTSource}
+	c.readCredential = c.Credential
+	switch {
+	case cfg.PollInterval == 0:
+		c.poll = defaultPoll
+	case cfg.PollInterval < minPoll:
+		return nil, fmt.Errorf("client: PollInterval %s: at least %s", cfg.PollInterval, minPoll)
+	default:
+		c.poll = cfg.PollInterval
+	}
 	for _, a := range cfg.AllowedStores {
 		address, err := storeAddress(a)
 		if err != nil {
@@ -193,6 +207,7 @@ func (c *Client) tlsConfig(serverID spiffeid.ID, verified func(error)) *tls.Conf
 // Bindings returns the caller's bindings that match f. No binding is an
 // empty list, not an error.
 func (c *Client) Bindings(ctx context.Context, f Filter) ([]Binding, error) {
+	f.WatchCredentials = false
 	items, err := fetch(ctx, c, c.bindings, f, c.transport.bindings)
 	if err != nil {
 		return nil, fmt.Errorf("client: bindings: %w", err)
@@ -203,7 +218,7 @@ func (c *Client) Bindings(ctx context.Context, f Filter) ([]Binding, error) {
 // Flows returns the network flows of the caller's bindings to f.Target, or
 // of all of them.
 func (c *Client) Flows(ctx context.Context, f Filter) ([]BindingFlows, error) {
-	f.PlatformType = ""
+	f.PlatformType, f.WatchCredentials = "", false
 	items, err := fetch(ctx, c, c.flows, f, c.transport.flows)
 	if err != nil {
 		return nil, fmt.Errorf("client: flows: %w", err)

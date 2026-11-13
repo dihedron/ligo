@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	workloadv1alpha1 "github.com/dihedron/ligo/api/gen/workload/v1alpha1"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -105,9 +106,22 @@ func (g *grpcTransport) failure(ctx context.Context, err error) error {
 		if refused := g.refused.Load(); refused != nil {
 			return *refused
 		}
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return retryInfo(fmt.Errorf("%w: %w", ErrUnavailable, err), err)
 	case codes.ResourceExhausted, codes.DeadlineExceeded:
-		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return retryInfo(fmt.Errorf("%w: %w", ErrUnavailable, err), err)
 	}
 	return fmt.Errorf("unexpected answer: %w", err)
+}
+
+// retryInfo adds to wrapped the delay of the RetryInfo detail, which
+// ligo sends as REST sends Retry-After.
+func retryInfo(wrapped, rpc error) error {
+	for _, d := range status.Convert(rpc).Details() {
+		if info, ok := d.(*errdetails.RetryInfo); ok {
+			if after := info.GetRetryDelay().AsDuration(); after > 0 && after <= maxRetryAfter {
+				return retryError{wrapped, after}
+			}
+		}
+	}
+	return wrapped
 }

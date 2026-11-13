@@ -76,7 +76,7 @@ func (a *Agent) FetchJWTSVID(_ context.Context, req *workload.JWTSVIDRequest) (*
 }
 
 // Serve starts a on a socket in dir and returns its address.
-func (a *Agent) Serve(t *testing.T, dir, name string) string {
+func (a *Agent) Serve(t testing.TB, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name+".sock")
 	l, err := net.Listen("unix", path)
@@ -97,7 +97,7 @@ type CA struct {
 }
 
 // NewCA creates the CA of trust domain td.
-func NewCA(t *testing.T, td string) *CA {
+func NewCA(t testing.TB, td string) *CA {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: td}, NotBefore: time.Now().Add(-time.Hour),
@@ -112,7 +112,7 @@ func NewCA(t *testing.T, td string) *CA {
 }
 
 // SVID issues an X509-SVID for id.
-func (c *CA) SVID(t *testing.T, id string) *workload.X509SVID {
+func (c *CA) SVID(t testing.TB, id string) *workload.X509SVID {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	u, _ := url.Parse(id)

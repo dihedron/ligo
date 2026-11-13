@@ -10,9 +10,11 @@ import (
 	"time"
 
 	workloadv1alpha1 "github.com/dihedron/ligo/api/gen/workload/v1alpha1"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -140,6 +142,16 @@ func TestGRPCRefusals(t *testing.T) {
 		if _, err := c.Flows(t.Context(), Filter{}); err == nil && name != "a bad auth" {
 			t.Errorf("%s: flows answered", name)
 		}
+	}
+	// a RetryInfo detail is remembered for Watch, as Retry-After is on REST
+	st, _ := status.New(codes.Unavailable, "stale").WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(7 * time.Second)})
+	var retry retryError
+	if _, err := v.client(t, v.serveGRPC(t, ligoID, &fakeService{err: st.Err()}), GRPC).Bindings(t.Context(), Filter{}); !errors.As(err, &retry) || retry.after != 7*time.Second || !errors.Is(err, ErrUnavailable) {
+		t.Errorf("RetryInfo: %v", err)
+	}
+	long, _ := status.New(codes.ResourceExhausted, "slow").WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(2 * time.Hour)})
+	if _, err := v.client(t, v.serveGRPC(t, ligoID, &fakeService{err: long.Err()}), GRPC).Bindings(t.Context(), Filter{}); errors.As(err, &retry) || !errors.Is(err, ErrUnavailable) {
+		t.Errorf("RetryInfo over an hour: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

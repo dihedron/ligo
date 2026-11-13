@@ -83,7 +83,7 @@ type Auth struct {
     Strategy      string            // secretStorageStrategy: "vault-static", "vault-dynamic", or empty
     StoreType     string
     StoreInstance string
-    Config        map[string]string // what the store plugin finalized: address, audience, authMount, role, secretPath or credsPath
+    Config        map[string]string // what the store plugin finalized: address, audience, namespace, authMount, role, secretPath or credsPath
 }
 ```
 
@@ -107,7 +107,8 @@ type Credential struct {
   1. fetch a JWT-SVID for `auth.config.audience`, for the same SPIFFE ID as the X.509-SVID in use;
   2. `POST <address>/v1/auth/<authMount>/login` with `role` and the JWT;
   3. read `secretPath` (KV version 2: `data.data.username`, `data.data.password`) or `credsPath` (database engine: `data.username`, `data.password`, `lease_duration`).
-- The store's token is kept in memory per (address, authMount, role) until 80 % of its TTL, then a new login is made. A `403` on a read with a remembered token causes one new login and one retry.
+- When `auth.config.namespace` is set (Vault Enterprise, HCP Vault, OpenBao 2.3 and later), every request to the store carries it in `X-Vault-Namespace`.
+- The store's token is kept in memory per (address, namespace, authMount, role) until 80 % of its TTL, then a new login is made. A `403` on a read with a remembered token causes one new login and one retry.
 - `Credential` is not cached by `Credential()`: each call reads the store. For `vault-dynamic` each read creates a new database user, so an application calls it once and then follows the watch (§3.5).
 - `c.Invalidate(b)` drops the remembered store token for the binding. An application calls it when the target refuses the credential.
 - A binding with an empty `Strategy` (an SVID-only mode) returns `ErrNoCredential`. Another strategy returns `ErrUnsupportedStrategy`.
@@ -139,8 +140,10 @@ err := c.Watch(ctx, client.Filter{Target: "orders-db"}, func(ev client.Event) { 
 - **Credentials in the watch.** When `WatchCredentials` is set in the filter:
   - after `Added` and after `Changed`, the watch reads the credential and emits `CredentialRotated`;
   - for a credential with an `Expires`, it reads again at two thirds of the lease and emits `CredentialRotated`;
-  - a failed read is logged at WARN and tried again at the next poll. It emits nothing.
-- **Failures.** A failed poll keeps the last good state and emits nothing. The watch backs off (the interval doubles, up to 5 minutes) and returns to `PollInterval` after a success. A `503` with `Retry-After` waits at least that long.
+  - a failed read is logged at WARN and tried again at the next poll. It emits nothing;
+  - a binding with no secret store (`ErrNoCredential`) is skipped silently.
+- **Failures.** A failed poll keeps the last good state and emits nothing. The watch waits `PollInterval` after the first failure, then doubles the wait at each further failure, up to 5 minutes, and returns to `PollInterval` after a success. When `ligo` says when to come back, the watch waits at least that long (up to one hour): `Retry-After` on REST, a `google.rpc.RetryInfo` detail on gRPC.
+- **Order.** At one poll, `Added` and `Changed` come in the order of the answer, then `Removed` by binding name.
 
 ### 3.6 Errors
 
@@ -162,11 +165,13 @@ Every error is wrapped with `%w`. Sentinels, for `errors.Is`:
 - Both use `tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(serverID))`, TLS 1.3 only, a 15 s timeout per call, and bodies limited to 8 MiB.
 - For the same server state, the two transports return equal `[]Binding` and `[]BindingFlows`. A test proves it.
 
-## 4. One change on the server
+## 4. Changes on the server
 
-The binding's `auth.config` carries `address`, `policy`, `authMount`, `role` and `secretPath` or `credsPath`, but not the audience of the JWT-SVID the store expects. A workload cannot log in without it.
+The binding's `auth.config` carries `address`, `policy`, `authMount`, `role` and `secretPath` or `credsPath`, but not the audience of the JWT-SVID the store expects, nor the store's namespace. A workload cannot log in without them.
 
 - The Vault plugin adds `"audience"` to the finalized client auth, with the instance's `workload_jwt_audience`, and to its `client_output_schema_json`.
+- The Vault plugin adds `"namespace"` when the instance has one; the field is absent otherwise.
+- The workload API's gRPC errors carry a `google.rpc.RetryInfo` detail where REST sends `Retry-After`: 5 s on `Unavailable` (the cache is stale), 1 s on `ResourceExhausted` (the caller's rate limit). The two transports then give a client the same hint.
 - No compatibility code: bindings applied before the change gain the field at their next apply. The SDK reports a binding without it as `ErrStore` ("the binding names no audience").
 - Main spec 4.1.1, with a changelog row.
 
@@ -187,7 +192,7 @@ The binding's `auth.config` carries `address`, `policy`, `authMount`, `role` and
 | T-C3 | Secrets leak through logs, errors or `%v`. | `Credential` hides its password in `String` and `LogValue`. Errors carry statuses, never bodies. Tokens and JWTs are never logged. |
 | T-C4 | Secrets stay in memory or on disk longer than needed. | Nothing is written to disk. A store token is dropped at 80 % of its TTL and at `Close`. Credentials are not cached by the SDK. |
 | T-C5 | A credential read during a rotation is stale. | The watch re-reads after a `Changed` event and before a lease ends; `Invalidate` forces a new login. |
-| T-C6 | Many workloads polling overload `ligo`. | A 5 s floor on the interval, jitter, the ETag (a `304` has no body), backoff after failures, `Retry-After` honoured. |
+| T-C6 | Many workloads polling overload `ligo`. | A 5 s floor on the interval, jitter, the ETag (a `304` has no body), backoff after failures, `Retry-After` and `RetryInfo` honoured. |
 | T-C7 | A hostile answer exhausts memory. | Bodies are read through an 8 MiB limit, on `ligo` and on the store. |
 | T-C8 | A revoked binding keeps being used. | The watch emits `Removed` within one poll interval. The SDK cannot close the application's connections: the guide says what the application must do. The store's policy is removed by `ligo` at revocation, so new credential reads fail. |
 
@@ -208,7 +213,9 @@ Unit tests, with in-memory SVIDs and `httptest` TLS servers (the pattern of `tes
 - **CS-11** `Watch` emits `Added`, `Changed`, `Removed` in order for a scripted server; with `WatchCredentials` it emits `CredentialRotated` after each, and again at two thirds of a lease.
 - **CS-12** `Watch` keeps its state through failed polls, backs off, honours `Retry-After`, and returns `ctx.Err()` when the context ends.
 - **CS-13** Bodies over 8 MiB are refused.
-- **CS-14** The Vault plugin's finalized client auth has `audience`, and its output schema allows it.
+- **CS-14** The Vault plugin's finalized client auth has `audience`, and `namespace` when the instance has one; its output schema allows both.
+- **CS-15** A binding's namespace is sent on the login and on the read; a login in one namespace is not used in another.
+- **CS-16** The server's gRPC errors carry `RetryInfo` (5 s stale, 1 s rate-limited), and the SDK's gRPC transport reads it as its REST transport reads `Retry-After`.
 
 Fuzzing: one target for decoding a bindings document (REST body and gRPC `Struct`), one for the store's responses. Benchmark: `Bindings` answered "not modified".
 
