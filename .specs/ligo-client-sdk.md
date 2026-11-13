@@ -148,7 +148,7 @@ Every error is wrapped with `%w`. Sentinels, for `errors.Is`:
 | Error | Meaning |
 |---|---|
 | `ErrUnauthorized` | `ligo` refused the caller (TLS alert, `401`, `403`, gRPC `Unauthenticated` or `PermissionDenied`). |
-| `ErrUnavailable` | `ligo` cannot resolve now (`503`, gRPC `Unavailable`), or it cannot be reached. Retry later. |
+| `ErrUnavailable` | `ligo` cannot resolve now (`503`, gRPC `Unavailable`), limits the caller's rate (`429`, gRPC `ResourceExhausted`), or cannot be reached. Retry later. |
 | `ErrNoCredential` | The binding has no secret store. |
 | `ErrUnsupportedStrategy` | The SDK does not know the binding's strategy. |
 | `ErrStoreNotAllowed` | The binding names a store address outside `AllowedStores`. |
