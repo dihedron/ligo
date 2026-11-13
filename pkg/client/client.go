@@ -31,8 +31,11 @@ const (
 // Transport selects how the client talks to ligo.
 type Transport string
 
-// REST is the default transport.
-const REST Transport = "rest"
+// The transports; both return the same data. REST is the default.
+const (
+	REST Transport = "rest"
+	GRPC Transport = "grpc"
+)
 
 // X509Source gives the workload's SVID and the bundles to verify peers
 // with; a *workloadapi.X509Source is one.
@@ -93,8 +96,8 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Transport == "" {
 		cfg.Transport = REST
 	}
-	if cfg.Transport != REST {
-		return nil, fmt.Errorf("client: Transport %q: %q only", cfg.Transport, REST)
+	if cfg.Transport != REST && cfg.Transport != GRPC {
+		return nil, fmt.Errorf("client: Transport %q: %q or %q", cfg.Transport, REST, GRPC)
 	}
 	c := &Client{source: cfg.X509Source, log: cfg.Logger, bindings: map[Filter]cached[Binding]{}, flows: map[Filter]cached[BindingFlows]{}}
 	if c.log == nil {
@@ -107,6 +110,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		}
 		c.source, c.closer = s, s
 	}
+	if cfg.Transport == GRPC {
+		if c.transport, err = newGRPC(cfg.Address, func(verified func(error)) *tls.Config { return c.tlsConfig(id, verified) }); err != nil {
+			_ = c.closeSource()
+			return nil, fmt.Errorf("client: gRPC: %w", err)
+		}
+		return c, nil
+	}
 	c.transport = newREST(cfg.Address, c.TLSConfig(id))
 	return c, nil
 }
@@ -114,23 +124,34 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 // Close releases the client's connections, and the SVID source if New
 // opened it.
 func (c *Client) Close() error {
-	err := c.transport.close()
-	if c.closer != nil {
-		err = errors.Join(err, c.closer.Close())
+	return errors.Join(c.transport.close(), c.closeSource())
+}
+
+func (c *Client) closeSource() error {
+	if c.closer == nil {
+		return nil
 	}
-	return err
+	return c.closer.Close()
 }
 
 // TLSConfig is a client configuration for mTLS with the workload's SVID
 // that accepts only serverID, for ligo and for targets that speak SPIFFE
 // mTLS.
 func (c *Client) TLSConfig(serverID spiffeid.ID) *tls.Config {
+	return c.tlsConfig(serverID, func(error) {})
+}
+
+// tlsConfig is TLSConfig; verified is told the outcome of each check of
+// the server's identity (nil when accepted).
+func (c *Client) tlsConfig(serverID spiffeid.ID, verified func(error)) *tls.Config {
 	authorize := tlsconfig.AuthorizeID(serverID)
 	cfg := tlsconfig.MTLSClientConfig(c.source, c.source, func(id spiffeid.ID, chains [][]*x509.Certificate) error {
-		if err := authorize(id, chains); err != nil {
-			return fmt.Errorf("%w: %w", ErrUnauthorized, err)
+		err := authorize(id, chains)
+		if err != nil {
+			err = fmt.Errorf("%w: %w", ErrUnauthorized, err)
 		}
-		return nil
+		verified(err)
+		return err
 	})
 	cfg.MinVersion = tls.VersionTLS13
 	return cfg

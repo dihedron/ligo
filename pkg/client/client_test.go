@@ -68,15 +68,15 @@ func (v *env) serve(t *testing.T, id string, h http.Handler) string {
 	}
 	cfg.Certificates, cfg.GetCertificate = []tls.Certificate{*cert}, nil // httptest would add its own certificate otherwise
 	srv := httptest.NewUnstartedServer(h)
-	srv.TLS = cfg
+	srv.TLS, srv.EnableHTTP2 = cfg, true
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	return strings.TrimPrefix(srv.URL, "https://")
 }
 
-func (v *env) client(t *testing.T, address string) *Client {
+func (v *env) client(t *testing.T, address string, transport ...Transport) *Client {
 	t.Helper()
-	c, err := New(t.Context(), Config{Address: address, ServerID: ligoID, X509Source: v.source})
+	c, err := New(t.Context(), Config{Address: address, ServerID: ligoID, X509Source: v.source, Transport: append(transport, REST)[0]})
 	if err != nil {
 		t.Fatal(err)
 	}
