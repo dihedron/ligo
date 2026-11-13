@@ -72,7 +72,7 @@ The workload authenticates with its X.509-SVID, or a JWT-SVID:
 curl --cert svid.pem --key key.pem --cacert bundle.pem https://ligo.prod.internal:8443/v1/bindings
 ```
 
-Each item gives the connection coordinates in `spec`, and how to get the credential in `auth`: the store's `address`, `authMount`, `role`, and `secretPath` or `credsPath`. The workload logs in to Vault with a JWT-SVID for the store's audience and its own role, reads the path, and connects:
+Each item gives the connection coordinates in `spec`, and how to get the credential in `auth`: the store's `address`, `audience`, `authMount`, `role`, and `secretPath` or `credsPath`. The workload logs in to Vault with a JWT-SVID for that `audience` and its own role, reads the path, and connects:
 
 ```bash
 vault write auth/jwt-spiffe/login role=binding-<id> jwt=<JWT-SVID>

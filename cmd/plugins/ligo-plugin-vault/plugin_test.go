@@ -190,7 +190,7 @@ func TestStatic(t *testing.T) {
 		t.Errorf("policy %v", acl)
 	}
 	var auth map[string]string
-	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth["secretPath"] != path || auth["role"] != "binding-"+id || auth["authMount"] != "jwt" {
+	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth["secretPath"] != path || auth["role"] != "binding-"+id || auth["authMount"] != "jwt" || auth["audience"] != "the-audience" {
 		t.Errorf("auth %v (%v)", auth, err)
 	}
 	if e := r.GetDeclaredEndpoints()[0]; e.GetHost() != "v.lab" || e.GetPort() != 8200 {
@@ -232,7 +232,7 @@ func TestDynamic(t *testing.T) {
 		t.Errorf("no JWT role for the workload: %v", role)
 	}
 	var auth map[string]string
-	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth["credsPath"] != "database/creds/binding-"+id || auth["role"] != "binding-"+id {
+	if err := json.Unmarshal(r.GetFinalizedClientAuthJson(), &auth); err != nil || auth["credsPath"] != "database/creds/binding-"+id || auth["role"] != "binding-"+id || auth["audience"] != "the-audience" {
 		t.Errorf("auth %v", auth)
 	}
 	_, err = v.plugin(config{}).EnsureSecretStore(context.Background(), req)

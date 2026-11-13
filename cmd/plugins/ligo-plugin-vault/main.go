@@ -332,7 +332,7 @@ func (p *plugin) EnsureSecretStore(ctx context.Context, r *pluginv1.EnsureSecret
 	}
 	defer done()
 	policy := "binding-" + id
-	auth := map[string]string{"address": in.Address, "policy": policy, "authMount": in.AuthMount, "role": policy}
+	auth := map[string]string{"address": in.Address, "audience": in.WorkloadJWTAudience, "policy": policy, "authMount": in.AuthMount, "role": policy}
 	var readPath string
 	if strategy == static {
 		readPath = in.KVMount + "/data/bindings/" + id

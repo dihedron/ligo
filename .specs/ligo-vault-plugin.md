@@ -52,7 +52,7 @@ This settles OI-1. A JWT role binds a subject exactly or by glob, and Vault's gl
 | Policy reading that path only | `sys/policies/acl/binding-<id>` | both |
 | JWT role: `bound_subject`, `bound_audiences`, that policy | `auth/<auth_mount>/role/binding-<id>` | both |
 
-The finalized client auth gives `address`, `authMount`, `role`, `policy`, and `secretPath` or `credsPath`.
+The finalized client auth gives `address`, `audience` (the instance's `workload_jwt_audience`, for the workload's JWT-SVID), `authMount`, `role`, `policy`, and `secretPath` or `credsPath`.
 
 ## 6. RPCs
 
