@@ -52,7 +52,7 @@ defer c.Close()
 | `X509Source` | no | An `x509svid.Source` and `x509bundle.Source`. Default: a `workloadapi.X509Source` on `SPIFFE_ENDPOINT_SOCKET`, owned and closed by the client. |
 | `JWTSource` | no | Returns a JWT-SVID for an audience. Default: the same Workload API socket, through one client kept open. |
 | `StoreRoots` | no | The CA pool for the secret store's certificate. Default: the system's roots. |
-| `AllowedStores` | no | Store addresses the SDK may log in to (exact `scheme://host:port`). Empty means any address a binding names (§7, T-C2). |
+| `AllowedStores` | no | Store addresses the SDK may log in to (`https://host:port`; port 443 when omitted). Empty means any address a binding names (§7, T-C2). |
 | `PollInterval` | no | The watch's interval. Default 30 s, never under 5 s. |
 | `Logger` | no | A `*slog.Logger`. Default: `slog.Default()`. |
 
@@ -104,14 +104,15 @@ type Credential struct {
 ```
 
 - **`vault-static` and `vault-dynamic`** (store types `vault`, also OpenBao):
-  1. fetch a JWT-SVID for `auth.config.audience`;
+  1. fetch a JWT-SVID for `auth.config.audience`, for the same SPIFFE ID as the X.509-SVID in use;
   2. `POST <address>/v1/auth/<authMount>/login` with `role` and the JWT;
   3. read `secretPath` (KV version 2: `data.data.username`, `data.data.password`) or `credsPath` (database engine: `data.username`, `data.password`, `lease_duration`).
 - The store's token is kept in memory per (address, authMount, role) until 80 % of its TTL, then a new login is made. A `403` on a read with a remembered token causes one new login and one retry.
 - `Credential` is not cached by `Credential()`: each call reads the store. For `vault-dynamic` each read creates a new database user, so an application calls it once and then follows the watch (§3.5).
 - `c.Invalidate(b)` drops the remembered store token for the binding. An application calls it when the target refuses the credential.
 - A binding with an empty `Strategy` (an SVID-only mode) returns `ErrNoCredential`. Another strategy returns `ErrUnsupportedStrategy`.
-- `Credential` implements `fmt.Stringer` and `slog.LogValuer`, and both hide the password.
+- `Credential` implements `fmt.Stringer`, `fmt.GoStringer` and `slog.LogValuer`, and all hide the password.
+- The store's address must be `https://host[:port]`, with no path. The SDK follows no redirect from a store: a redirect would carry the JWT-SVID or the store's token to another host.
 
 ### 3.4 TLS configuration and flows
 
@@ -151,7 +152,7 @@ Every error is wrapped with `%w`. Sentinels, for `errors.Is`:
 | `ErrUnavailable` | `ligo` cannot resolve now (`503`, gRPC `Unavailable`), limits the caller's rate (`429`, gRPC `ResourceExhausted`), or cannot be reached. Retry later. |
 | `ErrNoCredential` | The binding has no secret store. |
 | `ErrUnsupportedStrategy` | The SDK does not know the binding's strategy. |
-| `ErrStoreNotAllowed` | The binding names a store address outside `AllowedStores`. |
+| `ErrStoreNotAllowed` | The binding names a store address that is not `https`, or is outside `AllowedStores`. |
 | `ErrStore` | The store refused the login or the read; the message has the HTTP status, never the body. |
 
 ### 3.7 Transports
@@ -182,7 +183,7 @@ The binding's `auth.config` carries `address`, `policy`, `authMount`, `role` and
 | ID | Threat | Mitigation |
 |---|---|---|
 | T-C1 | A wrong server answers as `ligo`, or as the store. | `ligo` is accepted only with `ServerID`, over mTLS, against the SPIFFE bundle. The store is accepted only over TLS against `StoreRoots`. The SDK has no option to skip verification and refuses a store address that is not `https`. |
-| T-C2 | A compromised `ligo`, or a tampered answer, names a store address the attacker controls, to collect the workload's JWT-SVID. | The JWT-SVID carries the audience of the binding, so it is of use only against a store that trusts that audience. `AllowedStores` pins the addresses; the Developer's Guide recommends it. |
+| T-C2 | A compromised `ligo`, or a tampered answer, names a store address the attacker controls, to collect the workload's JWT-SVID. | The JWT-SVID carries the audience of the binding, so it is of use only against a store that trusts that audience. `AllowedStores` pins the addresses; the Developer's Guide recommends it. No redirect from a store is followed. |
 | T-C3 | Secrets leak through logs, errors or `%v`. | `Credential` hides its password in `String` and `LogValue`. Errors carry statuses, never bodies. Tokens and JWTs are never logged. |
 | T-C4 | Secrets stay in memory or on disk longer than needed. | Nothing is written to disk. A store token is dropped at 80 % of its TTL and at `Close`. Credentials are not cached by the SDK. |
 | T-C5 | A credential read during a rotation is stale. | The watch re-reads after a `Changed` event and before a lease ends; `Invalidate` forces a new login. |

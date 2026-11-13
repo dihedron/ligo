@@ -1,6 +1,7 @@
 // Package client is the Go SDK for workloads that use ligo: it fetches the
 // calling workload's bindings and network flows from ligo's workload API,
-// over mTLS with the workload's SVID (.specs/ligo-client-sdk.md).
+// over mTLS with the workload's SVID, and reads each binding's credential
+// from its secret store with a JWT-SVID (.specs/ligo-client-sdk.md).
 package client
 
 import (
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
@@ -51,6 +54,11 @@ type Config struct {
 	Transport  Transport    // REST when empty
 	X509Source X509Source   // default: the Workload API at SPIFFE_ENDPOINT_SOCKET
 	Logger     *slog.Logger // default: slog.Default()
+
+	// For Credential:
+	JWTSource     jwtsvid.Source // default: the Workload API at SPIFFE_ENDPOINT_SOCKET, opened at the first use
+	StoreRoots    *x509.CertPool // the CAs of the secret stores' certificates; default: the system's
+	AllowedStores []string       // https://host:port of the stores the client may log in to; empty: any a binding names
 }
 
 // Client reads the calling workload's bindings. It is safe for concurrent use.
@@ -60,9 +68,16 @@ type Client struct {
 	transport transport
 	log       *slog.Logger
 
-	mu       sync.Mutex
-	bindings map[Filter]cached[Binding]
-	flows    map[Filter]cached[BindingFlows]
+	storeHTTP     *http.Client
+	allowedStores map[string]bool
+	now           func() time.Time
+
+	mu        sync.Mutex
+	bindings  map[Filter]cached[Binding]
+	flows     map[Filter]cached[BindingFlows]
+	tokens    map[tokenKey]storeToken
+	jwtSource jwtsvid.Source
+	jwtCloser io.Closer // the JWT source, when the client opened it
 }
 
 // cached is the last answer for a filter, sent back as a conditional request.
@@ -99,7 +114,15 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Transport != REST && cfg.Transport != GRPC {
 		return nil, fmt.Errorf("client: Transport %q: %q or %q", cfg.Transport, REST, GRPC)
 	}
-	c := &Client{source: cfg.X509Source, log: cfg.Logger, bindings: map[Filter]cached[Binding]{}, flows: map[Filter]cached[BindingFlows]{}}
+	c := &Client{source: cfg.X509Source, log: cfg.Logger, bindings: map[Filter]cached[Binding]{}, flows: map[Filter]cached[BindingFlows]{},
+		storeHTTP: newStoreHTTP(cfg.StoreRoots), allowedStores: map[string]bool{}, now: time.Now, tokens: map[tokenKey]storeToken{}, jwtSource: cfg.JWTSource}
+	for _, a := range cfg.AllowedStores {
+		address, err := storeAddress(a)
+		if err != nil {
+			return nil, fmt.Errorf("client: AllowedStores: %w", err)
+		}
+		c.allowedStores[address] = true
+	}
 	if c.log == nil {
 		c.log = slog.Default()
 	}
@@ -124,7 +147,17 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 // Close releases the client's connections, and the SVID source if New
 // opened it.
 func (c *Client) Close() error {
-	return errors.Join(c.transport.close(), c.closeSource())
+	c.mu.Lock()
+	clear(c.tokens) // T-C4
+	jwt := c.jwtCloser
+	c.jwtSource, c.jwtCloser = nil, nil
+	c.mu.Unlock()
+	c.storeHTTP.CloseIdleConnections()
+	err := errors.Join(c.transport.close(), c.closeSource())
+	if jwt != nil {
+		err = errors.Join(err, jwt.Close())
+	}
+	return err
 }
 
 func (c *Client) closeSource() error {
