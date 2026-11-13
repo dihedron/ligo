@@ -222,8 +222,8 @@ Fuzzing: one target for decoding a bindings document (REST body and gRPC `Struct
 Lab (in the release-run, on OpenBao and Vault):
 
 - **CS-L1** `echo-client`, rebuilt on `pkg/client`, passes `lab.sh echo smoke` with `--transport rest` and with `--transport grpc`; the release-run gains `echo install` and `echo smoke`.
-- **CS-L2** A `vault-dynamic` PostgreSQL binding: a client built on the SDK reads its credential and runs a query; after its lease the watch delivers a new credential that also works.
-- **CS-L3** A revoked binding: the watch reports `Removed`, and a new credential read fails.
+- **CS-L2** A `vault-dynamic` PostgreSQL binding (`TestServeClientSDK`, in `lab.sh serve test`): a workload that watches with the SDK on REST sees `Added` and receives a credential that connects; on gRPC it reads the same binding, its flows, and a second credential that connects too.
+- **CS-L3** The binding revoked: the watch reports `Removed`, a new credential read fails with `ErrStore`, and the credentials issued before no longer connect.
 - **CS-L4** On OpenBao only (Vault Community has no namespaces): a secret store instance `vault-ns` in the namespace `lab-ns`, an echo platform `echo-ns` wired to it, and a binding. `echo-client` reads the password through the SDK and is admitted; the binding's secret is in the namespace's KV engine and not outside it.
 
 ## 9. Chunks

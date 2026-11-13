@@ -581,9 +581,10 @@ serve_test_topologies() {
 	section "e2e of the four topologies"
 	local before after
 	before="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
-	serve_e2e '^TestServe(Topologies|DynamicCredentials)$' ligo1 "$1" || die "TestServeTopologies or TestServeDynamicCredentials failed"
+	serve_e2e '^TestServe(Topologies|DynamicCredentials|ClientSDK)$' ligo1 "$1" ||
+		die "TestServeTopologies, TestServeDynamicCredentials or TestServeClientSDK failed"
 	after="$(serve_sql "select count(*) from audit_log where action = 'DELETE_COMPLETED'")"
-	((after - before == 5)) || die "the topologies: $((after - before)) DELETE_COMPLETED entries, want 5"
+	((after - before == 6)) || die "the topologies: $((after - before)) DELETE_COMPLETED entries, want 6"
 	info "e2e of the four topologies passed"
 }
 
