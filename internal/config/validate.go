@@ -14,6 +14,7 @@ import (
 	"github.com/dihedron/ligo/internal/engine"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/theme"
+	"github.com/dihedron/ligo/pkg/pluginsdk"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
@@ -60,6 +61,9 @@ func Validate(cfg *Config, opts Options) error {
 	c := &checker{}
 	if id, _ := opts.LookupEnv(cfg.Service.InstanceIDEnv); !instanceIDRE.MatchString(id) {
 		c.failf(1, "service.instance_id_env %q: the instance ID %q must match %s", cfg.Service.InstanceIDEnv, id, instanceIDRE)
+	}
+	if err := pluginsdk.CredentialTTL(cfg.Plugins.DynamicCredentials.DefaultTTL, cfg.Plugins.DynamicCredentials.MaxTTL); err != nil {
+		c.failf(1, "plugins.dynamic_credentials: %v", err)
 	}
 	realms := c.realms(cfg)
 	c.instances(cfg, realms)

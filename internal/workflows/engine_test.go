@@ -203,3 +203,41 @@ func TestSanitizeDatabase(t *testing.T) {
 		}
 	}
 }
+
+// TestLease: the lease of a dynamic credential is the platform's, else the
+// engine's (server.yaml, else the built-in); each value by itself
+// (.specs/ligo-postgres-plugin.md §3).
+func TestLease(t *testing.T) {
+	global := Lease{TTL: time.Hour, MaxTTL: 24 * time.Hour}
+	for name, tc := range map[string]struct {
+		ttl, max, wantTTL, wantMax int32
+		engine                     Lease
+		code                       string
+	}{
+		"the platform sets none":       {0, 0, 3600, 86400, global, ""},
+		"the platform sets both":       {90, 14400, 90, 14400, global, ""},
+		"the platform sets the lease":  {900, 0, 900, 86400, global, ""},
+		"the platform sets the limit":  {0, 7200, 3600, 7200, global, ""},
+		"a platform above the default": {172800, 2592000, 172800, 2592000, global, ""}, // the global value is no cap
+		"a lease above the limit":      {172800, 0, 0, 0, global, "INVALID_CREDENTIAL_TTL"},
+		"a limit under the default":    {0, 600, 0, 0, global, "INVALID_CREDENTIAL_TTL"},
+		"a plugin's short lease":       {30, 0, 0, 0, global, "INVALID_CREDENTIAL_TTL"},
+		"a plugin's long limit":        {0, 2592001, 0, 0, global, "INVALID_CREDENTIAL_TTL"},
+		"an engine without a lease":    {0, 0, 0, 0, Lease{}, ""}, // tests only: the store's own default
+	} {
+		role := &pluginv1.DelegatedRoleSpec{DefaultTtlSeconds: tc.ttl, MaxTtlSeconds: tc.max}
+		err := tc.engine.fill(role)
+		var se *StepError
+		switch {
+		case tc.code != "":
+			if !errors.As(err, &se) || se.Code != tc.code || se.Retryable {
+				t.Errorf("%s: %v", name, err)
+			}
+		case err != nil || role.GetDefaultTtlSeconds() != tc.wantTTL || role.GetMaxTtlSeconds() != tc.wantMax:
+			t.Errorf("%s: %d, %d (%v)", name, role.GetDefaultTtlSeconds(), role.GetMaxTtlSeconds(), err)
+		}
+	}
+	if err := global.fill(nil); err != nil { // a static secret has no role
+		t.Error(err)
+	}
+}

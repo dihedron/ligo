@@ -122,6 +122,10 @@ func TestRules(t *testing.T) {
 		{"break_glass on a SPIFFE ID", `{ ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,dc=corp,dc=internal",  role: break_glass`, `{ spiffe_id: "spiffe://prod.internal/x",  role: break_glass`, 14, nil},
 		{"break_glass jurisdiction without policy", `role: break_glass, jurisdictions: ["dc/corp-prod/*"]`, `role: break_glass, jurisdictions: ["dc/corp-prod"]`, 14, nil},
 		{"ttl above 24h", "default_ttl: 4h, max_ttl: 8h", "default_ttl: 4h, max_ttl: 25h", 14, nil},
+		{"a short dynamic lease", "dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }", "dynamic_credentials: { default_ttl: 30s, max_ttl: 24h }", 1, nil},
+		{"a long dynamic maximum", "dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }", "dynamic_credentials: { default_ttl: 1h, max_ttl: 721h }", 1, nil},
+		{"a dynamic lease above its maximum", "dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }", "dynamic_credentials: { default_ttl: 2h, max_ttl: 1h }", 1, nil},
+		{"a dynamic lease above the built-in maximum", "dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }", "dynamic_credentials: { default_ttl: 48h }", 1, nil},
 		{"short justification", "min_justification_length: 20", "min_justification_length: 10", 14, nil},
 		{"http webhook", `url: "https://oncall.corp.internal/hooks/ligo"`, `url: "http://oncall.corp.internal/hooks/ligo"`, 14, nil},
 		{"unset webhook secret", "LIGO_WEBHOOK_DBA_SECRET", "LIGO_WEBHOOK_UNSET", 14, nil},
@@ -217,6 +221,7 @@ func TestDefaults(t *testing.T) {
 	if !*cfg.Authorization.Approval.RequireDistinctApproversAcrossJurisdictions || cfg.Charter.Interconnects.DefaultCrossJurisdiction != "deny" ||
 		cfg.Bindings.MaxExpiry != 8760*time.Hour || cfg.Bindings.ExpiryWarning != 168*time.Hour ||
 		cfg.Plugins.RPCTimeout != time.Minute ||
+		cfg.Plugins.DynamicCredentials.DefaultTTL != time.Hour || cfg.Plugins.DynamicCredentials.MaxTTL != 24*time.Hour ||
 		cfg.Plugins.MaxConcurrentRPCsPerInstance != 4 || cfg.Service.StartupTimeout != time.Minute ||
 		*cfg.Notifications.DeliveredRetention != 24*time.Hour || *cfg.Notifications.AbandonedRetention != 720*time.Hour {
 		t.Errorf("defaults: %+v", cfg)

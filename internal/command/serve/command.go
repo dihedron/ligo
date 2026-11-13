@@ -232,7 +232,8 @@ func (cmd *Serve) run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	engine := &workflows.Engine{DB: pools.App, Plugins: workflows.Manager(plugins), Sealer: sealer,
-		Backoff: workflows.Backoff{Attempts: p.Retry.MaxAttempts, Initial: p.Retry.InitialBackoff, Max: p.Retry.MaxBackoff}}
+		Backoff: workflows.Backoff{Attempts: p.Retry.MaxAttempts, Initial: p.Retry.InitialBackoff, Max: p.Retry.MaxBackoff},
+		Lease:   workflows.Lease{TTL: p.DynamicCredentials.DefaultTTL, MaxTTL: p.DynamicCredentials.MaxTTL}}
 	health(ctx, log, inst.Current(), engine.Plugins)
 
 	// 6. DBOS: every dependency of the workflow steps is ready

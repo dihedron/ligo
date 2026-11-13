@@ -209,6 +209,9 @@
 | `plugins.restart_backoff` | After a plugin process dies. | |
 | `plugins.restart_backoff.initial` | First wait. | |
 | `plugins.restart_backoff.max` | Longest wait. | |
+| `plugins.dynamic_credentials` | The lease of a credential issued on demand (`vault-dynamic`), for a platform that sets none of its own. | |
+| `plugins.dynamic_credentials.default_ttl` | The lease. Between 1 minute and 720 hours, and not above `max_ttl`. A platform's `credential_ttl` wins. | 1 h |
+| `plugins.dynamic_credentials.max_ttl` | The longest a lease may be renewed to. A platform's `credential_max_ttl` wins. | 24 h |
 
 ## `ui`, `break_glass`, `notifications`, `reconciliation`
 

@@ -61,7 +61,8 @@ lab_instances() {
 	pg pg-ledger dc/corp-prod "Lab PostgreSQL ledger" target-local.v1 local-prod vault-static '{}' '{"allowedSourceTrustDomains": ["prod.lab", "test.lab"]}'
 	pg pg-ledger-cloud cloud/fin-01/ledger "Lab PostgreSQL ledger, owned by a tenancy" target-local.v1 local-prod vault-static '{}' \
 		'{"targetJurisdictions": ["cloud/fin-01/*"], "allowedSourceTrustDomains": ["prod.lab", "test.lab"]}'
-	pg pg-ledger-dynamic dc/corp-prod "Lab PostgreSQL ledger, credentials on demand" delegated-dynamic.v1 dynamic-prod vault-dynamic '{}' '{}'
+	# a lease of 90s: a workload that watches re-reads its credential after 60s (TestServeClientSDK)
+	pg pg-ledger-dynamic dc/corp-prod "Lab PostgreSQL ledger, credentials on demand" delegated-dynamic.v1 dynamic-prod vault-dynamic '{"credential_ttl": "90s"}' '{}'
 	# LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
 	pg pg-ledger-ldap dc/corp-prod "Lab PostgreSQL ledger, accounts in the directory" openldap.v1 openldap-prod vault-static \
 		'{"directory_group": "ligo_ldap", "grantable_roles": ["LEDGER_RO_ROLE", "LEDGER_RW_ROLE", "LEDGER_GONE_ROLE"]}' '{}'

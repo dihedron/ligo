@@ -272,6 +272,9 @@ func (e *Engine) ensureTarget(ctx context.Context, in ApplyInput, id identityOut
 	}
 	out := targetOutput{FinalizedClientSpec: resp.GetFinalizedClientSpecJson(), DeclaredEndpoints: endpoints(resp.GetDeclaredEndpoints())}
 	payload := proto.Clone(resp.GetSecretPayload()).(*pluginv1.SecretProvisioningPayload)
+	if err := e.Lease.fill(payload.GetDelegatedRole()); err != nil {
+		return targetOutput{}, err
+	}
 	if s := payload.GetStaticSecret(); s != nil {
 		var err error
 		if out.Sealed, err = e.seal(ctx, in, sealing.StageTarget, s); err != nil {

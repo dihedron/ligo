@@ -182,6 +182,10 @@ plugins:
   retry: { max_attempts: 5, initial_backoff: 2s, max_backoff: 60s }
   max_concurrent_rpcs_per_instance: 4
   restart_backoff: { initial: 1s, max: 60s }
+  # The lease of a credential issued on demand (vault-dynamic), for a platform
+  # that sets no credential_ttl or credential_max_ttl of its own; these are
+  # the defaults. Each between 1m and 720h.
+  dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }
 
 ui:                                       # §7.6
   theme:

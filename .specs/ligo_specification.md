@@ -84,6 +84,7 @@ The Go client SDK is specified in `.specs/ligo-client-sdk.md`; the row below nam
 | Area | Change |
 | :--- | :--- |
 | Vault plugin (§5.6, `.specs/ligo-vault-plugin.md`) | The finalized client auth of a binding gains `audience`: the instance's `workload_jwt_audience`, which a workload needs for the JWT-SVID it logs in to the store with. A binding applied before the change gains it at its next apply. It also gains `namespace` when the instance has one, so that the workload logs in to the same Vault namespace. |
+| Dynamic credentials (§5.6, §8.1, `.specs/ligo-postgres-plugin.md` §3) | The lease of a `vault-dynamic` credential is configurable: per platform (`credential_ttl`, `credential_max_ttl` in a `postgres.v1` platform's config), else `plugins.dynamic_credentials.default_ttl` and `max_ttl` in `server.yaml`, else the built-in 1 h and 24 h, which were fixed before. A platform plugin sends 0 for a value it has no opinion on, and the engine fills it; each value is between 1 minute and 720 hours. |
 | Workload API over gRPC (§7.1) | An `UNAVAILABLE` (stale cache) or `RESOURCE_EXHAUSTED` (rate limit) error carries a `google.rpc.RetryInfo` detail with the delay REST sends in `Retry-After` (5 s and 1 s). |
 
 ### 0.6 Changelog from 4.0.9 (4.1.0)
@@ -4034,6 +4035,7 @@ plugins:
   retry: { max_attempts: 5, initial_backoff: 2s, max_backoff: 60s }
   max_concurrent_rpcs_per_instance: 4
   restart_backoff: { initial: 1s, max: 60s }
+  dynamic_credentials: { default_ttl: 1h, max_ttl: 24h }   # the lease of a vault-dynamic credential, unless the platform sets its own
 
 ui:                                       # §7.6
   theme:

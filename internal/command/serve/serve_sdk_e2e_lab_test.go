@@ -89,15 +89,21 @@ func TestServeClientSDK(t *testing.T) {
 	}()
 	next := func(want client.EventKind) client.Event {
 		t.Helper()
-		select {
-		case ev := <-events:
-			if ev.Kind != want {
-				t.Fatalf("event %s, want %s", ev.Kind, want)
+		deadline := time.After(120 * time.Second)
+		for {
+			select {
+			case ev := <-events:
+				if ev.Kind == client.CredentialRotated && want != client.CredentialRotated {
+					continue // a lease ran on while the test did something else
+				}
+				if ev.Kind != want {
+					t.Fatalf("event %s, want %s", ev.Kind, want)
+				}
+				return ev
+			case <-deadline:
+				t.Fatalf("no %s event after 120s", want)
+				return client.Event{}
 			}
-			return ev
-		case <-time.After(90 * time.Second):
-			t.Fatalf("no %s event after 90s", want)
-			return client.Event{}
 		}
 	}
 
@@ -114,7 +120,8 @@ func TestServeClientSDK(t *testing.T) {
 	}
 	rotated := next(client.CredentialRotated)
 	cred := rotated.Credential
-	if lease := time.Until(cred.Expires); lease < time.Minute || lease > 2*time.Hour {
+	// the platform's credential_ttl, 90s, not the hour of plugins.dynamic_credentials
+	if lease := time.Until(cred.Expires); lease < time.Minute || lease > 90*time.Second {
 		t.Errorf("the credential expires in %s", lease)
 	}
 	record(t, cred.Password)
@@ -141,6 +148,15 @@ func TestServeClientSDK(t *testing.T) {
 	record(t, second.Password)
 	reads(t, second.Username, second.Password)
 
+	// at two thirds of the lease the watch reads a new credential, which connects
+	started := time.Now()
+	renewed := next(client.CredentialRotated).Credential
+	if renewed.Username == cred.Username || time.Since(started) > 80*time.Second {
+		t.Errorf("the renewed credential %s after %s", renewed.Username, time.Since(started))
+	}
+	record(t, renewed.Password)
+	reads(t, renewed.Username, renewed.Password)
+
 	revoke(t, olga, dora, binding, b)
 	if gone := next(client.Removed); gone.Previous.Name != binding {
 		t.Errorf("Removed: %+v", gone.Previous)
@@ -149,7 +165,7 @@ func TestServeClientSDK(t *testing.T) {
 	if _, err := grpc.Credential(t.Context(), same[0]); !errors.Is(err, client.ErrStore) {
 		t.Errorf("a credential of a revoked binding: %v", err)
 	}
-	for _, c := range []client.Credential{cred, second} {
+	for _, c := range []client.Credential{cred, second, renewed} {
 		if conn, err := ledgerConn(t, c.Username, c.Password); err == nil {
 			_ = conn.Close(context.Background())
 			t.Errorf("the credential %s of a revoked binding still connects", c.Username)

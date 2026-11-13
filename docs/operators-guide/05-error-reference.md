@@ -102,4 +102,5 @@ A binding's `status.message` gives the code. A retryable error is retried within
 | Code | Means | Do |
 | :--------------------------- | :----------------------------- | :-------------------------- |
 | `SEALED_SECRET_UNAVAILABLE` | Transit cannot seal or unseal this attempt's secret | Bring Vault back, then retry: a new attempt rotates |
+| `INVALID_CREDENTIAL_TTL` | The lease of a dynamic credential is longer than its maximum, or outside 1 minute to 720 hours | Set the platform's `credential_ttl` and `credential_max_ttl` together, or change `plugins.dynamic_credentials`; then retry |
 | `OUTPUT_VALIDATION_FAILED` | A plugin's output broke its schema, or pointed outside `allowed_endpoints` | Audited: treat a surprise as a compromised plugin |

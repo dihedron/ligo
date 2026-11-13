@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
@@ -155,6 +156,15 @@ func TestOtherModes(t *testing.T) {
 	}
 	d := newBinding(t, v)
 	r, err = ensure(v, d, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC, `["LEDGER_RO_ROLE"]`)
+	// no lease on the platform: 0, for ligo to fill
+	if role := r.GetSecretPayload().GetDelegatedRole(); err == nil && (role.GetDefaultTtlSeconds() != 0 || role.GetMaxTtlSeconds() != 0) {
+		t.Errorf("lease %d, %d without credential_ttl", role.GetDefaultTtlSeconds(), role.GetMaxTtlSeconds())
+	}
+	v.p.instances["pg"].ttl, v.p.instances["pg"].maxTTL = 90*time.Second, 4*time.Hour
+	if again, err := ensure(v, d, pluginv1.IdentityMode_IDENTITY_MODE_DELEGATED_DYNAMIC, `["LEDGER_RO_ROLE"]`); err != nil ||
+		again.GetSecretPayload().GetDelegatedRole().GetDefaultTtlSeconds() != 90 || again.GetSecretPayload().GetDelegatedRole().GetMaxTtlSeconds() != 14400 {
+		t.Errorf("the platform's lease: %v (%v)", again.GetSecretPayload().GetDelegatedRole(), err)
+	}
 	if err != nil || !strings.Contains(r.GetSecretPayload().GetDelegatedRole().GetCreationStatements()[0], `IN ROLE "`+d.GetDerivedPrincipalName()+`"`) {
 		t.Fatalf("%v %v", r, err)
 	}
