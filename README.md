@@ -163,7 +163,7 @@ make help     # list the targets
 
 ## Install
 
-Each release has deb and rpm packages and archives of `ligo` and of each plugin, and five documents, as PDF files: the **Why ligo?** leaflet, the **Setup Guide**, the **Operator's Guide**, **Architecture and Design**, and the **Planning for Deployment Guide**. Their sources are in [docs/](docs).
+Each release has deb and rpm packages and archives of `ligo` and of each plugin, and six documents, as PDF files: the **Why ligo?** leaflet, the **Setup Guide**, the **Operator's Guide**, **Architecture and Design**, the **Planning for Deployment Guide**, and the **Developer's Guide**, which shows how to write a workload with the Go client SDK and how to develop a plugin. Their sources are in [docs/](docs).
 
 ### Verify a release
 
