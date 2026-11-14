@@ -131,12 +131,17 @@ Working:
 - the binding workflows, including break-glass, with failures from a retryable cause retried automatically, and deletes that remove access first;
 - the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported, with the change requests it names ([.specs/ligo-pruning.md](.specs/ligo-pruning.md), [.specs/ligo-cr-pruning.md](.specs/ligo-cr-pruning.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
-- the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows;
+- the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows, and the Go client SDK (`pkg/client`) that wraps it: bindings, credentials from Vault or OpenBao, and a watch for changes, rotations and revocations ([.specs/ligo-client-sdk.md](.specs/ligo-client-sdk.md));
+- the lease of a credential that a store makes on demand, set per platform or for the installation, with the one hour and 24 hours of before as the default;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`);
 - the external plugins, each with its own package: `ligo-plugin-openldap` (identity provider), `ligo-plugin-postgres` (platform provider) and `ligo-plugin-vault` (secret store, for Vault and OpenBao).
 
-Known limits of v0.4.0:
+Known limits of v0.5.0:
+- the client SDK is for Go only: SDKs for Java, Python and JavaScript/TypeScript are not written yet (backlog item 7); `pkg/client`'s API may change between minor versions until 1.0.0;
+- the SDK's `Watch` polls (every 30 s by default), as the workload API has no stream, so a revocation reaches a watching workload within one poll; and every `Credential` call on a `vault-dynamic` binding makes a new database user, which the SDK does not cache;
+- the SDK reads credentials from Vault and OpenBao only; a binding applied before v0.5.0 has no `audience` (and no `namespace`) in its `auth` until its next apply or reconciliation, and the SDK reports that as an error;
+- a Vault namespace in a binding is tested on OpenBao only (Vault Community has no namespaces);
 - PostgreSQL is the only platform provider, and workloads cannot connect to it with an SVID directly (`.specs/ligo-postgres-plugin.md` §10);
 - the Vault store releases a credential to one exact SPIFFE ID, so a source covering many workloads cannot use it (`.specs/ligo-vault-plugin.md` §4);
 - there is no conformance suite that every plugin must pass; each plugin is tested on its own (`.specs/ligo-acceptance-matrix.md`, INV-07);
