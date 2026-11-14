@@ -12,7 +12,7 @@ People who deploy and run `ligo` need documents written for them. This file adds
 | **Architecture and Design** | Architects, security reviewers, auditors | How does `ligo` work, why is it built this way, what does it protect against and what does it not? |
 | **Operator's Guide** | Whoever runs it day to day, and on call | How do I watch it, what are the routine and incident procedures, what does each error mean? |
 | **Planning for Deployment Guide** | Architects planning an installation | Which layout fits my organisation: realms, SPIRE, installations, roles, capacity? Specified in `.specs/ligo-planning-guide.md`. |
-| **Developer's Guide** | Developers of workloads and plugins | How do I read my binding and follow its rotation with the Go client SDK? How do I write a plugin? Sources in `docs/developers-guide/`. |
+| **Developer's Guide** | Developers of workloads, plugins and tools | How do I read my binding and follow its rotation with the Go client SDK? How do I write a plugin? How do I file a change and wait for its approval with the admin client? Sources in `docs/developers-guide/`. |
 | **Why ligo?** | Newcomers, decision makers, security leads | Why give workloads identities, how do `ligo` and the attestation plugins fit in the SPIFFE and SPIRE ecosystem, and what does it bring to security? |
 
 The documents are self-contained: a reader never needs the specs, which stay the developers' design. Out of scope: an HTML site, translations, documentation of the code.
