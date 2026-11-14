@@ -6,9 +6,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -419,5 +422,72 @@ func TestSlugsAreMapped(t *testing.T) {
 		}
 	}), noSentinel) {
 		t.Errorf("%q is no longer sent", noSentinel)
+	}
+}
+
+// TestProxy: the calls go through a proxy by CONNECT, and the server is
+// still verified end to end. net/http reads HTTPS_PROXY once per process, so
+// the test sets the proxy on the HTTPClient's transport, which New clones;
+// by default the transport takes the proxy of the environment.
+func TestProxy(t *testing.T) {
+	url, pool := serveTLS(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{}`)) }))
+	backend := strings.TrimPrefix(url, "https://")
+	var connects atomic.Int32
+	var wanted atomic.Value
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "CONNECT only", http.StatusMethodNotAllowed)
+			return
+		}
+		connects.Add(1)
+		wanted.Store(r.Host)
+		upstream, err := net.Dial("tcp", backend) // whatever host was asked for, the test's server answers
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+		go func() { _, _ = io.Copy(upstream, conn); _ = upstream.Close() }()
+		go func() { _, _ = io.Copy(conn, upstream); _ = conn.Close() }()
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, _ := neturl.Parse(proxy.URL)
+	viaProxy := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}, Timeout: 10 * time.Second}
+
+	// example.com is in httptest's certificate; the proxy sends it to the test server
+	c, err := New(Config{ServerURL: "https://example.com:9443", RootCAs: pool, Basic: &BasicAuth{Username: "ada", Password: "x"}, HTTPClient: viaProxy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	if err := ping(c); err != nil {
+		t.Fatal(err)
+	}
+	if connects.Load() != 1 || wanted.Load() != "example.com:9443" {
+		t.Errorf("the proxy saw %d CONNECTs for %v", connects.Load(), wanted.Load())
+	}
+
+	// a server outside the roots fails the verification through the proxy too
+	c2, err := New(Config{ServerURL: "https://example.com:9443", RootCAs: x509.NewCertPool(), Basic: &BasicAuth{Username: "ada", Password: "x"}, HTTPClient: viaProxy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c2.Close() })
+	if ping(c2) == nil {
+		t.Error("a server outside the roots was accepted through a proxy")
+	}
+
+	// without an HTTPClient the transport takes the proxy of the environment
+	cfg := Config{RootCAs: pool}
+	h, err := cfg.httpClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Transport.(*http.Transport).Proxy == nil {
+		t.Error("the default transport has no proxy function")
 	}
 }

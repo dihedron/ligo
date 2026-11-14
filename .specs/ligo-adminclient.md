@@ -91,7 +91,7 @@ A problem response is a `*Problem` (`Type`, `Title`, `Status`, `Detail`, the ext
 
 ### 3.6 What the package does not do
 
-No cache, no global state, no goroutines of its own (a wait runs in the caller's goroutine), no file or environment reads, no output.
+No cache, no global state, no goroutines of its own (a wait runs in the caller's goroutine), no file reads, no output. The one environment it honours is the standard proxy variables (`HTTPS_PROXY`, `NO_PROXY`), through `net/http`, so that a program on a corporate network reaches a `ligo` elsewhere (decided 2026-11-14 on the user's question); a proxy only tunnels, so T-A1 holds: the server is still verified end to end.
 
 ### 3.7 The CLI
 

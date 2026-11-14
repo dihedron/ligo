@@ -47,8 +47,12 @@ type Config struct {
 	UserAgent string       // default "ligo-adminclient"
 
 	// HTTPClient sets the timeout and, when its Transport is an *http.Transport,
-	// the proxy and connection limits of the calls. Its TLS configuration and
-	// its redirect policy are replaced, never merged.
+	// its proxy and connection limits. Without one, the calls use the proxy
+	// of the standard HTTPS_PROXY, HTTP_PROXY and NO_PROXY variables, as
+	// net/http does. A proxy only tunnels (CONNECT): the TLS session, the
+	// server's verification and the client's SVID are end to end, so a proxy
+	// that intercepts TLS fails the verification unless its CA is in RootCAs.
+	// The TLS configuration and the redirect policy are replaced, never merged.
 	HTTPClient *http.Client
 
 	// MaxRetries is how often an idempotent GET is repeated after a failure
@@ -163,8 +167,8 @@ func (c *Config) httpClient() (*http.Client, error) {
 		}
 	}
 	if tr == nil {
-		tr = &http.Transport{ // no proxy from the environment: the package reads none
-			MaxIdleConns: 10, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true,
+		tr = &http.Transport{
+			Proxy: http.ProxyFromEnvironment, MaxIdleConns: 10, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true,
 		}
 	}
 	tr.TLSClientConfig = tc
