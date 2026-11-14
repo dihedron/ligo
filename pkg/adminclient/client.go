@@ -28,6 +28,10 @@ type Client struct {
 	authorize  func(*http.Request)
 	maxRetries int
 	sleep      func(context.Context, time.Duration) error
+	jitter     func(time.Duration) time.Duration
+	// getCR and getBinding are what WaitChangeRequest polls; the tests replace them
+	getCR      func(context.Context, string) (ChangeRequest, error)
+	getBinding func(context.Context, string) (BindingDetail, error)
 }
 
 // New validates the configuration and prepares the client. It does not call
@@ -45,7 +49,8 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("adminclient: %w", err)
 	}
-	c := &Client{gen: g, http: h, log: cfg.Logger, userAgent: cfg.userAgent(), maxRetries: cfg.MaxRetries, sleep: sleep}
+	c := &Client{gen: g, http: h, log: cfg.Logger, userAgent: cfg.userAgent(), maxRetries: cfg.MaxRetries, sleep: sleep, jitter: jitter}
+	c.getCR, c.getBinding = c.GetChangeRequest, c.GetBinding
 	if cfg.Basic != nil {
 		user, password := cfg.Basic.Username, string(cfg.Basic.Password)
 		c.authorize = func(req *http.Request) { req.SetBasicAuth(user, password) }
@@ -53,8 +58,11 @@ func New(cfg Config) (*Client, error) {
 	if c.log == nil {
 		c.log = slog.Default()
 	}
-	if cfg.MaxRetries == 0 {
+	switch cfg.MaxRetries {
+	case 0:
 		c.maxRetries = defaultMaxRetries
+	case -1:
+		c.maxRetries = 0
 	}
 	return c, nil
 }
@@ -91,10 +99,35 @@ func (c *Client) editor(_ context.Context, req *http.Request) error {
 }
 
 // exec makes a generated call and decodes a successful answer into out (nil
-// for none); anything else is a *Problem, a redirect or ErrTooLarge. Only
-// method, path and status are logged.
-func (c *Client) exec(ctx context.Context, call func(context.Context, ...gen.RequestEditorFn) (*http.Response, error), out any) error {
-	resp, err := call(ctx, c.editor)
+// for none); anything else is a *Problem, a redirect or ErrTooLarge. A GET
+// that fails in a way that may pass (a busy or unreachable server) is
+// repeated up to MaxRetries times with a backoff, honouring Retry-After; any
+// other call is made once (T-A6). Only method, path and status are logged.
+func (c *Client) exec(ctx context.Context, f call, out any) error {
+	var method string
+	record := func(ctx context.Context, req *http.Request) error {
+		method = req.Method
+		return c.editor(ctx, req)
+	}
+	for attempt := 0; ; attempt++ {
+		err := c.once(ctx, f, record, out)
+		if err == nil || method != http.MethodGet || attempt >= c.maxRetries || !transient(ctx, err) {
+			return err
+		}
+		d, ok := c.retryWait(err, attempt)
+		if !ok {
+			return err
+		}
+		c.log.LogAttrs(ctx, slog.LevelDebug, "admin API call failed, retrying", slog.Int("attempt", attempt+1), slog.Duration("after", d))
+		if sleepErr := c.sleep(ctx, d); sleepErr != nil {
+			return err
+		}
+	}
+}
+
+// once makes the call one time.
+func (c *Client) once(ctx context.Context, f call, record gen.RequestEditorFn, out any) error {
+	resp, err := f(ctx, record)
 	if err != nil {
 		return fmt.Errorf("adminclient: %w", err)
 	}

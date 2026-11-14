@@ -126,7 +126,7 @@ func TestNewValidates(t *testing.T) {
 		"basic without a user":     {Config{ServerURL: "https://ligo.lab:9443", RootCAs: pool, Basic: &BasicAuth{Password: "x"}}, "Username"},
 		"basic without a password": {Config{ServerURL: "https://ligo.lab:9443", RootCAs: pool, Basic: &BasicAuth{Username: "ada"}}, "Password"},
 		"a custom round tripper":   {Config{ServerURL: "https://ligo.lab:9443", RootCAs: pool, Basic: basic, HTTPClient: &http.Client{Transport: roundTripper{}}}, "HTTPClient"},
-		"a negative retry count":   {Config{ServerURL: "https://ligo.lab:9443", RootCAs: pool, Basic: basic, MaxRetries: -1}, "MaxRetries"},
+		"a retry count below -1":   {Config{ServerURL: "https://ligo.lab:9443", RootCAs: pool, Basic: basic, MaxRetries: -2}, "MaxRetries"},
 	} {
 		c, err := New(tc.cfg)
 		if err == nil {

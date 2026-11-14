@@ -55,8 +55,10 @@ type Config struct {
 	// The TLS configuration and the redirect policy are replaced, never merged.
 	HTTPClient *http.Client
 
-	// MaxRetries is how often an idempotent GET is repeated after a failure
-	// to connect or a 502, 503 or 504 (default 2); a mutation is never repeated.
+	// MaxRetries is how often a GET is repeated after a broken connection or a
+	// 429, 502, 503 or 504 (0: twice; -1: never), with a backoff from 200 ms to
+	// 5 s and the server's Retry-After when it is at most 30 s. A mutation is
+	// never repeated.
 	MaxRetries int
 }
 
@@ -86,8 +88,8 @@ func (c *Config) validate() (*url.URL, error) {
 	case u.User != nil || u.RawQuery != "" || u.Fragment != "":
 		return nil, errors.New("adminclient: ServerURL has credentials, a query or a fragment: none is accepted")
 	}
-	if c.MaxRetries < 0 {
-		return nil, fmt.Errorf("adminclient: MaxRetries %d: not negative", c.MaxRetries)
+	if c.MaxRetries < -1 {
+		return nil, fmt.Errorf("adminclient: MaxRetries %d: -1 (never), 0 (the default) or more", c.MaxRetries)
 	}
 	if (c.X509Source == nil) == (c.Basic == nil) {
 		return nil, errors.New("adminclient: exactly one authentication is required: X509Source or Basic")
