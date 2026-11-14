@@ -11,6 +11,7 @@
 | Plugin host | Starts and checks plugin processes, calls them over gRPC with AutoMTLS. |
 | PostgreSQL | `public`, the resources and audit log; `dbos`, the workflow journal. |
 | Vault or OpenBao | Transit for sealing; credentials and per-binding policies in the store. |
+| Client SDK (`pkg/client`) | Linked into a workload, not run by `ligo`: reads the workload's bindings over mTLS, REST or gRPC, takes its credential from the secret store with a JWT-SVID, and follows rotation and revocation by polling. See the Developer's Guide. |
 
 ## Listeners
 

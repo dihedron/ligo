@@ -48,6 +48,9 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-34 | Overlapping sources. | 2, 6 | Overlaps reported to reviewers. Residual: R-10. |
 | T-35 | Misleading flows. | 2, 4 | Destinations within `allowed_endpoints`; both owners consent. |
 | T-36 | Login lockout. | 2, 4 | The per-user limit is per address, and the limit from any address is ten times higher, so a lockout needs many addresses. |
+| T-37 | The client SDK talks to a wrong server as `ligo`, or as the store; a tampered answer names a store the attacker controls, to collect the workload's JWT-SVID. | 1, 4 | `ligo` accepted only with its exact SPIFFE ID, over mTLS; the store only over TLS against the configured roots, with no redirect followed and no option to skip verification; `AllowedStores` pins the store addresses; the JWT-SVID carries the binding's audience. |
+| T-38 | The SDK leaks a credential, or keeps it too long; a hostile answer exhausts memory. | 1 | The password is hidden in `String` and `LogValue`; errors carry statuses, never bodies; nothing is written to disk and credentials are not cached; store tokens dropped at 80 % of their TTL; bodies capped at 8 MiB. |
+| T-39 | Many workloads polling overload `ligo`; a revoked binding keeps being used. | 1 | A 5 s floor on the poll interval, jitter, ETag, back-off, `Retry-After` and `RetryInfo`. The watch reports `Removed` within one interval and the store's policy is gone, so new reads fail. Residual: R-12. |
 
 :::
 
@@ -66,3 +69,4 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | R-09 | A rule with `distinct_approvers: false` lets one person approve both sides for its pairs. |
 | R-10 | Two sources of one jurisdiction may overlap. Overlaps are reported, not refused, as a narrower source for a subset is legitimate. |
 | R-11 | Between a change's commit and each binding's re-apply, a platform can lag behind what was approved. For narrowed grants, old privileges remain until then. |
+| R-12 | The SDK cannot close an application's connections: after a revocation, connections already open stay open until the application closes them, and a dynamic credential lives until its lease ends. |
