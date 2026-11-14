@@ -453,18 +453,18 @@ paths:
       operationId: listChangeRequests
       summary: The change requests visible to the caller.
       parameters:
-        - { name: status, in: query, schema: { type: string } }
-        - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/ChangeRequestStatus" } }
+        - { name: resourceType, in: query, schema: { $ref: "#/components/schemas/ResourceType" } }
         - { name: resourceName, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
         - { name: jurisdiction, in: query, schema: { type: string } }
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ChangeRequestPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/change-requests/{id}:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/ChangeRequest" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/approve:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post:
@@ -789,14 +789,68 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
+    ResourceType:
+      description: What a change request changes. Kept equal to the database's resource_type by the contract test.
+      type: string
+      enum: [SOURCE, TARGET, BINDING, PLATFORM, IDENTITY_PROVIDER, SECRET_STORE]
+    ChangeRequestStatus:
+      description: PENDING is the only state with a decision to make; every other state is terminal. Kept equal to the database's change_request_status.
+      type: string
+      enum: [PENDING, APPLIED, REJECTED, WITHDRAWN, EXPIRED, FAILED_TO_APPLY]
     Side:
       type: object
+      required: [side, jurisdiction, basis]
       properties:
         side: { type: string, examples: [TARGET, SOURCE, OWNER, PLATFORM, "PARTY:security"] }
         jurisdiction: { type: string }
-        basis: { enum: [AUTO, DELEGATED, HUMAN] }
-        decision: { type: [string, "null"] }
+        basis: { type: string, enum: [AUTO, HUMAN, DELEGATED, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY] }
+        decision: { type: [string, "null"], enum: [APPROVED, DECLINED, null] }
         decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        ratifiedBy: { type: string }
+        ratifiedAt: { type: string, format: date-time }
+        ratificationComment: { type: string }
+    BreakGlass:
+      type: object
+      required: [justification, ttlSeconds, expiresAt]
+      properties:
+        justification: { type: string }
+        ttlSeconds: { type: integer, format: int64 }
+        expiresAt: { type: string, format: date-time }
+    ChangeRequest:
+      description: A change request (§7.2.3). Its terminal states are every status but PENDING.
+      type: object
+      required: [id, resourceType, resourceName, resourceId, operation, kind, consent, status, dependsOn, policySha256,
+                 distinctApproversRequired, payloadSha256, requestedBy, requestedAt, expiresAt, sides, awaitingApproval]
+      properties:
+        id: { type: string, format: uuid }
+        resourceType: { $ref: "#/components/schemas/ResourceType" }
+        resourceName: { type: string }
+        resourceId: { type: [string, "null"], format: uuid }
+        operation: { type: string, enum: [CREATE, UPDATE, DELETE] }
+        kind: { type: string, enum: [STANDARD, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY] }
+        consent: { type: string, enum: [ALL, ANY] }
+        status: { $ref: "#/components/schemas/ChangeRequestStatus" }
+        realm: { type: string }
+        ownerJurisdiction: { type: string }
+        sourceJurisdiction: { type: string }
+        targetJurisdiction: { type: string }
+        platformJurisdiction: { type: string }
+        interconnectRule: { type: string }
+        dependsOn: { type: [string, "null"], format: uuid }
+        revertsChangeRequest: { type: string, format: uuid }
+        policySha256: { type: string }
+        distinctApproversRequired: { type: boolean }
+        payloadSha256: { type: string }
+        payload: { type: object, description: "Only in a single read." }
+        approvalReference: { type: string }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+        awaitingApproval: { type: array, items: { type: string }, description: "The sides still to decide, while PENDING." }
+        diff: { description: "Against the resource's current revision, on an UPDATE." }
+        breakGlass: { $ref: "#/components/schemas/BreakGlass" }
   responses:
     Account:
       description: An account; counts only for a single account read.
@@ -835,14 +889,28 @@ components:
             properties:
               items: { type: array, items: { type: object } }
               nextPageToken: { type: [string, "null"] }
+    ChangeRequest:
+      description: A change request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+    ChangeRequestPage:
+      description: A page of change requests.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/ChangeRequest" } }
+              nextPageToken: { type: [string, "null"] }
     Filed:
       description: The change request and, once applied, the resource.
       content:
         application/json:
           schema:
             type: object
+            required: [changeRequest]
             properties:
-              changeRequest: { type: object }
+              changeRequest: { $ref: "#/components/schemas/ChangeRequest" }
               resource: { type: [object, "null"] }
     Flows:
       description: Effective network flows, in order of declaration.

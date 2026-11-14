@@ -1,8 +1,8 @@
 # The Go admin API client
 
-- **Version:** 0.2 (2026-11-14), draft: waits for approval; 0.2 reconciles 0.1 with the Go client SDK (§0) and the contract as it is (§3.4, §3.5)
+- **Version:** 0.3 (2026-11-14), approved by the user on 2026-11-14; implementation may start (chunk 1). 0.2 reconciled 0.1 with the Go client SDK (§0) and the contract; 0.3 adds the instances (§3.4a), starts the contract work (§3.4b) and settles §8
 - **Backlog:** item 8 (Terraform and OpenTofu provider) and item 11 (MCP server), which both need it
-- **Branch:** this spec travels with the client SDK (`feature/client-sdk`); the code goes on `feature/adminclient`, cut from `main` once the client SDK is merged, because chunk 6 extends the Developer's Guide and the code reuses what `pkg/client` settled (§0)
+- **Branch:** `feature/adminclient`, in the worktree `../ligo-adminclient`, cut from `feature/client-sdk` because chunk 6 extends the Developer's Guide and the code reuses what `pkg/client` settled (§0); it is rebased onto `main` when the client SDK is merged, and its PR is opened after that
 - **Decisions of 2026-11-14 (the user):** the package is `pkg/adminclient` in this module; its types and calls are generated from `api/openapi/admin.v1alpha1.yaml` with `oapi-codegen`, under a thin hand-written layer; the provider is a separate repository on `terraform-plugin-framework`.
 - **Follow-up specs:** the provider (`ligo-terraform-provider.md`, in its repository's design; the server changes it needs, such as managed-by-automation resources, are decided there) and the MCP server (`ligo-mcp-server.md`). This spec covers only the client they share.
 
@@ -29,7 +29,7 @@ Three programs call the admin API: the `ligo` CLI, the Terraform/OpenTofu provid
 
 ## 2. Scope
 
-In: `pkg/adminclient`, a Go package of this module, for every operation of `admin.v1alpha1.yaml`; the CLI moved onto it.
+In: `pkg/adminclient`, a Go package of this module, for every operation of `admin.v1alpha1.yaml` except the human decisions of §8 point 2, instances included (§3.4a); the CLI moved onto it.
 Out: the provider, the MCP server, printing (stays in the CLI), prompts, new server routes, clients in other languages.
 
 ## 3. Design
@@ -61,10 +61,29 @@ One method per operation, `ctx` first, named from the `operationId` (`ListBindin
 Every mutation of the API files a change request. The client does not hide that:
 
 - A mutation returns the `ChangeRequest` the server answered with, never the resource as if it had changed.
-- **The contract has gaps the client needs closed first (chunk 1).** `admin.v1alpha1.yaml` does not enumerate a change request's `status`, so the terminal states of `WaitChangeRequest` would be a copy in Go; and since backlog item 10 its `resourceType` enums (`listChangeRequests`, the charter preview's `kind`) lack `PLATFORM`, `IDENTITY_PROVIDER` and `SECRET_STORE`, so a generated client would reject a request the server files. Chunk 1 fixes the YAML (with the contract test of `internal/server/adminhttp` as the oracle) before it generates anything.
+- **The contract gaps are closed first (chunk 1, §3.4b).** The change request's `status` had no enum, so the terminal states of `WaitChangeRequest` would have been a copy in Go; and since backlog item 10 the `resourceType` enum of `listChangeRequests` lacked `PLATFORM`, `IDENTITY_PROVIDER` and `SECRET_STORE`. Both are fixed, with tests. The wider gap, that most requests and responses are still `type: object`, is the work of chunk 1.
 - Updates take `expectedRevision`; a missing one is an error before any call.
-- `WaitChangeRequest(ctx, id, WaitOptions)` polls until the request is in a terminal state (`APPLIED`, `REJECTED`, `WITHDRAWN`, `EXPIRED`, `FAILED`) or the context ends. Polling has a floor of 1 s, jitter, back-off after failures, and honours `Retry-After`. The terminal states and the optional wait for a binding to be `ACTIVE` come from the API's enums, not from a copy.
+- `WaitChangeRequest(ctx, id, WaitOptions)` polls until the request is in a terminal state (`APPLIED`, `REJECTED`, `WITHDRAWN`, `EXPIRED`, `FAILED`) or the context ends. Polling has a floor of 1 s, jitter, back-off after failures, and honours `Retry-After`. The terminal states (`APPLIED`, `REJECTED`, `WITHDRAWN`, `EXPIRED`, `FAILED_TO_APPLY`: every `ChangeRequestStatus` but `PENDING`) and the optional wait for a binding to be `ACTIVE` come from the API's enums, not from a copy.
 - `approvalReference` and `automationContext` (delegated approval, ADR-11) are fields of the mutation request, passed through unchanged. The client never approves, declines, ratifies or reverts anything by itself.
+
+### 3.4a Instances: platforms, identity providers, secret stores
+
+Decision of 2026-11-14 (the user): the client exposes the filing of instances, as well as reading them. The Terraform provider (the sibling session) uses them in two steps: first as **data sources**, which only read, then as **resources**, which file creations, changes and deletions. The client therefore offers the instance operations in the same two steps, and the two groups are separate files, so that the first step ships without the second.
+
+| Step | Operations (all three kinds: `/v1/admin/platforms`, `/identity-providers`, `/secret-stores`) | Used by |
+|---|---|---|
+| Read | list, get, audit (`ListPlatforms`, `GetIdentityProvider`, `PlatformAudit`, …) | data sources |
+| Write | create, update (`expectedRevision`), delete, each filing a change request (`CreatePlatform`, `UpdateSecretStore`, `DeleteIdentityProvider`, …) | resources |
+
+- **A write is a filing.** An instance change needs one `OWNER` approval on the instance's jurisdiction, never `AUTO` or `DELEGATED` (`.specs/ligo-instances.md` §5). The client returns the `ChangeRequest`; a Terraform resource that must see the instance in force waits with `WaitChangeRequest`, or says that the plan is pending approval. `WaitChangeRequest` returns `APPLIED`, and the provider then reads the instance. The client does not approve, so a provider without a second person's approval does not complete; that is the intended four eyes, and the provider's spec says how it reports it.
+- **What a reader sees.** A reader sees an instance's summary and its health; only a person who may file or decide on its jurisdiction also gets `revision` and `definition` (`GET`). A data source documents which attributes it can fill for whom. The client exposes `Revision` and `Definition` as optional and says why when they are absent.
+- **Definitions are typed.** The `definition` of each kind (`internal/instances.Definition`: metadata, type, `config`, `svidSelector`, wiring, `networkFlows`, …) is a schema of the OpenAPI document (§3.4b), so that the provider's resources can be typed and its plans compared. `config` stays a free JSON object: its schema is the plugin's, which `ligo` serves in the plugin's `Describe` (a read method on the client in a later step, so the provider can validate a plan).
+- **Idempotent filing is the provider's.** The CLI's `ligo apply` creates an instance or updates it at its current revision; the client offers the primitives (get, create, update with `expectedRevision`) and no apply. Plan and apply logic is the provider's.
+- **No secrets in or out.** An instance names a bootstrap credential, it does not hold one (`ligo-instances.md` T-22). The client never logs a definition, in case `config` holds anything a user put there.
+
+### 3.4b The contract before the code
+
+The OpenAPI document is the source of the client's types, so it must say what the server sends. Done on 2026-11-14 (chunk 1 begins with it): the change request (`ChangeRequest`, `Side`, `BreakGlass` and the enums `ResourceType`, `ChangeRequestStatus`, with `listChangeRequests` and `getChangeRequest` typed), and two tests in `internal/server/adminhttp/openapi_test.go`: `TestOpenAPIEnums` (the document's enums equal the database's) and `TestOpenAPIChangeRequest` (what the server sends satisfies the schema, as a read, a filing and a list). Still untyped, and to type in chunk 1 with the same two kinds of test: the three instance kinds and their `definition`; sources, targets, bindings and their requests; the `Filed` resource; the results of approve, decline, ratify and revert; accounts' lists; the audit entries; the executors. Each is typed from the server's own Go types, with a test that a real value of that type satisfies the schema. A generated client over a document that says `type: object` for everything would give `map[string]any`, which is no client; the order of the chunks reflects it.
 
 ### 3.5 Errors
 
@@ -98,6 +117,7 @@ Unit tests over `httptest` TLS servers, and the existing contract test (`interna
 - **AC-1** `New` refuses a `ServerURL` that is not `https`, no verification source, both or neither authentication, and a missing password with `BasicAuth`.
 - **AC-2** A server with another SPIFFE ID, or a certificate outside `RootCAs`, is refused; a redirect is refused and the `Authorization` header is not sent to the target.
 - **AC-3** Every operation of the YAML has a method (a test parses the YAML and the package's exported methods, and lists the differences), and the method uses the verb and path of the YAML.
+- **AC-13** Instances: each of the three kinds has list, get, audit, create, update and delete (AC-3 covers the names and paths); a reader's `GetPlatform` has no `Definition` and says so, a decider's has it; `CreateSecretStore` returns the change request and never claims the store exists; `UpdateIdentityProvider` without `expectedRevision` fails before any call.
 - **AC-4** Pagination: the iterator follows `nextPageToken` to the end, stops on error, and stops when the caller stops.
 - **AC-5** Problem mapping: each slug that has a sentinel maps to it; an unknown slug is a `*Problem`; a non-problem body is a status-only error that holds none of the body's text.
 - **AC-6** `Update*` without `expectedRevision` fails before any request; a stale revision returns `ErrConflict` and no second call is made.
@@ -121,16 +141,17 @@ Each chunk ends with `go test ./...`, `make lint`, `make vuln` and `make secrets
 | Chunk | Content |
 |---|---|
 | 0 | This spec, approved; the backlog rows. |
-| 1 | The generator set-up, `make generate`, the drift check (AC-3, AC-11, AC-12). |
+| 1 | The contract typed (§3.4b: done for change requests; to do for the instances, sources, targets, bindings and the rest, each with its test), then the generator set-up, `make generate`, the drift check (AC-3, AC-11, AC-12). |
 | 2 | `Config`, `New`, authentication, server verification, errors, bodies (AC-1, AC-2, AC-5, AC-8, AC-9). |
-| 3 | The operations, pagination, `expectedRevision` (AC-3, AC-4, AC-6). |
+| 3 | The operations, pagination, `expectedRevision` (AC-3, AC-4, AC-6), in two steps: the reads, instance reads included (what the provider's data sources need), then the writes, instance filing included (its resources). |
 | 4 | `WaitChangeRequest`, retries, the fuzz targets and the benchmark (AC-7). |
 | 5 | The CLI moved onto the package (AC-10). |
 | 6 | The lab, the documentation (§6). |
 
-## 8. To decide
+## 8. Decisions (settled in 0.3, for approval with the rest)
 
-1. The module's own version: `pkg/adminclient` follows `ligo`'s releases, and is `v0` until `ligo` 1.0.0 (AGENTS rule 8). Third parties import `github.com/dihedron/ligo`, which brings the whole module's dependencies into their `go.sum`. If that proves too heavy for the provider, a split into a module of its own is a later, mechanical step.
-2. Whether `approve`/`decline`/`ratify`/`revert`/`breakGlass` are in the package at all (T-A4). Leaving them out is safest; the CLI would then keep a small private call for them.
-3. The `oapi-codegen` version and whether its strict-client output is accepted as it is.
-4. Whether the few helpers shared with `pkg/client` (§0) move into one internal package. Recommendation: not yet; copy them, and extract when the provider or the MCP server needs a fourth.
+1. **One module.** `pkg/adminclient` follows `ligo`'s releases and is `v0` until `ligo` 1.0.0 (AGENTS rule 8). Third parties import `github.com/dihedron/ligo`, which brings the whole module's dependencies into their `go.sum`. If that proves too heavy for the provider, a split into a module of its own is a later, mechanical step.
+2. **No human decisions in the package.** `approve`, `decline`, `ratify`, `revert` and `breakGlass` are not methods of `pkg/adminclient` (T-A4). The CLI keeps a small private call for them in `internal/client`. A tool that needs them says so in its own spec, and the package gains them then, in a separate file.
+3. **The generator.** `oapi-codegen`, pinned by version and hash at chunk 1, after a check that its output for the typed document compiles, passes `go vet` and is hidden behind the exported layer (§3.1). If the output is not acceptable as it is, the fallback is hand-written types for the typed schemas only, with the contract tests of §3.4b as the guard; that choice comes back to the user at the end of chunk 1, with the evidence.
+4. **Shared helpers are copied,** not extracted, until a fourth user needs them (§0).
+
