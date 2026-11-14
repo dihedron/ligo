@@ -11,26 +11,29 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/dihedron/ligo/internal/adminraw"
 	"github.com/dihedron/ligo/pkg/adminclient/internal/gen"
 )
 
-// Do makes a call the typed methods do not model, with everything else the
+// do makes a call the typed methods do not model, with everything else the
 // package does for a call: the server's verification, the credentials, no
 // redirect, the body limit, the mapping of problems to *Problem and the
 // sentinels, and the retries of a GET. It is the way the ligo CLI, which
 // prints whatever the server answers, reaches the operations and the decisions
 // of people the package leaves out (T-A4).
 //
+// It is not a method of the package: the CLI reaches it through
+// internal/adminraw, which only code of this module can import, so that the
+// Terraform provider and the MCP server cannot call it, and what each of them
+// can do is the list of typed methods that a test reads
+// (.specs/ligo-adminclient.md §8.2).
+//
 // path is that of the admin API, such as /v1/admin/maintenance, already
 // escaped, with no query. body, if not nil, is sent as JSON. out is nil (the
 // answer is dropped), a pointer to decode the JSON answer into, or an
 // io.Writer that the answer of any size is copied to as it arrives; such a
 // call is not retried.
-//
-// The Terraform provider and the MCP server must not use Do: their calls are
-// the typed methods, so that what each of them can do is a list a test reads
-// (.specs/ligo-adminclient.md §8.2).
-func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "?#") {
 		return fmt.Errorf("adminclient: path %q: an absolute path with no query or fragment is required", path)
 	}
@@ -64,4 +67,14 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		}
 		return c.http.Do(req)
 	}, out)
+}
+
+func init() {
+	adminraw.Register(func(ctx context.Context, client any, method, path string, query url.Values, body, out any) error {
+		c, ok := client.(*Client)
+		if !ok {
+			return errors.New("adminclient: the raw call needs a *adminclient.Client")
+		}
+		return c.do(ctx, method, path, query, body, out)
+	})
 }

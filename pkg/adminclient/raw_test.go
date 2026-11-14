@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,26 +33,26 @@ func TestDo(t *testing.T) {
 	}))
 	ctx := context.Background()
 	var out any
-	if err := c.Do(ctx, "PUT", "/v1/admin/echo", url.Values{"q": {"a b"}, "n": {"1"}}, map[string]any{"enabled": true}, &out); err != nil {
+	if err := c.do(ctx, "PUT", "/v1/admin/echo", url.Values{"q": {"a b"}, "n": {"1"}}, map[string]any{"enabled": true}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if user != "ada" || method != "PUT" || ctype != "application/json" || rawQuery != "n=1&q=a+b" || in["enabled"] != true || out.(map[string]any)["ok"] != true {
 		t.Errorf("user %q, %s, %q, %q, body %v, answer %v", user, method, ctype, rawQuery, in, out)
 	}
-	if err := c.Do(ctx, "GET", "/v1/admin/echo", nil, nil, nil); err != nil || ctype != "" {
+	if err := c.do(ctx, "GET", "/v1/admin/echo", nil, nil, nil); err != nil || ctype != "" {
 		t.Errorf("no body, no answer wanted: %v, content type %q", err, ctype)
 	}
-	err := c.Do(ctx, "GET", "/v1/admin/gone", nil, nil, nil)
+	err := c.do(ctx, "GET", "/v1/admin/gone", nil, nil, nil)
 	var p *Problem
 	if !errors.Is(err, ErrNotFound) || !errors.As(err, &p) || p.Error() != "404 not-found: no such thing" {
 		t.Errorf("a problem: %v", err)
 	}
 	for _, bad := range []string{"v1/admin/x", "//evil.example/x", "/v1/admin/x?a=b", "/v1/admin/x#f", ""} {
-		if err := c.Do(ctx, "GET", bad, nil, nil, nil); err == nil {
+		if err := c.do(ctx, "GET", bad, nil, nil, nil); err == nil {
 			t.Errorf("path %q was accepted", bad)
 		}
 	}
-	if err := c.Do(ctx, "POST", "/v1/admin/echo", nil, make(chan int), nil); err == nil {
+	if err := c.do(ctx, "POST", "/v1/admin/echo", nil, make(chan int), nil); err == nil {
 		t.Error("a body that is not JSON was accepted")
 	}
 }
@@ -72,22 +73,22 @@ func TestDoStreams(t *testing.T) {
 		}
 	}))
 	var buf bytes.Buffer
-	if err := c.Do(context.Background(), "GET", "/v1/admin/export", nil, nil, &buf); err != nil || buf.Len() != 10<<20 {
+	if err := c.do(context.Background(), "GET", "/v1/admin/export", nil, nil, &buf); err != nil || buf.Len() != 10<<20 {
 		t.Errorf("%d bytes, %v", buf.Len(), err)
 	}
 	// the same answer decoded is cut at the limit
 	var v any
-	if err := c.Do(context.Background(), "GET", "/v1/admin/export", nil, nil, &v); !errors.Is(err, ErrTooLarge) {
+	if err := c.do(context.Background(), "GET", "/v1/admin/export", nil, nil, &v); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("10 MiB decoded: %v", err)
 	}
 	calls.Store(0)
 	buf.Reset()
-	err := c.Do(context.Background(), "GET", "/v1/admin/down", nil, nil, &buf)
+	err := c.do(context.Background(), "GET", "/v1/admin/down", nil, nil, &buf)
 	if !errors.Is(err, ErrUnavailable) || calls.Load() != 1 || buf.Len() != 0 {
 		t.Errorf("a failing stream: %v after %d calls, %d bytes written", err, calls.Load(), buf.Len())
 	}
 	// failing to write stops the copy
-	if err := c.Do(context.Background(), "GET", "/v1/admin/export", nil, nil, failingWriter{}); err == nil {
+	if err := c.do(context.Background(), "GET", "/v1/admin/export", nil, nil, failingWriter{}); err == nil {
 		t.Error("a writer error was swallowed")
 	}
 }
@@ -95,3 +96,15 @@ func TestDoStreams(t *testing.T) {
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// TestNoExportedRawCall is T-A4: the raw call is not a method of the package,
+// so that a program outside this module, such as the Terraform provider or
+// the MCP server, cannot make it; the CLI reaches it through internal/adminraw.
+func TestNoExportedRawCall(t *testing.T) {
+	typ := reflect.TypeFor[*Client]()
+	for _, name := range []string{"Do", "Raw", "Call", "Request"} {
+		if _, ok := typ.MethodByName(name); ok {
+			t.Errorf("*Client has the exported method %s", name)
+		}
+	}
+}

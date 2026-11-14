@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
+	"github.com/dihedron/ligo/internal/adminraw"
 	"github.com/dihedron/ligo/pkg/adminclient"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -35,6 +36,13 @@ type Options struct {
 type Client struct {
 	*adminclient.Client
 	source *workloadapi.X509Source
+}
+
+// Do makes a call the typed methods of pkg/adminclient do not model, with the
+// package's verification, credentials, limits and mapping of problems; see
+// internal/adminraw.
+func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
+	return adminraw.Do(ctx, c.Client, method, path, query, body, out)
 }
 
 // Problem is an RFC 9457 problem from the server (§7.2.3).
