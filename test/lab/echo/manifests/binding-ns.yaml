@@ -1,0 +1,3 @@
+# The binding to the echo server that admits users with a password, kept in
+# the OpenBao namespace lab-ns (.specs/ligo-client-sdk.md, CS-L4).
+{kind: Binding, name: echo-bound-ns, source: echo-bound-src, target: echo-ns-target, accessLevel: echo, purpose: "client SDK, namespace"}

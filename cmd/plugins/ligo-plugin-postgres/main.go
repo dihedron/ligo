@@ -64,9 +64,12 @@ type config struct {
 	AllowedEndpoints    []string                            `json:"allowed_endpoints"`
 	CAPEM               string                              `json:"ca_pem"`
 	DirectoryGroup      string                              `json:"directory_group"`
+	CredentialTTL       string                              `json:"credential_ttl"`
+	CredentialMaxTTL    string                              `json:"credential_max_ttl"`
 	BootstrapCredential pluginsdk.BootstrapCredentialConfig `json:"bootstrap_credential"`
 
-	roots *x509.CertPool // nil: the system roots
+	roots       *x509.CertPool // nil: the system roots
+	ttl, maxTTL time.Duration  // of a dynamic credential; 0: ligo's own setting (§3)
 }
 
 // parseConfig checks an instance's configuration (§3); errors name the field.
@@ -115,6 +118,25 @@ func parseConfig(data []byte, mode pluginv1.IdentityMode) (*config, error) {
 		return nil, err
 	}
 	var err error
+	if c.CredentialTTL != "" {
+		if c.ttl, err = time.ParseDuration(c.CredentialTTL); err != nil || c.ttl == 0 {
+			return nil, errors.New("credential_ttl is not a duration such as 15m")
+		}
+	}
+	if c.CredentialMaxTTL != "" {
+		if c.maxTTL, err = time.ParseDuration(c.CredentialMaxTTL); err != nil || c.maxTTL == 0 {
+			return nil, errors.New("credential_max_ttl is not a duration such as 4h")
+		}
+	}
+	if err := pluginsdk.CredentialTTL(c.ttl, 0); err != nil {
+		return nil, fmt.Errorf("credential_ttl: %w", err)
+	}
+	if err := pluginsdk.CredentialTTL(0, c.maxTTL); err != nil {
+		return nil, fmt.Errorf("credential_max_ttl: %w", err)
+	}
+	if err := pluginsdk.CredentialTTL(c.ttl, c.maxTTL); err != nil {
+		return nil, fmt.Errorf("credential_ttl: %w", err)
+	}
 	c.roots, err = pluginsdk.ParseRoots(c.CAPEM)
 	return &c, err
 }
@@ -528,7 +550,7 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 			refused = pluginsdk.Error(codes.FailedPrecondition, "RESOURCE_OWNED_BY_OTHER_BINDING", "the role belongs to another binding", false)
 			return refused
 		}
-		if err := converge(ctx, tx, r, s.ConnectionLimit, ident, exists, payload); err != nil {
+		if err := converge(ctx, tx, r, s.ConnectionLimit, ident, exists, payload, in.ttl, in.maxTTL); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, fmt.Sprintf("COMMENT ON ROLE %s IS '%s'", ident, tag)); err != nil { // the tag's grammar: checkBinding
@@ -549,7 +571,7 @@ func (p *plugin) EnsureTarget(ctx context.Context, r *pluginv1.EnsureTargetReque
 
 // converge creates or alters the role for its identity mode, and fills the
 // payload for Stage 3.
-func converge(ctx context.Context, tx pgx.Tx, r *pluginv1.EnsureTargetRequest, connectionLimit int, ident string, exists bool, payload *pluginv1.SecretProvisioningPayload) error {
+func converge(ctx context.Context, tx pgx.Tx, r *pluginv1.EnsureTargetRequest, connectionLimit int, ident string, exists bool, payload *pluginv1.SecretProvisioningPayload, ttl, maxTTL time.Duration) error {
 	limit := connectionLimit
 	if limit == 0 {
 		limit = -1
@@ -590,7 +612,8 @@ func converge(ctx context.Context, tx pgx.Tx, r *pluginv1.EnsureTargetRequest, c
 		RoleType: "database-dynamic", TargetConnectionRef: r.GetInstance(), TargetUsername: b.GetDerivedPrincipalName(),
 		CreationStatements:   []string{fmt.Sprintf(`CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' CONNECTION LIMIT %d IN ROLE %s`, limit, ident)},
 		RevocationStatements: []string{`DROP ROLE IF EXISTS "{{name}}"`},
-		DefaultTtlSeconds:    3600, MaxTtlSeconds: 86400,
+		// 0 for a value the platform does not set: ligo fills it (§3)
+		DefaultTtlSeconds: int32(ttl.Seconds()), MaxTtlSeconds: int32(maxTTL.Seconds()), // #nosec G115 -- at most 720 h, checked by parseConfig
 	}}
 	return nil
 }

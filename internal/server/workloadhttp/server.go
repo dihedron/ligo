@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -100,17 +101,17 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		switch {
 		case err != nil && isGRPC(r):
 			metrics.WorkloadRequests.WithLabelValues(mode, "unauthenticated").Inc()
-			grpcError(w, codes.Unauthenticated, "a valid X.509-SVID or JWT-SVID is required")
+			grpcError(w, codes.Unauthenticated, "a valid X.509-SVID or JWT-SVID is required", 0)
 		case err != nil:
 			metrics.WorkloadRequests.WithLabelValues(mode, "unauthenticated").Inc()
 			problem(w, http.StatusUnauthorized, "unauthenticated", "a valid X.509-SVID or JWT-SVID is required")
 		case !s.limits.Allow(id.String(), ratelimit.Rate{PerSecond: s.Listener.RateLimit.PerSVIDRPS, Burst: float64(max(s.Listener.RateLimit.Burst, 1))}):
 			metrics.WorkloadRequests.WithLabelValues(mode, "rate_limited").Inc()
 			if isGRPC(r) {
-				grpcError(w, codes.ResourceExhausted, "too many requests")
+				grpcError(w, codes.ResourceExhausted, "too many requests", limitRetry)
 				break
 			}
-			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Retry-After", strconv.Itoa(int(limitRetry.Seconds())))
 			problem(w, http.StatusTooManyRequests, "rate-limited", "too many requests")
 		default:
 			rec := &recorder{ResponseWriter: w, code: http.StatusOK}

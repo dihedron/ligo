@@ -44,6 +44,14 @@
     "directory_group": {
       "type": "string"
     },
+    "credential_ttl": {
+      "type": "string",
+      "description": "the lease of a credential issued on demand, such as 15m; ligo's plugins.dynamic_credentials.default_ttl when absent"
+    },
+    "credential_max_ttl": {
+      "type": "string",
+      "description": "the longest a lease may be renewed to, such as 4h; ligo's plugins.dynamic_credentials.max_ttl when absent"
+    },
     "bootstrap_credential": {
       "type": "object"
     }

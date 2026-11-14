@@ -4,20 +4,27 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/dihedron/ligo/internal/spiffetest"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
+	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
 const (
@@ -76,7 +83,7 @@ func setup(t *testing.T, ligoAs, serverAs string) *env {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
 	}))
-	wl.TLS = serving(t, ca, bundle, ligoAs)
+	wl.TLS, wl.EnableHTTP2 = serving(t, ca, bundle, ligoAs), true
 	wl.StartTLS()
 	t.Cleanup(wl.Close)
 
@@ -85,7 +92,7 @@ func setup(t *testing.T, ligoAs, serverAs string) *env {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/auth/jwt-spiffe/login":
 			var b struct{ Role, JWT string }
 			_ = json.NewDecoder(r.Body).Decode(&b)
-			if b.Role != "binding-1" || b.JWT != "jwt-for-https://bao-prod.ligo.lab" {
+			if b.Role != "binding-1" || !forAudience(b.JWT, "https://bao-prod.ligo.lab") {
 				http.Error(w, "permission denied", http.StatusForbidden)
 				return
 			}
@@ -138,10 +145,38 @@ func setup(t *testing.T, ligoAs, serverAs string) *env {
 		}
 	}()
 
-	v.ligo, v.bao, v.echo = wl.URL, bao.URL, l.Addr().String()
-	v.deps = deps{SVIDs: svid(t, ca, boundID), Bundles: bundle, Roots: roots,
-		JWT: func(_ context.Context, audience string) (string, error) { return "jwt-for-" + audience, nil }}
+	// JWT-SVIDs come from a fake SPIRE agent
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	agent := &spiffetest.Agent{Key: key, SVIDs: []*workload.X509SVID{ca.SVID(t, boundID)}, Bundles: map[string][]byte{"prod.lab": ca.Cert.Raw}}
+	jwt, err := workloadapi.New(t.Context(), workloadapi.WithAddr(agent.Serve(t, t.TempDir(), "agent.sock")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = jwt.Close() })
+
+	v.ligo, v.bao, v.echo = strings.TrimPrefix(wl.URL, "https://"), bao.URL, l.Addr().String()
+	v.deps = deps{X509: source{svid(t, ca, boundID), bundle}, JWT: jwt, Roots: roots}
 	return v
+}
+
+// source is a fixed SVID with its trust domain's bundle.
+type source struct {
+	*x509svid.SVID
+	*x509bundle.Bundle
+}
+
+// forAudience reports whether jwt's claims name audience.
+func forAudience(jwt, audience string) bool {
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	var claims struct {
+		Aud []string `json:"aud"`
+		Sub string   `json:"sub"`
+	}
+	return err == nil && json.Unmarshal(raw, &claims) == nil && slices.Contains(claims.Aud, audience) && claims.Sub == boundID
 }
 
 func (v *env) run(t *testing.T, args ...string) (int, string) {
@@ -158,8 +193,8 @@ func (v *env) svidBinding() map[string]any {
 
 func (v *env) passwordBinding() map[string]any {
 	return map[string]any{"name": "echo-bound-local", "spec": map[string]string{"endpoint": v.echo, "serverId": serverID, "mode": "password", "user": "bnd_x"},
-		"auth": map[string]any{"secretStorageStrategy": "vault-static", "config": map[string]string{"address": v.bao, "secretPath": "kv/data/bindings/1",
-			"authMount": "jwt-spiffe", "role": "binding-1", "policy": "binding-1"}}}
+		"auth": map[string]any{"secretStorageStrategy": "vault-static", "config": map[string]string{"address": v.bao, "audience": "https://bao-prod.ligo.lab",
+			"secretPath": "kv/data/bindings/1", "authMount": "jwt-spiffe", "role": "binding-1", "policy": "binding-1"}}}
 }
 
 // TestBinding: no binding is exit 2; a binding in either mode echoes the
@@ -209,7 +244,8 @@ func TestRefusals(t *testing.T) {
 		t.Errorf("an impostor echo server: %d %q", code, out)
 	}
 	v := setup(t, ligoID, serverID)
-	for name, args := range map[string][]string{"no target": {}, "two lines": {"--direct", v.echo, "--message", "a\nb"}, "bad mode": {"--direct", v.echo, "--mode", "x"}} {
+	for name, args := range map[string][]string{"no target": {}, "two lines": {"--direct", v.echo, "--message", "a\nb"}, "bad mode": {"--direct", v.echo, "--mode", "x"},
+		"bad transport": {"--direct", v.echo, "--transport", "soap"}} {
 		if code, _ := v.run(t, args...); code != exitError {
 			t.Errorf("%s: %d", name, code)
 		}
@@ -217,7 +253,7 @@ func TestRefusals(t *testing.T) {
 	b := v.passwordBinding()
 	b["auth"].(map[string]any)["config"].(map[string]string)["role"] = "binding-2"
 	v.items = []map[string]any{b}
-	if code, out := v.run(t, "--target", "echo-local-target"); code != exitError || !strings.Contains(out, "OpenBao login") {
+	if code, out := v.run(t, "--target", "echo-local-target"); code != exitError || !strings.Contains(out, "login: 403") {
 		t.Errorf("another binding's role: %d %q", code, out)
 	}
 }

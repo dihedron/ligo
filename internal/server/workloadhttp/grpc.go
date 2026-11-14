@@ -2,21 +2,33 @@ package workloadhttp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	workloadv1alpha1 "github.com/dihedron/ligo/api/gen/workload/v1alpha1"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/resolution"
 	"github.com/dihedron/ligo/internal/tracing"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// When a client should come back, on both transports: Retry-After on REST,
+// a RetryInfo detail on gRPC.
+const (
+	staleRetry = 5 * time.Second // the cache is stale
+	limitRetry = time.Second     // the caller's rate limit
 )
 
 // isGRPC reports whether r is a gRPC call, routed to the gRPC server after
@@ -28,11 +40,27 @@ func isGRPC(r *http.Request) bool {
 // grpcError answers a gRPC call that never reaches the gRPC server with a
 // trailers-only response: grpc-go would map HTTP 429 to UNAVAILABLE, not
 // RESOURCE_EXHAUSTED.
-func grpcError(w http.ResponseWriter, code codes.Code, msg string) {
+// retry, when not 0, is sent as a RetryInfo detail, as REST sends
+// Retry-After.
+func grpcError(w http.ResponseWriter, code codes.Code, msg string, retry time.Duration) {
 	w.Header().Set("Content-Type", "application/grpc")
 	w.Header().Set("Grpc-Status", strconv.Itoa(int(code)))
 	w.Header().Set("Grpc-Message", msg)
+	if retry > 0 {
+		if raw, err := proto.Marshal(retryStatus(code, msg, retry).Proto()); err == nil {
+			w.Header().Set("Grpc-Status-Details-Bin", base64.RawStdEncoding.EncodeToString(raw))
+		}
+	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// retryStatus is a status that tells the client when to come back.
+func retryStatus(code codes.Code, msg string, retry time.Duration) *status.Status {
+	st := status.New(code, msg)
+	if with, err := st.WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(retry)}); err == nil {
+		return with
+	}
+	return st
 }
 
 // grpcServer serves WorkloadBindingService behind the middleware, which has
@@ -53,7 +81,7 @@ func (v *service) failure(ctx context.Context, err error) error {
 	if !errors.Is(err, resolution.ErrStale) {
 		v.s.Logger.Error("resolution", "request_id", requestID(ctx), "caller", caller(ctx).String(), "error", err)
 	}
-	return status.Error(codes.Unavailable, "bindings cannot be resolved now")
+	return retryStatus(codes.Unavailable, "bindings cannot be resolved now", staleRetry).Err()
 }
 
 // GetBindings is GET /v1/bindings, with the same ETag (§7.1).

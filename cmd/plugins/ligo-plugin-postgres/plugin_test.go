@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
 	"github.com/jackc/pgx/v5"
@@ -31,8 +32,16 @@ func errorCode(t *testing.T, err error) (string, bool) {
 
 // TestParseConfig: PG-1, every field's rule names the field.
 func TestParseConfig(t *testing.T) {
-	if _, err := parseConfig([]byte(goodConfig), pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL); err != nil {
+	c, err := parseConfig([]byte(goodConfig), pluginv1.IdentityMode_IDENTITY_MODE_TARGET_LOCAL)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if c.ttl != 0 || c.maxTTL != 0 { // not set: ligo fills them (§3)
+		t.Errorf("lease %s, %s", c.ttl, c.maxTTL)
+	}
+	c, err = parseConfig([]byte(strings.Replace(goodConfig, `{`, `{"credential_ttl":"90s","credential_max_ttl":"4h",`, 1)), 0)
+	if err != nil || c.ttl != 90*time.Second || c.maxTTL != 4*time.Hour {
+		t.Fatalf("lease %+v (%v)", c, err)
 	}
 	set := func(field, value string) string {
 		var m map[string]json.RawMessage
@@ -68,6 +77,11 @@ func TestParseConfig(t *testing.T) {
 		"invalid bootstrap": {set("bootstrap_credential", `{"source":"nope","kv_path":"x"}`), 0, ""},
 		"ca_pem":            {set("ca_pem", `"not a certificate"`), 0, "ca_pem"},
 		"ca_file":           {set("ca_file", `"/etc/shadow"`), 0, "ca_file"}, // no file paths (ligo-instances T-22d)
+		"short lease":       {set("credential_ttl", `"30s"`), 0, "credential_ttl"},
+		"lease not a time":  {set("credential_ttl", `"soon"`), 0, "credential_ttl"},
+		"lease as a number": {set("credential_ttl", `90`), 0, "credential_ttl"},
+		"long maximum":      {set("credential_max_ttl", `"721h"`), 0, "credential_max_ttl"},
+		"lease above max":   {strings.Replace(set("credential_ttl", `"2h"`), `{`, `{"credential_max_ttl":"1h",`, 1), 0, "credential_ttl"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseConfig([]byte(tc.config), tc.mode)

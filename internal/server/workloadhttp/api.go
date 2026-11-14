@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 	"uuid"
 
@@ -132,7 +133,7 @@ func reply[T any](s *Server, w http.ResponseWriter, r *http.Request, doc *Docume
 		if !errors.Is(err, resolution.ErrStale) {
 			s.Logger.Error("resolution", "request_id", requestID(r.Context()), "caller", Caller(r).String(), "error", err)
 		}
-		w.Header().Set("Retry-After", "5")
+		w.Header().Set("Retry-After", strconv.Itoa(int(staleRetry.Seconds())))
 		problem(w, http.StatusServiceUnavailable, "unavailable", "bindings cannot be resolved now")
 		return
 	}

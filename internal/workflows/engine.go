@@ -4,6 +4,7 @@
 package workflows
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,6 +64,27 @@ type Engine struct {
 	Plugins Plugins
 	Sealer  *sealing.Sealer
 	Backoff Backoff
+	Lease   Lease
+}
+
+// Lease is the lease of a credential issued on demand, and the longest it
+// may be renewed to, for a platform that sets none of its own
+// (plugins.dynamic_credentials, .specs/ligo-postgres-plugin.md §3).
+type Lease struct{ TTL, MaxTTL time.Duration }
+
+// fill gives role the engine's value where the platform's plugin sent 0,
+// and checks the result. A nil role (no dynamic credential) passes.
+func (l Lease) fill(role *pluginv1.DelegatedRoleSpec) error {
+	if role == nil {
+		return nil
+	}
+	ttl := cmp.Or(time.Duration(role.GetDefaultTtlSeconds())*time.Second, l.TTL)
+	maxTTL := cmp.Or(time.Duration(role.GetMaxTtlSeconds())*time.Second, l.MaxTTL)
+	if err := pluginsdk.CredentialTTL(ttl, maxTTL); err != nil {
+		return &StepError{Code: "INVALID_CREDENTIAL_TTL", Message: "the lease of the dynamic credential: " + err.Error()}
+	}
+	role.DefaultTtlSeconds, role.MaxTtlSeconds = int32(ttl.Seconds()), int32(maxTTL.Seconds()) // #nosec G115 -- at most 720 h
+	return nil
 }
 
 // Register registers the workflows with DBOS; call it before dbos.Launch.

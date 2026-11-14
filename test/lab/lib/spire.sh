@@ -28,6 +28,9 @@ inner_container() {
 	fi
 	inner_start "$name"
 	inner_wait "$name"
+	# unattended-upgrades takes about 140 MiB: in a container of 256 MiB it
+	# starves the service under test (slapd stalled, haproxy reset connections)
+	inner_exec "$name" systemctl mask --now apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service >/dev/null 2>&1 || true
 }
 
 # inner_lxd_fingerprint: the SHA-256 of the inner LXD's certificate (the pin).

@@ -1,0 +1,5 @@
+# Developer's Guide: title page and PDF metadata (see docs/build.sh)
+title: "Developer's Guide"
+subtitle: "Writing applications and plugins for ligo"
+author: "ligo"
+lang: en-GB

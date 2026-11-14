@@ -12,13 +12,14 @@ set -euo pipefail
 
 readonly PANDOC_IMAGE="docker.io/pandoc/extra:3.11.0.0-debian@sha256:fa8ccae75418449568f10f1842706aee1885ab24fba54f5aec08516260fc0166"
 readonly MERMAID_IMAGE="ghcr.io/mermaid-js/mermaid-cli/mermaid-cli:12.0.0@sha256:fa995339034aae7e5cd4f61482248b7f5c51be355b1a6f6eda11a2bbf8401f5f"
-readonly DOCUMENTS=(setup-guide architecture operators-guide planning-guide why-ligo)
+readonly DOCUMENTS=(setup-guide architecture operators-guide planning-guide developers-guide why-ligo)
 
 declare -A FILE_NAMES=(
 	[setup-guide]=setup-guide
 	[architecture]=architecture-and-design
 	[operators-guide]=operators-guide
 	[planning-guide]=planning-for-deployment-guide
+	[developers-guide]=developers-guide
 	[why-ligo]=why-ligo
 )
 

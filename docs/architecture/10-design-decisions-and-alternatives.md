@@ -16,6 +16,8 @@
 | Fixed error messages from plugins | A backend's text can echo statements or data | Persisting the error |
 | Instances in the database, plugin types in `server.yaml` | Instances change as often as the systems they describe; four-eyes requests per jurisdiction replace file ownership, and the types' `instance_bounds` keep a root-owned limit | Instances in `server.yaml`, a restart per change; a global role applying changes at once |
 | Instance rows signed by the audit key | Catches edits outside `ligo` even after audit pruning | Comparing with the audit entry, which pruning removes |
+| A client SDK that returns the credential, not a connection | The application keeps its driver, pool and retry policy; the SDK stays small and has no database dependencies | Ready connections per platform type |
+| The SDK polls, with an ETag | The workload API stays read-only and stateless; a `304` costs no body | A streaming watch on the server |
 
 ## Why the Vault store takes exact SPIFFE IDs only
 

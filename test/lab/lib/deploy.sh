@@ -118,6 +118,34 @@ deploy_plugins() {
 	ldap_password ligo-idp >/dev/null
 	plugin_bao openldap "cn=ligo-idp,ou=services,$LDAP_BASE" "$LAB_STATE_DIR/passwords/ldap-ligo-idp"
 	store_vault_bao
+	store_namespace
+}
+
+# LAB_NAMESPACE: the namespace of the secret store instance vault-ns, on
+# OpenBao only: Vault Community has no namespaces.
+LAB_NAMESPACE=lab-ns
+has_namespaces() { [[ "$(secrets_backend)" == openbao ]]; }
+
+# store_namespace: on OpenBao, the namespace with its own KV engine, its JWT
+# auth trusting the realm's SPIRE, and the ligo-plugin-vault plugin's policy
+# and role, as store_vault_bao has them outside it (.specs/ligo-client-sdk.md,
+# CS-L4).
+store_namespace() {
+	has_namespaces || return 0
+	local server aud ns="-namespace=$LAB_NAMESPACE"
+	server="$(secrets_host)" aud="$(secrets_audience)"
+	secrets_cli namespace lookup "$LAB_NAMESPACE" >/dev/null 2>&1 || secrets_cli namespace create "$LAB_NAMESPACE" >/dev/null ||
+		die "$server: cannot create the namespace $LAB_NAMESPACE"
+	secrets_cli secrets list "$ns" -format=json | jq -e '."kv/"' >/dev/null || secrets_cli secrets enable "$ns" -path=kv kv-v2 >/dev/null
+	secrets_cli auth list "$ns" -format=json | jq -e '."jwt-spiffe/"' >/dev/null || secrets_cli auth enable "$ns" -path=jwt-spiffe jwt >/dev/null
+	secrets_cli write "$ns" auth/jwt-spiffe/config oidc_discovery_url="https://spire-prod.ligo.lab:$OIDC_PORT" \
+		oidc_discovery_ca_pem="@$(server_ca "$server")" >/dev/null || die "$server: cannot configure the JWT auth of $LAB_NAMESPACE"
+	secrets_cli policy write "$ns" ligo-plugin-vault /root/ligo-plugin-vault.hcl >/dev/null
+	secrets_cli write "$ns" auth/jwt-spiffe/role/ligo-plugin-vault role_type=jwt user_claim=sub \
+		bound_subject="spiffe://prod.lab/ligo/plugin/vault" bound_audiences="$aud" \
+		token_policies=ligo-plugin-vault token_ttl=15m token_max_ttl=1h >/dev/null ||
+		die "$server: cannot write the role ligo-plugin-vault in $LAB_NAMESPACE"
+	info "$server: namespace $LAB_NAMESPACE with kv, jwt-spiffe and the role ligo-plugin-vault"
 }
 
 # store_vault_bao: on the secrets backend, the database secrets engine and its

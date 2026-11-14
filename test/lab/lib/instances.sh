@@ -46,14 +46,23 @@ lab_instances() {
 	jq -cn '{kind: "SecretStore", metadata: {name: "none-prod", jurisdiction: "dc/corp-prod", realm: "prod"}, type: "none.v1"}'
 	jq -cn --arg aud "$aud" --arg bao "$bao" --arg host "$host" --argjson port "$BAO_PORT" --argjson ca "$ca" \
 		'{kind: "SecretStore", metadata: {name: "vault-prod", jurisdiction: "dc/corp-prod", realm: "prod"}, type: "vault.v1",
-		  svidSelector: {matchExpr: "path == \"/ligo/plugin/vault\"", jwtAudience: [$aud]},
+		  svidSelector: {matchExpr: "path == \"/ligo/plugin/vault\"", jwtAudience: [$aud], allowSharedSvid: true},
 		  config: {address: $bao, auth_mount: "jwt-spiffe", role: "ligo-plugin-vault", db_connection: "lab-pg", ca_pem: $ca,
 		    workload_jwt_audience: $aud, allowed_endpoints: ["\($host):\($port)"]},
 		  networkFlows: [{name: "vault", purpose: "CREDENTIALS", protocol: "TCP", destination: $host, ports: [$port], tls: true, serverName: $host}]}'
+	if has_namespaces; then # the same server, inside a namespace; the plugin's SVID is shared within dc/corp-prod (rule 7)
+		jq -cn --arg aud "$aud" --arg bao "$bao" --arg host "$host" --argjson port "$BAO_PORT" --argjson ca "$ca" --arg ns "$LAB_NAMESPACE" \
+			'{kind: "SecretStore", metadata: {name: "vault-ns", jurisdiction: "dc/corp-prod", realm: "prod"}, type: "vault.v1",
+			  svidSelector: {matchExpr: "path == \"/ligo/plugin/vault\"", jwtAudience: [$aud], allowSharedSvid: true},
+			  config: {address: $bao, namespace: $ns, auth_mount: "jwt-spiffe", role: "ligo-plugin-vault", ca_pem: $ca,
+			    workload_jwt_audience: $aud, allowed_endpoints: ["\($host):\($port)"]},
+			  networkFlows: [{name: "vault", purpose: "CREDENTIALS", protocol: "TCP", destination: $host, ports: [$port], tls: true, serverName: $host}]}'
+	fi
 	pg pg-ledger dc/corp-prod "Lab PostgreSQL ledger" target-local.v1 local-prod vault-static '{}' '{"allowedSourceTrustDomains": ["prod.lab", "test.lab"]}'
 	pg pg-ledger-cloud cloud/fin-01/ledger "Lab PostgreSQL ledger, owned by a tenancy" target-local.v1 local-prod vault-static '{}' \
 		'{"targetJurisdictions": ["cloud/fin-01/*"], "allowedSourceTrustDomains": ["prod.lab", "test.lab"]}'
-	pg pg-ledger-dynamic dc/corp-prod "Lab PostgreSQL ledger, credentials on demand" delegated-dynamic.v1 dynamic-prod vault-dynamic '{}' '{}'
+	# a lease of 90s: a workload that watches re-reads its credential after 60s (TestServeClientSDK)
+	pg pg-ledger-dynamic dc/corp-prod "Lab PostgreSQL ledger, credentials on demand" delegated-dynamic.v1 dynamic-prod vault-dynamic '{"credential_ttl": "90s"}' '{}'
 	# LEDGER_GONE_ROLE: AC-10, serve_ldap_e2e_lab_test.go
 	pg pg-ledger-ldap dc/corp-prod "Lab PostgreSQL ledger, accounts in the directory" openldap.v1 openldap-prod vault-static \
 		'{"directory_group": "ligo_ldap", "grantable_roles": ["LEDGER_RO_ROLE", "LEDGER_RW_ROLE", "LEDGER_GONE_ROLE"]}' '{}'
@@ -63,17 +72,20 @@ lab_instances() {
 			'{"targetJurisdictions": ["tenants/*"], "namespaceTemplate": "{account}_{tenancy}"}' |
 			jq -c 'del(.config.grantable_roles)'
 	fi
-	local mode port control
-	for mode in svid password; do # the echo target (.specs/ligo-echo-target.md)
+	local name mode store port control platforms="echo-svid:svid:none-prod echo-local:password:vault-prod"
+	# echo-ns: the password server again, its passwords kept in the namespace
+	if has_namespaces; then platforms="$platforms echo-ns:password:vault-ns"; fi
+	for name in $platforms; do # the echo target (.specs/ligo-echo-target.md)
+		IFS=: read -r name mode store <<<"$name"
 		port=7101 control=7102
 		[[ "$mode" == svid ]] || port=7201 control=7202
-		jq -cn --arg mode "$mode" --arg data "ligo1.ligo.lab:$port" --arg control "ligo1.ligo.lab:$control" --argjson ca "$ca" \
-			'{kind: "Platform", metadata: {name: (if $mode == "svid" then "echo-svid" else "echo-local" end), jurisdiction: "dc/corp-prod", realm: "prod",
-			    displayName: (if $mode == "svid" then "Lab echo server, admits SVIDs" else "Lab echo server, admits users with a password" end)},
+		jq -cn --arg name "$name" --arg mode "$mode" --arg store "$store" --arg data "ligo1.ligo.lab:$port" --arg control "ligo1.ligo.lab:$control" --argjson ca "$ca" \
+			'{kind: "Platform", metadata: {name: $name, jurisdiction: "dc/corp-prod", realm: "prod",
+			    displayName: (if $mode == "svid" then "Lab echo server, admits SVIDs" else "Lab echo server, admits users with a password (\($store))" end)},
 			  type: "echo.v1", allowedSourceTrustDomains: ["prod.lab"],
 			  identityProvider: (if $mode == "svid" then {type: "svid.v1", instance: "svid-prod"} else {type: "target-local.v1", instance: "local-prod"} end),
-			  secretStore: (if $mode == "svid" then {type: "none.v1", instance: "none-prod", secretStorageStrategy: "svid"}
-			    else {type: "vault.v1", instance: "vault-prod", secretStorageStrategy: "vault-static"} end),
+			  secretStore: (if $mode == "svid" then {type: "none.v1", instance: $store, secretStorageStrategy: "svid"}
+			    else {type: "vault.v1", instance: $store, secretStorageStrategy: "vault-static"} end),
 			  svidSelector: {matchExpr: "path == \"/ligo/plugin/echo\"", allowSharedSvid: true},
 			  config: {data_address: $data, control_address: $control, server_id: "spiffe://prod.lab/ns/lab/sa/echo-server", mode: $mode,
 			    ca_pem: $ca, allowed_endpoints: [$data]}}'

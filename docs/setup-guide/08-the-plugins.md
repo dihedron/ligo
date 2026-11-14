@@ -122,6 +122,14 @@ identityProvider: { type: delegated-dynamic.v1, instance: dynamic-prod }
 secretStore: { type: vault.v1, instance: vault-prod, secretStorageStrategy: vault-dynamic }
 ```
 
+Each credential has a lease, after which the store removes it. The lease and the longest it may be renewed to are, each by itself, the first of these that is set:
+
+1. the platform's `credential_ttl` and `credential_max_ttl`, in its `config`, such as `credential_ttl: 15m` and `credential_max_ttl: 4h`;
+2. `plugins.dynamic_credentials.default_ttl` and `max_ttl` in `server.yaml`;
+3. 1 hour and 24 hours.
+
+Each value is between 1 minute and 720 hours, and the lease must not exceed the maximum: when a platform sets one of the two, check it against the other in force, or set both. A change reaches a binding at its next apply or reconciliation; credentials already issued keep their lease.
+
 ## The OpenLDAP provider
 
 It creates one account per binding in one organizational unit, and PostgreSQL verifies it against the directory.

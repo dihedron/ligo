@@ -4,6 +4,7 @@
   "additionalProperties": false,
   "required": [
     "address",
+    "audience",
     "policy",
     "authMount",
     "role"
@@ -12,6 +13,12 @@
     "address": {
       "type": "string",
       "x-ligo-endpoint": true
+    },
+    "audience": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
     },
     "secretPath": {
       "type": "string"

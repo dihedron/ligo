@@ -283,6 +283,14 @@ type Plugins struct {
 	Retry                        Retry         `yaml:"retry"`
 	MaxConcurrentRPCsPerInstance int           `yaml:"max_concurrent_rpcs_per_instance"`
 	RestartBackoff               Backoff       `yaml:"restart_backoff"`
+	DynamicCredentials           DynamicLease  `yaml:"dynamic_credentials"`
+}
+
+// DynamicLease is the lease of a credential issued on demand, for a
+// platform that sets none of its own (.specs/ligo-postgres-plugin.md §3).
+type DynamicLease struct {
+	DefaultTTL time.Duration `yaml:"default_ttl"`
+	MaxTTL     time.Duration `yaml:"max_ttl"`
 }
 
 type Retry struct {
@@ -431,6 +439,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Plugins.RPCTimeout == 0 {
 		c.Plugins.RPCTimeout = 60 * time.Second // §5.3 rule 6
+	}
+	if c.Plugins.DynamicCredentials.DefaultTTL == 0 {
+		c.Plugins.DynamicCredentials.DefaultTTL = time.Hour
+	}
+	if c.Plugins.DynamicCredentials.MaxTTL == 0 {
+		c.Plugins.DynamicCredentials.MaxTTL = 24 * time.Hour
 	}
 	if c.Plugins.MaxConcurrentRPCsPerInstance == 0 {
 		c.Plugins.MaxConcurrentRPCsPerInstance = 4 // §5.3 rule 7

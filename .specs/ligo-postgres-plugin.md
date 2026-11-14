@@ -26,9 +26,22 @@ As `.specs/ligo-openldap-plugin.md` §2: source in `cmd/plugins/ligo-plugin-post
 | `allowed_endpoints` | yes | Must contain `host:port`. |
 | `bootstrap_credential` | yes | §5.5, `kv_path` only. Its `username` is the admin role of §5. |
 | `ca_pem` | no | PEM text (not a file path, ligo-instances T-22d) of the roots that verify the server and the Vault of `bootstrap_credential`; the system roots when absent. |
+| `credential_ttl` | no | With `DELEGATED_DYNAMIC`: the lease of each credential the store issues, a duration (`90s`, `15m`). When absent, `ligo`'s `plugins.dynamic_credentials.default_ttl`. |
+| `credential_max_ttl` | no | With `DELEGATED_DYNAMIC`: the longest a lease may be renewed to. When absent, `plugins.dynamic_credentials.max_ttl`. |
 | `directory_group` | with `EXTERNAL_DIR` | An identifier: a group role of which every directory-verified role is made a member, so that one `pg_hba.conf` line, `+directory_group`, covers them. |
 
 Connections always use `sslmode=verify-full`, with a 10 s connection timeout, one per call.
+
+**The lease of a dynamic credential.** Each of the two values is resolved by itself, the first that is set winning:
+
+1. the platform's `credential_ttl` or `credential_max_ttl`;
+2. `plugins.dynamic_credentials.default_ttl` or `max_ttl` in `server.yaml`;
+3. the built-in 1 h and 24 h.
+
+- The plugin sends the platform's values in the role it hands to the store, and 0 for a value the platform does not set. The engine fills a 0 from `server.yaml` or the built-in value before the store stage, so the rule holds for any platform plugin.
+- Each value is between 1 minute and 720 hours, checked when the platform is filed and when `server.yaml` is loaded. The global value is a default, not a cap: a platform may set a longer lease.
+- The resolved lease must not exceed the resolved maximum. A platform whose `credential_ttl` is above the maximum in force fails the apply with `INVALID_CREDENTIAL_TTL`, not retryable.
+- A change reaches a binding at its next apply or reconciliation. Leases already issued keep their time.
 
 ## 4. Identifiers and the definition
 
