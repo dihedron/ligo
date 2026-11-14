@@ -20,6 +20,7 @@ const maxBody = 8 << 20
 // and starts no goroutine.
 type Client struct {
 	gen       *gen.Client
+	base      string // the server URL without a trailing slash
 	http      *http.Client
 	log       *slog.Logger
 	userAgent string
@@ -45,11 +46,12 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("adminclient: %w", err)
 	}
-	g, err := gen.NewClient(strings.TrimSuffix(u.String(), "/"), gen.WithHTTPClient(h))
+	base := strings.TrimSuffix(u.String(), "/")
+	g, err := gen.NewClient(base, gen.WithHTTPClient(h))
 	if err != nil {
 		return nil, fmt.Errorf("adminclient: %w", err)
 	}
-	c := &Client{gen: g, http: h, log: cfg.Logger, userAgent: cfg.userAgent(), maxRetries: cfg.MaxRetries, sleep: sleep, jitter: jitter}
+	c := &Client{gen: g, base: base, http: h, log: cfg.Logger, userAgent: cfg.userAgent(), maxRetries: cfg.MaxRetries, sleep: sleep, jitter: jitter}
 	c.getCR, c.getBinding = c.GetChangeRequest, c.GetBinding
 	if cfg.Basic != nil {
 		user, password := cfg.Basic.Username, string(cfg.Basic.Password)
@@ -105,13 +107,14 @@ func (c *Client) editor(_ context.Context, req *http.Request) error {
 // other call is made once (T-A6). Only method, path and status are logged.
 func (c *Client) exec(ctx context.Context, f call, out any) error {
 	var method string
+	_, streaming := out.(io.Writer) // part of the answer may be written already: not repeatable
 	record := func(ctx context.Context, req *http.Request) error {
 		method = req.Method
 		return c.editor(ctx, req)
 	}
 	for attempt := 0; ; attempt++ {
 		err := c.once(ctx, f, record, out)
-		if err == nil || method != http.MethodGet || attempt >= c.maxRetries || !transient(ctx, err) {
+		if err == nil || method != http.MethodGet || streaming || attempt >= c.maxRetries || !transient(ctx, err) {
 			return err
 		}
 		d, ok := c.retryWait(err, attempt)
@@ -134,6 +137,12 @@ func (c *Client) once(ctx context.Context, f call, record gen.RequestEditorFn, o
 	defer func() { _ = resp.Body.Close() }()
 	c.log.LogAttrs(ctx, slog.LevelDebug, "admin API call", slog.String("method", resp.Request.Method), slog.String("path", resp.Request.URL.Path), slog.Int("status", resp.StatusCode))
 
+	if w, ok := out.(io.Writer); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			return fmt.Errorf("adminclient: copying the response: %w", err)
+		}
+		return nil
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	switch {
 	case err != nil:

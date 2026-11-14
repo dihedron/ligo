@@ -92,11 +92,18 @@ func TestDo(t *testing.T) {
 		t.Errorf("echo: %v %v", out, err)
 	}
 	var p *Problem
-	if err := c.Do(ctx, "GET", "/v1/admin/other", nil, nil, nil); !errors.As(err, &p) || p.Status != 502 || p.Detail != "bad gateway" {
+	// a body that is not a problem is reported by its status: a proxy's page never goes into an error
+	if err := c.Do(ctx, "GET", "/v1/admin/other", nil, nil, nil); !errors.As(err, &p) || p.Status != 502 || p.Detail != "" || strings.Contains(err.Error(), "bad gateway") {
 		t.Errorf("not a problem body: %v", err)
 	}
-	c.pass = "wrong"
-	if err := c.Do(ctx, "GET", "/v1/admin/echo", nil, nil, nil); !errors.As(err, &p) || p.Status != 401 ||
+	wrong := filepath.Join(t.TempDir(), "pw")
+	_ = os.WriteFile(wrong, []byte("wrong"), 0o600)
+	c2, err := (&Options{ServerURL: srv.URL, CACert: caFile(t, srv), Username: "olivia", PasswordFile: wrong}).Connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	if err := c2.Do(ctx, "GET", "/v1/admin/echo", nil, nil, nil); !errors.As(err, &p) || p.Status != 401 ||
 		p.Error() != "401 unauthenticated: valid credentials are required" {
 		t.Errorf("problem: %v", err)
 	}

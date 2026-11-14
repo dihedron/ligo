@@ -138,17 +138,21 @@ func (c *Config) tlsConfig() (*tls.Config, error) {
 	if bundles == nil && c.X509Source != nil {
 		bundles = c.X509Source
 	}
+	var tc *tls.Config
 	switch {
 	case c.RootCAs != nil && c.X509Source != nil:
-		return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.RootCAs, GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		tc = &tls.Config{RootCAs: c.RootCAs, GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return tlsconfig.GetCertificate(c.X509Source)(nil)
-		}}, nil
+		}}
 	case c.RootCAs != nil:
-		return &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.RootCAs}, nil
+		tc = &tls.Config{RootCAs: c.RootCAs}
 	case c.X509Source != nil:
-		return tlsconfig.MTLSClientConfig(c.X509Source, bundles, tlsconfig.AuthorizeID(id)), nil
+		tc = tlsconfig.MTLSClientConfig(c.X509Source, bundles, tlsconfig.AuthorizeID(id))
+	default:
+		tc = tlsconfig.TLSClientConfig(bundles, tlsconfig.AuthorizeID(id))
 	}
-	return tlsconfig.TLSClientConfig(bundles, tlsconfig.AuthorizeID(id)), nil
+	tc.MinVersion = tls.VersionTLS13 // the admin API is ligo's own: nothing older is needed
+	return tc, nil
 }
 
 // httpClient builds the client of the calls, with this package's TLS

@@ -1,17 +1,14 @@
-// Package client is the CLI's side of the admin API (§8.4): it connects
-// with an X.509-SVID or LDAP Basic credentials, verifies the server, turns
-// problems into errors and prints results as table, JSON or YAML.
+// Package client is the CLI's side of the admin API (§8.4): its options, the
+// password prompt and the printing of results as table, JSON or YAML. The
+// connection, the verification of the server, the credentials and the mapping
+// of problems are pkg/adminclient's (.specs/ligo-adminclient.md §3.7).
 package client
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,8 +16,8 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
+	"github.com/dihedron/ligo/pkg/adminclient"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
@@ -34,13 +31,14 @@ type Options struct {
 	PasswordFile string `long:"password-file" env:"LIGO_PASSWORD_FILE" description:"File containing the LDAP password (only when server allow_basic_auth is enabled). If omitted and no SPIFFE socket is set, the password is prompted for without echo."`
 }
 
-// Client calls the admin API.
+// Client calls the admin API through pkg/adminclient.
 type Client struct {
-	base       string
-	http       *http.Client
-	user, pass string
-	source     *workloadapi.X509Source
+	*adminclient.Client
+	source *workloadapi.X509Source
 }
+
+// Problem is an RFC 9457 problem from the server (§7.2.3).
+type Problem = adminclient.Problem
 
 // prompt reads the password on a terminal without echo; tests replace it.
 var prompt = func(user string) (string, error) {
@@ -59,8 +57,8 @@ func (o *Options) Connect(ctx context.Context) (*Client, error) {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, fmt.Errorf("client: --server %q: an https:// URL is required", o.ServerURL)
 	}
-	c := &Client{base: strings.TrimSuffix(o.ServerURL, "/")}
-	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
+	cfg := adminclient.Config{ServerURL: strings.TrimSuffix(o.ServerURL, "/"), UserAgent: "ligo",
+		HTTPClient: &http.Client{Timeout: 90 * time.Second}}
 	if o.CACert != "" {
 		pem, err := os.ReadFile(o.CACert)
 		if err != nil {
@@ -71,51 +69,63 @@ func (o *Options) Connect(ctx context.Context) (*Client, error) {
 			return nil, fmt.Errorf("client: --ca-cert %s: no certificate", o.CACert)
 		}
 	}
+	c := &Client{}
 	if o.SpiffeSocket != "" {
 		if c.source, err = workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(o.SpiffeSocket))); err != nil {
 			return nil, fmt.Errorf("client: --spiffe-socket: %w", err)
 		}
-		if cfg, err = o.svidConfig(cfg, c.source); err != nil {
-			c.Close()
-			return nil, err
-		}
 	}
 	if o.Username != "" || o.SpiffeSocket == "" {
-		if c.user, c.pass, err = o.credentials(); err != nil {
+		user, password, err := o.credentials()
+		if err != nil {
 			c.Close()
 			return nil, err
 		}
+		cfg.Basic = &adminclient.BasicAuth{Username: user, Password: adminclient.Secret(password)}
 	}
-	c.http = &http.Client{Timeout: 90 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
+	if err := o.verification(&cfg, c.source); err != nil {
+		c.Close()
+		return nil, err
+	}
+	if cfg.Basic == nil {
+		cfg.X509Source = c.source // the client SVID, over mTLS
+	}
+	if c.Client, err = adminclient.New(cfg); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("client: %w", err)
+	}
 	return c, nil
 }
 
-// svidConfig presents the source's SVID, unless --username asks for Basic
-// credentials; without --ca-cert the server is verified with the source's
-// bundle and must be exactly --server-id.
-func (o *Options) svidConfig(cfg *tls.Config, source *workloadapi.X509Source) (*tls.Config, error) {
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		return nil, fmt.Errorf("client: --spiffe-socket: %w", err)
-	}
-	if cfg.RootCAs != nil {
-		if o.Username == "" {
-			cfg.GetClientCertificate = tlsconfig.GetClientCertificate(source)
+// verification says how the server is verified: with --ca-cert; else, with a
+// socket, by the SPIFFE ID --server-id (by default ligo's, in the trust
+// domain of the SVID) against the source's bundle; else with the system's
+// roots.
+func (o *Options) verification(cfg *adminclient.Config, source *workloadapi.X509Source) error {
+	switch {
+	case cfg.RootCAs != nil:
+		return nil
+	case source == nil:
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			return fmt.Errorf("client: the system's certificates: %w", err)
 		}
-		return cfg, nil
+		cfg.RootCAs = pool
+		return nil
 	}
 	id := o.ServerID
 	if id == "" {
+		svid, err := source.GetX509SVID()
+		if err != nil {
+			return fmt.Errorf("client: --spiffe-socket: %w", err)
+		}
 		id = "spiffe://" + svid.ID.TrustDomain().Name() + "/ns/sys/sa/ligo"
 	}
-	server, err := spiffeid.FromString(id)
-	if err != nil {
-		return nil, fmt.Errorf("client: --server-id %q: %w", id, err)
+	if _, err := spiffeid.FromString(id); err != nil {
+		return fmt.Errorf("client: --server-id %q: %w", id, err)
 	}
-	if o.Username != "" {
-		return tlsconfig.TLSClientConfig(source, tlsconfig.AuthorizeID(server)), nil
-	}
-	return tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeID(server)), nil
+	cfg.ServerID, cfg.Bundles = id, source
+	return nil
 }
 
 // credentials are the LDAP username and the password from --password-file,
@@ -142,73 +152,12 @@ func (o *Options) credentials() (string, string, error) {
 	return o.Username, strings.TrimRight(string(data), "\r\n"), nil
 }
 
-// Close releases the Workload API source.
+// Close releases the connections and the Workload API source.
 func (c *Client) Close() {
+	if c.Client != nil {
+		_ = c.Client.Close()
+	}
 	if c.source != nil {
 		_ = c.source.Close()
 	}
-}
-
-// Problem is an RFC 9457 problem from the server (§7.2.3).
-type Problem struct {
-	Status int    `json:"status"`
-	Type   string `json:"type"`
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-}
-
-func (p *Problem) Error() string {
-	return fmt.Sprintf("%d %s: %s", p.Status, strings.TrimPrefix(p.Type, "urn:ligo:problem:"), p.Detail)
-}
-
-// Do sends body as JSON to path with query and decodes the answer into out
-// (any JSON, when out is *any), or copies it into out when out is an
-// io.Writer, whatever its size; a problem is a *Problem error.
-func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
-	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		rd = bytes.NewReader(b)
-	}
-	target := c.base + path
-	if len(query) > 0 {
-		target += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, method, target, rd)
-	if err != nil {
-		return err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.user != "" {
-		req.SetBasicAuth(c.user, c.pass)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("client: %s %s: %w", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if w, ok := out.(io.Writer); ok && resp.StatusCode < 400 {
-		_, err := io.Copy(w, resp.Body)
-		return err
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 400 {
-		p := &Problem{Status: resp.StatusCode}
-		if json.Unmarshal(data, p) != nil || p.Type == "" {
-			p.Type, p.Detail = "http", strings.TrimSpace(string(data))
-		}
-		return p
-	}
-	if out == nil || len(data) == 0 {
-		return nil
-	}
-	return json.Unmarshal(data, out)
 }
