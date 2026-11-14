@@ -142,7 +142,7 @@ Each chunk ends with `go test ./...`, `make lint`, `make vuln` and `make secrets
 |---|---|
 | 0 | This spec, approved; the backlog rows. |
 | 1 | The contract typed (§3.4b: done for change requests; to do for the instances, sources, targets, bindings and the rest, each with its test), then the generator set-up, `make generate`, the drift check (AC-3, AC-11, AC-12). |
-| 2 | `Config`, `New`, authentication, server verification, errors, bodies (AC-1, AC-2, AC-5, AC-8, AC-9). |
+| 2 | `Config`, `New`, authentication, server verification, errors, bodies (AC-1, AC-2, AC-5, AC-8, AC-9). Written 2026-11-14: `New(Config)` takes no context (it makes no call); `Config` has `Bundles` for the SPIFFE ID check with LDAP credentials; a `Secret` type redacts the password, and the client holds it in a closure so that a copy of a `Client` prints none. |
 | 3 | The operations, pagination, `expectedRevision` (AC-3, AC-4, AC-6), in two steps: the reads, instance reads included (what the provider's data sources need), then the writes, instance filing included (its resources). |
 | 4 | `WaitChangeRequest`, retries, the fuzz targets and the benchmark (AC-7). |
 | 5 | The CLI moved onto the package (AC-10). |
