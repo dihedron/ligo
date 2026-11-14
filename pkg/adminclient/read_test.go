@@ -18,19 +18,12 @@ import (
 const someID = "0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b"
 
 // notYet are the operations of the OpenAPI document that have no method yet:
-// the writes (chunk 3, second step) and the operations whose answers the
-// document does not type yet (chunk 1). TestEveryOperationHasAMethod fails
+// the human decisions and the operations whose answers the document does not
+// type yet (chunk 1). TestEveryOperationHasAMethod fails
 // when one of them gets a method, so that the list only shrinks.
 var notYet = []string{
-	// writes
-	"createSource", "updateSource", "deprecateSource", "reactivateSource", "retireSource",
-	"createTarget", "updateTarget", "deprecateTarget", "reactivateTarget", "retireTarget",
-	"deprecateAccessLevel", "reactivateAccessLevel", "retireAccessLevel", "revokeTargetBindings",
-	"createBinding", "updateBinding", "deleteBinding", "retryBinding", "rotateBinding",
-	"createPlatform", "updatePlatform", "retirePlatform",
-	"createIdentityProvider", "updateIdentityProvider", "retireIdentityProvider",
-	"createSecretStore", "updateSecretStore", "retireSecretStore",
-	"withdrawChangeRequest", "registerAccount", "retireAccount",
+	// writes whose answers the document does not type yet
+	"revokeTargetBindings", "retryBinding", "rotateBinding", "withdrawChangeRequest",
 	// human decisions: never in the package by default (T-A4)
 	"approveChangeRequest", "declineChangeRequest", "ratifyChangeRequest", "revertChangeRequest", "breakGlass",
 	// answers not typed in the document yet
