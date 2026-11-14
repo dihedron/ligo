@@ -153,6 +153,11 @@ func TestOpenAPIEnums(t *testing.T) {
 		"ChangeRequest.consent":     {schemas("ChangeRequest", "properties", "consent"), "consent_rule"},
 		"Side.basis":                {schemas("Side", "properties", "basis"), "approval_basis"},
 		"Side.decision (with null)": {schemas("Side", "properties", "decision"), "side_decision"},
+		"BindingPhase":              {schemas("BindingPhase"), "binding_phase"},
+		"Binding.status.operation":  {schemas("Binding", "properties", "status", "properties", "operation"), "binding_operation"},
+		"Stage.stage":               {schemas("Stage", "properties", "stage"), "binding_stage"},
+		"Stage.status":              {schemas("Stage", "properties", "status"), "stage_status"},
+		"ResourceState":             {schemas("ResourceState"), "lifecycle_state"},
 	} {
 		want := db[tc.db]
 		if len(want) == 0 {
@@ -168,22 +173,7 @@ func TestOpenAPIEnums(t *testing.T) {
 // TestOpenAPIChangeRequest: what the server sends for a change request
 // satisfies the document's schema, in a single read, a filing and a list.
 func TestOpenAPIChangeRequest(t *testing.T) {
-	data, _ := openAPI(t)
-	var asJSON any
-	if err := yaml.Unmarshal(data, &asJSON); err != nil {
-		t.Fatal(err)
-	}
-	c := jsonschema.NewCompiler()
-	if err := c.AddResource("openapi.json", asJSON); err != nil {
-		t.Fatal(err)
-	}
-	compile := func(pointer string) *jsonschema.Schema {
-		sch, err := c.Compile("openapi.json#" + pointer)
-		if err != nil {
-			t.Fatalf("%s: %v", pointer, err)
-		}
-		return sch
-	}
+	compile := compileOpenAPI(t)
 	one := compile("/components/schemas/ChangeRequest")
 	filed := compile("/components/responses/Filed/content/application~1json/schema")
 	page := compile("/components/responses/ChangeRequestPage/content/application~1json/schema")
