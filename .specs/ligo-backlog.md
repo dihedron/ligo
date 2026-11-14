@@ -12,11 +12,11 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
-| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go done 2026-11-14 on `feature/client-sdk` (PR pending): `.specs/ligo-client-sdk.md`; the other languages not started |
-| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open; needs the Go admin client, `.specs/ligo-adminclient.md` (draft) |
+| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; the other languages not started |
+| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
-| 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed; needs the Go admin client, `.specs/ligo-adminclient.md` (draft) |
+| 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
 | 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
