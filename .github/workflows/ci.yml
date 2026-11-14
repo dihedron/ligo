@@ -97,6 +97,11 @@ jobs:
       - name: Lint the OpenAPI document (make openapi-lint)
         run: make openapi-lint
 
+      # the admin API client's generated code is checked in; it must be what
+      # the OpenAPI document generates
+      - name: Check the generated admin client (make generate-check)
+        run: make generate-check
+
       # the roles and the database of §4.1, as operations create them
       - name: Create the database roles
         run: >-

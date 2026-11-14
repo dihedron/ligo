@@ -154,7 +154,7 @@ func TestOpenAPIEnums(t *testing.T) {
 		"Side.basis":                {schemas("Side", "properties", "basis"), "approval_basis"},
 		"Side.decision (with null)": {schemas("Side", "properties", "decision"), "side_decision"},
 		"BindingPhase":              {schemas("BindingPhase"), "binding_phase"},
-		"Binding.status.operation":  {schemas("Binding", "properties", "status", "properties", "operation"), "binding_operation"},
+		"Binding.status.operation":  {schemas("BindingStatus", "properties", "operation"), "binding_operation"},
 		"Stage.stage":               {schemas("Stage", "properties", "stage"), "binding_stage"},
 		"Stage.status":              {schemas("Stage", "properties", "status"), "stage_status"},
 		"ResourceState":             {schemas("ResourceState"), "lifecycle_state"},

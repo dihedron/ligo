@@ -817,6 +817,8 @@ components:
               comment: { type: string }
               side: { type: string }
   schemas:
+    NetworkFlow:
+      $ref: "../schemas/v1alpha1/network-flow.json"
     Problem:
       type: object
       required: [type, title, status]
@@ -909,71 +911,76 @@ components:
     ResourceState:
       type: string
       enum: [ACTIVE, DEPRECATED, RETIRED]
+    SourceSpecMetadata:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string, description: "Derived from the regex (§3.9); ignored on input." }
+        state: { $ref: "#/components/schemas/ResourceState" }
+    SourceSpecIdentity:
+      type: object
+      required: [trustDomain, svidRegex]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
     SourceSpec:
       description: A source as a caller writes it (§3.2); the body of a registration or an update.
       type: object
       required: [metadata, identity]
       properties:
-        kind: { type: string, const: Source }
-        metadata:
-          type: object
-          required: [name]
-          properties:
-            name: { type: string }
-            jurisdiction: { type: string, description: "Derived from the regex (§3.9); ignored on input." }
-            state: { $ref: "#/components/schemas/ResourceState" }
-        identity:
-          type: object
-          required: [trustDomain, svidRegex]
-          properties:
-            trustDomain: { type: string }
-            svidRegex: { type: string }
-            sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
+        kind: { type: string, description: "Always Source." }
+        metadata: { $ref: "#/components/schemas/SourceSpecMetadata" }
+        identity: { $ref: "#/components/schemas/SourceSpecIdentity" }
         displayName: { type: string }
         description: { type: string }
         labels: { type: object, additionalProperties: { type: string } }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
+    SourceMetadata:
+      type: object
+      required: [id, name, jurisdiction, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        jurisdiction: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        revision: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
+    SourceIdentity:
+      type: object
+      required: [trustDomain, svidRegex, sampleSpiffeIds]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
+    ResourceStatus:
+      type: object
+      required: [bindings]
+      properties:
+        bindings: { type: integer, description: "Bindings visible to the caller." }
     Source:
       description: A source as the server returns it (§3.2).
       type: object
       required: [apiVersion, metadata, identity, visibility, status]
       properties:
         apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
-        kind: { type: string, const: Source }
-        metadata:
-          type: object
-          required: [id, name, jurisdiction, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
-          properties:
-            id: { type: string, format: uuid }
-            name: { type: string }
-            jurisdiction: { type: string }
-            state: { $ref: "#/components/schemas/ResourceState" }
-            revision: { type: integer, format: int64 }
-            createdAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time }
-            createdBy: { type: string }
-            updatedBy: { type: string }
-            pendingChangeRequestId: { type: [string, "null"], format: uuid }
-        identity:
-          type: object
-          required: [trustDomain, svidRegex, sampleSpiffeIds]
-          properties:
-            trustDomain: { type: string }
-            svidRegex: { type: string }
-            sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
+        kind: { type: string, description: "Always Source." }
+        metadata: { $ref: "#/components/schemas/SourceMetadata" }
+        identity: { $ref: "#/components/schemas/SourceIdentity" }
         displayName: { type: string }
         description: { type: string }
         labels: { type: object, additionalProperties: { type: string } }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
-        status:
-          type: object
-          required: [bindings]
-          properties:
-            bindings: { type: integer, description: "Bindings visible to the caller." }
+        status: { $ref: "#/components/schemas/ResourceStatus" }
     AccessLevel:
       type: object
       required: [name, grants]
@@ -983,67 +990,65 @@ components:
         grants: { type: object, description: "Platform-specific (the platform type's grants schema)." }
         privileges: { type: array, items: { type: string }, description: "Output of the platform's target validation." }
         state: { $ref: "#/components/schemas/ResourceState" }
+    TargetSpecMetadata:
+      type: object
+      required: [name, platform]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string }
+        platform: { type: string }
     TargetSpec:
       description: A target as a caller writes it (§3.3); the body of a publication or an update.
       type: object
       required: [metadata, definition, accessLevels]
       properties:
-        kind: { type: string, const: Target }
-        metadata:
-          type: object
-          required: [name, platform]
-          properties:
-            name: { type: string }
-            jurisdiction: { type: string }
-            platform: { type: string }
+        kind: { type: string, description: "Always Target." }
+        metadata: { $ref: "#/components/schemas/TargetSpecMetadata" }
         definition: { type: object, description: "Platform-specific (the platform type's target schema)." }
         accessLevels: { type: array, items: { $ref: "#/components/schemas/AccessLevel" } }
-        networkFlows: { type: [array, "null"], items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+        networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
         labels: { type: object, additionalProperties: { type: string } }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
+    TargetMetadata:
+      type: object
+      required: [id, name, jurisdiction, platform, platformType, platformJurisdiction, realm, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        jurisdiction: { type: string }
+        platform: { type: string }
+        platformType: { type: string }
+        platformJurisdiction: { type: string }
+        realm: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        revision: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
     Target:
       description: A target as the server returns it (§3.3).
       type: object
       required: [apiVersion, metadata, definition, accessLevels, visibility, status]
       properties:
         apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
-        kind: { type: string, const: Target }
-        metadata:
-          type: object
-          required: [id, name, jurisdiction, platform, platformType, platformJurisdiction, realm, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
-          properties:
-            id: { type: string, format: uuid }
-            name: { type: string }
-            jurisdiction: { type: string }
-            platform: { type: string }
-            platformType: { type: string }
-            platformJurisdiction: { type: string }
-            realm: { type: string }
-            state: { $ref: "#/components/schemas/ResourceState" }
-            revision: { type: integer, format: int64 }
-            createdAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time }
-            createdBy: { type: string }
-            updatedBy: { type: string }
-            pendingChangeRequestId: { type: [string, "null"], format: uuid }
+        kind: { type: string, description: "Always Target." }
+        metadata: { $ref: "#/components/schemas/TargetMetadata" }
         definition: { type: object, description: "Platform-specific (the platform type's target schema)." }
         accessLevels: { type: array, items: { $ref: "#/components/schemas/AccessLevel" } }
-        networkFlows: { type: [array, "null"], items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+        networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
         labels: { type: object, additionalProperties: { type: string } }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
-        status:
-          type: object
-          required: [bindings]
-          properties:
-            bindings: { type: integer, description: "Bindings visible to the caller." }
+        status: { $ref: "#/components/schemas/ResourceStatus" }
     AuditEntry:
       type: object
       required: [id, action, actor, occurredAt]
@@ -1078,7 +1083,7 @@ components:
       type: object
       required: [name, source, target, accessLevel]
       properties:
-        kind: { type: string, const: Binding }
+        kind: { type: string, description: "Always Binding." }
         name: { type: string }
         source: { type: string, description: "A source's name; with inlineSource, the name it is registered under." }
         target: { type: string }
@@ -1094,37 +1099,77 @@ components:
       properties:
         type: { type: string }
         instance: { type: string }
+    BindingWiring:
+      type: object
+      required: [identityProvider, secretStore]
+      properties:
+        identityProvider: { $ref: "#/components/schemas/InstanceRef" }
+        secretStore: { $ref: "#/components/schemas/InstanceRef" }
+    BindingMetadata:
+      type: object
+      required: [id, name, realm, sourceJurisdiction, targetJurisdiction, platformJurisdiction, platformType, platform, wiring, revision, activeRevision, createdAt, updatedAt, createdBy, updatedBy]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        realm: { type: string }
+        sourceJurisdiction: { type: string }
+        targetJurisdiction: { type: string }
+        platformJurisdiction: { type: string }
+        platformType: { type: string }
+        platform: { type: string }
+        wiring: { $ref: "#/components/schemas/BindingWiring" }
+        revision: { type: integer, format: int64 }
+        activeRevision: { type: [integer, "null"], format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+    BreakGlassStatus:
+      type: object
+      required: [changeRequestId, requestedBy, incidentReference, expiresAt]
+      properties:
+        changeRequestId: { type: string, format: uuid }
+        requestedBy: { type: string }
+        incidentReference: { type: string }
+        expiresAt: { type: string, format: date-time }
+    BindingStatus:
+      type: object
+      required: [phase, operation, attempt, workflowId, currentStep, message, lastTransitionTime, pendingChangeRequestId, propagationPending, breakGlass]
+      properties:
+        phase: { $ref: "#/components/schemas/BindingPhase" }
+        operation: { type: string, enum: [APPLY, REAPPLY, DELETE] }
+        attempt: { type: integer, format: int64 }
+        workflowId: { type: string }
+        currentStep: { type: string }
+        message: { type: string }
+        lastTransitionTime: { type: string, format: date-time }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
+        propagationPending: { type: boolean }
+        breakGlass: { anyOf: [{ $ref: "#/components/schemas/BreakGlassStatus" }, { type: "null" }] }
+    BindingRequested:
+      type: object
+      required: [sourceRevision, targetRevision, trustDomain, svidRegex, spec]
+      properties:
+        sourceRevision: { type: integer, format: int64 }
+        targetRevision: { type: integer, format: int64 }
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        spec: { description: "Platform-specific." }
+    BindingActive:
+      type: object
+      required: [revision, svidRegex, since]
+      properties:
+        revision: { type: integer, format: int64 }
+        svidRegex: { type: string }
+        since: { type: string, format: date-time }
     Binding:
       description: A binding as the server returns it (§3.5).
       type: object
       required: [apiVersion, kind, metadata, source, target, accessLevel, parameters, expiresAt, status, requested, active, auth, spec]
       properties:
         apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
-        kind: { type: string, const: Binding }
-        metadata:
-          type: object
-          required: [id, name, realm, sourceJurisdiction, targetJurisdiction, platformJurisdiction, platformType, platform, wiring, revision, activeRevision, createdAt, updatedAt, createdBy, updatedBy]
-          properties:
-            id: { type: string, format: uuid }
-            name: { type: string }
-            realm: { type: string }
-            sourceJurisdiction: { type: string }
-            targetJurisdiction: { type: string }
-            platformJurisdiction: { type: string }
-            platformType: { type: string }
-            platform: { type: string }
-            wiring:
-              type: object
-              required: [identityProvider, secretStore]
-              properties:
-                identityProvider: { $ref: "#/components/schemas/InstanceRef" }
-                secretStore: { $ref: "#/components/schemas/InstanceRef" }
-            revision: { type: integer, format: int64 }
-            activeRevision: { type: [integer, "null"], format: int64 }
-            createdAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time }
-            createdBy: { type: string }
-            updatedBy: { type: string }
+        kind: { type: string, description: "Always Binding." }
+        metadata: { $ref: "#/components/schemas/BindingMetadata" }
         source: { type: string }
         target: { type: string }
         accessLevel: { type: string }
@@ -1132,43 +1177,9 @@ components:
         purpose: { type: string }
         labels: { type: object, additionalProperties: { type: string } }
         expiresAt: { type: [string, "null"], format: date-time }
-        status:
-          type: object
-          required: [phase, operation, attempt, workflowId, currentStep, message, lastTransitionTime, pendingChangeRequestId, propagationPending, breakGlass]
-          properties:
-            phase: { $ref: "#/components/schemas/BindingPhase" }
-            operation: { type: string, enum: [APPLY, REAPPLY, DELETE] }
-            attempt: { type: integer, format: int64 }
-            workflowId: { type: string }
-            currentStep: { type: string }
-            message: { type: string }
-            lastTransitionTime: { type: string, format: date-time }
-            pendingChangeRequestId: { type: [string, "null"], format: uuid }
-            propagationPending: { type: boolean }
-            breakGlass:
-              type: [object, "null"]
-              required: [changeRequestId, requestedBy, incidentReference, expiresAt]
-              properties:
-                changeRequestId: { type: string, format: uuid }
-                requestedBy: { type: string }
-                incidentReference: { type: string }
-                expiresAt: { type: string, format: date-time }
-        requested:
-          type: object
-          required: [sourceRevision, targetRevision, trustDomain, svidRegex, spec]
-          properties:
-            sourceRevision: { type: integer, format: int64 }
-            targetRevision: { type: integer, format: int64 }
-            trustDomain: { type: string }
-            svidRegex: { type: string }
-            spec: { description: "Platform-specific." }
-        active:
-          type: [object, "null"]
-          required: [revision, svidRegex, since]
-          properties:
-            revision: { type: integer, format: int64 }
-            svidRegex: { type: string }
-            since: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/BindingStatus" }
+        requested: { $ref: "#/components/schemas/BindingRequested" }
+        active: { anyOf: [{ $ref: "#/components/schemas/BindingActive" }, { type: "null" }] }
         auth: { description: "What the workload API hands the workload: the strategy and its store configuration; never a secret." }
         spec: { description: "Platform-specific." }
     Stage:
@@ -1192,35 +1203,37 @@ components:
           properties:
             stages: { type: array, items: { $ref: "#/components/schemas/Stage" } }
             audit: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
-    InstanceKind:
+    DefinitionKind:
       type: string
       enum: [IdentityProvider, SecretStore, Platform]
+    DefinitionMetadata:
+      type: object
+      required: [name, jurisdiction, realm]
+      properties:
+        name: { type: string, description: "Immutable." }
+        jurisdiction: { type: string, description: "Immutable." }
+        realm: { type: string, description: "Immutable." }
+        displayName: { type: string }
+        description: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+    SVIDSelector:
+      type: object
+      required: [matchExpr]
+      properties:
+        matchExpr: { type: string }
+        jwtAudience: { type: array, items: { type: string } }
+        allowSharedSvid: { type: boolean }
     InstanceDefinition:
       description: The definition of an identity provider, a secret store or a platform (.specs/ligo-instances.md §4); the body of a creation or an update. The platform-only fields are refused for the other two kinds.
       type: object
       required: [kind, metadata, type]
       properties:
-        kind: { $ref: "#/components/schemas/InstanceKind" }
-        metadata:
-          type: object
-          required: [name, jurisdiction, realm]
-          properties:
-            name: { type: string, description: "Immutable." }
-            jurisdiction: { type: string, description: "Immutable." }
-            realm: { type: string, description: "Immutable." }
-            displayName: { type: string }
-            description: { type: string }
-            contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        kind: { $ref: "#/components/schemas/DefinitionKind" }
+        metadata: { $ref: "#/components/schemas/DefinitionMetadata" }
         type: { type: string, description: "The plugin type; immutable." }
-        svidSelector:
-          type: object
-          required: [matchExpr]
-          properties:
-            matchExpr: { type: string }
-            jwtAudience: { type: array, items: { type: string } }
-            allowSharedSvid: { type: boolean }
+        svidSelector: { $ref: "#/components/schemas/SVIDSelector" }
         config: { type: object, description: "Plugin-specific (the plugin's instance schema)." }
-        networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
         targetJurisdictions: { type: array, items: { type: string }, description: "Platforms only." }
         namespaceTemplate: { type: string, description: "Platforms only." }
         checkExistence: { type: boolean, description: "Platforms only; default true." }
@@ -1251,17 +1264,23 @@ components:
         displayName: { type: string }
         description: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
-        networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
         revision: { type: integer, format: int64 }
         definition: { $ref: "#/components/schemas/InstanceDefinition" }
         quarantined: { type: boolean, description: "Its row does not verify: it is not in force." }
+    Health:
+      type: object
+      required: [serving]
+      properties:
+        serving: { type: boolean }
+        message: { type: string }
     Platform:
       description: "A platform as §3.4 shows it: no credentials and no plugin configuration beyond the privilege bounds."
       type: object
       required: [apiVersion, kind, name, type, realm, jurisdiction, targetJurisdictions, allowedSourceTrustDomains, networkFlows, identityProvider, secretStore]
       properties:
         apiVersion: { type: string }
-        kind: { type: string, const: Platform }
+        kind: { type: string, description: "Always Platform." }
         name: { type: string }
         type: { type: string }
         realm: { type: string }
@@ -1272,15 +1291,10 @@ components:
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         allowedSourceTrustDomains: { type: array, items: { type: string } }
         privilegeBounds: { type: object, description: "Platform-type specific." }
-        networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
         identityProvider: { $ref: "#/components/schemas/InstanceRef" }
         secretStore: { $ref: "#/components/schemas/InstanceRef" }
-        health:
-          type: object
-          required: [serving]
-          properties:
-            serving: { type: boolean }
-            message: { type: string }
+        health: { $ref: "#/components/schemas/Health" }
         uiSchemas: { type: object, description: "The forms of the platform's plugin, in a single read." }
         revision: { type: integer, format: int64 }
         definition: { $ref: "#/components/schemas/InstanceDefinition" }
@@ -1325,6 +1339,12 @@ components:
       allOf:
         - { $ref: "#/components/schemas/Target" }
         - { type: object, required: [outcomes], properties: { outcomes: { type: array, items: { $ref: "#/components/schemas/Outcome" } } } }
+    AccountCounts:
+      type: object
+      properties:
+        sources: { type: integer }
+        targets: { type: integer }
+        bindings: { type: integer }
     Account:
       description: An account; counts only for a single account read.
       type: object
@@ -1337,12 +1357,7 @@ components:
         registeredAt: { type: string, format: date-time }
         retiredBy: { type: string }
         retiredAt: { type: string, format: date-time }
-        counts:
-          type: object
-          properties:
-            sources: { type: integer }
-            targets: { type: integer }
-            bindings: { type: integer }
+        counts: { $ref: "#/components/schemas/AccountCounts" }
   responses:
     Account:
       description: An account; counts only for a single account read.
@@ -1505,4 +1520,4 @@ components:
           schema:
             type: object
             properties:
-              networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+              networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
