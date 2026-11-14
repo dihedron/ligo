@@ -165,6 +165,16 @@ An instance change needs the approval of a person of its jurisdiction, never an 
 
 A reader sees an instance's summary and, for a platform, its health. Only a person who may file or decide on its jurisdiction also gets its `Revision` and `Definition`: for anyone else they are nil. A tool that reads instances must say what it cannot fill, and for whom. An instance names a bootstrap credential, it does not hold one: the package never logs a definition, in case its `config` holds anything a user put there.
 
+## Operating, containing and auditing
+
+Some operations are not filings of a change. They are made once and never repeated by the client.
+
+- `RetryBinding` and `RotateBinding` start a binding's workflow again and return the binding. The server asks for an operator of one of the binding's jurisdictions.
+- `RevokeTargetBindings` files, for containment, one deletion per binding of a source, or of the sources of a jurisdiction, on a target. A `Comment` is required, and exactly one of `Source` and `SourceJurisdiction`. The answer holds the change requests filed and, apart, the bindings that could not be revoked: a call that filed some and failed others is an answer, not an error, so read `Errors`.
+- `WithdrawChangeRequest` withdraws a pending request of the caller's own, with an optional comment for the audit log.
+- `GetCharter`, `EvaluateCharter` and `TestSourceRegex` are dry runs: they store nothing. `EvaluateCharter` takes a planned binding, source or target as it would be filed, and says which sides the charter would ask for.
+- `GetMaintenance` and `PutMaintenance`, `VerifyAudit`, `ExportAudit`, `RecordAuditExport`, `ListExecutors` and `RecoverExecutor` are the operator's tools, and most of them need `admin.full_access`. A chain that does not verify is a result (`Valid` false), not an error. `ExportAudit` writes JSON Lines to an `io.Writer`; verify the file offline before you record it, and discard it if the call fails: a cut stream is not repeated.
+
 ## What the package does not do
 
 It does not approve, decline, ratify or revert a change request, and it does not break glass: those are decisions of people, and the server enforces who may decide and that the approver is not the requester. A tool that automates filing must leave the decision to people.

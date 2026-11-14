@@ -86,16 +86,16 @@ func (e BindingStatusOperation) Valid() bool {
 
 // Defines values for ChangeRequestConsent.
 const (
-	ALL ChangeRequestConsent = "ALL"
-	ANY ChangeRequestConsent = "ANY"
+	ChangeRequestConsentALL ChangeRequestConsent = "ALL"
+	ChangeRequestConsentANY ChangeRequestConsent = "ANY"
 )
 
 // Valid indicates whether the value is a known member of the ChangeRequestConsent enum.
 func (e ChangeRequestConsent) Valid() bool {
 	switch e {
-	case ALL:
+	case ChangeRequestConsentALL:
 		return true
-	case ANY:
+	case ChangeRequestConsentANY:
 		return true
 	default:
 		return false
@@ -192,6 +192,63 @@ func (e DefinitionKind) Valid() bool {
 	case DefinitionKindPlatform:
 		return true
 	case DefinitionKindSecretStore:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EvaluationConsent.
+const (
+	EvaluationConsentALL EvaluationConsent = "ALL"
+	EvaluationConsentANY EvaluationConsent = "ANY"
+)
+
+// Valid indicates whether the value is a known member of the EvaluationConsent enum.
+func (e EvaluationConsent) Valid() bool {
+	switch e {
+	case EvaluationConsentALL:
+		return true
+	case EvaluationConsentANY:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EvaluationResourceType.
+const (
+	EvaluationResourceTypeBINDING EvaluationResourceType = "BINDING"
+	EvaluationResourceTypeSOURCE  EvaluationResourceType = "SOURCE"
+	EvaluationResourceTypeTARGET  EvaluationResourceType = "TARGET"
+)
+
+// Valid indicates whether the value is a known member of the EvaluationResourceType enum.
+func (e EvaluationResourceType) Valid() bool {
+	switch e {
+	case EvaluationResourceTypeBINDING:
+		return true
+	case EvaluationResourceTypeSOURCE:
+		return true
+	case EvaluationResourceTypeTARGET:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EvaluationInterconnectAction.
+const (
+	Allow EvaluationInterconnectAction = "allow"
+	Deny  EvaluationInterconnectAction = "deny"
+)
+
+// Valid indicates whether the value is a known member of the EvaluationInterconnectAction enum.
+func (e EvaluationInterconnectAction) Valid() bool {
+	switch e {
+	case Allow:
+		return true
+	case Deny:
 		return true
 	default:
 		return false
@@ -511,6 +568,28 @@ type AuditEntry struct {
 	WorkflowId *string                 `json:"workflowId,omitempty"`
 }
 
+// AuditExportRecord defines model for AuditExportRecord.
+type AuditExportRecord struct {
+	// Sha256 Of the exported file.
+	Sha256 string `json:"sha256"`
+
+	// Through The checkpoint the export ends on.
+	Through int64 `json:"through"`
+}
+
+// AuditVerification defines model for AuditVerification.
+type AuditVerification struct {
+	Checkpoints int `json:"checkpoints"`
+
+	// Entries Re-hashed by this pass.
+	Entries int `json:"entries"`
+
+	// FirstBroken The first entry that does not match; present when not valid.
+	FirstBroken *int64 `json:"firstBroken,omitempty"`
+	Full        bool   `json:"full"`
+	Valid       bool   `json:"valid"`
+}
+
 // Binding A binding as the server returns it (§3.5).
 type Binding struct {
 	AccessLevel string         `json:"accessLevel"`
@@ -784,6 +863,12 @@ type ChangeRequestOperation string
 // ChangeRequestStatus PENDING is the only state with a decision to make; every other state is terminal. Kept equal to the database's change_request_status.
 type ChangeRequestStatus string
 
+// Charter The charter in force, as the canonical JSON its SHA-256 is computed over.
+type Charter struct {
+	Policy map[string]interface{} `json:"policy"`
+	Sha256 string                 `json:"sha256"`
+}
+
 // Contact defines model for Contact.
 type Contact struct {
 	Email *string `json:"email,omitempty"`
@@ -807,6 +892,59 @@ type DefinitionMetadata struct {
 
 	// Realm Immutable.
 	Realm string `json:"realm"`
+}
+
+// Evaluation The charter outcome of a planned creation.
+type Evaluation struct {
+	Consent       EvaluationConsent       `json:"consent"`
+	Interconnect  *EvaluationInterconnect `json:"interconnect"`
+	Jurisdictions map[string]string       `json:"jurisdictions"`
+	Name          string                  `json:"name"`
+	NamePrefix    EvaluationNameCheck     `json:"namePrefix"`
+	ResourceType  EvaluationResourceType  `json:"resourceType"`
+	Sides         []Side                  `json:"sides"`
+}
+
+// EvaluationConsent defines model for Evaluation.Consent.
+type EvaluationConsent string
+
+// EvaluationResourceType defines model for Evaluation.ResourceType.
+type EvaluationResourceType string
+
+// EvaluationInterconnect defines model for EvaluationInterconnect.
+type EvaluationInterconnect struct {
+	Action EvaluationInterconnectAction `json:"action"`
+
+	// Rule The deciding rule, or default.
+	Rule string `json:"rule"`
+}
+
+// EvaluationInterconnectAction defines model for EvaluationInterconnect.Action.
+type EvaluationInterconnectAction string
+
+// EvaluationNameCheck defines model for EvaluationNameCheck.
+type EvaluationNameCheck struct {
+	Detail *string `json:"detail,omitempty"`
+	Valid  bool    `json:"valid"`
+}
+
+// Executor An executor's pending workflows of one application version, or, with none pending, only its live sessions.
+type Executor struct {
+	ApplicationVersion *string    `json:"applicationVersion,omitempty"`
+	Executor           string     `json:"executor"`
+	LiveSessions       int        `json:"liveSessions"`
+	OldestPending      *time.Time `json:"oldestPending,omitempty"`
+	Pending            int        `json:"pending"`
+	Self               bool       `json:"self"`
+}
+
+// ExecutorRecovery defines model for ExecutorRecovery.
+type ExecutorRecovery struct {
+	Executor string `json:"executor"`
+
+	// OtherVersions Pending workflows of another application version, left alone.
+	OtherVersions int `json:"otherVersions"`
+	Recovered     int `json:"recovered"`
 }
 
 // Health defines model for Health.
@@ -882,6 +1020,24 @@ type InstanceDefinition struct {
 type InstanceRef struct {
 	Instance string `json:"instance"`
 	Type     string `json:"type"`
+}
+
+// Maintenance defines model for Maintenance.
+type Maintenance struct {
+	ChangedAt         *time.Time `json:"changedAt"`
+	ChangedBy         string     `json:"changedBy"`
+	InFlight          int        `json:"inFlight"`
+	MaintenanceMode   bool       `json:"maintenanceMode"`
+	PropagationQueued int        `json:"propagationQueued"`
+	Reason            string     `json:"reason"`
+}
+
+// MaintenanceRequest defines model for MaintenanceRequest.
+type MaintenanceRequest struct {
+	Enabled bool `json:"enabled"`
+
+	// Reason Required when enabling.
+	Reason *string `json:"reason,omitempty"`
 }
 
 // NetworkFlow defines model for NetworkFlow.
@@ -981,6 +1137,29 @@ type ResourceStatus struct {
 
 // ResourceType What a change request changes. Kept equal to the database's resource_type by the contract test.
 type ResourceType string
+
+// Revocation defines model for Revocation.
+type Revocation struct {
+	ChangeRequests []ChangeRequest `json:"changeRequests"`
+	Errors         []RevokeFailure `json:"errors"`
+}
+
+// RevokeFailure A binding that could not be revoked, with its problem.
+type RevokeFailure struct {
+	Binding string `json:"binding"`
+	Detail  string `json:"detail"`
+	Type    string `json:"type"`
+}
+
+// RevokeRequest defines model for RevokeRequest.
+type RevokeRequest struct {
+	ApprovalReference *string `json:"approvalReference,omitempty"`
+	Comment           string  `json:"comment"`
+	Source            *string `json:"source,omitempty"`
+
+	// SourceJurisdiction A jurisdiction pattern.
+	SourceJurisdiction *string `json:"sourceJurisdiction,omitempty"`
+}
 
 // SVIDSelector defines model for SVIDSelector.
 type SVIDSelector struct {
@@ -1096,6 +1275,42 @@ type SourceSpecMetadata struct {
 	Jurisdiction *string        `json:"jurisdiction,omitempty"`
 	Name         string         `json:"name"`
 	State        *ResourceState `json:"state,omitempty"`
+}
+
+// SourceTestNarrowing defines model for SourceTestNarrowing.
+type SourceTestNarrowing struct {
+	DroppedSamples []string `json:"droppedSamples"`
+	Narrower       bool     `json:"narrower"`
+	Undecided      *bool    `json:"undecided,omitempty"`
+	Witness        *string  `json:"witness,omitempty"`
+}
+
+// SourceTestOverlap defines model for SourceTestOverlap.
+type SourceTestOverlap struct {
+	Source    string `json:"source"`
+	Undecided *bool  `json:"undecided,omitempty"`
+
+	// Witness An identity both match.
+	Witness *string `json:"witness,omitempty"`
+}
+
+// SourceTestRequest defines model for SourceTestRequest.
+type SourceTestRequest struct {
+	// CurrentSource A source whose narrowing to check.
+	CurrentSource *string   `json:"currentSource,omitempty"`
+	SpiffeIds     *[]string `json:"spiffeIds,omitempty"`
+	SvidRegex     string    `json:"svidRegex"`
+	TrustDomain   string    `json:"trustDomain"`
+}
+
+// SourceTestResult What the regex tester finds; nothing is stored.
+type SourceTestResult struct {
+	Error        *string              `json:"error,omitempty"`
+	Jurisdiction *string              `json:"jurisdiction,omitempty"`
+	Matches      map[string]bool      `json:"matches"`
+	Narrowing    *SourceTestNarrowing `json:"narrowing,omitempty"`
+	Overlaps     []SourceTestOverlap  `json:"overlaps"`
+	Valid        bool                 `json:"valid"`
 }
 
 // Stage defines model for Stage.
@@ -1228,6 +1443,12 @@ type Wiring struct {
 	Type                  string  `json:"type"`
 }
 
+// WithdrawRequest defines model for WithdrawRequest.
+type WithdrawRequest struct {
+	// Comment Why; kept in the audit log.
+	Comment *string `json:"comment,omitempty"`
+}
+
 // Id defines model for id.
 type Id = openapi_types.UUID
 
@@ -1270,14 +1491,26 @@ type AccountPage struct {
 	NextPageToken *string   `json:"nextPageToken,omitempty"`
 }
 
+// AuditExportRecorded defines model for AuditExportRecorded.
+type AuditExportRecorded = AuditExportRecord
+
 // AuditPage defines model for AuditPage.
 type AuditPage struct {
 	Items         []AuditEntry `json:"items"`
 	NextPageToken *string      `json:"nextPageToken,omitempty"`
 }
 
+// AuditVerificationResponse defines model for AuditVerification.
+type AuditVerificationResponse = AuditVerification
+
 // BindingResponse A binding with its stage states and last 20 audit entries.
 type BindingResponse = BindingDetail
+
+// BindingOperated defines model for BindingOperated.
+type BindingOperated struct {
+	// Binding A binding as the server returns it (§3.5).
+	Binding Binding `json:"binding"`
+}
 
 // BindingPage defines model for BindingPage.
 type BindingPage struct {
@@ -1309,6 +1542,20 @@ type ChangeRequestPage struct {
 	NextPageToken *string         `json:"nextPageToken,omitempty"`
 }
 
+// Decided defines model for Decided.
+type Decided struct {
+	// ChangeRequest A change request (§7.2.3). Its terminal states are every status but PENDING.
+	ChangeRequest ChangeRequest `json:"changeRequest"`
+}
+
+// ExecutorList defines model for ExecutorList.
+type ExecutorList struct {
+	Items []Executor `json:"items"`
+}
+
+// ExecutorRecovered defines model for ExecutorRecovered.
+type ExecutorRecovered = ExecutorRecovery
+
 // Filed defines model for Filed.
 type Filed struct {
 	// ChangeRequest A change request (§7.2.3). Its terminal states are every status but PENDING.
@@ -1336,14 +1583,11 @@ type InstancePage struct {
 	Items []Instance `json:"items"`
 }
 
+// MaintenanceResponse defines model for Maintenance.
+type MaintenanceResponse = Maintenance
+
 // Object defines model for Object.
 type Object = map[string]interface{}
-
-// Page defines model for Page.
-type Page struct {
-	Items         []map[string]interface{} `json:"items"`
-	NextPageToken *string                  `json:"nextPageToken,omitempty"`
-}
 
 // PlatformResponse A platform as §3.4 shows it: no credentials and no plugin configuration beyond the privilege bounds.
 type PlatformResponse = Platform
@@ -1356,6 +1600,9 @@ type PlatformPage struct {
 // ProblemResponse defines model for Problem.
 type ProblemResponse = Problem
 
+// Revoked defines model for Revoked.
+type Revoked = Revocation
+
 // SourceResponse A source with its last 20 audit entries, newest first.
 type SourceResponse = SourceDetail
 
@@ -1364,6 +1611,9 @@ type SourcePage struct {
 	Items         []Source `json:"items"`
 	NextPageToken *string  `json:"nextPageToken,omitempty"`
 }
+
+// SourceTest What the regex tester finds; nothing is stored.
+type SourceTest = SourceTestResult
 
 // TargetResponse A target with its last 20 audit entries, newest first.
 type TargetResponse = TargetDetail
@@ -1518,15 +1768,6 @@ type RegisterAccountJSONBody struct {
 type ExportAuditParams struct {
 	// Through A checkpoint's audit entry id; the newest checkpoint when absent.
 	Through *int64 `form:"through,omitempty" json:"through,omitempty"`
-}
-
-// RecordAuditExportJSONBody defines parameters for RecordAuditExport.
-type RecordAuditExportJSONBody struct {
-	// Sha256 Of the exported file.
-	Sha256 string `json:"sha256"`
-
-	// Through The checkpoint the export ends on.
-	Through int64 `json:"through"`
 }
 
 // VerifyAuditParams defines parameters for VerifyAudit.
@@ -1896,14 +2137,6 @@ type IdentityProviderAuditParams struct {
 	PageToken *PageToken `form:"pageToken,omitempty" json:"pageToken,omitempty"`
 }
 
-// PutMaintenanceJSONBody defines parameters for PutMaintenance.
-type PutMaintenanceJSONBody struct {
-	Enabled bool `json:"enabled"`
-
-	// Reason Required when enabling.
-	Reason *string `json:"reason,omitempty"`
-}
-
 // CreatePlatformJSONBody defines parameters for CreatePlatform.
 type CreatePlatformJSONBody struct {
 	// AllowedSourceTrustDomains Platforms only.
@@ -2188,15 +2421,6 @@ type CreateSource202JSONResponseBody_Resource struct {
 	union json.RawMessage
 }
 
-// TestSourceRegexJSONBody defines parameters for TestSourceRegex.
-type TestSourceRegexJSONBody struct {
-	// CurrentSource A source whose narrowing to check.
-	CurrentSource *string   `json:"currentSource,omitempty"`
-	SpiffeIds     *[]string `json:"spiffeIds,omitempty"`
-	SvidRegex     string    `json:"svidRegex"`
-	TrustDomain   string    `json:"trustDomain"`
-}
-
 // UpdateSourceJSONBody defines parameters for UpdateSource.
 type UpdateSourceJSONBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
@@ -2396,16 +2620,6 @@ type ListTargetBindingsParams struct {
 	PageToken *PageToken `form:"pageToken,omitempty" json:"pageToken,omitempty"`
 }
 
-// RevokeTargetBindingsJSONBody defines parameters for RevokeTargetBindings.
-type RevokeTargetBindingsJSONBody struct {
-	ApprovalReference *string `json:"approvalReference,omitempty"`
-	Comment           string  `json:"comment"`
-	Source            *string `json:"source,omitempty"`
-
-	// SourceJurisdiction A jurisdiction pattern.
-	SourceJurisdiction *string `json:"sourceJurisdiction,omitempty"`
-}
-
 // DeprecateTargetJSONBody defines parameters for DeprecateTarget.
 type DeprecateTargetJSONBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
@@ -2446,7 +2660,7 @@ type RetireTarget202JSONResponseBody_Resource struct {
 type RegisterAccountJSONRequestBody RegisterAccountJSONBody
 
 // RecordAuditExportJSONRequestBody defines body for RecordAuditExport for application/json ContentType.
-type RecordAuditExportJSONRequestBody RecordAuditExportJSONBody
+type RecordAuditExportJSONRequestBody = AuditExportRecord
 
 // CreateBindingJSONRequestBody defines body for CreateBinding for application/json ContentType.
 type CreateBindingJSONRequestBody CreateBindingJSONBody
@@ -2472,6 +2686,9 @@ type RatifyChangeRequestJSONRequestBody RatifyChangeRequestJSONBody
 // RevertChangeRequestJSONRequestBody defines body for RevertChangeRequest for application/json ContentType.
 type RevertChangeRequestJSONRequestBody RevertChangeRequestJSONBody
 
+// WithdrawChangeRequestJSONRequestBody defines body for WithdrawChangeRequest for application/json ContentType.
+type WithdrawChangeRequestJSONRequestBody = WithdrawRequest
+
 // EvaluateCharterJSONRequestBody defines body for EvaluateCharter for application/json ContentType.
 type EvaluateCharterJSONRequestBody EvaluateCharterJSONBody
 
@@ -2485,7 +2702,7 @@ type RetireIdentityProviderJSONRequestBody RetireIdentityProviderJSONBody
 type UpdateIdentityProviderJSONRequestBody UpdateIdentityProviderJSONBody
 
 // PutMaintenanceJSONRequestBody defines body for PutMaintenance for application/json ContentType.
-type PutMaintenanceJSONRequestBody PutMaintenanceJSONBody
+type PutMaintenanceJSONRequestBody = MaintenanceRequest
 
 // CreatePlatformJSONRequestBody defines body for CreatePlatform for application/json ContentType.
 type CreatePlatformJSONRequestBody CreatePlatformJSONBody
@@ -2509,7 +2726,7 @@ type UpdateSecretStoreJSONRequestBody UpdateSecretStoreJSONBody
 type CreateSourceJSONRequestBody CreateSourceJSONBody
 
 // TestSourceRegexJSONRequestBody defines body for TestSourceRegex for application/json ContentType.
-type TestSourceRegexJSONRequestBody TestSourceRegexJSONBody
+type TestSourceRegexJSONRequestBody = SourceTestRequest
 
 // UpdateSourceJSONRequestBody defines body for UpdateSource for application/json ContentType.
 type UpdateSourceJSONRequestBody UpdateSourceJSONBody
@@ -2539,7 +2756,7 @@ type ReactivateAccessLevelJSONRequestBody ReactivateAccessLevelJSONBody
 type RetireAccessLevelJSONRequestBody RetireAccessLevelJSONBody
 
 // RevokeTargetBindingsJSONRequestBody defines body for RevokeTargetBindings for application/json ContentType.
-type RevokeTargetBindingsJSONRequestBody RevokeTargetBindingsJSONBody
+type RevokeTargetBindingsJSONRequestBody = RevokeRequest
 
 // DeprecateTargetJSONRequestBody defines body for DeprecateTarget for application/json ContentType.
 type DeprecateTargetJSONRequestBody DeprecateTargetJSONBody
@@ -5512,10 +5729,19 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/admin/change-requests/{id}/revert (the `RevertChangeRequest` operationId).
 	RevertChangeRequest(ctx context.Context, id Id, body RevertChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// WithdrawChangeRequest Withdraw a PENDING change request (requester only).
+	// WithdrawChangeRequestWithBody Withdraw a PENDING change request (requester only).
+	//
+	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
-	WithdrawChangeRequest(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error)
+	WithdrawChangeRequestWithBody(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// WithdrawChangeRequest Withdraw a PENDING change request (requester only).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
+	WithdrawChangeRequest(ctx context.Context, id Id, body WithdrawChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetCharter The charter in force, as the canonical JSON its SHA-256 is computed over (§8.2).
 	//
@@ -6605,11 +6831,30 @@ func (c *Client) RevertChangeRequest(ctx context.Context, id Id, body RevertChan
 	return c.Client.Do(req)
 }
 
-// WithdrawChangeRequest Withdraw a PENDING change request (requester only).
+// WithdrawChangeRequestWithBody Withdraw a PENDING change request (requester only).
+//
+// Takes any type of body and a specified content type.
 //
 // Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
-func (c *Client) WithdrawChangeRequest(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewWithdrawChangeRequestRequest(c.Server, id)
+func (c *Client) WithdrawChangeRequestWithBody(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWithdrawChangeRequestRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// WithdrawChangeRequest Withdraw a PENDING change request (requester only).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
+func (c *Client) WithdrawChangeRequest(ctx context.Context, id Id, body WithdrawChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWithdrawChangeRequestRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9482,8 +9727,19 @@ func NewRevertChangeRequestRequestWithBody(server string, id Id, contentType str
 	return req, nil
 }
 
-// NewWithdrawChangeRequestRequest constructs an http.Request for the WithdrawChangeRequest method
-func NewWithdrawChangeRequestRequest(server string, id Id) (*http.Request, error) {
+// NewWithdrawChangeRequestRequest calls the generic WithdrawChangeRequest builder with application/json body
+func NewWithdrawChangeRequestRequest(server string, id Id, body WithdrawChangeRequestJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewWithdrawChangeRequestRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewWithdrawChangeRequestRequestWithBody constructs an http.Request for the WithdrawChangeRequest method, with any body, and a specified content type
+func NewWithdrawChangeRequestRequestWithBody(server string, id Id, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -9508,10 +9764,12 @@ func NewWithdrawChangeRequestRequest(server string, id Id) (*http.Request, error
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -12231,12 +12489,19 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/admin/change-requests/{id}/revert (the `RevertChangeRequest` operationId).
 	RevertChangeRequestWithResponse(ctx context.Context, id Id, body RevertChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*RevertChangeRequestResponse, error)
 
-	// WithdrawChangeRequestWithResponse Withdraw a PENDING change request (requester only).
+	// WithdrawChangeRequestWithBodyWithResponse Withdraw a PENDING change request (requester only).
 	//
-	// Returns a wrapper object for the known response body format(s).
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
-	WithdrawChangeRequestWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error)
+	WithdrawChangeRequestWithBodyWithResponse(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error)
+
+	// WithdrawChangeRequestWithResponse Withdraw a PENDING change request (requester only).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
+	WithdrawChangeRequestWithResponse(ctx context.Context, id Id, body WithdrawChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error)
 
 	// GetCharterWithResponse The charter in force, as the canonical JSON its SHA-256 is computed over (§8.2).
 	//
@@ -13022,7 +13287,7 @@ type RecordAuditExportResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON201 the response for an HTTP 201 `application/json` response
-	JSON201 *Object
+	JSON201 *AuditExportRecorded
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -13030,7 +13295,7 @@ type RecordAuditExportResponse struct {
 }
 
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
-func (r RecordAuditExportResponse) GetJSON201() *Object {
+func (r RecordAuditExportResponse) GetJSON201() *AuditExportRecorded {
 	return r.JSON201
 }
 
@@ -13077,7 +13342,7 @@ type VerifyAuditResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *AuditVerificationResponse
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -13085,7 +13350,7 @@ type VerifyAuditResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r VerifyAuditResponse) GetJSON200() *Object {
+func (r VerifyAuditResponse) GetJSON200() *AuditVerificationResponse {
 	return r.JSON200
 }
 
@@ -13524,7 +13789,7 @@ type RetryBindingResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
-	JSON202 *Object
+	JSON202 *BindingOperated
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -13532,7 +13797,7 @@ type RetryBindingResponse struct {
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
-func (r RetryBindingResponse) GetJSON202() *Object {
+func (r RetryBindingResponse) GetJSON202() *BindingOperated {
 	return r.JSON202
 }
 
@@ -13579,7 +13844,7 @@ type RotateBindingResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
-	JSON202 *Object
+	JSON202 *BindingOperated
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -13587,7 +13852,7 @@ type RotateBindingResponse struct {
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
-func (r RotateBindingResponse) GetJSON202() *Object {
+func (r RotateBindingResponse) GetJSON202() *BindingOperated {
 	return r.JSON202
 }
 
@@ -13634,7 +13899,7 @@ type ListBreakGlassResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Page
+	JSON200 *ChangeRequestPage
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -13642,7 +13907,7 @@ type ListBreakGlassResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ListBreakGlassResponse) GetJSON200() *Page {
+func (r ListBreakGlassResponse) GetJSON200() *ChangeRequestPage {
 	return r.JSON200
 }
 
@@ -14294,7 +14559,7 @@ type WithdrawChangeRequestResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *Decided
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14302,7 +14567,7 @@ type WithdrawChangeRequestResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r WithdrawChangeRequestResponse) GetJSON200() *Object {
+func (r WithdrawChangeRequestResponse) GetJSON200() *Decided {
 	return r.JSON200
 }
 
@@ -14349,10 +14614,7 @@ type GetCharterResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *struct {
-		Policy map[string]interface{} `json:"policy"`
-		Sha256 string                 `json:"sha256"`
-	}
+	JSON200 *Charter
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14360,10 +14622,7 @@ type GetCharterResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetCharterResponse) GetJSON200() *struct {
-	Policy map[string]interface{} `json:"policy"`
-	Sha256 string                 `json:"sha256"`
-} {
+func (r GetCharterResponse) GetJSON200() *Charter {
 	return r.JSON200
 }
 
@@ -14410,21 +14669,7 @@ type EvaluateCharterResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *struct {
-		Consent      interface{} `json:"consent,omitempty"`
-		Interconnect *struct {
-			Action interface{} `json:"action,omitempty"`
-			Rule   *string     `json:"rule,omitempty"`
-		} `json:"interconnect,omitempty"`
-		Jurisdictions *map[string]string `json:"jurisdictions,omitempty"`
-		Name          *string            `json:"name,omitempty"`
-		NamePrefix    *struct {
-			Detail *string `json:"detail,omitempty"`
-			Valid  *bool   `json:"valid,omitempty"`
-		} `json:"namePrefix,omitempty"`
-		ResourceType interface{} `json:"resourceType,omitempty"`
-		Sides        *[]Side     `json:"sides,omitempty"`
-	}
+	JSON200 *Evaluation
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14432,21 +14677,7 @@ type EvaluateCharterResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r EvaluateCharterResponse) GetJSON200() *struct {
-	Consent      interface{} `json:"consent,omitempty"`
-	Interconnect *struct {
-		Action interface{} `json:"action,omitempty"`
-		Rule   *string     `json:"rule,omitempty"`
-	} `json:"interconnect,omitempty"`
-	Jurisdictions *map[string]string `json:"jurisdictions,omitempty"`
-	Name          *string            `json:"name,omitempty"`
-	NamePrefix    *struct {
-		Detail *string `json:"detail,omitempty"`
-		Valid  *bool   `json:"valid,omitempty"`
-	} `json:"namePrefix,omitempty"`
-	ResourceType interface{} `json:"resourceType,omitempty"`
-	Sides        *[]Side     `json:"sides,omitempty"`
-} {
+func (r EvaluateCharterResponse) GetJSON200() *Evaluation {
 	return r.JSON200
 }
 
@@ -14493,7 +14724,7 @@ type ListExecutorsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *ExecutorList
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14501,7 +14732,7 @@ type ListExecutorsResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ListExecutorsResponse) GetJSON200() *Object {
+func (r ListExecutorsResponse) GetJSON200() *ExecutorList {
 	return r.JSON200
 }
 
@@ -14548,7 +14779,7 @@ type RecoverExecutorResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *ExecutorRecovered
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14556,7 +14787,7 @@ type RecoverExecutorResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r RecoverExecutorResponse) GetJSON200() *Object {
+func (r RecoverExecutorResponse) GetJSON200() *ExecutorRecovered {
 	return r.JSON200
 }
 
@@ -14933,14 +15164,7 @@ type GetMaintenanceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *struct {
-		ChangedAt         *time.Time `json:"changedAt,omitempty"`
-		ChangedBy         *string    `json:"changedBy,omitempty"`
-		InFlight          *int       `json:"inFlight,omitempty"`
-		MaintenanceMode   *bool      `json:"maintenanceMode,omitempty"`
-		PropagationQueued *int       `json:"propagationQueued,omitempty"`
-		Reason            *string    `json:"reason,omitempty"`
-	}
+	JSON200 *MaintenanceResponse
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -14948,14 +15172,7 @@ type GetMaintenanceResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetMaintenanceResponse) GetJSON200() *struct {
-	ChangedAt         *time.Time `json:"changedAt,omitempty"`
-	ChangedBy         *string    `json:"changedBy,omitempty"`
-	InFlight          *int       `json:"inFlight,omitempty"`
-	MaintenanceMode   *bool      `json:"maintenanceMode,omitempty"`
-	PropagationQueued *int       `json:"propagationQueued,omitempty"`
-	Reason            *string    `json:"reason,omitempty"`
-} {
+func (r GetMaintenanceResponse) GetJSON200() *MaintenanceResponse {
 	return r.JSON200
 }
 
@@ -15002,7 +15219,7 @@ type PutMaintenanceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *MaintenanceResponse
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -15010,7 +15227,7 @@ type PutMaintenanceResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r PutMaintenanceResponse) GetJSON200() *Object {
+func (r PutMaintenanceResponse) GetJSON200() *MaintenanceResponse {
 	return r.JSON200
 }
 
@@ -15827,7 +16044,7 @@ type TestSourceRegexResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Object
+	JSON200 *SourceTest
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -15835,7 +16052,7 @@ type TestSourceRegexResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r TestSourceRegexResponse) GetJSON200() *Object {
+func (r TestSourceRegexResponse) GetJSON200() *SourceTest {
 	return r.JSON200
 }
 
@@ -16762,7 +16979,7 @@ type RevokeTargetBindingsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
-	JSON202 *Object
+	JSON202 *Revoked
 	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
 	ApplicationproblemJSON4XX *ProblemResponse
 	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
@@ -16770,7 +16987,7 @@ type RevokeTargetBindingsResponse struct {
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
-func (r RevokeTargetBindingsResponse) GetJSON202() *Object {
+func (r RevokeTargetBindingsResponse) GetJSON202() *Revoked {
 	return r.JSON202
 }
 
@@ -17480,13 +17697,26 @@ func (c *ClientWithResponses) RevertChangeRequestWithResponse(ctx context.Contex
 	return ParseRevertChangeRequestResponse(rsp)
 }
 
-// WithdrawChangeRequestWithResponse Withdraw a PENDING change request (requester only).
+// WithdrawChangeRequestWithBodyWithResponse Withdraw a PENDING change request (requester only).
 //
-// Returns a wrapper object for the known response body format(s).
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
-func (c *ClientWithResponses) WithdrawChangeRequestWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error) {
-	rsp, err := c.WithdrawChangeRequest(ctx, id, reqEditors...)
+func (c *ClientWithResponses) WithdrawChangeRequestWithBodyWithResponse(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error) {
+	rsp, err := c.WithdrawChangeRequestWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWithdrawChangeRequestResponse(rsp)
+}
+
+// WithdrawChangeRequestWithResponse Withdraw a PENDING change request (requester only).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/change-requests/{id}/withdraw (the `WithdrawChangeRequest` operationId).
+func (c *ClientWithResponses) WithdrawChangeRequestWithResponse(ctx context.Context, id Id, body WithdrawChangeRequestJSONRequestBody, reqEditors ...RequestEditorFn) (*WithdrawChangeRequestResponse, error) {
+	rsp, err := c.WithdrawChangeRequest(ctx, id, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -18650,7 +18880,7 @@ func ParseRecordAuditExportResponse(rsp *http.Response) (*RecordAuditExportRespo
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest Object
+		var dest AuditExportRecorded
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -18690,7 +18920,7 @@ func ParseVerifyAuditResponse(rsp *http.Response) (*VerifyAuditResponse, error) 
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest AuditVerificationResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19017,7 +19247,7 @@ func ParseRetryBindingResponse(rsp *http.Response) (*RetryBindingResponse, error
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest Object
+		var dest BindingOperated
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19057,7 +19287,7 @@ func ParseRotateBindingResponse(rsp *http.Response) (*RotateBindingResponse, err
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest Object
+		var dest BindingOperated
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19097,7 +19327,7 @@ func ParseListBreakGlassResponse(rsp *http.Response) (*ListBreakGlassResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Page
+		var dest ChangeRequestPage
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19577,7 +19807,7 @@ func ParseWithdrawChangeRequestResponse(rsp *http.Response) (*WithdrawChangeRequ
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest Decided
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19617,10 +19847,7 @@ func ParseGetCharterResponse(rsp *http.Response) (*GetCharterResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Policy map[string]interface{} `json:"policy"`
-			Sha256 string                 `json:"sha256"`
-		}
+		var dest Charter
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19660,21 +19887,7 @@ func ParseEvaluateCharterResponse(rsp *http.Response) (*EvaluateCharterResponse,
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Consent      interface{} `json:"consent,omitempty"`
-			Interconnect *struct {
-				Action interface{} `json:"action,omitempty"`
-				Rule   *string     `json:"rule,omitempty"`
-			} `json:"interconnect,omitempty"`
-			Jurisdictions *map[string]string `json:"jurisdictions,omitempty"`
-			Name          *string            `json:"name,omitempty"`
-			NamePrefix    *struct {
-				Detail *string `json:"detail,omitempty"`
-				Valid  *bool   `json:"valid,omitempty"`
-			} `json:"namePrefix,omitempty"`
-			ResourceType interface{} `json:"resourceType,omitempty"`
-			Sides        *[]Side     `json:"sides,omitempty"`
-		}
+		var dest Evaluation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19714,7 +19927,7 @@ func ParseListExecutorsResponse(rsp *http.Response) (*ListExecutorsResponse, err
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest ExecutorList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -19754,7 +19967,7 @@ func ParseRecoverExecutorResponse(rsp *http.Response) (*RecoverExecutorResponse,
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest ExecutorRecovered
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -20034,14 +20247,7 @@ func ParseGetMaintenanceResponse(rsp *http.Response) (*GetMaintenanceResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			ChangedAt         *time.Time `json:"changedAt,omitempty"`
-			ChangedBy         *string    `json:"changedBy,omitempty"`
-			InFlight          *int       `json:"inFlight,omitempty"`
-			MaintenanceMode   *bool      `json:"maintenanceMode,omitempty"`
-			PropagationQueued *int       `json:"propagationQueued,omitempty"`
-			Reason            *string    `json:"reason,omitempty"`
-		}
+		var dest MaintenanceResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -20081,7 +20287,7 @@ func ParsePutMaintenanceResponse(rsp *http.Response) (*PutMaintenanceResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest MaintenanceResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -20681,7 +20887,7 @@ func ParseTestSourceRegexResponse(rsp *http.Response) (*TestSourceRegexResponse,
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Object
+		var dest SourceTest
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -21361,7 +21567,7 @@ func ParseRevokeTargetBindingsResponse(rsp *http.Response) (*RevokeTargetBinding
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest Object
+		var dest Revoked
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

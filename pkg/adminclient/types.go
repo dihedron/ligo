@@ -45,3 +45,18 @@ type Page[T any] struct {
 	Items         []T
 	NextPageToken string
 }
+
+// The answers and requests of the operations of containment, charter,
+// maintenance, audit and executors.
+type (
+	SourceTestRequest = gen.SourceTestRequest
+	SourceTestResult  = gen.SourceTestResult
+	RevokeRequest     = gen.RevokeRequest // Comment is required; ApprovalReference is Options'
+	Revocation        = gen.Revocation    // the requests filed, and the bindings that could not be revoked
+	Charter           = gen.Charter
+	Evaluation        = gen.Evaluation
+	Maintenance       = gen.Maintenance
+	AuditVerification = gen.AuditVerification
+	Executor          = gen.Executor
+	ExecutorRecovery  = gen.ExecutorRecovery
+)

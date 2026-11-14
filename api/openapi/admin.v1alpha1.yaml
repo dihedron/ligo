@@ -71,17 +71,8 @@ paths:
       summary: Test an SVID regex (Appendix A); stores nothing.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [trustDomain, svidRegex]
-              properties:
-                trustDomain: { type: string }
-                svidRegex: { type: string }
-                spiffeIds: { type: array, items: { type: string } }
-                currentSource: { type: string, description: "A source whose narrowing to check." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/SourceTestRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/SourceTest" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -185,17 +176,8 @@ paths:
       summary: Bulk revocation for containment; one DELETE change request (consent ANY) per matching binding.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [comment]
-              properties:
-                source: { type: string }
-                sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
-                comment: { type: string }
-                approvalReference: { type: string }
-      responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/RevokeRequest" } } }
+      responses: { "202": { $ref: "#/components/responses/Revoked" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
@@ -438,10 +420,10 @@ paths:
     get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/retry:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/BindingOperated" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/rotate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/BindingOperated" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
@@ -488,7 +470,7 @@ paths:
     post: { tags: [change-requests], operationId: declineChangeRequest, summary: Decline the caller's side(s)., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/withdraw:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/WithdrawRequest" } } } }, responses: { "200": { $ref: "#/components/responses/Decided" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/ratify:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
@@ -507,12 +489,7 @@ paths:
           description: The policy and its hash.
           content:
             application/json:
-              schema:
-                type: object
-                required: [policy, sha256]
-                properties:
-                  policy: { type: object }
-                  sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+              schema: { $ref: "#/components/schemas/Charter" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
   /v1/admin/charter/evaluate:
@@ -542,21 +519,7 @@ paths:
       responses:
         "200":
           description: The charter outcome.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  resourceType: { enum: [BINDING, SOURCE, TARGET] }
-                  name: { type: string }
-                  jurisdictions: { type: object, additionalProperties: { type: string } }
-                  namePrefix: { type: object, properties: { valid: { type: boolean }, detail: { type: string } } }
-                  consent: { enum: [ALL, ANY] }
-                  interconnect:
-                    oneOf:
-                      - type: "null"
-                      - { type: object, properties: { rule: { type: string }, action: { enum: [allow, deny] } } }
-                  sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Evaluation" } } }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
 
@@ -589,7 +552,7 @@ paths:
       operationId: listBreakGlass
       summary: Open and recent break-glass changes.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ChangeRequestPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- operations --------------------------------------------------------------
   /v1/admin/accounts:
@@ -648,19 +611,7 @@ paths:
       operationId: getMaintenance
       summary: The maintenance setting and what the drain waits for (§10.3).
       responses:
-        "200":
-          description: The setting.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  maintenanceMode: { type: boolean }
-                  reason: { type: string }
-                  changedBy: { type: string }
-                  changedAt: { type: [string, "null"], format: date-time }
-                  inFlight: { type: integer }
-                  propagationQueued: { type: integer }
+        "200": { $ref: "#/components/responses/Maintenance" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
     put:
@@ -669,15 +620,8 @@ paths:
       summary: Enable or disable maintenance mode (admin.full_access).
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [enabled]
-              properties:
-                enabled: { type: boolean }
-                reason: { type: string, description: "Required when enabling." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Maintenance" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/audit/verify:
     get:
       tags: [operations]
@@ -686,7 +630,7 @@ paths:
       description: Checks every signed checkpoint, then re-hashes the entries after the newest one; with full, every entry. 503 when the signing key cannot be reached.
       parameters:
         - { name: full, in: query, schema: { type: boolean, default: false } }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/AuditVerification" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/audit/export:
     get:
       tags: [operations]
@@ -709,21 +653,14 @@ paths:
       description: Audits SYSTEM_AUDIT_EXPORTED. 409 audit-export-recorded when an export through this checkpoint or a later one is recorded; 422 when through is not a checkpoint or sha256 is not 64 hex characters.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [through, sha256]
-              properties:
-                through: { type: integer, format: int64, description: "The checkpoint the export ends on." }
-                sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Of the exported file." }
-      responses: { "201": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/AuditExportRecord" } } }
+      responses: { "201": { $ref: "#/components/responses/AuditExportRecorded" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors:
     get:
       tags: [operations]
       operationId: listExecutors
       summary: The pending workflows and live database sessions of each executor (§10.2).
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ExecutorList" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors/{id}/recover:
     post:
       tags: [operations]
@@ -731,7 +668,7 @@ paths:
       summary: Re-enqueue the pending workflows of a replica gone for good (admin.full_access, §10.2).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ExecutorRecovered" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
 components:
   securitySchemes:
@@ -1358,10 +1295,198 @@ components:
         retiredBy: { type: string }
         retiredAt: { type: string, format: date-time }
         counts: { $ref: "#/components/schemas/AccountCounts" }
+    SourceTestRequest:
+      type: object
+      required: [trustDomain, svidRegex]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        spiffeIds: { type: array, items: { type: string } }
+        currentSource: { type: string, description: "A source whose narrowing to check." }
+    SourceTestNarrowing:
+      type: object
+      required: [narrower, droppedSamples]
+      properties:
+        narrower: { type: boolean }
+        undecided: { type: boolean }
+        witness: { type: string }
+        droppedSamples: { type: array, items: { type: string } }
+    SourceTestOverlap:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string }
+        witness: { type: string, description: "An identity both match." }
+        undecided: { type: boolean }
+    SourceTestResult:
+      description: What the regex tester finds; nothing is stored.
+      type: object
+      required: [valid, matches, overlaps]
+      properties:
+        valid: { type: boolean }
+        error: { type: string }
+        jurisdiction: { type: string }
+        matches: { type: object, additionalProperties: { type: boolean } }
+        narrowing: { $ref: "#/components/schemas/SourceTestNarrowing" }
+        overlaps: { type: array, items: { $ref: "#/components/schemas/SourceTestOverlap" } }
+    WithdrawRequest:
+      type: object
+      properties:
+        comment: { type: string, description: "Why; kept in the audit log." }
+    RevokeRequest:
+      type: object
+      required: [comment]
+      properties:
+        source: { type: string }
+        sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
+        comment: { type: string }
+        approvalReference: { type: string }
+    RevokeFailure:
+      description: A binding that could not be revoked, with its problem.
+      type: object
+      required: [binding, type, detail]
+      properties:
+        binding: { type: string }
+        type: { type: string }
+        detail: { type: string }
+    Revocation:
+      type: object
+      required: [changeRequests, errors]
+      properties:
+        changeRequests: { type: array, items: { $ref: "#/components/schemas/ChangeRequest" } }
+        errors: { type: array, items: { $ref: "#/components/schemas/RevokeFailure" } }
+    Charter:
+      description: The charter in force, as the canonical JSON its SHA-256 is computed over.
+      type: object
+      required: [policy, sha256]
+      properties:
+        policy: { type: object }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    EvaluationNameCheck:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean }
+        detail: { type: string }
+    EvaluationInterconnect:
+      type: object
+      required: [rule, action]
+      properties:
+        rule: { type: string, description: "The deciding rule, or default." }
+        action: { type: string, enum: [allow, deny] }
+    Evaluation:
+      description: The charter outcome of a planned creation.
+      type: object
+      required: [resourceType, name, jurisdictions, namePrefix, consent, interconnect, sides]
+      properties:
+        resourceType: { type: string, enum: [BINDING, SOURCE, TARGET] }
+        name: { type: string }
+        jurisdictions: { type: object, additionalProperties: { type: string } }
+        namePrefix: { $ref: "#/components/schemas/EvaluationNameCheck" }
+        consent: { type: string, enum: [ALL, ANY] }
+        interconnect:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/EvaluationInterconnect" }
+        sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+    Maintenance:
+      type: object
+      required: [maintenanceMode, reason, changedBy, changedAt, inFlight, propagationQueued]
+      properties:
+        maintenanceMode: { type: boolean }
+        reason: { type: string }
+        changedBy: { type: string }
+        changedAt: { type: [string, "null"], format: date-time }
+        inFlight: { type: integer }
+        propagationQueued: { type: integer }
+    MaintenanceRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        reason: { type: string, description: "Required when enabling." }
+    AuditVerification:
+      type: object
+      required: [valid, entries, checkpoints, full]
+      properties:
+        valid: { type: boolean }
+        entries: { type: integer, description: "Re-hashed by this pass." }
+        checkpoints: { type: integer }
+        full: { type: boolean }
+        firstBroken: { type: integer, format: int64, description: "The first entry that does not match; present when not valid." }
+    AuditExportRecord:
+      type: object
+      required: [through, sha256]
+      properties:
+        through: { type: integer, format: int64, description: "The checkpoint the export ends on." }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Of the exported file." }
+    Executor:
+      description: An executor's pending workflows of one application version, or, with none pending, only its live sessions.
+      type: object
+      required: [executor, pending, liveSessions, self]
+      properties:
+        executor: { type: string }
+        applicationVersion: { type: string }
+        pending: { type: integer }
+        oldestPending: { type: string, format: date-time }
+        liveSessions: { type: integer }
+        self: { type: boolean }
+    ExecutorRecovery:
+      type: object
+      required: [executor, recovered, otherVersions]
+      properties:
+        executor: { type: string }
+        recovered: { type: integer }
+        otherVersions: { type: integer, description: "Pending workflows of another application version, left alone." }
   responses:
     Account:
       description: An account; counts only for a single account read.
       content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } }
+    SourceTest:
+      description: The regex tester's result.
+      content: { application/json: { schema: { $ref: "#/components/schemas/SourceTestResult" } } }
+    Revoked:
+      description: The change requests filed, and the bindings that could not be revoked.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Revocation" } } }
+    BindingOperated:
+      description: The binding, after the operation was started.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [binding]
+            properties:
+              binding: { $ref: "#/components/schemas/Binding" }
+    Decided:
+      description: The change request after the call.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [changeRequest]
+            properties:
+              changeRequest: { $ref: "#/components/schemas/ChangeRequest" }
+    Maintenance:
+      description: The maintenance setting.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Maintenance" } } }
+    AuditVerification:
+      description: The result of the verification.
+      content: { application/json: { schema: { $ref: "#/components/schemas/AuditVerification" } } }
+    AuditExportRecorded:
+      description: The export record.
+      content: { application/json: { schema: { $ref: "#/components/schemas/AuditExportRecord" } } }
+    ExecutorList:
+      description: The executors.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Executor" } }
+    ExecutorRecovered:
+      description: What was re-enqueued.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ExecutorRecovery" } } }
     Problem:
       description: An RFC 9457 problem.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }

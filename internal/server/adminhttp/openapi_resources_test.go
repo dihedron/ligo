@@ -13,6 +13,7 @@ import (
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/flows"
 	"github.com/dihedron/ligo/internal/instances"
+	"github.com/dihedron/ligo/internal/preview"
 	"github.com/dihedron/ligo/internal/sources"
 	"github.com/dihedron/ligo/internal/targets"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -218,4 +219,37 @@ func TestOpenAPISourceTarget(t *testing.T) {
 	// What a caller writes: the stored form of a source and a target.
 	satisfies(t, "source body", compile("/components/schemas/SourceSpec"), src.Source)
 	satisfies(t, "target body", compile("/components/schemas/TargetSpec"), tgt.Target)
+}
+
+// TestOpenAPIOperations: what the server sends for the operations of
+// containment, charter, maintenance, audit and executors satisfies the
+// document's schemas (.specs/ligo-adminclient.md §3.4b).
+func TestOpenAPIOperations(t *testing.T) {
+	compile := compileOpenAPI(t)
+	now := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	decision := "APPROVED"
+	for name, c := range map[string]struct {
+		schema string
+		value  any
+	}{
+		"source test": {"/components/schemas/SourceTestResult", &sources.TestResult{Valid: true, Jurisdiction: "it/rm", Matches: map[string]bool{"spiffe://x/a": true},
+			Narrowing: &sources.TestNarrowing{Narrower: false, Witness: "spiffe://x/b", DroppedSamples: []string{"spiffe://x/c"}},
+			Overlaps:  []sources.TestOverlap{{Source: "s1", Witness: "spiffe://x/a", Undecided: true}}}},
+		"source test, an error": {"/components/schemas/SourceTestResult", &sources.TestResult{Error: "no", Matches: map[string]bool{}, Overlaps: []sources.TestOverlap{}}},
+		"charter":               {"/components/schemas/Charter", map[string]any{"policy": json.RawMessage(`{"a":1}`), "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}},
+		"evaluation": {"/components/schemas/Evaluation", &preview.Evaluation{ResourceType: "BINDING", Name: "b", Jurisdictions: map[string]string{"source": "it"},
+			NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL", Interconnect: &preview.Interconnect{Rule: "default", Action: "allow"},
+			Sides: []preview.Side{{Side: "SOURCE", Jurisdiction: "it", Basis: "AUTO", Decision: &decision, DecidedAt: &now}}}},
+		"evaluation, no rule": {"/components/schemas/Evaluation", &preview.Evaluation{ResourceType: "SOURCE", Name: "s", Jurisdictions: map[string]string{}, Consent: "ANY", Sides: []preview.Side{}}},
+		"maintenance":         {"/components/schemas/Maintenance", maintenance{MaintenanceMode: true, Reason: "r", ChangedBy: "u", ChangedAt: &now, InFlight: 1, PropagationQueued: 2}},
+		"maintenance, never":  {"/components/schemas/Maintenance", maintenance{}},
+		"audit verification":  {"/components/schemas/AuditVerification", map[string]any{"valid": false, "entries": 3, "checkpoints": 1, "full": true, "firstBroken": int64(2)}},
+		"export record":       {"/components/schemas/AuditExportRecord", map[string]any{"through": int64(9), "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}},
+		"executor":            {"/components/schemas/Executor", executorDTO{Executor: "e", ApplicationVersion: "v", Pending: 2, OldestPending: &now, LiveSessions: 1, Self: true}},
+		"executor, sessions":  {"/components/schemas/Executor", executorDTO{Executor: "e"}},
+		"recovery":            {"/components/schemas/ExecutorRecovery", map[string]any{"executor": "e", "recovered": 1, "otherVersions": 0}},
+		"revocation":          {"/components/schemas/Revocation", map[string]any{"changeRequests": []any{}, "errors": []map[string]any{{"binding": "b", "type": "urn:ligo:problem:internal", "detail": "internal error"}}}},
+	} {
+		satisfies(t, name, compile(c.schema), c.value)
+	}
 }
