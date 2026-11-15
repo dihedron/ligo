@@ -4794,6 +4794,7 @@ type GovCheckCommand struct {
   - `ligo_plugin_process_restarts_total{type,realm}`
   - `ligo_break_glass_open{realm}` (gauge) and `ligo_break_glass_total{realm,operation,outcome}` (`outcome`: `ratified`, `reverted`, `revert_failed`, `review_overdue`)
   - `ligo_notifications_abandoned_total{webhook}`
+  - `ligo_lock_violations_total{type}` (counter: changes refused because the resource is managed by automation, .specs/ligo-managed-resources.md; a burst SHOULD be alerted on), `ligo_managed_resources{type}` (gauge: sources, targets and bindings locked to an automation) and `ligo_holds_open` (gauge: holds on bindings removed in an emergency and not yet lifted)
   - `ligo_delegated_approvals_total{principal,realm,operation}` (SHOULD be alerted on for unusual rates)
   - `ligo_bundle_conflicts_total{trust_domain,socket_realm}` (bundles discarded because they came from a non-authoritative socket, §7.1; SHOULD be alerted on)
   - `ligo_db_scrape_success` (gauge: whether the last scrape's database queries all succeeded)

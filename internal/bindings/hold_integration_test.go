@@ -4,6 +4,7 @@ package bindings
 
 import (
 	"context"
+	"github.com/dihedron/ligo/internal/audit"
 	"testing"
 
 	"github.com/dihedron/ligo/internal/changerequests"
@@ -113,6 +114,14 @@ func TestHoldRefusesAndLifts(t *testing.T) {
 	if h := holdOf(t, o, name); h.liftedBy != "" {
 		t.Fatalf("lifted without a person: %+v", h)
 	}
+	// an open hold holds the audit pruning back at the entry that created it
+	var created, floor int64
+	if err := o.QueryRow(ctx, "select min(id) from audit_log where action = 'HOLD_CREATED' and resource_name = $1", name).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.QueryRow(ctx, "select "+audit.OpenHoldFloor).Scan(&floor); err != nil || floor > created {
+		t.Errorf("floor %d with an open hold created at %d (%v)", floor, created, err)
+	}
 	if err := s.LiftHold(ctx, ledgerApp, id, "restored after the review"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +133,10 @@ func TestHoldRefusesAndLifts(t *testing.T) {
 	}
 	if n, _ := audited(t, o, name, "HOLD_LIFTED"); n != 1 {
 		t.Errorf("HOLD_LIFTED %d", n)
+	}
+	var other int64
+	if err := o.QueryRow(ctx, "select "+audit.OpenHoldFloor).Scan(&other); err != nil || other <= created {
+		t.Errorf("floor %d after the lift, was %d (%v)", other, floor, err)
 	}
 	if _, err := s.Create(ctx, pipeline, body(name+"-2", source, w.ledger, "read", `"managed":true`, `"approvalReference":"CHG-3"`)); err != nil {
 		t.Errorf("after the lift: %v", err)

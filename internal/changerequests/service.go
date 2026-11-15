@@ -103,7 +103,7 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 		return err
 	}
 	if err := Lock(c, r); err != nil {
-		return err
+		return s.refused(ctx, c, r, err)
 	}
 	if r.ReleaseJustification != "" || r.adopts() { // a person decides, never a delegation (§3.3)
 		candidates = slices.Clone(candidates)

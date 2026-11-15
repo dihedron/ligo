@@ -1,4 +1,4 @@
-{{define "content"}}{{with .Content}}{{with .Target}}<h1>{{.Metadata.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}</h1>
+{{define "content"}}{{with .Content}}{{with .Target}}<h1>{{.Metadata.Name}}{{with .DisplayName}} <span class="muted">{{.}}</span>{{end}}{{with .Metadata.ManagedBy}} <span class="badge" title="Only its owner changes it">managed by {{.}}</span>{{end}}</h1>
 <div class="grid">
   <section class="card"><h2>Target</h2><dl class="fields">
     <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, realm {{.Metadata.Realm}})</dd>
@@ -14,7 +14,7 @@
   </dl></section>
   <section class="card"><h2>Definition</h2><pre>{{pretty .Definition}}</pre></section>
 </div>
-{{if ne .Metadata.State "RETIRED"}}<div id="target-errors" class="errors"></div>
+{{if .Metadata.ManagedBy}}<p class="notice" id="target-managed">Managed by <span class="mono">{{.Metadata.ManagedBy}}</span>: only its owner changes it. If the owner is gone, an administrator can ask to release it (<span class="mono">ligo release target {{.Metadata.Name}}</span>).</p>{{else if ne .Metadata.State "RETIRED"}}<div id="target-errors" class="errors"></div>
 <div class="actions">
   <a class="button" href="/ui/targets/{{.Metadata.Name}}/edit-form">Edit</a>
   {{if eq .Metadata.State "ACTIVE"}}<a class="button button-secondary" href="/ui/bindings/wizard?target={{.Metadata.Name}}&amp;offer=1">Offer a binding</a>{{end}}

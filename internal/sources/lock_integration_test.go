@@ -204,3 +204,44 @@ func TestLockAC_M4(t *testing.T) {
 		t.Errorf("releasing an unmanaged source: %v", err)
 	}
 }
+
+// TestLockAudit (chunk 4): setting the lock, a refusal (rate-limited to one a
+// window for the same principal and resource, the metric counts them all)
+// and a release leave their entries; an owner that keeps its lock leaves none.
+func TestLockAudit(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	src := managedSource(t, s, owner)
+	name := src.Metadata.Name
+	count := func(action string) (n int) {
+		t.Helper()
+		if err := owner.QueryRow(ctx, "select count(*) from audit_log where resource_type = 'SOURCE' and resource_name = $1 and action = $2", name, action).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count("RESOURCE_MANAGED"); n != 1 {
+		t.Errorf("RESOURCE_MANAGED %d", n)
+	}
+	src.DisplayName = "again"
+	if _, err := s.Update(ctx, pipeline, name, body(t, src, map[string]any{"expectedRevision": 1, "managed": true, "approvalReference": "CHG-2"})); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("RESOURCE_MANAGED"); n != 1 {
+		t.Errorf("an owner that keeps its lock: RESOURCE_MANAGED %d", n)
+	}
+	for range 3 {
+		if _, err := s.Update(ctx, alice, name, body(t, src, map[string]any{"expectedRevision": 2})); slug(err) != "resource-managed" {
+			t.Fatalf("update by a person: %v", err)
+		}
+	}
+	if n := count("LOCK_VIOLATION_REFUSED"); n != 1 {
+		t.Errorf("LOCK_VIOLATION_REFUSED %d for three refusals in a window, want 1", n)
+	}
+	if _, err := s.Update(ctx, pipeline, name, body(t, src, map[string]any{"expectedRevision": 2, "managed": false, "approvalReference": "CHG-3"})); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("RESOURCE_RELEASED"); n != 1 {
+		t.Errorf("RESOURCE_RELEASED %d", n)
+	}
+}

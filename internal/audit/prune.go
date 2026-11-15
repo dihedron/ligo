@@ -18,6 +18,13 @@ type Pruned struct {
 	Through, Export, Deleted int64
 }
 
+// OpenHoldFloor is the id of the oldest audit entry that created a hold still
+// open, or the largest id when there is none: pruning stops before it, so the
+// record of an emergency removal stays until someone lifts the hold
+// (.specs/ligo-managed-resources.md §3.9).
+const OpenHoldFloor = `coalesce((SELECT min(h.id) FROM audit_log h JOIN managed_holds m ON m.change_request_id = h.change_request_id
+	WHERE h.action = 'HOLD_CREATED' AND m.lifted_at IS NULL), 9223372036854775807)`
+
 // Prune deletes the head of the chain through the boundary of
 // .specs/ligo-pruning.md §3.4: the newest checkpoint that verifies, is at or
 // below the newest recorded export, was signed over 24 hours ago, and whose
@@ -35,7 +42,8 @@ func Prune(ctx context.Context, db interface {
 		err := tx.QueryRow(ctx, `SELECT c.audit_id, c.entry_hash, c.created_at, c.key_id, c.signature, e.through
 			FROM audit_checkpoints c JOIN audit_log a ON a.id = c.audit_id
 			CROSS JOIN (SELECT max(through) AS through FROM audit_exports) e
-			WHERE c.audit_id <= e.through AND a.occurred_at < $1 AND c.created_at < now() - interval '24 hours'
+			WHERE c.audit_id <= e.through AND a.occurred_at < $1
+			AND c.audit_id < `+OpenHoldFloor+` AND c.created_at < now() - interval '24 hours'
 			ORDER BY c.audit_id DESC LIMIT 1`, now.Add(-retention)).Scan(&p.Through, &entryHash, &at, &keyID, &sig, &p.Export)
 		if errors.Is(err, pgx.ErrNoRows) {
 			p = Pruned{}

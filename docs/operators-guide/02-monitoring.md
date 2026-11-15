@@ -16,6 +16,8 @@ Logs are structured JSON, with `request_id`, `binding_id`, `workflow_id` and `at
 | `ligo_resolution_cache_age_seconds` | Near `max_staleness` | The workload API will soon refuse: check PostgreSQL |
 | `ligo_bundle_conflicts_total` | Rising | Two sources claim one trust domain's bundle: check SPIRE |
 | `ligo_break_glass_open` | Above 0 | Someone used break-glass: review it |
+| `ligo_lock_violations_total` | A burst | Someone or something keeps changing resources that an automation owns: see `LOCK_VIOLATION_REFUSED` in the audit log |
+| `ligo_holds_open` | Above 0 for long | A binding removed in an emergency is still held, and it holds back audit pruning: lift it (`ligo hold lift`) or ratify the emergency removal |
 | `ligo_notifications_abandoned_total` | Rising | A webhook has been down for 24 h |
 | `ligo_plugin_process_restarts_total` | Rising | A plugin keeps dying: see its logs |
 
@@ -59,6 +61,9 @@ No metric carries a jurisdiction label, as jurisdictions are unbounded. Per-juri
 | `ligo_plugin_reconfigure_failures_total` | `type`, `realm` | Plugin processes that refused a new set of instances |
 | `ligo_break_glass_open` | `realm` | Open emergency changes |
 | `ligo_break_glass_total` | `realm`, `operation`, `outcome` | `ratified`, `reverted`, `revert_failed`, `review_overdue` |
+| `ligo_lock_violations_total` | `type` | Changes refused because an automation owns the resource |
+| `ligo_managed_resources` | `type` | Sources, targets and bindings locked to an automation |
+| `ligo_holds_open` | | Holds on bindings removed in an emergency, not yet lifted |
 | `ligo_notifications_abandoned_total` | | Notifications given up on |
 | `ligo_rotation_overdue` | | Static secrets past their rotation |
 | `ligo_db_scrape_success` | | 1 when the database's gauges are current |
@@ -67,7 +72,9 @@ No metric carries a jurisdiction label, as jurisdictions are unbounded. Per-juri
 
 ## Webhooks
 
-Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">`. Receivers should check it, refuse timestamps older than 5 minutes, and deduplicate on `eventId`. A failure never delays the change it announces. Page on these at least: `BREAK_GLASS_USED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_CHARTER_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`.
+Each request carries `X-Ligo-Timestamp` and `X-Ligo-Signature: sha256=<hex HMAC-SHA256 over "<timestamp>.<body>">`. Receivers should check it, refuse timestamps older than 5 minutes, and deduplicate on `eventId`. A failure never delays the change it announces. Page on these at least: `BREAK_GLASS_USED`, `BREAK_GLASS_REVERT_FAILED`, `BREAK_GLASS_REVIEW_OVERDUE`, `CONFIG_APPROVAL_POLICY_WEAKENED`, `CONFIG_CHARTER_CHANGED`, `SYSTEM_INTERCONNECT_VIOLATIONS`, `RESOURCE_RELEASED_BY_ADMIN` and a burst of `LOCK_VIOLATION_REFUSED`.
+
+The lock adds six events, each named as its audit action: `RESOURCE_MANAGED`, `RESOURCE_RELEASED` (by the owner), `RESOURCE_RELEASED_BY_ADMIN`, `LOCK_VIOLATION_REFUSED` (at most one a minute for each principal and resource; `ligo_lock_violations_total` counts them all), `HOLD_CREATED` and `HOLD_LIFTED`.
 
 With accounts, send `BINDING_TARGET_DECIDED_BY_PLATFORM` to each account's own team, by giving its webhook the account's jurisdiction. It tells a target's account that a platform approver decided for it. The account can revoke the binding alone.
 
@@ -78,5 +85,7 @@ Every state-changing action, propagation and workflow outcome is audited, in a h
 Every 1000 entries or hour, `ligo` signs the head of the chain with the `ligo-audit` key, outside the database. One replica verifies the chain every 10 minutes, from the newest of these checkpoints, and the whole chain at startup and every 24 hours; `ligo_audit_chain_valid` gives the result. `ligo audit verify` checks it on demand, and `ligo audit verify --full` walks the whole chain. Run a full verification after restoring a backup, and before archiving the log.
 
 With `storage.audit.retention` set, the same replica prunes once a day; each prune writes a `SYSTEM_AUDIT_PRUNED` entry and adds to `ligo_audit_pruned_entries_total`. Alert when `ligo_audit_oldest_entry_timestamp_seconds` moves forward without a `SYSTEM_AUDIT_PRUNED` entry: that is a deletion `ligo` did not make.
+
+An open hold (`ligo hold list`) holds the pruning back at the entry that created it, so that the record of the emergency removal stays until someone lifts the hold or ratifies the removal; lift it when it has served.
 
 An auditor can check the checkpoints without `ligo`: the public keys are at `transit/keys/ligo-audit`, and each checkpoint signs the RFC 8785 JSON of `auditId`, `entryHash` and `createdAt`.

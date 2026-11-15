@@ -18,9 +18,11 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/authz"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/jcs"
+	"github.com/dihedron/ligo/internal/metrics"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -541,6 +543,7 @@ func ApplyLock(ctx context.Context, tx pgx.Tx, table string, id uuid.UUID, r *Re
 		check := *r
 		check.LockOwner = curOwner
 		if err := notOwner(r.RequestedBy, &check); err != nil {
+			metrics.LockViolations.WithLabelValues(strings.ToLower(r.ResourceType)).Inc() // not audited: this transaction rolls back
 			return err
 		}
 	}
@@ -556,6 +559,12 @@ func ApplyLock(ctx context.Context, tx pgx.Tx, table string, id uuid.UUID, r *Re
 	}
 	if _, err := tx.Exec(ctx, "UPDATE "+table+" SET managed_by = $2 WHERE id = $1", id, owner); err != nil { //nolint:gosec // G202: table is a constant of the caller
 		return fmt.Errorf("changerequests: lock: %w", err)
+	}
+	if e := lockAudit(r, curOwner); e != nil {
+		e.ResourceID = &id
+		if _, err := audit.Append(ctx, tx, *e); err != nil {
+			return fmt.Errorf("changerequests: lock: %w", err)
+		}
 	}
 	return nil
 }

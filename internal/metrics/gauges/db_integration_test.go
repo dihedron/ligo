@@ -92,6 +92,9 @@ func TestDB(t *testing.T) {
 			t.Errorf("ligo_bindings_expiring{within=%s} missing", w)
 		}
 	}
+	if v := value("ligo_holds_open", nil); v < 0 {
+		t.Error("ligo_holds_open missing")
+	}
 	before := max(value("ligo_sources", map[string]string{"state": "ACTIVE"}), 0)
 	name := "metrics-" + uuid.NewV7().String()[24:]
 	if _, err := owner.Exec(ctx, `insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by)

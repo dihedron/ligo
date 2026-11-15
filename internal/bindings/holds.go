@@ -59,7 +59,8 @@ func createHold(ctx context.Context, tx pgx.Tx, r *changerequests.Request, cur *
 		cur.managedBy, basis, r.RequestedBy, r.ID); err != nil {
 		return nil, fmt.Errorf("bindings: hold: %w", err)
 	}
-	snap, _ := json.Marshal(map[string]any{"holdId": id, "basis": basis, "managedBy": cur.managedBy})
+	snap, _ := json.Marshal(map[string]any{"holdId": id, "basis": basis, "managedBy": cur.managedBy,
+		"jurisdictions": []string{cur.sourceJurisdiction, cur.targetJurisdiction, cur.platformJurisdiction}})
 	return []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID, Action: "HOLD_CREATED", Snapshot: snap}}, nil
 }
 
@@ -114,7 +115,7 @@ func (s *Service) LiftHold(ctx context.Context, c changerequests.Caller, id, com
 			hold, c.ID(), comment); err != nil {
 			return err
 		}
-		snap, _ := json.Marshal(map[string]any{"holdId": hold, "basis": "PERSON", "comment": comment})
+		snap, _ := json.Marshal(map[string]any{"holdId": hold, "basis": "PERSON", "comment": comment, "jurisdictions": []string{sj, tj, pj}})
 		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceName: name, Action: "HOLD_LIFTED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
 		return err
 	})
