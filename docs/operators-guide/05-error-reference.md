@@ -35,6 +35,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 | `normalization-drift` | 409 | The source or target changed since validation | File it again |
 | `charter-changed` | 409 | The charter changed since the request was filed, and now denies it or asks for another party | File it again |
 | `change-request-pending` | 409 | The resource has a pending request | Decide or withdraw that one |
+| `resource-managed` | 409 | The source, target or binding is managed by an automation, and only its owner may change it (containment and break-glass aside) | Change it through the automation that owns it, or ask its owner to release it |
 | `dependency-unavailable` | 503 | A plugin needed to check an instance does not run, or cannot be reached | Check the plugin type and its process, then file again |
 | `change-request-not-pending` | 409 | It has already been decided | Nothing |
 | `dependency-pending` | 409 | It depends on a request not yet applied | Decide that one first |

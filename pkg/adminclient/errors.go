@@ -52,6 +52,7 @@ var sentinels = map[string]error{
 	"audit-export-recorded":      ErrState,
 	"executor-alive":             ErrState,
 	"executor-self":              ErrState,
+	"resource-managed":           ErrState,
 
 	"validation-failed":               ErrInvalid,
 	"immutable-field":                 ErrInvalid,

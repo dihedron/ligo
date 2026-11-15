@@ -226,6 +226,7 @@ type stored struct {
 	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
 	platform, phase, purpose, realm                              string
 	revision, attempt                                            int64
+	managedBy                                                    string // the owner of the lock, or empty
 	parameters                                                   json.RawMessage
 	labels                                                       map[string]string
 	expiresAt                                                    *time.Time
@@ -236,7 +237,7 @@ type stored struct {
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
 	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction,
-		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id
+		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id, coalesce(b.managed_by, '')
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
@@ -244,7 +245,7 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceJurisdiction,
 		&st.targetJurisdiction, &st.platformJurisdiction, &st.platform, &st.phase, &st.purpose, &st.realm, &st.revision, &st.attempt, &st.parameters,
-		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR)
+		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR, &st.managedBy)
 	return st, err
 }
 
@@ -462,9 +463,9 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
 		Realm: res.platform.Realm, SourceJurisdiction: res.sourceJurisdiction, TargetJurisdiction: res.targetJurisdiction, PlatformJurisdiction: res.platformJurisdiction,
 		InterconnectRule: res.decision.Rule, DistinctApprovers: res.decision.DistinctApprovers, ExpectedRevision: common.ExpectedRevision,
-		Payload: payload, AutomationContext: common.AutomationContext}
+		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed}
 	if cur != nil {
-		r.ResourceID = &cur.id
+		r.ResourceID, r.LockOwner = &cur.id, cur.managedBy
 	}
 	sides := anySides
 	if consent == changerequests.ConsentAll {
@@ -544,6 +545,11 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, breakGlassOpen(cur)
 		}
 	}
+	if cur != nil {
+		if err := changerequests.ApplyLock(ctx, tx, "bindings", cur.id, r, cur.managedBy); err != nil {
+			return nil, err
+		}
+	}
 	if r.Operation == "DELETE" {
 		entries, err := s.applyDelete(ctx, tx, r, cur)
 		return revertStarted(r, cur, entries), err
@@ -597,6 +603,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, err
 		}
 		r.ResourceID = &id
+		if err := changerequests.ApplyLock(ctx, tx, "bindings", id, r, ""); err != nil {
+			return nil, err
+		}
 	} else {
 		id = cur.id
 		if revision, attempt, err = revise(ctx, tx, cur, &b, snap, r.RequestedBy); err != nil {

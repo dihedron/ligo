@@ -122,6 +122,7 @@ CREATE TABLE sources (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by         VARCHAR(255) NOT NULL,
     updated_by         VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
     -- Coarse defense in depth only; authoritative validation is Appendix A (ADR-06).
     CONSTRAINT chk_source_regex_shape CHECK (
         svid_regex LIKE '^spiffe://%' AND svid_regex LIKE '%$'
@@ -163,6 +164,7 @@ CREATE TABLE targets (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by         VARCHAR(255) NOT NULL,
     updated_by         VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
     CONSTRAINT chk_target_visible_to CHECK (
         jsonb_typeof(visible_to) = 'array' AND (visibility <> 'LISTED' OR jsonb_array_length(visible_to) > 0)
     )
@@ -346,6 +348,7 @@ CREATE TABLE bindings (
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by                  VARCHAR(255) NOT NULL,
     updated_by                  VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
 
     CONSTRAINT uq_binding_source_target UNIQUE (source_id, target_id),          -- one binding per pair (ADR-15)
     CONSTRAINT fk_binding_access_level FOREIGN KEY (target_id, access_level)
@@ -514,6 +517,8 @@ CREATE TABLE change_requests (
     reverts_cr_id      UUID REFERENCES change_requests(id), -- SYSTEM_REVERT: the break-glass change being reverted
     depends_on_cr_id   UUID REFERENCES change_requests(id), -- BINDING CREATE filed with an inline source: the source's CREATE (§7.2.4)
     review_overdue_notified_at TIMESTAMPTZ,                 -- BREAK_GLASS_REVIEW_OVERDUE already emitted
+    managed            BOOLEAN,                             -- SOURCE, TARGET, BINDING: sets (true) or clears (false) the lock; NULL leaves it (.specs/ligo-managed-resources.md)
+    lock_owner         VARCHAR(255),                        -- the resource's owner at filing, checked again at apply
     requested_by       VARCHAR(255) NOT NULL,
     requested_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     decided_by         VARCHAR(255),                        -- the principal whose action closed the request
@@ -523,6 +528,7 @@ CREATE TABLE change_requests (
     expires_at         TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_cr_id_requester_kind UNIQUE (id, requested_by, kind),  -- target of the sides' composite foreign key
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
+    CONSTRAINT chk_managed CHECK (managed IS NOT TRUE OR (requested_by LIKE 'spiffe://%' AND resource_type IN ('SOURCE', 'TARGET', 'BINDING'))),
     CONSTRAINT chk_cr_jurisdiction_columns CHECK (
         (resource_type = 'SOURCE'  AND owner_jurisdiction IS NOT NULL AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL
                                    AND platform_jurisdiction IS NULL AND realm IS NULL)
@@ -647,6 +653,7 @@ BEGIN
      OR NEW.revert_payload IS DISTINCT FROM OLD.revert_payload
      OR NEW.reverts_cr_id IS DISTINCT FROM OLD.reverts_cr_id
      OR NEW.depends_on_cr_id IS DISTINCT FROM OLD.depends_on_cr_id
+     OR NEW.managed IS DISTINCT FROM OLD.managed OR NEW.lock_owner IS DISTINCT FROM OLD.lock_owner
      OR NEW.requested_by <> OLD.requested_by OR NEW.payload_sha256 <> OLD.payload_sha256
      OR (OLD.status <> 'PENDING' AND NEW.status <> OLD.status) THEN
     RAISE EXCEPTION 'immutable change_request column modified';
@@ -655,6 +662,27 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_change_requests_immutable BEFORE UPDATE ON change_requests
     FOR EACH ROW EXECUTE FUNCTION change_requests_immutable_guard();
+
+-- The lock's owner changes only as a change request says (T-M10): the
+-- applying transaction names the request in ligo.apply_cr, and that request,
+-- still pending, must set the owner it is the filer of, or clear it.
+CREATE FUNCTION managed_by_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  cr UUID := nullif(current_setting('ligo.apply_cr', true), '')::uuid;
+BEGIN
+  IF (TG_OP = 'INSERT' AND NEW.managed_by IS NULL) OR (TG_OP = 'UPDATE' AND NEW.managed_by IS NOT DISTINCT FROM OLD.managed_by) THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM change_requests c WHERE c.id = cr AND c.status = 'PENDING' AND c.resource_name = NEW.name
+      AND ((NEW.managed_by IS NOT NULL AND c.managed IS TRUE AND c.requested_by = NEW.managed_by)
+        OR (NEW.managed_by IS NULL AND c.managed IS FALSE))) THEN
+    RAISE EXCEPTION 'managed_by changes only with a change request that sets it' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_sources_managed_by BEFORE INSERT OR UPDATE ON sources FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
+CREATE TRIGGER trg_targets_managed_by BEFORE INSERT OR UPDATE ON targets FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
+CREATE TRIGGER trg_bindings_managed_by BEFORE INSERT OR UPDATE ON bindings FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
 
 CREATE FUNCTION change_request_sides_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

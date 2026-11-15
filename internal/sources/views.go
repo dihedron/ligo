@@ -53,7 +53,7 @@ func scanView(row pgx.Row) (*View, *stored, error) {
 	st.Kind = "Source"
 	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
 		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
-		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy,
+		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &st.ManagedBy, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy,
 		&m.PendingChangeRequestID)
 	if len(st.Visibility.VisibleTo) == 0 {
 		st.Visibility.VisibleTo = nil

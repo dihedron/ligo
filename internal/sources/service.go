@@ -42,6 +42,8 @@ func decode(body []byte) (*request, error) {
 type stored struct {
 	ID       uuid.UUID
 	Revision int64
+	// ManagedBy is the owner of the lock (.specs/ligo-managed-resources.md), or empty.
+	ManagedBy string
 	Source
 }
 
@@ -192,9 +194,9 @@ func compose(op string, cur *stored, src *Source, req *request) (*changerequests
 	}
 	r := &changerequests.Request{ResourceType: "SOURCE", ResourceName: src.Metadata.Name, Operation: op,
 		Consent: changerequests.ConsentAll, OwnerJurisdiction: src.Metadata.Jurisdiction, ExpectedRevision: req.ExpectedRevision,
-		Payload: payload, AutomationContext: req.AutomationContext}
+		Payload: payload, AutomationContext: req.AutomationContext, Managed: req.Managed}
 	if cur != nil {
-		r.ResourceID = &cur.ID
+		r.ResourceID, r.LockOwner = &cur.ID, cur.ManagedBy
 	}
 	return r, []changerequests.Candidate{{Side: "OWNER", Jurisdiction: src.Metadata.Jurisdiction}}, nil
 }
@@ -260,6 +262,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, err
 		}
 		r.ResourceID = &id
+		if err := changerequests.ApplyLock(ctx, tx, "sources", id, r, ""); err != nil {
+			return nil, err
+		}
 		return []audit.Entry{entry(r, "SOURCE_REGISTERED", 1, nil)}, nil
 	}
 	cur, err := s.loadID(ctx, tx, *r.ResourceID, true)
@@ -279,6 +284,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		if err := inUse(ctx, tx, cur.ID); err != nil {
 			return nil, err
 		}
+	}
+	if err := changerequests.ApplyLock(ctx, tx, "sources", cur.ID, r, cur.ManagedBy); err != nil {
+		return nil, err
 	}
 	if err := update(ctx, tx, cur.ID, &src, r.RequestedBy); err != nil {
 		return nil, err
@@ -343,14 +351,14 @@ func inUse(ctx context.Context, q store.Querier, id uuid.UUID) error {
 }
 
 const columns = `id, revision, name, jurisdiction, state, trust_domain, svid_regex, sample_spiffe_ids, coalesce(display_name, ''),
-	coalesce(description, ''), labels, external_refs, contacts, visibility, visible_to`
+	coalesce(description, ''), labels, external_refs, contacts, visibility, visible_to, coalesce(managed_by, '')`
 
 func scan(row pgx.Row) (*stored, error) {
 	var st stored
 	st.Kind = "Source"
 	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
 		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
-		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo)
+		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &st.ManagedBy)
 	if len(st.Visibility.VisibleTo) == 0 {
 		st.Visibility.VisibleTo = nil
 	}

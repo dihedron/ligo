@@ -1,6 +1,6 @@
 # Resources managed by automation (the lock)
 
-- **Version:** 0.1 (2026-11-15), draft for the user's approval; nothing is implemented until it is approved (AGENTS.md rules 1 and 3).
+- **Version:** 0.2 (2026-11-15), approved by the user on 2026-11-15 with the five recommended decisions of §8; implementation starts with chunk 1 (AGENTS.md rules 1 and 3).
 - **Backlog:** item 16 (this one); it unblocks the resources of item 8, the Terraform and OpenTofu provider (`terraform-provider-ligo/.specs/ligo-terraform-provider.md` §3.7, chunk 4)
 - **Builds on:** ADR-09 (maker-checker), ADR-11 (delegated approval for `trusted_automation`), ADR-12 (break-glass), ADR-13 (jurisdictions and two-sided consent), `.specs/ligo-adminclient.md`
 - **Direction of the user (2026-11-08, restated 2026-11-15):** a resource that automation creates is marked "managed by automation"; people cannot change it, except a binding through break-glass, and break-glass changes are always reverted; a lasting change goes only through the automation's own source of truth (the Terraform configuration) again.
@@ -136,7 +136,9 @@ Main specification: a new ADR-17 and the threats T-M1 to T-M10 in its register; 
 
 Each chunk is committed only on the user's word, after `go test ./...`, `make lint`, `make vuln` and `make secrets`.
 
-## 8. Decisions for the user
+## 8. Decisions (all taken 2026-11-15)
+
+The user chose the recommended option of each.
 
 1. **The owner's identity:** the SPIFFE ID of the principal that filed the creation (recommended, §3.1), or a run-time registry of automations (the user's 2026-11-08 idea; a larger change, and not needed for the lock).
 2. **Holds:** the owner's re-creation is refused after a person's emergency deletion or containment until a person lifts the hold (§3.5, recommended), or the pipeline re-grants at its next run and the hold is only an alert.

@@ -209,9 +209,9 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 	m := t.Metadata
 	r := &changerequests.Request{ResourceType: "TARGET", ResourceName: m.Name, Operation: op, Consent: changerequests.ConsentAll,
 		Realm: m.Realm, OwnerJurisdiction: m.Jurisdiction, PlatformJurisdiction: m.PlatformJurisdiction, ExpectedRevision: common.ExpectedRevision,
-		Payload: payload, AutomationContext: common.AutomationContext}
+		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed}
 	if cur != nil {
-		r.ResourceID = &cur.ID
+		r.ResourceID, r.LockOwner = &cur.ID, cur.ManagedBy
 	}
 	sides := []changerequests.Candidate{{Side: "OWNER", Jurisdiction: m.Jurisdiction, Platform: m.Platform}}
 	if material && m.PlatformJurisdiction != m.Jurisdiction {
@@ -291,6 +291,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		return nil, err
 	}
 	r.ResourceID = &id
+	if err := changerequests.ApplyLock(ctx, tx, "targets", id, r, ""); err != nil {
+		return nil, err
+	}
 	revision := int64(1)
 	return []audit.Entry{{ResourceType: "TARGET", ResourceID: &id, ResourceName: r.ResourceName, ChangeRequestID: &r.ID,
 		Action: "TARGET_PUBLISHED", Revision: &revision}}, nil
@@ -369,6 +372,8 @@ func putLevelsAndFlows(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target) 
 type stored struct {
 	ID       uuid.UUID
 	Revision int64
+	// ManagedBy is the owner of the lock (.specs/ligo-managed-resources.md), or empty.
+	ManagedBy string
 	Target
 }
 
@@ -380,14 +385,14 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	m := &t.Metadata
 	t.Kind = "Target"
 	sql := `SELECT id, revision, name, jurisdiction, platform, platform_type, platform_jurisdiction, realm, state, definition,
-		coalesce(display_name, ''), coalesce(description, ''), labels, coalesce(documentation_url, ''), contacts, visibility, visible_to
+		coalesce(display_name, ''), coalesce(description, ''), labels, coalesce(documentation_url, ''), contacts, visibility, visible_to, coalesce(managed_by, '')
 		FROM targets WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE"
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.ID, &st.Revision, &m.Name, &m.Jurisdiction, &m.Platform, &m.PlatformType, &m.PlatformJurisdiction,
 		&m.Realm, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Labels, &t.DocumentationURL, &t.Contacts,
-		&t.Visibility.Mode, &t.Visibility.VisibleTo)
+		&t.Visibility.Mode, &t.Visibility.VisibleTo, &st.ManagedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -435,6 +440,9 @@ func (s *Service) applyUpdate(ctx context.Context, tx pgx.Tx, r *changerequests.
 	}
 	if cur.Revision != *r.ExpectedRevision {
 		return nil, refuse(409, "revision-conflict", "the target is at revision %d", cur.Revision)
+	}
+	if err := changerequests.ApplyLock(ctx, tx, "targets", cur.ID, r, cur.ManagedBy); err != nil {
+		return nil, err
 	}
 	if err := sources.Transition(cur.Metadata.State, t.Metadata.State); err != nil {
 		return nil, err
