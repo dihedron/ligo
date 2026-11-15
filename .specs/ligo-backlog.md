@@ -13,7 +13,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
 | 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; the other languages not started |
-| 8 | Terraform and OpenTofu provider | 2026-11-08 | Not started; direction set, design open; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
+| 8 | Terraform and OpenTofu provider | 2026-11-08 | Spec 0.1 drafted in `terraform-provider-ligo/.specs/`; chunk 1 (configuration) written; resources wait for item 16; uses the Go admin client, released in v0.6.0 |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
@@ -21,6 +21,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 | 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
+| 16 | Resources managed by automation (the lock) | 2026-11-15 | Spec 0.1 drafted: `.specs/ligo-managed-resources.md`; blocks the resources of item 8 |
 
 ## 1. Audit pruning
 
