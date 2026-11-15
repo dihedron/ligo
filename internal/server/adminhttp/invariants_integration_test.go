@@ -245,7 +245,9 @@ func TestINV11Routes(t *testing.T) {
 		$5, 'CONTAINMENT', 'olga', $6)`, hold2, "held2-"+x, "src-"+x, "tgt-"+x, managedBy, v.request.ID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from managed_holds where id = any($1)", []uuid.UUID{hold, hold2}) })
+	t.Cleanup(func() {
+		_, _ = v.owner.Exec(context.Background(), "delete from managed_holds where id = any($1)", []uuid.UUID{hold, hold2})
+	})
 	if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?pageSize=1&state=all", nil, "lena", "pw"); r.code != 200 || r.body["nextPageToken"] == nil {
 		t.Errorf("first page of holds: %d %v", r.code, r.body)
 	} else if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?pageSize=1&state=all&pageToken="+r.body["nextPageToken"].(string), nil, "lena", "pw"); r.code != 200 {
