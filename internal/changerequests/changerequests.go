@@ -472,8 +472,8 @@ func Hash(payload json.RawMessage) (string, error) {
 // Lock decides who may touch a resource that automation manages
 // (.specs/ligo-managed-resources.md §3.1 to §3.4). r.LockOwner is the owner
 // of the resource at filing, r.Managed what the request sets. Only a
-// trusted_automation principal may set the lock, on a jurisdiction it
-// delegates for; on a managed resource only its owner may file a change,
+// trusted_automation principal may set the lock, and only when it delegates
+// for every jurisdiction involved; on a managed resource only its owner may file a change,
 // except the containment of a binding (consent ANY, ADR-13 rule 5).
 func Lock(c Caller, r *Request) error {
 	if r.Managed != nil && r.ResourceType != "" && !slices.Contains([]string{"SOURCE", "TARGET", "BINDING"}, r.ResourceType) {
@@ -497,14 +497,11 @@ func Lock(c Caller, r *Request) error {
 	return refuse(409, "resource-managed", "%s %q is managed by %s", strings.ToLower(r.ResourceType), r.ResourceName, r.LockOwner)
 }
 
-// delegates reports whether c is trusted_automation on a jurisdiction of r.
+// delegates reports whether c is trusted_automation on every jurisdiction
+// involved in r (owner, source, target and platform).
 func delegates(c Caller, r *Request) bool {
-	for _, j := range r.jurisdictions() {
-		if c.Grants.Delegates(j, r.PlatformJurisdiction) != nil {
-			return true
-		}
-	}
-	return false
+	js := r.jurisdictions()
+	return len(js) > 0 && !slices.ContainsFunc(js, func(j string) bool { return c.Grants.Delegates(j, r.PlatformJurisdiction) == nil })
 }
 
 // ApplyLock is the lock's part of applying r to the SOURCE, TARGET or BINDING

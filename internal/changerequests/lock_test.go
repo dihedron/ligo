@@ -47,6 +47,8 @@ func TestLock(t *testing.T) {
 		{"person creates managed", person, Request{Operation: "CREATE", Managed: on(true)}, "forbidden"},
 		{"operator machine creates managed", machine, Request{Operation: "CREATE", Managed: on(true), OwnerJurisdiction: "dc/corp-prod/ledger"}, "forbidden"},
 		{"automation outside its jurisdictions", owner, Request{Operation: "CREATE", Managed: on(true), OwnerJurisdiction: "cloud/fin-01/payments"}, "forbidden"},
+		{"binding with one jurisdiction not delegated", owner, Request{ResourceType: "BINDING", Operation: "CREATE", Managed: on(true), SourceJurisdiction: "dc/corp-prod/ledger", TargetJurisdiction: "cloud/fin-01/payments", PlatformJurisdiction: "dc/corp-prod/ledger"}, "forbidden"},
+		{"binding with every jurisdiction delegated", owner, Request{ResourceType: "BINDING", Operation: "CREATE", Managed: on(true), SourceJurisdiction: "dc/corp-prod/ledger", TargetJurisdiction: "dc/corp-prod/ledger", PlatformJurisdiction: "dc/corp-prod/ledger"}, ""},
 		{"an instance cannot be managed", owner, Request{ResourceType: "PLATFORM", Operation: "CREATE", Managed: on(true), OwnerJurisdiction: "dc/corp-prod/ledger"}, "validation-failed"},
 		{"unmanaged create by anyone", person, Request{Operation: "CREATE", Managed: on(false)}, ""},
 	} {
