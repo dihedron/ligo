@@ -84,6 +84,8 @@ commands:
                             kills replicas; test-otel (with otel) the traces;
                             test-webhook (with webhook and ligo2) the webhooks,
                             which stops the receiver and the replicas
+                            test-adminclient runs pkg/adminclient against ligo and
+                            restarts ligo1 under a wait;
                             test-faults stops the secrets backend and PostgreSQL
                             under bindings being applied; test-audit exports the
                             audit log, verifies the file offline and prunes it

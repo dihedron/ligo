@@ -12,6 +12,7 @@
 | PostgreSQL | `public`, the resources and audit log; `dbos`, the workflow journal. |
 | Vault or OpenBao | Transit for sealing; credentials and per-binding policies in the store. |
 | Client SDK (`pkg/client`) | Linked into a workload, not run by `ligo`: reads the workload's bindings over mTLS, REST or gRPC, takes its credential from the secret store with a JWT-SVID, and follows rotation and revocation by polling. See the Developer's Guide. |
+| Admin client (`pkg/adminclient`) | Linked into a tool that drives `ligo`, not run by `ligo`: the `ligo` CLI, the Terraform and OpenTofu provider, the MCP server. Calls the admin API with an SVID or LDAP credentials, files changes as change requests and follows them to their end, and cannot decide one. See the Developer's Guide, Part 3. |
 
 ## Listeners
 

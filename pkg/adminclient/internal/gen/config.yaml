@@ -1,0 +1,10 @@
+# oapi-codegen configuration; `make generate` runs it on
+# api/openapi/admin.v1alpha1.yaml and writes the output to gen.go, which is
+# checked in; CI fails when it differs from what the document generates
+# (`make generate-check`).
+package: gen
+generate:
+  models: true
+  client: true
+output-options:
+  resolve-type-name-collisions: true

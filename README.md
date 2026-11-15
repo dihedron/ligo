@@ -132,6 +132,7 @@ Working:
 - the hash-chained audit log, with checkpoints signed by a key outside the database (Vault or OpenBao Transit), verified in batches, exported to files that verify offline, and pruned after a retention, only once exported, with the change requests it names ([.specs/ligo-pruning.md](.specs/ligo-pruning.md), [.specs/ligo-cr-pruning.md](.specs/ligo-cr-pruning.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows, and the Go client SDK (`pkg/client`) that wraps it: bindings, credentials from Vault or OpenBao, and a watch for changes, rotations and revocations ([.specs/ligo-client-sdk.md](.specs/ligo-client-sdk.md));
+- the Go admin client (`pkg/adminclient`), which the `ligo` CLI is built on and which the Terraform and OpenTofu provider and the MCP server will use: every read and the filing of every change, `WaitChangeRequest`, and a revision on every update ([.specs/ligo-adminclient.md](.specs/ligo-adminclient.md));
 - the lease of a credential that a store makes on demand, set per platform or for the installation, with the one hour and 24 hours of before as the default;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`);
@@ -168,7 +169,7 @@ make help     # list the targets
 
 ## Install
 
-Each release has deb and rpm packages and archives of `ligo` and of each plugin, and six documents, as PDF files: the **Why ligo?** leaflet, the **Setup Guide**, the **Operator's Guide**, **Architecture and Design**, the **Planning for Deployment Guide**, and the **Developer's Guide**, which shows how to write a workload with the Go client SDK and how to develop a plugin. Their sources are in [docs/](docs).
+Each release has deb and rpm packages and archives of `ligo` and of each plugin, and six documents, as PDF files: the **Why ligo?** leaflet, the **Setup Guide**, the **Operator's Guide**, **Architecture and Design**, the **Planning for Deployment Guide**, and the **Developer's Guide**, which shows how to write a workload with the Go client SDK, how to develop a plugin and how to drive `ligo` from Go. Their sources are in [docs/](docs).
 
 ### Verify a release
 

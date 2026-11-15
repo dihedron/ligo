@@ -128,3 +128,16 @@ proto: ## regenerate the Go code of the protobuf contracts into api/gen (needs p
 		go build -o "$$tmp/" tool && \
 		PATH="$$tmp:$$PATH" protoc --go_out=. --go_opt=module=github.com/dihedron/ligo \
 			--go-grpc_out=. --go-grpc_opt=module=github.com/dihedron/ligo $(PROTOS)
+
+# GENERATED is the Go code oapi-codegen writes for the admin API client
+# (.specs/ligo-adminclient.md §3.1); it is checked in
+GENERATED := pkg/adminclient/internal/gen/gen.go
+OAPI_CODEGEN := go tool oapi-codegen -config pkg/adminclient/internal/gen/config.yaml api/openapi/admin.v1alpha1.yaml
+
+.PHONY: generate
+generate: ## regenerate the admin API client's code from api/openapi/admin.v1alpha1.yaml (oapi-codegen is a tool of go.mod)
+	@$(OAPI_CODEGEN) > $(GENERATED).new && mv $(GENERATED).new $(GENERATED)
+
+.PHONY: generate-check
+generate-check: ## fail if the checked-in generated code differs from what the OpenAPI document generates
+	@{ $(OAPI_CODEGEN) 2>/dev/null; } | cmp -s - $(GENERATED) || { echo "$(GENERATED) is out of date: run make generate and commit it" >&2; exit 1; }

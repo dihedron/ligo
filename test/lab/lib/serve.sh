@@ -29,6 +29,7 @@ cmd_serve() {
 	test-webhook) serve_test_webhook ;;
 	test-faults) serve_test_faults ;;
 	test-audit) serve_test_audit ;;
+	test-adminclient) serve_test_adminclient ;;
 	test-instances) serve_test_instances ;;
 	test-accounts) serve_test_accounts ;;
 	test-accounts-chaos) serve_test_accounts_chaos ;;
@@ -43,7 +44,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -543,6 +544,7 @@ serve_test() {
 	serve_cli
 	serve_test_ldap "$other"
 	serve_test_topologies "$other"
+	serve_test_adminclient
 	if inner_exists lb; then
 		section "e2e through lb"
 		E2E_SUFFIX="$(openssl rand -hex 4)" # new resources, and a fresh workload JWT-SVID
@@ -558,6 +560,36 @@ serve_test() {
 	info "workflows ran as the executors $executors"
 	serve_scan_secrets
 	info "e2e of ligo serve passed"
+}
+
+# serve_test_adminclient: pkg/adminclient against ligo (.specs/ligo-adminclient.md,
+# chunk 6): an operator by SVID and a viewer by LDAP go through the package,
+# dora approves; then a wait for a change request that spans a restart of
+# ligo1, which this function does while the test waits.
+serve_test_adminclient() {
+	deploy_tests
+	section "e2e of pkg/adminclient"
+	local other pid i
+	other="$(ligo_hosts | tail -1)"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_e2e '^TestServeAdminClient$' ligo1 "$other" || die "TestServeAdminClient failed"
+	info "pkg/adminclient: create, approve, wait, read, conflict, refusals passed"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_e2e '^TestServeAdminClientWait$' ligo1 "$other" &
+	pid=$!
+	for ((i = 0; i < 120; i++)); do
+		inner_exec ligo1 test -f "$LIGO1_E2E/wait-filed" && break
+		sleep 1
+	done
+	((i < 120)) || { kill "$pid" 2>/dev/null || true; die "pkg/adminclient: the wait test filed nothing"; }
+	sleep 3
+	inner_exec ligo1 systemctl restart ligo
+	serve_wait ligo1
+	inner_exec ligo1 sh -c "touch $LIGO1_E2E/wait-restarted && chown ligo:ligo $LIGO1_E2E/wait-restarted"
+	wait "$pid" || die "TestServeAdminClientWait failed"
+	info "pkg/adminclient: a wait rode out a restart of ligo1"
 }
 
 # serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,

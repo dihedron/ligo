@@ -49,7 +49,7 @@ paths:
       tags: [sources]
       operationId: createSource
       summary: File the registration of a source (SOURCE/CREATE).
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Source" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [sources]
@@ -63,7 +63,7 @@ paths:
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/SourcePage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/test:
     post:
       tags: [sources]
@@ -71,29 +71,20 @@ paths:
       summary: Test an SVID regex (Appendix A); stores nothing.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [trustDomain, svidRegex]
-              properties:
-                trustDomain: { type: string }
-                svidRegex: { type: string }
-                spiffeIds: { type: array, items: { type: string } }
-                currentSource: { type: string, description: "A source whose narrowing to check." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/SourceTestRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/SourceTest" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [sources]
       operationId: getSource
       summary: A source (§3.2) and its last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Source" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [sources]
       operationId: updateSource
       summary: File a change of a source (SOURCE/UPDATE); a regex change must narrow.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Source" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}/deprecate:
     parameters: [{ $ref: "#/components/parameters/name" }]
@@ -111,10 +102,10 @@ paths:
       operationId: listSourceBindings
       summary: The source's bindings visible to the caller.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/BindingPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/sources/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [sources], operationId: sourceAudit, summary: The audit entries of a source., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [sources], operationId: sourceAudit, summary: The audit entries of a source., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- targets -------------------------------------------------------------
   /v1/admin/targets:
@@ -122,7 +113,7 @@ paths:
       tags: [targets]
       operationId: createTarget
       summary: File the publication of a target (TARGET/CREATE).
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Target" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [targets]
@@ -137,19 +128,19 @@ paths:
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/TargetPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [targets]
       operationId: getTarget
       summary: A target (§3.3) and its last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Target" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [targets]
       operationId: updateTarget
       summary: File a change of a target (TARGET/UPDATE); a grants change must narrow.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Target" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/deprecate:
     parameters: [{ $ref: "#/components/parameters/name" }]
@@ -176,7 +167,7 @@ paths:
       operationId: listTargetBindings
       summary: The target's bindings visible to the caller.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/BindingPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/bindings/revoke:
     parameters: [{ $ref: "#/components/parameters/name" }]
     post:
@@ -185,20 +176,11 @@ paths:
       summary: Bulk revocation for containment; one DELETE change request (consent ANY) per matching binding.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [comment]
-              properties:
-                source: { type: string }
-                sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
-                comment: { type: string }
-                approvalReference: { type: string }
-      responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/RevokeRequest" } } }
+      responses: { "202": { $ref: "#/components/responses/Revoked" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/targets/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [targets], operationId: targetAudit, summary: The audit entries of a target., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- platforms and catalog ------------------------------------------------
   /v1/admin/platforms:
@@ -206,25 +188,25 @@ paths:
       tags: [platforms]
       operationId: createPlatform
       summary: File the creation of a platform (PLATFORM/CREATE); one OWNER side, decided by a person.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [platforms]
       operationId: listPlatforms
       summary: The platforms in force (§3.4) with their health.
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/PlatformPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/platforms/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [platforms]
       operationId: getPlatform
       summary: One platform with its health and uiSchemas, and for the operators and approvers of its jurisdiction its revision and definition, and a quarantined one (quarantined true); 503 if its plugin cannot be reached.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Platform" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [platforms]
       operationId: updatePlatform
       summary: File a change of a platform (PLATFORM/UPDATE); expectedRevision is required.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     delete:
       tags: [platforms]
@@ -244,31 +226,31 @@ paths:
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/platforms/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [platforms], operationId: platformAudit, summary: The audit entries of a platform., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [platforms], operationId: platformAudit, summary: The audit entries of a platform., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/identity-providers:
     post:
       tags: [instances]
       operationId: createIdentityProvider
       summary: File the creation of a identity provider instance (IDENTITY_PROVIDER/CREATE); one OWNER side, decided by a person.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [instances]
       operationId: listIdentityProviders
       summary: The identity provider instances in force, to any viewer (.specs/ligo-instances.md §10.1).
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/InstancePage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/identity-providers/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [instances]
       operationId: getIdentityProvider
       summary: One identity provider instance; its revision and definition only for the operators and approvers of its jurisdiction.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Instance" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [instances]
       operationId: updateIdentityProvider
       summary: File a change of a identity provider instance (IDENTITY_PROVIDER/UPDATE); expectedRevision is required.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     delete:
       tags: [instances]
@@ -288,31 +270,31 @@ paths:
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/identity-providers/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [instances], operationId: identityProviderAudit, summary: The audit entries of a identity provider instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [instances], operationId: identityProviderAudit, summary: The audit entries of a identity provider instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/secret-stores:
     post:
       tags: [instances]
       operationId: createSecretStore
       summary: File the creation of a secret store instance (SECRET_STORE/CREATE); one OWNER side, decided by a person.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     get:
       tags: [instances]
       operationId: listSecretStores
       summary: The secret store instances in force, to any viewer (.specs/ligo-instances.md §10.1).
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/InstancePage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/secret-stores/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [instances]
       operationId: getSecretStore
       summary: One secret store instance; its revision and definition only for the operators and approvers of its jurisdiction.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Instance" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [instances]
       operationId: updateSecretStore
       summary: File a change of a secret store instance (SECRET_STORE/UPDATE); expectedRevision is required.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Instance" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     delete:
       tags: [instances]
@@ -332,7 +314,7 @@ paths:
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/secret-stores/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [instances], operationId: secretStoreAudit, summary: The audit entries of a secret store instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [instances], operationId: secretStoreAudit, summary: The audit entries of a secret store instance., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/catalog/targets:
     get:
       tags: [catalog]
@@ -348,14 +330,14 @@ paths:
         - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/CatalogTargetPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [catalog]
       operationId: getCatalogTarget
       summary: A target's card with the charter outcome for each of the caller's sources.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/CatalogTarget" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/catalog/targets/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -369,7 +351,7 @@ paths:
       operationId: listCatalogSources
       summary: The sources visible to the caller beyond their own.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/CatalogSourcePage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- bindings --------------------------------------------------------------
   /v1/admin/bindings:
@@ -379,7 +361,7 @@ paths:
       summary: File a binding (BINDING/CREATE), with an optional inlineSource.
       parameters:
         - { name: wait, in: query, description: "true: wait up to 10 s for an applied binding to settle.", schema: { type: boolean } }
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Binding" }
       responses:
         "200": { $ref: "#/components/responses/Filed" }
         "202": { $ref: "#/components/responses/Filed" }
@@ -403,19 +385,19 @@ paths:
         - { name: propagationPending, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/BindingPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/bindings/{name}:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
       tags: [bindings]
       operationId: getBinding
       summary: A binding (§3.5) with its stage states (no secrets) and last 20 audit entries.
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/Binding" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     put:
       tags: [bindings]
       operationId: updateBinding
       summary: File a change of a binding (BINDING/UPDATE); consent ANY if every change removes access.
-      requestBody: { $ref: "#/components/requestBodies/Resource" }
+      requestBody: { $ref: "#/components/requestBodies/Binding" }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
     delete:
       tags: [bindings]
@@ -438,13 +420,13 @@ paths:
     get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/retry:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: retryBinding, summary: Retry a FAILED or DELETE_FAILED binding., responses: { "202": { $ref: "#/components/responses/BindingOperated" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/rotate:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [bindings], operationId: rotateBinding, summary: Re-apply an ACTIVE binding with rotation., responses: { "202": { $ref: "#/components/responses/BindingOperated" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/audit:
     parameters: [{ $ref: "#/components/parameters/name" }]
-    get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- change requests ---------------------------------------------------------
   /v1/admin/change-requests:
@@ -453,18 +435,18 @@ paths:
       operationId: listChangeRequests
       summary: The change requests visible to the caller.
       parameters:
-        - { name: status, in: query, schema: { type: string } }
-        - { name: resourceType, in: query, schema: { type: string, enum: [SOURCE, TARGET, BINDING] } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/ChangeRequestStatus" } }
+        - { name: resourceType, in: query, schema: { $ref: "#/components/schemas/ResourceType" } }
         - { name: resourceName, in: query, schema: { type: string } }
         - { name: realm, in: query, schema: { type: string } }
         - { name: jurisdiction, in: query, schema: { type: string } }
         - { name: awaitingMe, in: query, schema: { type: boolean } }
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ChangeRequestPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/change-requests/{id}:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    get: { tags: [change-requests], operationId: getChangeRequest, summary: A change request with its sides and a diff against the current revision., responses: { "200": { $ref: "#/components/responses/ChangeRequest" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/approve:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post:
@@ -488,7 +470,7 @@ paths:
     post: { tags: [change-requests], operationId: declineChangeRequest, summary: Decline the caller's side(s)., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/withdraw:
     parameters: [{ $ref: "#/components/parameters/id" }]
-    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+    post: { tags: [change-requests], operationId: withdrawChangeRequest, summary: Withdraw a PENDING change request (requester only)., requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/WithdrawRequest" } } } }, responses: { "200": { $ref: "#/components/responses/Decided" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests/{id}/ratify:
     parameters: [{ $ref: "#/components/parameters/id" }]
     post: { tags: [change-requests, break-glass], operationId: ratifyChangeRequest, summary: Ratify a side of a break-glass change., requestBody: { $ref: "#/components/requestBodies/Decision" }, responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
@@ -507,12 +489,7 @@ paths:
           description: The policy and its hash.
           content:
             application/json:
-              schema:
-                type: object
-                required: [policy, sha256]
-                properties:
-                  policy: { type: object }
-                  sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+              schema: { $ref: "#/components/schemas/Charter" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
   /v1/admin/charter/evaluate:
@@ -542,21 +519,7 @@ paths:
       responses:
         "200":
           description: The charter outcome.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  resourceType: { enum: [BINDING, SOURCE, TARGET] }
-                  name: { type: string }
-                  jurisdictions: { type: object, additionalProperties: { type: string } }
-                  namePrefix: { type: object, properties: { valid: { type: boolean }, detail: { type: string } } }
-                  consent: { enum: [ALL, ANY] }
-                  interconnect:
-                    oneOf:
-                      - type: "null"
-                      - { type: object, properties: { rule: { type: string }, action: { enum: [allow, deny] } } }
-                  sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Evaluation" } } }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
 
@@ -589,7 +552,7 @@ paths:
       operationId: listBreakGlass
       summary: Open and recent break-glass changes.
       parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }]
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ChangeRequestPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
   # --- operations --------------------------------------------------------------
   /v1/admin/accounts:
@@ -619,7 +582,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
-      responses: { "200": { $ref: "#/components/responses/Page" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/AccountPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/accounts/{name}:
     parameters:
       - { name: name, in: path, required: true, schema: { type: string } }
@@ -648,19 +611,7 @@ paths:
       operationId: getMaintenance
       summary: The maintenance setting and what the drain waits for (§10.3).
       responses:
-        "200":
-          description: The setting.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  maintenanceMode: { type: boolean }
-                  reason: { type: string }
-                  changedBy: { type: string }
-                  changedAt: { type: [string, "null"], format: date-time }
-                  inFlight: { type: integer }
-                  propagationQueued: { type: integer }
+        "200": { $ref: "#/components/responses/Maintenance" }
         "4XX": { $ref: "#/components/responses/Problem" }
         "5XX": { $ref: "#/components/responses/Problem" }
     put:
@@ -669,15 +620,8 @@ paths:
       summary: Enable or disable maintenance mode (admin.full_access).
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [enabled]
-              properties:
-                enabled: { type: boolean }
-                reason: { type: string, description: "Required when enabling." }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRequest" } } }
+      responses: { "200": { $ref: "#/components/responses/Maintenance" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/audit/verify:
     get:
       tags: [operations]
@@ -686,7 +630,7 @@ paths:
       description: Checks every signed checkpoint, then re-hashes the entries after the newest one; with full, every entry. 503 when the signing key cannot be reached.
       parameters:
         - { name: full, in: query, schema: { type: boolean, default: false } }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/AuditVerification" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/audit/export:
     get:
       tags: [operations]
@@ -709,21 +653,14 @@ paths:
       description: Audits SYSTEM_AUDIT_EXPORTED. 409 audit-export-recorded when an export through this checkpoint or a later one is recorded; 422 when through is not a checkpoint or sha256 is not 64 hex characters.
       requestBody:
         required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [through, sha256]
-              properties:
-                through: { type: integer, format: int64, description: "The checkpoint the export ends on." }
-                sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Of the exported file." }
-      responses: { "201": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+        content: { application/json: { schema: { $ref: "#/components/schemas/AuditExportRecord" } } }
+      responses: { "201": { $ref: "#/components/responses/AuditExportRecorded" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors:
     get:
       tags: [operations]
       operationId: listExecutors
       summary: The pending workflows and live database sessions of each executor (§10.2).
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ExecutorList" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
   /v1/admin/executors/{id}/recover:
     post:
       tags: [operations]
@@ -731,7 +668,7 @@ paths:
       summary: Re-enqueue the pending workflows of a replica gone for good (admin.full_access, §10.2).
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-      responses: { "200": { $ref: "#/components/responses/Object" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+      responses: { "200": { $ref: "#/components/responses/ExecutorRecovered" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
 
 components:
   securitySchemes:
@@ -755,10 +692,42 @@ components:
     platform: { name: platform, in: query, schema: { type: string } }
     platformType: { name: platformType, in: query, schema: { type: string } }
   requestBodies:
-    Resource:
+    Instance:
       required: true
-      description: The resource (§3.2, §3.3, §3.5) plus expectedRevision (updates), approvalReference and automationContext.
-      content: { application/json: { schema: { type: object } } }
+      description: The definition of an instance plus expectedRevision (updates), approvalReference and automationContext.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/InstanceDefinition" }
+              - { $ref: "#/components/schemas/ChangeEnvelope" }
+    Binding:
+      required: true
+      description: A binding (§3.5) plus expectedRevision (updates), approvalReference and automationContext.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/BindingSpec" }
+              - { $ref: "#/components/schemas/ChangeEnvelope" }
+    Source:
+      required: true
+      description: A source (§3.2) plus expectedRevision (updates), approvalReference and automationContext.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/SourceSpec" }
+              - { $ref: "#/components/schemas/ChangeEnvelope" }
+    Target:
+      required: true
+      description: A target (§3.3) plus expectedRevision (updates), approvalReference and automationContext.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - { $ref: "#/components/schemas/TargetSpec" }
+              - { $ref: "#/components/schemas/ChangeEnvelope" }
     StateChange:
       required: true
       content:
@@ -781,6 +750,8 @@ components:
               comment: { type: string }
               side: { type: string }
   schemas:
+    NetworkFlow:
+      $ref: "../schemas/v1alpha1/network-flow.json"
     Problem:
       type: object
       required: [type, title, status]
@@ -789,51 +760,853 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
+    ResourceType:
+      description: What a change request changes. Kept equal to the database's resource_type by the contract test.
+      type: string
+      enum: [SOURCE, TARGET, BINDING, PLATFORM, IDENTITY_PROVIDER, SECRET_STORE]
+    ChangeRequestStatus:
+      description: PENDING is the only state with a decision to make; every other state is terminal. Kept equal to the database's change_request_status.
+      type: string
+      enum: [PENDING, APPLIED, REJECTED, WITHDRAWN, EXPIRED, FAILED_TO_APPLY]
     Side:
       type: object
+      required: [side, jurisdiction, basis]
       properties:
         side: { type: string, examples: [TARGET, SOURCE, OWNER, PLATFORM, "PARTY:security"] }
         jurisdiction: { type: string }
-        basis: { enum: [AUTO, DELEGATED, HUMAN] }
-        decision: { type: [string, "null"] }
+        basis: { type: string, enum: [AUTO, HUMAN, DELEGATED, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY] }
+        decision: { type: [string, "null"], enum: [APPROVED, DECLINED, null] }
         decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        ratifiedBy: { type: string }
+        ratifiedAt: { type: string, format: date-time }
+        ratificationComment: { type: string }
+    BreakGlass:
+      type: object
+      required: [justification, ttlSeconds, expiresAt]
+      properties:
+        justification: { type: string }
+        ttlSeconds: { type: integer, format: int64 }
+        expiresAt: { type: string, format: date-time }
+    ChangeRequest:
+      description: A change request (§7.2.3). Its terminal states are every status but PENDING.
+      type: object
+      required: [id, resourceType, resourceName, resourceId, operation, kind, consent, status, dependsOn, policySha256,
+                 distinctApproversRequired, payloadSha256, requestedBy, requestedAt, expiresAt, sides, awaitingApproval]
+      properties:
+        id: { type: string, format: uuid }
+        resourceType: { $ref: "#/components/schemas/ResourceType" }
+        resourceName: { type: string }
+        resourceId: { type: [string, "null"], format: uuid }
+        operation: { type: string, enum: [CREATE, UPDATE, DELETE] }
+        kind: { type: string, enum: [STANDARD, BREAK_GLASS, SYSTEM_REVERT, SYSTEM_EXPIRY] }
+        consent: { type: string, enum: [ALL, ANY] }
+        status: { $ref: "#/components/schemas/ChangeRequestStatus" }
+        realm: { type: string }
+        ownerJurisdiction: { type: string }
+        sourceJurisdiction: { type: string }
+        targetJurisdiction: { type: string }
+        platformJurisdiction: { type: string }
+        interconnectRule: { type: string }
+        dependsOn: { type: [string, "null"], format: uuid }
+        revertsChangeRequest: { type: string, format: uuid }
+        policySha256: { type: string }
+        distinctApproversRequired: { type: boolean }
+        payloadSha256: { type: string }
+        payload: { type: object, description: "Only in a single read." }
+        approvalReference: { type: string }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+        awaitingApproval: { type: array, items: { type: string }, description: "The sides still to decide, while PENDING." }
+        diff: { description: "Against the resource's current revision, on an UPDATE." }
+        breakGlass: { $ref: "#/components/schemas/BreakGlass" }
+    ChangeEnvelope:
+      description: What every filing may add to the resource it carries.
+      type: object
+      properties:
+        expectedRevision: { type: integer, format: int64, description: "Required on an update." }
+        approvalReference: { type: string }
+        automationContext: { type: object }
+    Contact:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        email: { type: string }
+    Visibility:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [PRIVATE, LISTED, PUBLIC] }
+        visibleTo: { type: array, items: { type: string }, description: "Jurisdiction patterns." }
+    ResourceState:
+      type: string
+      enum: [ACTIVE, DEPRECATED, RETIRED]
+    SourceSpecMetadata:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string, description: "Derived from the regex (§3.9); ignored on input." }
+        state: { $ref: "#/components/schemas/ResourceState" }
+    SourceSpecIdentity:
+      type: object
+      required: [trustDomain, svidRegex]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
+    SourceSpec:
+      description: A source as a caller writes it (§3.2); the body of a registration or an update.
+      type: object
+      required: [metadata, identity]
+      properties:
+        kind: { type: string, description: "Always Source." }
+        metadata: { $ref: "#/components/schemas/SourceSpecMetadata" }
+        identity: { $ref: "#/components/schemas/SourceSpecIdentity" }
+        displayName: { type: string }
+        description: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        externalRefs: { type: object, additionalProperties: { type: string } }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+    SourceMetadata:
+      type: object
+      required: [id, name, jurisdiction, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        jurisdiction: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        revision: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
+    SourceIdentity:
+      type: object
+      required: [trustDomain, svidRegex, sampleSpiffeIds]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        sampleSpiffeIds: { type: [array, "null"], items: { type: string } }
+    ResourceStatus:
+      type: object
+      required: [bindings]
+      properties:
+        bindings: { type: integer, description: "Bindings visible to the caller." }
+    Source:
+      description: A source as the server returns it (§3.2).
+      type: object
+      required: [apiVersion, metadata, identity, visibility, status]
+      properties:
+        apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
+        kind: { type: string, description: "Always Source." }
+        metadata: { $ref: "#/components/schemas/SourceMetadata" }
+        identity: { $ref: "#/components/schemas/SourceIdentity" }
+        displayName: { type: string }
+        description: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        externalRefs: { type: object, additionalProperties: { type: string } }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        status: { $ref: "#/components/schemas/ResourceStatus" }
+    AccessLevel:
+      type: object
+      required: [name, grants]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        grants: { type: object, description: "Platform-specific (the platform type's grants schema)." }
+        privileges: { type: array, items: { type: string }, description: "Output of the platform's target validation." }
+        state: { $ref: "#/components/schemas/ResourceState" }
+    TargetSpecMetadata:
+      type: object
+      required: [name, platform]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string }
+        platform: { type: string }
+    TargetSpec:
+      description: A target as a caller writes it (§3.3); the body of a publication or an update.
+      type: object
+      required: [metadata, definition, accessLevels]
+      properties:
+        kind: { type: string, description: "Always Target." }
+        metadata: { $ref: "#/components/schemas/TargetSpecMetadata" }
+        definition: { type: object, description: "Platform-specific (the platform type's target schema)." }
+        accessLevels: { type: array, items: { $ref: "#/components/schemas/AccessLevel" } }
+        networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
+        displayName: { type: string }
+        description: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        documentationUrl: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+    TargetMetadata:
+      type: object
+      required: [id, name, jurisdiction, platform, platformType, platformJurisdiction, realm, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        jurisdiction: { type: string }
+        platform: { type: string }
+        platformType: { type: string }
+        platformJurisdiction: { type: string }
+        realm: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        revision: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
+    Target:
+      description: A target as the server returns it (§3.3).
+      type: object
+      required: [apiVersion, metadata, definition, accessLevels, visibility, status]
+      properties:
+        apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
+        kind: { type: string, description: "Always Target." }
+        metadata: { $ref: "#/components/schemas/TargetMetadata" }
+        definition: { type: object, description: "Platform-specific (the platform type's target schema)." }
+        accessLevels: { type: array, items: { $ref: "#/components/schemas/AccessLevel" } }
+        networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
+        displayName: { type: string }
+        description: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        documentationUrl: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        status: { $ref: "#/components/schemas/ResourceStatus" }
+    AuditEntry:
+      type: object
+      required: [id, action, actor, occurredAt]
+      properties:
+        id: { type: integer, format: int64 }
+        action: { type: string }
+        actor: { type: string }
+        approver: { type: string }
+        changeRequestId: { type: string, format: uuid }
+        revision: { type: integer, format: int64 }
+        attempt: { type: integer, format: int64 }
+        workflowId: { type: string }
+        requestId: { type: string }
+        snapshot: { type: object, description: "The resource as it was, when the entry records a state." }
+        occurredAt: { type: string, format: date-time }
+    SourceDetail:
+      description: A source with its last 20 audit entries, newest first.
+      allOf:
+        - { $ref: "#/components/schemas/Source" }
+        - { type: object, required: [audit], properties: { audit: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } } } }
+    TargetDetail:
+      description: A target with its last 20 audit entries, newest first.
+      allOf:
+        - { $ref: "#/components/schemas/Target" }
+        - { type: object, required: [audit], properties: { audit: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } } } }
+    BindingPhase:
+      description: Kept equal to the database's binding_phase by the contract test.
+      type: string
+      enum: [PROVISIONING, ACTIVE, FAILED, DELETING, DELETE_FAILED]
+    BindingSpec:
+      description: A binding as a caller writes it (§3.5); the body of a filing.
+      type: object
+      required: [name, source, target, accessLevel]
+      properties:
+        kind: { type: string, description: "Always Binding." }
+        name: { type: string }
+        source: { type: string, description: "A source's name; with inlineSource, the name it is registered under." }
+        target: { type: string }
+        accessLevel: { type: string }
+        parameters: { type: object, description: "Platform-specific (the platform type's binding parameters)." }
+        purpose: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        expiresAt: { type: [string, "null"], format: date-time }
+        inlineSource: { $ref: "#/components/schemas/SourceSpec", description: "Registered with the binding; only on a CREATE (§7.2.4)." }
+    InstanceRef:
+      type: object
+      required: [type, instance]
+      properties:
+        type: { type: string }
+        instance: { type: string }
+    BindingWiring:
+      type: object
+      required: [identityProvider, secretStore]
+      properties:
+        identityProvider: { $ref: "#/components/schemas/InstanceRef" }
+        secretStore: { $ref: "#/components/schemas/InstanceRef" }
+    BindingMetadata:
+      type: object
+      required: [id, name, realm, sourceJurisdiction, targetJurisdiction, platformJurisdiction, platformType, platform, wiring, revision, activeRevision, createdAt, updatedAt, createdBy, updatedBy]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        realm: { type: string }
+        sourceJurisdiction: { type: string }
+        targetJurisdiction: { type: string }
+        platformJurisdiction: { type: string }
+        platformType: { type: string }
+        platform: { type: string }
+        wiring: { $ref: "#/components/schemas/BindingWiring" }
+        revision: { type: integer, format: int64 }
+        activeRevision: { type: [integer, "null"], format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedBy: { type: string }
+    BreakGlassStatus:
+      type: object
+      required: [changeRequestId, requestedBy, incidentReference, expiresAt]
+      properties:
+        changeRequestId: { type: string, format: uuid }
+        requestedBy: { type: string }
+        incidentReference: { type: string }
+        expiresAt: { type: string, format: date-time }
+    BindingStatus:
+      type: object
+      required: [phase, operation, attempt, workflowId, currentStep, message, lastTransitionTime, pendingChangeRequestId, propagationPending, breakGlass]
+      properties:
+        phase: { $ref: "#/components/schemas/BindingPhase" }
+        operation: { type: string, enum: [APPLY, REAPPLY, DELETE] }
+        attempt: { type: integer, format: int64 }
+        workflowId: { type: string }
+        currentStep: { type: string }
+        message: { type: string }
+        lastTransitionTime: { type: string, format: date-time }
+        pendingChangeRequestId: { type: [string, "null"], format: uuid }
+        propagationPending: { type: boolean }
+        breakGlass: { anyOf: [{ $ref: "#/components/schemas/BreakGlassStatus" }, { type: "null" }] }
+    BindingRequested:
+      type: object
+      required: [sourceRevision, targetRevision, trustDomain, svidRegex, spec]
+      properties:
+        sourceRevision: { type: integer, format: int64 }
+        targetRevision: { type: integer, format: int64 }
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        spec: { description: "Platform-specific." }
+    BindingActive:
+      type: object
+      required: [revision, svidRegex, since]
+      properties:
+        revision: { type: integer, format: int64 }
+        svidRegex: { type: string }
+        since: { type: string, format: date-time }
+    Binding:
+      description: A binding as the server returns it (§3.5).
+      type: object
+      required: [apiVersion, kind, metadata, source, target, accessLevel, parameters, expiresAt, status, requested, active, auth, spec]
+      properties:
+        apiVersion: { type: string, examples: ["ligo.dihedron.org/v1alpha1"] }
+        kind: { type: string, description: "Always Binding." }
+        metadata: { $ref: "#/components/schemas/BindingMetadata" }
+        source: { type: string }
+        target: { type: string }
+        accessLevel: { type: string }
+        parameters: { description: "Platform-specific." }
+        purpose: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        expiresAt: { type: [string, "null"], format: date-time }
+        status: { $ref: "#/components/schemas/BindingStatus" }
+        requested: { $ref: "#/components/schemas/BindingRequested" }
+        active: { anyOf: [{ $ref: "#/components/schemas/BindingActive" }, { type: "null" }] }
+        auth: { description: "What the workload API hands the workload: the strategy and its store configuration; never a secret." }
+        spec: { description: "Platform-specific." }
+    Stage:
+      type: object
+      required: [stage, providerType, providerInstance, status, revision, workflowId, artifact, updatedAt]
+      properties:
+        stage: { type: string, enum: [IDENTITY, TARGET, SECRET_STORE] }
+        providerType: { type: string }
+        providerInstance: { type: string }
+        status: { type: string, enum: [STARTED, ENSURED] }
+        revision: { type: integer, format: int64 }
+        workflowId: { type: string }
+        artifact: { description: "What the stage produced; no secrets." }
+        updatedAt: { type: string, format: date-time }
+    BindingDetail:
+      description: A binding with its stage states and last 20 audit entries.
+      allOf:
+        - { $ref: "#/components/schemas/Binding" }
+        - type: object
+          required: [stages, audit]
+          properties:
+            stages: { type: array, items: { $ref: "#/components/schemas/Stage" } }
+            audit: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
+    DefinitionKind:
+      type: string
+      enum: [IdentityProvider, SecretStore, Platform]
+    DefinitionMetadata:
+      type: object
+      required: [name, jurisdiction, realm]
+      properties:
+        name: { type: string, description: "Immutable." }
+        jurisdiction: { type: string, description: "Immutable." }
+        realm: { type: string, description: "Immutable." }
+        displayName: { type: string }
+        description: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+    SVIDSelector:
+      type: object
+      required: [matchExpr]
+      properties:
+        matchExpr: { type: string }
+        jwtAudience: { type: array, items: { type: string } }
+        allowSharedSvid: { type: boolean }
+    InstanceDefinition:
+      description: The definition of an identity provider, a secret store or a platform (.specs/ligo-instances.md §4); the body of a creation or an update. The platform-only fields are refused for the other two kinds.
+      type: object
+      required: [kind, metadata, type]
+      properties:
+        kind: { $ref: "#/components/schemas/DefinitionKind" }
+        metadata: { $ref: "#/components/schemas/DefinitionMetadata" }
+        type: { type: string, description: "The plugin type; immutable." }
+        svidSelector: { $ref: "#/components/schemas/SVIDSelector" }
+        config: { type: object, description: "Plugin-specific (the plugin's instance schema)." }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
+        targetJurisdictions: { type: array, items: { type: string }, description: "Platforms only." }
+        namespaceTemplate: { type: string, description: "Platforms only." }
+        checkExistence: { type: boolean, description: "Platforms only; default true." }
+        principalPrefix: { type: string, description: "Platforms only." }
+        allowedSourceTrustDomains: { type: array, items: { type: string }, description: "Platforms only." }
+        rotationInterval: { type: string, examples: ["24h"], description: "Platforms only." }
+        identityProvider: { $ref: "#/components/schemas/Wiring" }
+        secretStore: { $ref: "#/components/schemas/Wiring" }
+    Wiring:
+      description: Names an instance of a plugin type; platforms only.
+      type: object
+      required: [type, instance]
+      properties:
+        type: { type: string }
+        instance: { type: string }
+        secretStorageStrategy: { type: string, description: "Secret store only (§5.6)." }
+    Instance:
+      description: An identity provider or secret store instance as any viewer sees it; revision and definition only for those who file and decide its requests.
+      type: object
+      required: [apiVersion, kind, name, type, realm, jurisdiction, networkFlows]
+      properties:
+        apiVersion: { type: string }
+        kind: { type: string, enum: [IdentityProvider, SecretStore] }
+        name: { type: string }
+        type: { type: string }
+        realm: { type: string }
+        jurisdiction: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
+        revision: { type: integer, format: int64 }
+        definition: { $ref: "#/components/schemas/InstanceDefinition" }
+        quarantined: { type: boolean, description: "Its row does not verify: it is not in force." }
+    Health:
+      type: object
+      required: [serving]
+      properties:
+        serving: { type: boolean }
+        message: { type: string }
+    Platform:
+      description: "A platform as §3.4 shows it: no credentials and no plugin configuration beyond the privilege bounds."
+      type: object
+      required: [apiVersion, kind, name, type, realm, jurisdiction, targetJurisdictions, allowedSourceTrustDomains, networkFlows, identityProvider, secretStore]
+      properties:
+        apiVersion: { type: string }
+        kind: { type: string, description: "Always Platform." }
+        name: { type: string }
+        type: { type: string }
+        realm: { type: string }
+        jurisdiction: { type: string }
+        targetJurisdictions: { type: [array, "null"], items: { type: string } }
+        displayName: { type: string }
+        description: { type: string }
+        contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
+        allowedSourceTrustDomains: { type: array, items: { type: string } }
+        privilegeBounds: { type: object, description: "Platform-type specific." }
+        networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
+        identityProvider: { $ref: "#/components/schemas/InstanceRef" }
+        secretStore: { $ref: "#/components/schemas/InstanceRef" }
+        health: { $ref: "#/components/schemas/Health" }
+        uiSchemas: { type: object, description: "The forms of the platform's plugin, in a single read." }
+        revision: { type: integer, format: int64 }
+        definition: { $ref: "#/components/schemas/InstanceDefinition" }
+        quarantined: { type: boolean, description: "Its row does not verify: it is not in force." }
+    CatalogTarget:
+      description: A target as the catalog lists it (§7.2.4).
+      type: object
+      required: [name, jurisdiction, platform, platformType, platformJurisdiction, state]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string }
+        platform: { type: string }
+        platformType: { type: string }
+        platformJurisdiction: { type: string }
+        state: { $ref: "#/components/schemas/ResourceState" }
+        displayName: { type: string }
+        description: { type: string }
+        labels: { type: object, additionalProperties: { type: string } }
+        bound: { type: boolean, description: "Bound to the source of forSource." }
+    CatalogSource:
+      description: A source visible to the caller beyond their own (§7.2.4).
+      type: object
+      required: [name, jurisdiction, trustDomain]
+      properties:
+        name: { type: string }
+        jurisdiction: { type: string }
+        trustDomain: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+    Outcome:
+      description: What the charter says of a binding of one of the caller's sources to the target.
+      type: object
+      required: [source, sourceJurisdiction, allowed]
+      properties:
+        source: { type: string }
+        sourceJurisdiction: { type: string }
+        allowed: { type: boolean }
+        rule: { type: string, description: "The deciding rule, \"default\", or absent for the same jurisdiction." }
+        sides: { type: array, items: { type: string }, description: "When allowed." }
+    CatalogTargetDetail:
+      description: A target with the charter outcome for each of the caller's sources.
+      allOf:
+        - { $ref: "#/components/schemas/Target" }
+        - { type: object, required: [outcomes], properties: { outcomes: { type: array, items: { $ref: "#/components/schemas/Outcome" } } } }
+    AccountCounts:
+      type: object
+      properties:
+        sources: { type: integer }
+        targets: { type: integer }
+        bindings: { type: integer }
+    Account:
+      description: An account; counts only for a single account read.
+      type: object
+      required: [name, status, registeredBy, registeredAt]
+      properties:
+        name: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [ACTIVE, RETIRED] }
+        registeredBy: { type: string }
+        registeredAt: { type: string, format: date-time }
+        retiredBy: { type: string }
+        retiredAt: { type: string, format: date-time }
+        counts: { $ref: "#/components/schemas/AccountCounts" }
+    SourceTestRequest:
+      type: object
+      required: [trustDomain, svidRegex]
+      properties:
+        trustDomain: { type: string }
+        svidRegex: { type: string }
+        spiffeIds: { type: array, items: { type: string } }
+        currentSource: { type: string, description: "A source whose narrowing to check." }
+    SourceTestNarrowing:
+      type: object
+      required: [narrower, droppedSamples]
+      properties:
+        narrower: { type: boolean }
+        undecided: { type: boolean }
+        witness: { type: string }
+        droppedSamples: { type: array, items: { type: string } }
+    SourceTestOverlap:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string }
+        witness: { type: string, description: "An identity both match." }
+        undecided: { type: boolean }
+    SourceTestResult:
+      description: What the regex tester finds; nothing is stored.
+      type: object
+      required: [valid, matches, overlaps]
+      properties:
+        valid: { type: boolean }
+        error: { type: string }
+        jurisdiction: { type: string }
+        matches: { type: object, additionalProperties: { type: boolean } }
+        narrowing: { $ref: "#/components/schemas/SourceTestNarrowing" }
+        overlaps: { type: array, items: { $ref: "#/components/schemas/SourceTestOverlap" } }
+    WithdrawRequest:
+      type: object
+      properties:
+        comment: { type: string, description: "Why; kept in the audit log." }
+    RevokeRequest:
+      type: object
+      required: [comment]
+      properties:
+        source: { type: string }
+        sourceJurisdiction: { type: string, description: "A jurisdiction pattern." }
+        comment: { type: string }
+        approvalReference: { type: string }
+    RevokeFailure:
+      description: A binding that could not be revoked, with its problem.
+      type: object
+      required: [binding, type, detail]
+      properties:
+        binding: { type: string }
+        type: { type: string }
+        detail: { type: string }
+    Revocation:
+      type: object
+      required: [changeRequests, errors]
+      properties:
+        changeRequests: { type: array, items: { $ref: "#/components/schemas/ChangeRequest" } }
+        errors: { type: array, items: { $ref: "#/components/schemas/RevokeFailure" } }
+    Charter:
+      description: The charter in force, as the canonical JSON its SHA-256 is computed over.
+      type: object
+      required: [policy, sha256]
+      properties:
+        policy: { type: object }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    EvaluationNameCheck:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean }
+        detail: { type: string }
+    EvaluationInterconnect:
+      type: object
+      required: [rule, action]
+      properties:
+        rule: { type: string, description: "The deciding rule, or default." }
+        action: { type: string, enum: [allow, deny] }
+    Evaluation:
+      description: The charter outcome of a planned creation.
+      type: object
+      required: [resourceType, name, jurisdictions, namePrefix, consent, interconnect, sides]
+      properties:
+        resourceType: { type: string, enum: [BINDING, SOURCE, TARGET] }
+        name: { type: string }
+        jurisdictions: { type: object, additionalProperties: { type: string } }
+        namePrefix: { $ref: "#/components/schemas/EvaluationNameCheck" }
+        consent: { type: string, enum: [ALL, ANY] }
+        interconnect:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/EvaluationInterconnect" }
+        sides: { type: array, items: { $ref: "#/components/schemas/Side" } }
+    Maintenance:
+      type: object
+      required: [maintenanceMode, reason, changedBy, changedAt, inFlight, propagationQueued]
+      properties:
+        maintenanceMode: { type: boolean }
+        reason: { type: string }
+        changedBy: { type: string }
+        changedAt: { type: [string, "null"], format: date-time }
+        inFlight: { type: integer }
+        propagationQueued: { type: integer }
+    MaintenanceRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        reason: { type: string, description: "Required when enabling." }
+    AuditVerification:
+      type: object
+      required: [valid, entries, checkpoints, full]
+      properties:
+        valid: { type: boolean }
+        entries: { type: integer, description: "Re-hashed by this pass." }
+        checkpoints: { type: integer }
+        full: { type: boolean }
+        firstBroken: { type: integer, format: int64, description: "The first entry that does not match; present when not valid." }
+    AuditExportRecord:
+      type: object
+      required: [through, sha256]
+      properties:
+        through: { type: integer, format: int64, description: "The checkpoint the export ends on." }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Of the exported file." }
+    Executor:
+      description: An executor's pending workflows of one application version, or, with none pending, only its live sessions.
+      type: object
+      required: [executor, pending, liveSessions, self]
+      properties:
+        executor: { type: string }
+        applicationVersion: { type: string }
+        pending: { type: integer }
+        oldestPending: { type: string, format: date-time }
+        liveSessions: { type: integer }
+        self: { type: boolean }
+    ExecutorRecovery:
+      type: object
+      required: [executor, recovered, otherVersions]
+      properties:
+        executor: { type: string }
+        recovered: { type: integer }
+        otherVersions: { type: integer, description: "Pending workflows of another application version, left alone." }
   responses:
     Account:
       description: An account; counts only for a single account read.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } }
+    SourceTest:
+      description: The regex tester's result.
+      content: { application/json: { schema: { $ref: "#/components/schemas/SourceTestResult" } } }
+    Revoked:
+      description: The change requests filed, and the bindings that could not be revoked.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Revocation" } } }
+    BindingOperated:
+      description: The binding, after the operation was started.
       content:
         application/json:
           schema:
             type: object
-            required: [name, status, registeredBy, registeredAt]
+            required: [binding]
             properties:
-              name: { type: string }
-              displayName: { type: string }
-              status: { type: string, enum: [ACTIVE, RETIRED] }
-              registeredBy: { type: string }
-              registeredAt: { type: string, format: date-time }
-              retiredBy: { type: string }
-              retiredAt: { type: string, format: date-time }
-              counts:
-                type: object
-                properties:
-                  sources: { type: integer }
-                  targets: { type: integer }
-                  bindings: { type: integer }
-    Problem:
-      description: An RFC 9457 problem.
-      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
-    Object:
-      description: The resource or result.
-      content: { application/json: { schema: { type: object } } }
-    Page:
-      description: A page of items.
+              binding: { $ref: "#/components/schemas/Binding" }
+    Decided:
+      description: The change request after the call.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [changeRequest]
+            properties:
+              changeRequest: { $ref: "#/components/schemas/ChangeRequest" }
+    Maintenance:
+      description: The maintenance setting.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Maintenance" } } }
+    AuditVerification:
+      description: The result of the verification.
+      content: { application/json: { schema: { $ref: "#/components/schemas/AuditVerification" } } }
+    AuditExportRecorded:
+      description: The export record.
+      content: { application/json: { schema: { $ref: "#/components/schemas/AuditExportRecord" } } }
+    ExecutorList:
+      description: The executors.
       content:
         application/json:
           schema:
             type: object
             required: [items]
             properties:
-              items: { type: array, items: { type: object } }
+              items: { type: array, items: { $ref: "#/components/schemas/Executor" } }
+    ExecutorRecovered:
+      description: What was re-enqueued.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ExecutorRecovery" } } }
+    Problem:
+      description: An RFC 9457 problem.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    Object:
+      description: The resource or result.
+      content: { application/json: { schema: { type: object } } }
+    AuditPage:
+      description: A page of audit entries, newest first.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
+              nextPageToken: { type: [string, "null"] }
+    Source:
+      description: A source with its last 20 audit entries.
+      content: { application/json: { schema: { $ref: "#/components/schemas/SourceDetail" } } }
+    SourcePage:
+      description: A page of sources.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Source" } }
+              nextPageToken: { type: [string, "null"] }
+    Target:
+      description: A target with its last 20 audit entries.
+      content: { application/json: { schema: { $ref: "#/components/schemas/TargetDetail" } } }
+    TargetPage:
+      description: A page of targets.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Target" } }
+              nextPageToken: { type: [string, "null"] }
+    Binding:
+      description: A binding with its stages and last 20 audit entries.
+      content: { application/json: { schema: { $ref: "#/components/schemas/BindingDetail" } } }
+    BindingPage:
+      description: A page of bindings.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Binding" } }
+              nextPageToken: { type: [string, "null"] }
+    Platform:
+      description: A platform.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Platform" } } }
+    PlatformPage:
+      description: A page of platforms.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Platform" } }
+    Instance:
+      description: An identity provider or secret store instance.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Instance" } } }
+    InstancePage:
+      description: A page of instances.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Instance" } }
+    CatalogTargetPage:
+      description: A page of catalog targets.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/CatalogTarget" } }
+              nextPageToken: { type: [string, "null"] }
+    CatalogSourcePage:
+      description: A page of catalog sources.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/CatalogSource" } }
+              nextPageToken: { type: [string, "null"] }
+    CatalogTarget:
+      description: A target with the charter outcome for each of the caller's sources.
+      content: { application/json: { schema: { $ref: "#/components/schemas/CatalogTargetDetail" } } }
+    AccountPage:
+      description: A page of accounts.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Account" } }
+              nextPageToken: { type: [string, "null"] }
+    ChangeRequest:
+      description: A change request.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+    ChangeRequestPage:
+      description: A page of change requests.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/ChangeRequest" } }
               nextPageToken: { type: [string, "null"] }
     Filed:
       description: The change request and, once applied, the resource.
@@ -841,9 +1614,16 @@ components:
         application/json:
           schema:
             type: object
+            required: [changeRequest]
             properties:
-              changeRequest: { type: object }
-              resource: { type: [object, "null"] }
+              changeRequest: { $ref: "#/components/schemas/ChangeRequest" }
+              resource:
+                description: The resource as it is once applied; null while pending, for a deletion and for an instance (read it with its own operation).
+                oneOf:
+                  - { type: "null" }
+                  - { $ref: "#/components/schemas/Source" }
+                  - { $ref: "#/components/schemas/Target" }
+                  - { $ref: "#/components/schemas/Binding" }
     Flows:
       description: Effective network flows, in order of declaration.
       content:
@@ -851,4 +1631,4 @@ components:
           schema:
             type: object
             properties:
-              networkFlows: { type: array, items: { $ref: "../schemas/v1alpha1/network-flow.json" } }
+              networkFlows: { type: array, items: { $ref: "#/components/schemas/NetworkFlow" } }
