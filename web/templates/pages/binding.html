@@ -1,4 +1,4 @@
-{{define "content"}}{{with .Content}}{{with .Binding}}<h1>{{.Metadata.Name}}</h1>
+{{define "content"}}{{with .Content}}{{with .Binding}}<h1>{{.Metadata.Name}}{{with .Metadata.ManagedBy}} <span class="badge" title="Only its owner changes it">managed by {{.}}</span>{{end}}</h1>
 <div class="grid">
   <section class="card"><h2>Binding</h2><dl class="fields">
     <dt>Source</dt><dd>{{.Source}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Access level</dt><dd>{{.AccessLevel}}</dd>
@@ -19,7 +19,7 @@
 {{template "status-row" .Row}}
 {{with .Binding}}{{if not (or (eq .Status.Phase "DELETING") (eq .Status.Phase "PENDING"))}}<div id="binding-errors" class="errors"></div>
 <div class="actions">
-  <a class="button" href="/ui/bindings/{{.Metadata.Name}}/edit-form">Edit</a>
+  {{if .Metadata.ManagedBy}}<p class="notice" id="binding-managed">Managed by <span class="mono">{{.Metadata.ManagedBy}}</span>: only its owner changes it, but you can still revoke it. If the owner is gone, an administrator can ask to release it (<span class="mono">ligo binding release {{.Metadata.Name}}</span>).</p>{{else}}<a class="button" href="/ui/bindings/{{.Metadata.Name}}/edit-form">Edit</a>{{end}}
   <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/retry" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Retry</button>
   <button type="button" class="button-secondary" hx-post="/ui/bindings/{{.Metadata.Name}}/rotate" hx-target="#status-row" hx-swap="outerHTML" {{hxnonce}}{{if $.Maintenance}} disabled{{end}}>Rotate</button>
   <form hx-delete="/ui/bindings/{{.Metadata.Name}}" hx-confirm="Revoke {{.Metadata.Name}}? The workloads lose this access once it is deleted."

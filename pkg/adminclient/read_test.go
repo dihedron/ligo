@@ -23,6 +23,7 @@ const someID = "0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b"
 var notYet = []string{
 	// human decisions: never in the package by default (T-A4)
 	"approveChangeRequest", "declineChangeRequest", "ratifyChangeRequest", "revertChangeRequest", "breakGlass",
+	"liftHold", "releaseSource", "releaseTarget", "releaseBinding",
 }
 
 type operation struct{ id, method, path string }
@@ -139,6 +140,7 @@ func TestReadsUseTheDocumentsVerbAndPath(t *testing.T) {
 		"getCatalogTargetFlows": func() error { _, err := c.GetCatalogTargetFlows(ctx, "x"); return err },
 		"listCatalogSources":    func() error { return drainSeq(c.ListCatalogSources(ctx, 0)) },
 		"listChangeRequests":    func() error { return drainSeq(c.ListChangeRequests(ctx, ChangeRequestFilter{})) },
+		"listHolds":             func() error { return drainSeq(c.ListHolds(ctx, HoldFilter{})) },
 		"getChangeRequest":      func() error { _, err := c.GetChangeRequest(ctx, someID); return err },
 		"listAccounts":          func() error { return drainSeq(c.ListAccounts(ctx, 0)) },
 		"getAccount":            func() error { _, err := c.GetAccount(ctx, "x"); return err },

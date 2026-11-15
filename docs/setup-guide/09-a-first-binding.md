@@ -59,7 +59,7 @@ accessLevel: read
 ```bash
 ligo charter check -f binding.yaml   # the jurisdictions, the rule and the sides it will need
 ligo apply -f binding.yaml --wait
-ligo get binding payments-ledger
+ligo binding show payments-ledger
 ```
 
 Once every side approves, the binding becomes `PROVISIONING`, then `ACTIVE`.
@@ -83,7 +83,7 @@ vault read kv/data/bindings/<id>
 
 ## Check the result
 
-- `ligo get binding payments-ledger` shows `ACTIVE`, and its stages `ENSURED`.
+- `ligo binding show payments-ledger` shows `ACTIVE`, and its stages `ENSURED`.
 - In the target database, the role exists, with the comment `ligo:binding_id=<uuid>` and only the level's memberships.
 - `ligo audit verify` reports a valid chain.
-- `ligo delete binding payments-ledger -r 1` files a revocation, for that revision. Once it applies, the role is gone, its sessions have ended and the credential no longer connects.
+- `ligo binding delete payments-ledger -r 1` files a revocation, for that revision. Once it applies, the role is gone, its sessions have ended and the credential no longer connects.

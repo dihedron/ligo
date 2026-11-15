@@ -49,3 +49,12 @@ func TestWants(t *testing.T) {
 		}
 	}
 }
+
+// TestLockEvents: the lock's audit actions are webhook events of the same name.
+func TestLockEvents(t *testing.T) {
+	for _, a := range []string{"RESOURCE_MANAGED", "RESOURCE_RELEASED", "RESOURCE_RELEASED_BY_ADMIN", "LOCK_VIOLATION_REFUSED", "HOLD_CREATED", "HOLD_LIFTED"} {
+		if event(a) != a {
+			t.Errorf("%s is not an event", a)
+		}
+	}
+}

@@ -49,9 +49,14 @@ type Apply struct {
 	Wait              bool   `short:"w" long:"wait" description:"If a binding change is applied at creation, block up to 10s until provisioning reaches a terminal phase."`
 	ApprovalRef       string `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference (required for delegated approval, ADR-11)."`
 	AutomationContext string `long:"automation-context" env:"LIGO_AUTOMATION_CONTEXT" description:"Optional JSON object describing the calling automation (informative only)."`
+	Managed           bool   `long:"managed" description:"Lock the sources, targets and bindings of the file to the caller: only it may change them (trusted_automation on every jurisdiction involved)."`
+	Unmanaged         bool   `long:"unmanaged" description:"Release the lock of the sources, targets and bindings of the file (the owner only; an administrator uses 'ligo <kind> release')."`
 }
 
 func (cmd *Apply) Execute([]string) error {
+	if cmd.Managed && cmd.Unmanaged {
+		return errors.New("--managed and --unmanaged exclude each other")
+	}
 	docs, err := readManifest(cmd.File)
 	if err != nil {
 		return err
@@ -71,6 +76,9 @@ func (cmd *Apply) Execute([]string) error {
 		submit := func(d document) error {
 			if err := automation(d.body, cmd.ApprovalRef, cmd.AutomationContext); err != nil {
 				return err
+			}
+			if _, set := d.body["managed"]; !set && (cmd.Managed || cmd.Unmanaged) && lockable[d.kind] {
+				d.body["managed"] = cmd.Managed
 			}
 			kind := kindPaths[d.kind]
 			method, p := "POST", path(kind+"s")
@@ -134,17 +142,17 @@ func (cmd *Apply) Execute([]string) error {
 	})
 }
 
-// Delete revokes a binding, or retires a source, target or instance (ligo delete).
-type Delete struct {
+// Delete revokes a binding, or retires a source, target or instance (ligo <kind> delete).
+type Delete[K Kind] struct {
 	Base
-	ExpectedRevision int64        `short:"r" long:"expected-revision" required:"true" description:"Expected current revision of the resource."`
-	ApprovalRef      string       `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference (required for delegated approval, ADR-11)."`
-	Wait             bool         `short:"w" long:"wait" description:"If a binding revocation is applied at creation, block up to 10s until deletion completes."`
-	Args             ResourceArgs `positional-args:"yes" required:"yes"`
+	ExpectedRevision int64   `short:"r" long:"expected-revision" required:"true" description:"Expected current revision of the resource."`
+	ApprovalRef      string  `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference (required for delegated approval, ADR-11)."`
+	Wait             bool    `short:"w" long:"wait" description:"If a binding revocation is applied at creation, block up to 10s until deletion completes."`
+	Args             NameArg `positional-args:"yes" required:"yes"`
 }
 
-func (cmd *Delete) Execute([]string) error {
-	kind, name := cmd.Args.Kind, cmd.Args.Name
+func (cmd *Delete[K]) Execute([]string) error {
+	kind, name := kindName[K](), cmd.Args.Name
 	return cmd.changed("deleted", func(ctx context.Context, c *client.Client) ([]filed, error) {
 		if instanceKinds[kind] {
 			f, err := cmd.post(ctx, c, "DELETE", path(kind+"s", name), url.Values{"expectedRevision": {strconv.FormatInt(cmd.ExpectedRevision, 10)}},
@@ -200,21 +208,50 @@ func (cmd *operation) run(op string) error {
 	})
 }
 
-// Retry retries a binding in FAILED or DELETE_FAILED (ligo retry NAME).
+// Retry retries a binding in FAILED or DELETE_FAILED (ligo binding retry NAME).
 type Retry struct{ operation }
 
 func (cmd *Retry) Execute([]string) error { return cmd.run("retry") }
 
-// Rotate re-applies an ACTIVE binding with rotation (ligo rotate NAME).
+// Rotate re-applies an ACTIVE binding with rotation (ligo binding rotate NAME).
 type Rotate struct{ operation }
 
 func (cmd *Rotate) Execute([]string) error { return cmd.run("rotate") }
 
+// Binding: ligo binding list|show|delete|release|retry|rotate|flows.
+type Binding struct {
+	List    List[BindingKind]    `command:"list" alias:"ls" description:"List bindings."`
+	Show    Show[BindingKind]    `command:"show" description:"Show a binding."`
+	Delete  Delete[BindingKind]  `command:"delete" description:"Revoke a binding."`
+	Release Release[BindingKind] `command:"release" description:"Ask people to unlock a managed binding whose owner cannot (four eyes)."`
+	Retry   Retry                `command:"retry" description:"Retry a binding in FAILED or DELETE_FAILED phase."`
+	Rotate  Rotate               `command:"rotate" description:"Trigger an immediate credential rotation (reapply) on an ACTIVE binding."`
+	Flows   Flows                `command:"flows" description:"Show the effective network flows of a binding (JSON for the verification tool)."`
+}
+
+// IdentityProvider: ligo identity-provider list|show|delete.
+type IdentityProvider struct {
+	List   List[IdentityProviderKind]   `command:"list" alias:"ls" description:"List identity provider instances."`
+	Show   Show[IdentityProviderKind]   `command:"show" description:"Show an identity provider instance."`
+	Delete Delete[IdentityProviderKind] `command:"delete" description:"Retire an identity provider instance."`
+}
+
+// SecretStore: ligo secret-store list|show|delete.
+type SecretStore struct {
+	List   List[SecretStoreKind]   `command:"list" alias:"ls" description:"List secret store instances."`
+	Show   Show[SecretStoreKind]   `command:"show" description:"Show a secret store instance."`
+	Delete Delete[SecretStoreKind] `command:"delete" description:"Retire a secret store instance."`
+}
+
 // Source: ligo source test|deprecate|reactivate.
 type Source struct {
-	Test       SourceTest       `command:"test" description:"Test a regex: Appendix A, jurisdiction, sample IDs, overlaps, and narrowing of an existing source (nothing is stored)."`
-	Deprecate  SourceDeprecate  `command:"deprecate" description:"Deprecate a source (no new bindings)."`
-	Reactivate SourceReactivate `command:"reactivate" description:"Reactivate a deprecated source."`
+	List       List[SourceKind]    `command:"list" alias:"ls" description:"List sources."`
+	Show       Show[SourceKind]    `command:"show" description:"Show a source."`
+	Delete     Delete[SourceKind]  `command:"delete" description:"Retire a source (it needs no binding)."`
+	Release    Release[SourceKind] `command:"release" description:"Ask people to unlock a managed source whose owner cannot (four eyes)."`
+	Test       SourceTest          `command:"test" description:"Test a regex: Appendix A, jurisdiction, sample IDs, overlaps, and narrowing of an existing source (nothing is stored)."`
+	Deprecate  SourceDeprecate     `command:"deprecate" description:"Deprecate a source (no new bindings)."`
+	Reactivate SourceReactivate    `command:"reactivate" description:"Reactivate a deprecated source."`
 }
 
 type SourceTest struct {
@@ -265,10 +302,14 @@ func (cmd *TargetReactivate) Execute([]string) error { return cmd.run("target", 
 
 // Target: ligo target deprecate|reactivate|level|revoke-bindings.
 type Target struct {
-	Deprecate  TargetDeprecate  `command:"deprecate" description:"Deprecate a target (no new bindings)."`
-	Reactivate TargetReactivate `command:"reactivate" description:"Reactivate a deprecated target."`
-	Level      TargetLevel      `command:"level" description:"Deprecate, reactivate or retire an access level."`
-	Revoke     TargetRevoke     `command:"revoke-bindings" description:"Revoke every binding of a source or source jurisdiction on this target (containment)."`
+	List       List[TargetKind]    `command:"list" alias:"ls" description:"List targets."`
+	Show       Show[TargetKind]    `command:"show" description:"Show a target."`
+	Delete     Delete[TargetKind]  `command:"delete" description:"Retire a target (it needs no binding)."`
+	Release    Release[TargetKind] `command:"release" description:"Ask people to unlock a managed target whose owner cannot (four eyes)."`
+	Deprecate  TargetDeprecate     `command:"deprecate" description:"Deprecate a target (no new bindings)."`
+	Reactivate TargetReactivate    `command:"reactivate" description:"Reactivate a deprecated target."`
+	Level      TargetLevel         `command:"level" description:"Deprecate, reactivate or retire an access level."`
+	Revoke     TargetRevoke        `command:"revoke-bindings" description:"Revoke every binding of a source or source jurisdiction on this target (containment)."`
 }
 
 type TargetLevel struct {
@@ -549,7 +590,7 @@ func (cmd *CharterCheck) Execute([]string) error {
 // Account: ligo account list|get|register|retire.
 type Account struct {
 	List     AccountList     `command:"list" alias:"ls" description:"List the accounts visible to you."`
-	Get      AccountGet      `command:"get" description:"Show an account and its counts of sources, targets and bindings."`
+	Show     AccountShow     `command:"show" description:"Show an account and its counts of sources, targets and bindings."`
 	Register AccountRegister `command:"register" description:"Register an account, at once (account_admin)."`
 	Retire   AccountRetire   `command:"retire" description:"Retire an account with no active source or target (account_admin). Its name is never reused."`
 }
@@ -567,12 +608,12 @@ func (cmd *AccountList) Execute([]string) error {
 	return cmd.get(path("accounts"), cmd.query(), columns["account"]...)
 }
 
-type AccountGet struct {
+type AccountShow struct {
 	Base
 	Args accountName `positional-args:"yes" required:"yes"`
 }
 
-func (cmd *AccountGet) Execute([]string) error {
+func (cmd *AccountShow) Execute([]string) error {
 	return cmd.get(path("accounts", cmd.Args.Name), nil, columns["account"]...)
 }
 
@@ -613,5 +654,64 @@ func (cmd *AccountRetire) Execute([]string) error {
 	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
 		var v any
 		return v, columns["account"], c.Do(ctx, "POST", path("accounts", name, "retire"), nil, nil, &v)
+	})
+}
+
+// lockable are the kinds the lock covers (.specs/ligo-managed-resources.md §3.1).
+var lockable = map[string]bool{"Source": true, "Target": true, "Binding": true}
+
+// Release: ligo <kind> release NAME, a four-eyes request by people to unlock a
+// resource whose owner cannot (§3.3). Only sources, targets and bindings have it.
+type Release[K Kind] struct {
+	Base
+	ExpectedRevision int64   `short:"r" long:"expected-revision" required:"true" description:"Expected current revision of the resource."`
+	Justification    string  `long:"justification" required:"true" description:"Why the owner cannot release it (at least 20 characters)."`
+	Args             NameArg `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *Release[K]) Execute([]string) error {
+	kind, name := kindName[K](), cmd.Args.Name
+	return cmd.changed("release requested", func(ctx context.Context, c *client.Client) ([]filed, error) {
+		f, err := cmd.post(ctx, c, "POST", path(kind+"s", name, "release"), nil,
+			map[string]any{"expectedRevision": cmd.ExpectedRevision, "justification": cmd.Justification})
+		return answers(f, err)
+	})
+}
+
+// Hold: ligo hold list|lift.
+type Hold struct {
+	List HoldList `command:"list" alias:"ls" description:"List the holds on bindings: removals in an emergency that nobody may undo until a person lifts them."`
+	Lift HoldLift `command:"lift" description:"Lift a hold (a person who approves a side of the binding): it only restores the right to ask."`
+}
+
+type holdID struct {
+	ID string `positional-arg-name:"id" description:"Hold id."`
+}
+
+type HoldList struct {
+	Base
+	Page
+	Binding string `long:"binding" description:"Only the holds of this binding name."`
+	All     bool   `long:"all" description:"Include the holds already lifted."`
+}
+
+func (cmd *HoldList) Execute([]string) error {
+	state := ""
+	if cmd.All {
+		state = "all"
+	}
+	return cmd.get(path("holds"), cmd.query("binding", cmd.Binding, "state", state), columns["hold"]...)
+}
+
+type HoldLift struct {
+	Base
+	Comment string `short:"m" long:"comment" required:"true" description:"Why the binding may be asked for again."`
+	Args    holdID `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *HoldLift) Execute([]string) error {
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		return map[string]any{"lifted": cmd.Args.ID}, []client.Column{col("LIFTED", "lifted")},
+			c.Do(ctx, "POST", path("holds", cmd.Args.ID, "lift"), nil, map[string]any{"comment": cmd.Comment}, nil)
 	})
 }

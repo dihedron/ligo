@@ -40,6 +40,18 @@ A failure whose cause was retryable, such as a store or SPIRE outage, is retried
 
 Workloads only ever get a binding whose active regex and whose source's current regex both match them, and before its expiry. So a failure never loses working access, and a revocation takes effect at once in the API, even if cleaning up the target takes longer.
 
+## Resources managed by automation (the lock)
+
+A pipeline (Terraform, OpenTofu, CI) that holds `trusted_automation` may file a source, a target or a binding with `managed: true`. The resource then belongs to that pipeline's SPIFFE ID (`managedBy` in every view, a badge in the web UI). Its configuration file is the truth, so nobody else may change it: not you, not an administrator with full access, not another pipeline. Each attempt is refused at once with `409 resource-managed`, and nothing is filed for review.
+
+Three things stay open on purpose:
+
+- **Containment.** An owner of a side or of the platform can always revoke a managed binding, and an emergency (`break-glass`) change is allowed too.
+- **A removal in an emergency is not undone by the pipeline.** After a containment revocation by anyone but the owner, or a break-glass `DELETE`, ligo records a **hold** on the binding. Until a person lifts it, nobody creates the binding again, the pipeline included (`409 resource-held`). Time never lifts it.
+- **A break-glass `UPDATE` or `CREATE` is never ratified** on a managed binding. It reverts at its TTL.
+
+Only a pipeline locks, and only where it holds `trusted_automation` on every jurisdiction involved. A person asking for `managed: true` gets `403`. Platforms, instances and accounts are never managed.
+
 ## What happens without you
 
 | Loop | Does | Bound by |

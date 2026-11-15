@@ -11,6 +11,17 @@
   </table></div>
   <p><a href="/ui/change-requests?awaiting=me">All requests awaiting me</a></p>
 </section>{{end}}
+{{if .Holds}}<section class="card" id="holds">
+  <h2>Open holds</h2>
+  <p class="muted">A person removed these managed bindings in an emergency. Their owner cannot create them again until someone who approves a side lifts the hold.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Binding</th><th>Owner</th><th>Removed</th><th>Why</th><th>Lift</th></tr></thead>
+    <tbody>{{range .Holds}}<tr><td>{{.BindingName}} <span class="muted">({{.Source}} to {{.Target}}, {{.AccessLevel}})</span></td><td class="mono">{{.ManagedBy}}</td>
+      <td>{{when .DeletedAt}} by {{.DeletedBy}}</td><td>{{.Basis}}</td>
+      <td><form hx-post="/ui/holds/{{.ID}}/lift" hx-confirm="Lift the hold on {{.BindingName}}? Its owner may then create it again." hx-status:403="target:#holds-errors swap:innerHTML" hx-status:404="target:#holds-errors swap:innerHTML" hx-status:409="target:#holds-errors swap:innerHTML" hx-status:422="target:#holds-errors swap:innerHTML" {{hxnonce}}>
+        <input name="comment" aria-label="Comment" placeholder="Why" required><button type="submit"{{if $.Maintenance}} disabled{{end}}>Lift</button></form></td></tr>{{end}}</tbody>
+  </table></div><div id="holds-errors" class="errors"></div>
+</section>{{end}}
 <form class="card" method="get" action="/ui/bindings">
   <div class="grid">
     <div class="field"><label for="f-source">Source</label><input id="f-source" name="source" value="{{.Filter.Source}}"></div>
@@ -26,7 +37,7 @@
 <div class="table-wrap"><table>
   <thead><tr><th>Name</th><th>Source</th><th>Target</th><th>Level</th><th>Phase</th><th>Expires</th><th>Notes</th></tr></thead>
   <tbody>{{range .Bindings}}<tr>
-    <td><a href="/ui/bindings/{{.Metadata.Name}}">{{.Metadata.Name}}</a></td><td>{{.Source}}</td><td>{{.Target}}</td><td>{{.AccessLevel}}</td>
+    <td><a href="/ui/bindings/{{.Metadata.Name}}">{{.Metadata.Name}}</a>{{with .Metadata.ManagedBy}} <span class="badge" title="Only its owner changes it">managed by {{.}}</span>{{end}}</td><td>{{.Source}}</td><td>{{.Target}}</td><td>{{.AccessLevel}}</td>
     <td><span class="{{badge .Status.Phase}}">{{.Status.Phase}}</span></td><td>{{when .ExpiresAt}}</td>
     <td>{{with .Status.PendingChangeRequestID}}<a href="/ui/change-requests/{{.}}">change pending</a> {{end}}{{if .Status.PropagationPending}}<span class="badge">propagation pending</span> {{end}}{{if .Status.BreakGlass}}<span class="badge badge-danger">break-glass</span>{{end}}</td>
   </tr>{{else}}<tr><td colspan="7" class="muted">No bindings.</td></tr>{{end}}</tbody>

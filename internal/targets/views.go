@@ -40,6 +40,7 @@ type ViewMetadata struct {
 	CreatedBy              string     `json:"createdBy"`
 	UpdatedBy              string     `json:"updatedBy"`
 	PendingChangeRequestID *uuid.UUID `json:"pendingChangeRequestId"`
+	ManagedBy              *string    `json:"managedBy"` // the owner of the lock, or null
 }
 
 // view completes a stored target with its metadata and the bindings the
@@ -49,6 +50,9 @@ func (s *Service) view(ctx context.Context, c changerequests.Caller, st *stored)
 	v := &View{APIVersion: sources.APIVersion, Target: st.Target, Metadata: ViewMetadata{ID: st.ID, Name: m.Name, Jurisdiction: m.Jurisdiction,
 		Platform: m.Platform, PlatformType: m.PlatformType, PlatformJurisdiction: m.PlatformJurisdiction, Realm: m.Realm, State: m.State, Revision: st.Revision}}
 	vm := &v.Metadata
+	if st.ManagedBy != "" {
+		vm.ManagedBy = &st.ManagedBy
+	}
 	err := s.DB.QueryRow(ctx, `SELECT created_at, updated_at, created_by, updated_by, (SELECT c.id FROM change_requests c
 		WHERE c.resource_type = 'TARGET' AND c.resource_name = t.name AND c.status = 'PENDING') FROM targets t WHERE id = $1`,
 		st.ID).Scan(&vm.CreatedAt, &vm.UpdatedAt, &vm.CreatedBy, &vm.UpdatedBy, &vm.PendingChangeRequestID)

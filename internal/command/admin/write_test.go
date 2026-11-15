@@ -151,6 +151,9 @@ func TestWriteCommands(t *testing.T) {
 		"/v1/admin/executors/ligo1/recover":               {`{"executor":"ligo1","recovered":1,"otherVersions":0}`},
 		"/v1/admin/break-glass":                           {applied},
 		"/v1/admin/charter/evaluate":                      {`{"resourceType":"BINDING","name":"b1","consent":"ALL","sides":[]}`},
+		"/v1/admin/bindings/b1/release":                   {applied},
+		"/v1/admin/holds/h1/lift":                         {`{}`},
+		"/v1/admin/holds":                                 {`{"items":[]}`},
 	})
 	var out bytes.Buffer
 	b := f.base(t, "table", &out)
@@ -159,7 +162,7 @@ func TestWriteCommands(t *testing.T) {
 	tstate := StateChange{Base: b, ExpectedRevision: 2, Args: NameArg{"t1"}}
 	op := operation{Base: b}
 	op.Args.Name = "b1"
-	del := &Delete{Base: b, ExpectedRevision: 3, ApprovalRef: "CHG-2", Wait: true, Args: ResourceArgs{"binding", "b1"}}
+	del := &Delete[BindingKind]{Base: b, ExpectedRevision: 3, ApprovalRef: "CHG-2", Wait: true, Args: NameArg{"b1"}}
 	level := &TargetLevel{Base: b, ExpectedRevision: 5}
 	level.Args.Action, level.Args.Target, level.Args.Level = "retire", "t1", "write"
 	bgDel := &BreakGlassDelete{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1", TTL: "4h"}, ExpectedRevision: 3}
@@ -173,9 +176,9 @@ func TestWriteCommands(t *testing.T) {
 		request, body string
 	}{
 		{"delete binding", del.Execute, "DELETE /v1/admin/bindings/b1?expectedRevision=3", `"approvalReference":"CHG-2"`},
-		{"delete source", (&Delete{Base: b, ExpectedRevision: 1, Args: ResourceArgs{"source", "s1"}}).Execute, "POST /v1/admin/sources/s1/retire", `"expectedRevision":1`},
-		{"retry", (&Retry{op}).Execute, "POST /v1/admin/bindings/b1/retry", ""},
-		{"rotate", (&Rotate{op}).Execute, "POST /v1/admin/bindings/b1/rotate", ""},
+		{"delete source", (&Delete[SourceKind]{Base: b, ExpectedRevision: 1, Args: NameArg{"s1"}}).Execute, "POST /v1/admin/sources/s1/retire", `"expectedRevision":1`},
+		{"binding retry", (&Retry{op}).Execute, "POST /v1/admin/bindings/b1/retry", ""},
+		{"binding rotate", (&Rotate{op}).Execute, "POST /v1/admin/bindings/b1/rotate", ""},
 		{"source test", (&SourceTest{Base: b, TrustDomain: "prod.lab", Regex: "^x$", SpiffeIDs: []string{"spiffe://prod.lab/x"}, Current: "s1"}).Execute,
 			"POST /v1/admin/sources/test", `"currentSource":"s1"`},
 		{"source deprecate", (&SourceDeprecate{state}).Execute, "POST /v1/admin/sources/s1/deprecate", `{"expectedRevision":2}`},
@@ -195,6 +198,10 @@ func TestWriteCommands(t *testing.T) {
 		{"break-glass apply", (&BreakGlassApply{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1"}, File: bgFile}).Execute,
 			"POST /v1/admin/break-glass", `"inlineSource":{"kind":"Source","metadata":{"name":"s9"}}`},
 		{"break-glass delete", bgDel.Execute, "POST /v1/admin/break-glass", `"operation":"DELETE"`},
+		{"release", (&Release[BindingKind]{Base: b, ExpectedRevision: 4, Justification: "the pipeline was retired in March", Args: NameArg{"b1"}}).Execute,
+			"POST /v1/admin/bindings/b1/release", `"justification":"the pipeline was retired in March"`},
+		{"hold list --all", (&HoldList{Base: b, Binding: "b1", All: true}).Execute, "GET /v1/admin/holds?binding=b1&state=all", ""},
+		{"hold lift", (&HoldLift{Base: b, Comment: "contained", Args: holdID{"h1"}}).Execute, "POST /v1/admin/holds/h1/lift", `{"comment":"contained"}`},
 		{"charter check", (&CharterCheck{Base: b, File: bgFile}).Execute, "POST /v1/admin/charter/evaluate", `"source":{"svidRegex":null,"trustDomain":null}`},
 	} {
 		out.Reset()
@@ -308,10 +315,27 @@ metadata: {name: ldap-a}
 	if !strings.Contains(f.bodies[0], `"kind":"IdentityProvider"`) {
 		t.Errorf("an instance's body keeps its kind: %s", f.bodies[0])
 	}
-	if err := (&Delete{Base: f.base(t, "table", &out), ExpectedRevision: 3, Args: ResourceArgs{Kind: "secret-store", Name: "vault-a"}}).Execute(nil); err != nil {
+	if err := (&Delete[SecretStoreKind]{Base: f.base(t, "table", &out), ExpectedRevision: 3, Args: NameArg{"vault-a"}}).Execute(nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.last(); got != "DELETE /v1/admin/secret-stores/vault-a?expectedRevision=3" {
 		t.Errorf("retire: %s", got)
+	}
+}
+
+// TestApplyManaged: --managed and --unmanaged set the lock on the lockable
+// kinds only, and never both.
+func TestApplyManaged(t *testing.T) {
+	f := newFake(t, map[string][]string{"/v1/admin/sources": {pendingAnswer}, "/v1/admin/platforms": {pendingAnswer}})
+	var out bytes.Buffer
+	file := manifest(t, "kind: Source\nmetadata: {name: s1}\n")
+	if err := (&Apply{Base: f.base(t, "table", &out), File: file, Managed: true}).Execute(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.bodies[0], `"managed":true`) {
+		t.Errorf("body: %s", f.bodies[0])
+	}
+	if err := (&Apply{Base: f.base(t, "table", &out), File: file, Managed: true, Unmanaged: true}).Execute(nil); err == nil {
+		t.Error("both flags accepted")
 	}
 }

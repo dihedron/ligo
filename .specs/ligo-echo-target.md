@@ -59,7 +59,7 @@ test/lab/lab.sh cli ligo-ops apply -f - < test/lab/echo/manifests/binding-svid.y
 test/lab/lab.sh cli ligo-approver cr list --awaiting-me                              # the source's and the binding's requests
 test/lab/lab.sh cli ligo-approver cr approve <id> --sha256 <payloadSha256> --side <side> -m "echo test"
                                                                                      # the source's first, then the binding's
-test/lab/lab.sh cli ligo-ops get binding echo-bound-svid                             # until status.phase is ACTIVE
+test/lab/lab.sh cli ligo-ops binding show echo-bound-svid                             # until status.phase is ACTIVE
 ```
 `ligo-ops` (olga) and `ligo-approver` (dora) are two different principals: the approval is four-eyes.
 
@@ -89,7 +89,7 @@ test/lab/lab.sh echo logs                                          # the server 
 
 ### 4. Revoke the binding
 
-- CLI: `test/lab/lab.sh cli ligo-ops delete binding echo-bound-svid -r <revision>` (the revision from `get binding`), then approve its request as `ligo-approver` as in 2a; `get binding` until it is gone.
+- CLI: `test/lab/lab.sh cli ligo-ops binding delete echo-bound-svid -r <revision>` (the revision from `binding show`), then approve its request as `ligo-approver` as in 2a; `binding show` until it is gone.
 - Web UI: as `carol`, **Bindings → `echo-bound-svid` → Revoke** and confirm; as `dave`, approve the request.
 
 Then, as in 1: `echo-bound` gets `no binding` (exit 2), and `denied` with `--direct` (exit 3).

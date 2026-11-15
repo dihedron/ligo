@@ -102,6 +102,15 @@ func (s *Service) Create(ctx context.Context, c Caller, r *Request, candidates [
 	if err != nil {
 		return err
 	}
+	if err := Lock(c, r); err != nil {
+		return s.refused(ctx, c, r, err)
+	}
+	if r.ReleaseJustification != "" || r.adopts() { // a person decides, never a delegation (§3.3)
+		candidates = slices.Clone(candidates)
+		for i := range candidates {
+			candidates[i].AlwaysHuman = true
+		}
+	}
 	if r.Sides, err = BuildSides(candidates, c, s.Policy, approvalReference); err != nil {
 		return err
 	}
@@ -886,12 +895,12 @@ func insert(ctx context.Context, tx pgx.Tx, r *Request) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO change_requests (id, resource_type, resource_name, resource_id, operation, kind, consent,
 		realm, owner_jurisdiction, source_jurisdiction, target_jurisdiction, platform_jurisdiction, policy_sha256, distinct_approvers_required, expected_revision,
 		payload, payload_sha256, external_approval_ref, automation_context, requested_by, expires_at, interconnect_rule,
-		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id)
-		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27)`,
+		break_glass_justification, break_glass_ttl_seconds, revert_payload, depends_on_cr_id, reverts_cr_id, managed, lock_owner, release_justification)
+		VALUES ($1, $2, $3, $4, $5, $22, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $23, $24, $25, $26, $27, $28, $29, $30)`,
 		r.ID, r.ResourceType, r.ResourceName, r.ResourceID, r.Operation, r.Consent, null(r.Realm), null(r.OwnerJurisdiction),
 		null(r.SourceJurisdiction), null(r.TargetJurisdiction), null(r.PlatformJurisdiction), r.PolicySHA256, r.DistinctApprovers, r.ExpectedRevision,
 		r.Payload, r.PayloadSHA256, null(r.ApprovalReference), automation, r.RequestedBy, r.ExpiresAt, null(r.InterconnectRule), r.kind(),
-		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID); err != nil {
+		null(r.Justification), null(int64(r.TTL.Seconds())), revert, r.DependsOn, r.RevertsID, r.Managed, null(r.LockOwner), null(r.ReleaseJustification)); err != nil {
 		return fmt.Errorf("changerequests: insert: %w", err)
 	}
 	for _, sd := range r.Sides {
@@ -921,10 +930,10 @@ func read(ctx context.Context, q store.Querier, id uuid.UUID) (*Request, error) 
 		expected_revision, payload, payload_sha256, coalesce(external_approval_ref, ''), automation_context, policy_sha256,
 		distinct_approvers_required, status, requested_by, expires_at, coalesce(interconnect_rule, ''), kind,
 		coalesce(break_glass_justification, ''), coalesce(break_glass_ttl_seconds, 0), revert_payload, depends_on_cr_id, reverts_cr_id,
-		requested_at FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
+		requested_at, managed, coalesce(lock_owner, ''), coalesce(release_justification, '') FROM change_requests WHERE id = $1`, id).Scan(&r.ResourceType, &r.ResourceName, &r.ResourceID, &r.Operation,
 		&r.Consent, &r.Realm, &r.OwnerJurisdiction, &r.SourceJurisdiction, &r.TargetJurisdiction, &r.PlatformJurisdiction, &r.ExpectedRevision,
 		&r.Payload, &r.PayloadSHA256, &r.ApprovalReference, &r.AutomationContext, &r.PolicySHA256, &r.DistinctApprovers,
-		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID, &r.RequestedAt)
+		&r.Status, &r.RequestedBy, &r.ExpiresAt, &r.InterconnectRule, &r.Kind, &r.Justification, &ttl, &r.RevertPayload, &r.DependsOn, &r.RevertsID, &r.RequestedAt, &r.Managed, &r.LockOwner, &r.ReleaseJustification)
 	if err != nil {
 		return nil, err
 	}

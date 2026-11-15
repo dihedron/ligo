@@ -21,18 +21,20 @@ import (
 	"github.com/dihedron/ligo/internal/sealing"
 )
 
-// Get displays a source, target, binding or instance (ligo get KIND NAME).
-type Get struct {
+// Show displays one source, target, binding or instance (ligo <kind> show NAME).
+type Show[K Kind] struct {
 	Base
-	Args ResourceArgs `positional-args:"yes" required:"yes"`
+	Args NameArg `positional-args:"yes" required:"yes"`
 }
 
-func (cmd *Get) Execute([]string) error {
-	return cmd.get(path(cmd.Args.Kind+"s", cmd.Args.Name), nil, columns[cmd.Args.Kind]...)
+func (cmd *Show[K]) Execute([]string) error {
+	kind := kindName[K]()
+	return cmd.get(path(kind+"s", cmd.Args.Name), nil, columns[kind]...)
 }
 
-// List lists sources, targets, bindings or instances (ligo list KIND).
-type List struct {
+// List lists the resources of one kind (ligo <kind> list). The filters that a
+// kind does not have are ignored by the server, as they always were.
+type List[K Kind] struct {
 	Base
 	Page
 	Realm          string `long:"realm" description:"Filter by realm (targets, bindings)."`
@@ -45,18 +47,16 @@ type List struct {
 	Phase          string `long:"phase" choice:"PROVISIONING" choice:"ACTIVE" choice:"FAILED" choice:"DELETING" choice:"DELETE_FAILED" description:"Filter by lifecycle phase (bindings)."`
 	TrustDomain    string `long:"trust-domain" description:"Filter by source trust domain."`
 	ExpiringBefore string `long:"expiring-before" description:"Bindings expiring before this RFC 3339 time."`
-	Args           struct {
-		Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
-	} `positional-args:"yes" required:"yes"`
 }
 
-func (cmd *List) Execute([]string) error {
+func (cmd *List[K]) Execute([]string) error {
 	q := cmd.query("realm", cmd.Realm, "jurisdiction", cmd.Jurisdiction, "source", cmd.Source, "target", cmd.Target, "platform", cmd.Platform,
 		"platformType", cmd.Type, "state", cmd.State, "phase", cmd.Phase, "trustDomain", cmd.TrustDomain, "expiringBefore", cmd.ExpiringBefore)
-	return cmd.get(path(cmd.Args.Kind), q, columns[strings.TrimSuffix(cmd.Args.Kind, "s")]...)
+	kind := kindName[K]()
+	return cmd.get(path(kind+"s"), q, columns[kind]...)
 }
 
-// Flows prints the effective network flows of a binding (ligo flows NAME).
+// Flows prints the effective network flows of a binding (ligo binding flows NAME).
 type Flows struct {
 	Base
 	Args struct {
@@ -84,9 +84,10 @@ func (b *Base) flows(p string) error {
 
 // Platform: ligo platform list|show|schema.
 type Platform struct {
-	List   PlatformList   `command:"list" alias:"ls" description:"List configured platforms and their health."`
-	Show   PlatformShow   `command:"show" description:"Show a platform, including its flows and privilege bounds."`
-	Schema PlatformSchema `command:"schema" description:"Fetch the UI forms (target definition, access-level grants, binding parameters) of a platform."`
+	List   PlatformList         `command:"list" alias:"ls" description:"List configured platforms and their health."`
+	Show   PlatformShow         `command:"show" description:"Show a platform, including its flows and privilege bounds."`
+	Schema PlatformSchema       `command:"schema" description:"Fetch the UI forms (target definition, access-level grants, binding parameters) of a platform."`
+	Delete Delete[PlatformKind] `command:"delete" description:"Retire a platform (it needs no target)."`
 }
 
 type PlatformList struct{ Base }
@@ -265,7 +266,7 @@ func (cmd *CharterShow) Execute([]string) error { return cmd.get(path("charter")
 // ChangeRequest: ligo cr list|get|approve|decline|withdraw|ratify|revert|review.
 type ChangeRequest struct {
 	List     ChangeRequestList     `command:"list" alias:"ls" description:"List change requests."`
-	Get      ChangeRequestGet      `command:"get" description:"Inspect a change request, its diff, and its payloadSha256."`
+	Show     ChangeRequestShow     `command:"show" description:"Inspect a change request, its diff, and its payloadSha256."`
 	Approve  ChangeRequestApprove  `command:"approve" description:"Approve one or more sides of a PENDING change request; applies it when every required side is approved (four-eyes)."`
 	Decline  ChangeRequestDecline  `command:"decline" description:"Decline one or more sides of a PENDING change request."`
 	Withdraw ChangeRequestWithdraw `command:"withdraw" description:"Withdraw own PENDING change request."`
@@ -295,14 +296,14 @@ func (cmd *ChangeRequestList) Execute([]string) error {
 	return cmd.get(path("change-requests"), q, columns["request"]...)
 }
 
-type ChangeRequestGet struct {
+type ChangeRequestShow struct {
 	Base
 	Args struct {
 		ID string `positional-arg-name:"cr-id" description:"Change request UUID."`
 	} `positional-args:"yes" required:"yes"`
 }
 
-func (cmd *ChangeRequestGet) Execute([]string) error {
+func (cmd *ChangeRequestShow) Execute([]string) error {
 	return cmd.get(path("change-requests", cmd.Args.ID), nil)
 }
 

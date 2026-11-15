@@ -122,6 +122,7 @@ CREATE TABLE sources (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by         VARCHAR(255) NOT NULL,
     updated_by         VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
     -- Coarse defense in depth only; authoritative validation is Appendix A (ADR-06).
     CONSTRAINT chk_source_regex_shape CHECK (
         svid_regex LIKE '^spiffe://%' AND svid_regex LIKE '%$'
@@ -163,6 +164,7 @@ CREATE TABLE targets (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by         VARCHAR(255) NOT NULL,
     updated_by         VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
     CONSTRAINT chk_target_visible_to CHECK (
         jsonb_typeof(visible_to) = 'array' AND (visibility <> 'LISTED' OR jsonb_array_length(visible_to) > 0)
     )
@@ -346,6 +348,7 @@ CREATE TABLE bindings (
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by                  VARCHAR(255) NOT NULL,
     updated_by                  VARCHAR(255) NOT NULL,
+    managed_by         VARCHAR(255) CHECK (managed_by LIKE 'spiffe://%'),  -- the owner (a trusted_automation SPIFFE ID) of a resource managed by automation (.specs/ligo-managed-resources.md)
 
     CONSTRAINT uq_binding_source_target UNIQUE (source_id, target_id),          -- one binding per pair (ADR-15)
     CONSTRAINT fk_binding_access_level FOREIGN KEY (target_id, access_level)
@@ -514,6 +517,9 @@ CREATE TABLE change_requests (
     reverts_cr_id      UUID REFERENCES change_requests(id), -- SYSTEM_REVERT: the break-glass change being reverted
     depends_on_cr_id   UUID REFERENCES change_requests(id), -- BINDING CREATE filed with an inline source: the source's CREATE (§7.2.4)
     review_overdue_notified_at TIMESTAMPTZ,                 -- BREAK_GLASS_REVIEW_OVERDUE already emitted
+    managed            BOOLEAN,                             -- SOURCE, TARGET, BINDING: sets (true) or clears (false) the lock; NULL leaves it (.specs/ligo-managed-resources.md)
+    lock_owner         VARCHAR(255),                        -- the resource's owner at filing, checked again at apply
+    release_justification TEXT CHECK (length(release_justification) BETWEEN 20 AND 2048),   -- release by administrator: why a person takes the lock off (§3.3)
     requested_by       VARCHAR(255) NOT NULL,
     requested_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     decided_by         VARCHAR(255),                        -- the principal whose action closed the request
@@ -523,6 +529,9 @@ CREATE TABLE change_requests (
     expires_at         TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_cr_id_requester_kind UNIQUE (id, requested_by, kind),  -- target of the sides' composite foreign key
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
+    CONSTRAINT chk_managed CHECK (managed IS NOT TRUE OR (requested_by LIKE 'spiffe://%' AND resource_type IN ('SOURCE', 'TARGET', 'BINDING'))),
+    CONSTRAINT chk_release CHECK (release_justification IS NULL OR (operation = 'UPDATE' AND managed IS FALSE AND kind = 'STANDARD'
+        AND requested_by NOT LIKE 'spiffe://%' AND requested_by NOT LIKE 'system:%')),
     CONSTRAINT chk_cr_jurisdiction_columns CHECK (
         (resource_type = 'SOURCE'  AND owner_jurisdiction IS NOT NULL AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL
                                    AND platform_jurisdiction IS NULL AND realm IS NULL)
@@ -647,6 +656,8 @@ BEGIN
      OR NEW.revert_payload IS DISTINCT FROM OLD.revert_payload
      OR NEW.reverts_cr_id IS DISTINCT FROM OLD.reverts_cr_id
      OR NEW.depends_on_cr_id IS DISTINCT FROM OLD.depends_on_cr_id
+     OR NEW.managed IS DISTINCT FROM OLD.managed OR NEW.lock_owner IS DISTINCT FROM OLD.lock_owner
+     OR NEW.release_justification IS DISTINCT FROM OLD.release_justification
      OR NEW.requested_by <> OLD.requested_by OR NEW.payload_sha256 <> OLD.payload_sha256
      OR (OLD.status <> 'PENDING' AND NEW.status <> OLD.status) THEN
     RAISE EXCEPTION 'immutable change_request column modified';
@@ -655,6 +666,70 @@ BEGIN
 END $$;
 CREATE TRIGGER trg_change_requests_immutable BEFORE UPDATE ON change_requests
     FOR EACH ROW EXECUTE FUNCTION change_requests_immutable_guard();
+
+-- The lock's owner changes only as a change request says (T-M10): the
+-- applying transaction names the request in ligo.apply_cr, and that request,
+-- still pending, must set the owner it is the filer of, or clear it.
+CREATE FUNCTION managed_by_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  cr UUID := nullif(current_setting('ligo.apply_cr', true), '')::uuid;
+BEGIN
+  IF (TG_OP = 'INSERT' AND NEW.managed_by IS NULL) OR (TG_OP = 'UPDATE' AND NEW.managed_by IS NOT DISTINCT FROM OLD.managed_by) THEN
+    RETURN NEW;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM change_requests c WHERE c.id = cr AND c.status = 'PENDING' AND c.resource_name = NEW.name
+      AND ((NEW.managed_by IS NOT NULL AND c.managed IS TRUE AND c.requested_by = NEW.managed_by)
+        OR (NEW.managed_by IS NULL AND c.managed IS FALSE))) THEN
+    RAISE EXCEPTION 'managed_by changes only with a change request that sets it' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_sources_managed_by BEFORE INSERT OR UPDATE ON sources FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
+CREATE TRIGGER trg_targets_managed_by BEFORE INSERT OR UPDATE ON targets FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
+CREATE TRIGGER trg_bindings_managed_by BEFORE INSERT OR UPDATE ON bindings FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
+
+-- A hold: a person removed a managed binding (containment or break-glass
+-- DELETE), so nobody creates it again until a person lifts the hold, or its
+-- break-glass review ratifies the deletion. It never ends with time
+-- (.specs/ligo-managed-resources.md §3.5).
+CREATE TABLE managed_holds (
+    id                    UUID PRIMARY KEY,                  -- UUIDv7
+    binding_name          resource_name NOT NULL,
+    source                resource_name NOT NULL,
+    target                resource_name NOT NULL,
+    access_level          resource_name NOT NULL,
+    source_jurisdiction   jurisdiction_path NOT NULL,
+    target_jurisdiction   jurisdiction_path NOT NULL,
+    platform_jurisdiction jurisdiction_path NOT NULL,
+    managed_by            VARCHAR(255) NOT NULL CHECK (managed_by LIKE 'spiffe://%'),   -- the owner at the deletion
+    basis                 VARCHAR(16) NOT NULL CHECK (basis IN ('CONTAINMENT', 'BREAK_GLASS')),
+    deleted_by            VARCHAR(255) NOT NULL,
+    deleted_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    change_request_id     UUID NOT NULL REFERENCES change_requests(id),
+    lifted_by             VARCHAR(255),
+    lifted_at             TIMESTAMPTZ,
+    lift_basis            VARCHAR(16) CHECK (lift_basis IN ('PERSON', 'RATIFIED')),
+    lift_comment          TEXT CHECK (length(lift_comment) <= 2048),
+    CONSTRAINT chk_hold_lift CHECK ((lifted_by IS NULL) = (lifted_at IS NULL) AND (lifted_by IS NULL) = (lift_basis IS NULL)),
+    CONSTRAINT chk_hold_lifter CHECK (lifted_by IS NULL OR (lifted_by NOT LIKE 'spiffe://%' AND lifted_by NOT LIKE 'system:%'))   -- a person lifts, or a ratification by one
+);
+CREATE UNIQUE INDEX uq_holds_open_pair ON managed_holds (source, target, access_level) WHERE lifted_at IS NULL;
+CREATE INDEX idx_holds_open_name ON managed_holds (binding_name) WHERE lifted_at IS NULL;
+
+CREATE FUNCTION managed_holds_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.id <> OLD.id OR NEW.binding_name <> OLD.binding_name OR NEW.source <> OLD.source OR NEW.target <> OLD.target
+     OR NEW.access_level <> OLD.access_level OR NEW.managed_by <> OLD.managed_by OR NEW.basis <> OLD.basis
+     OR NEW.deleted_by <> OLD.deleted_by OR NEW.deleted_at <> OLD.deleted_at OR NEW.change_request_id <> OLD.change_request_id
+     OR NEW.source_jurisdiction <> OLD.source_jurisdiction OR NEW.target_jurisdiction <> OLD.target_jurisdiction
+     OR NEW.platform_jurisdiction <> OLD.platform_jurisdiction
+     OR (OLD.lifted_at IS NOT NULL AND (NEW.lifted_by IS DISTINCT FROM OLD.lifted_by OR NEW.lifted_at IS DISTINCT FROM OLD.lifted_at
+         OR NEW.lift_basis IS DISTINCT FROM OLD.lift_basis OR NEW.lift_comment IS DISTINCT FROM OLD.lift_comment)) THEN
+    RAISE EXCEPTION 'immutable managed_holds column modified';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_managed_holds_guard BEFORE UPDATE ON managed_holds FOR EACH ROW EXECUTE FUNCTION managed_holds_guard();
 
 CREATE FUNCTION change_request_sides_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -941,7 +1016,8 @@ BEGIN
     SELECT coalesce(array_agg(c.id), '{}') INTO ids FROM change_requests c
     WHERE c.status <> 'PENDING' AND c.decided_at < older_than
       AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.change_request_id = c.id)
-      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id);
+      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM managed_holds h WHERE h.change_request_id = c.id);
     LOOP -- drop what a request that stays still refers to, until nothing changes
         kept := ARRAY(SELECT x FROM unnest(ids) AS x WHERE NOT EXISTS (
             SELECT 1 FROM change_requests r WHERE (r.depends_on_cr_id = x OR r.reverts_cr_id = x) AND NOT r.id = ANY (ids)));
@@ -1025,6 +1101,7 @@ GRANT SELECT, INSERT, UPDATE ON accounts, instances, sources, targets, target_ac
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
 GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue, admin_sessions TO ligo_app;
 GRANT SELECT, INSERT, UPDATE ON change_requests TO ligo_app;    -- no DELETE: change_requests_prune is the only way
+GRANT SELECT, INSERT, UPDATE ON managed_holds TO ligo_app;       -- no DELETE: a hold is lifted, never removed
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;

@@ -201,6 +201,22 @@ func TestINV11Routes(t *testing.T) {
 	}
 	act(a, decide, "BREAK_GLASS_REVERT_STARTED", "/ui/change-requests/"+crOf("bg2-"+x)+"/revert", url.Values{"comment": {"the incident is over"}})
 
+	// a hold, lifted by an approver of its sides
+	hold := uuid.NewV7()
+	if _, err := v.owner.Exec(ctx, `insert into managed_holds (id, binding_name, source, target, access_level, source_jurisdiction, target_jurisdiction,
+		platform_jurisdiction, managed_by, basis, deleted_by, change_request_id) values ($1, $2, 's', 't', 'read', 'dc/corp-prod', 'dc/corp-prod/ledger', 'dc/corp-prod',
+		'spiffe://prod.internal/ns/ci/sa/inv', 'CONTAINMENT', 'someone', (select id from change_requests where resource_name = $3 limit 1))`, hold, "held-"+x, source); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from managed_holds where id = $1", hold) })
+	if resp, _ := a.do("POST", "/ui/holds/"+hold.String()+"/lift", url.Values{"comment": {" "}}); resp.StatusCode != 422 {
+		t.Errorf("a lift without a comment: %d", resp.StatusCode)
+	}
+	if resp, _ := a.do("POST", "/ui/holds/"+uuid.NewV7().String()+"/lift", url.Values{"comment": {"contained"}}); resp.StatusCode != 404 {
+		t.Errorf("a lift of no hold: %d", resp.StatusCode)
+	}
+	act(a, "POST /ui/holds/{id}/lift", "HOLD_LIFTED", "/ui/holds/"+hold.String()+"/lift", url.Values{"comment": {"contained"}})
+
 	source2, err := os.ReadFile("server.go")
 	if err != nil {
 		t.Fatal(err)

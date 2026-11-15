@@ -5,7 +5,7 @@
 ```bash
 ligo cr review                     # the queue awaiting you, interactive
 ligo cr list --awaiting-me
-ligo cr get <id>                   # its diff and payloadSha256
+ligo cr show <id>                   # its diff and payloadSha256
 ligo cr approve <id> --sha256 <payloadSha256> --side TARGET --comment "..."
 ligo cr decline <id> --side TARGET --comment "..."
 ```
@@ -15,23 +15,49 @@ An approval names the payload's hash, so you approve exactly what you read. A re
 ## Rotating a credential
 
 ```bash
-ligo rotate <binding>
+ligo binding rotate <binding>
 ```
 
 The reconciler also rotates each platform's static secrets at its `rotation_interval`. Between the target changing a password and the store holding the new one, the stored credential does not connect, so workloads must retry a failed connection by reading the credential again.
 
 ## Retrying a failure
 
-Read the binding's message. A retryable cause needs nothing from you: `ligo` retries the binding by itself once the cause is gone (`ligo audit list` shows `system:auto-retry`). For a final cause, fix it (*Error reference*), then `ligo retry <binding>`. Either way a retry is a new attempt, which rotates static secrets.
+Read the binding's message. A retryable cause needs nothing from you: `ligo` retries the binding by itself once the cause is gone (`ligo audit list` shows `system:auto-retry`). For a final cause, fix it (*Error reference*), then `ligo binding retry <binding>`. Either way a retry is a new attempt, which rotates static secrets.
 
 ## Revoking
 
 ```bash
-ligo delete binding <name> -r <revision>                 # one binding
+ligo binding delete <name> -r <revision>                 # one binding
 ligo target revoke-bindings <target> --source-jurisdiction 'cloud/*' --comment "..."   # containment
 ```
 
 One owner is enough to revoke: the source's, the target's or the platform's. No other can veto it. The API stops serving it at once; the workflow then removes the store's objects, the role and any account, in that order.
+
+## Holds and orphaned locks
+
+**List the holds** (removals that a pipeline may not undo):
+
+```bash
+ligo hold list                  # open holds; --binding NAME, --all for the lifted ones
+```
+
+The web UI shows the same under "Open holds" on the dashboard. A hold is a decision for a person who approves a side of the binding (the source's, the target's or the platform's owner). It is not for an SVID, an operator without approval rights, or the pipeline.
+
+**Lift one** once the incident is closed and the binding may be asked for again:
+
+```bash
+ligo hold lift <id> -m "INC0012345 closed; credential rotated"
+```
+
+Lifting only restores the right to ask: the pipeline's next run creates the binding, under the usual rules. An open hold also stops audit pruning at the entry that created it.
+
+**Release an orphaned lock.** When the pipeline is gone, its resources stay locked. A person with `admin.full_access` files a release, and a second person decides each side (four eyes, people only; it is never delegated):
+
+```bash
+ligo source release <name> -r <revision> --justification "pipeline ci/terraform decommissioned, ticket CHG-123"
+```
+
+The justification is at least 20 characters. When the request is applied the resource is unmanaged, and anyone allowed to edit it can edit it. The audit log records `RESOURCE_RELEASED_BY_ADMIN` with the previous owner. The owner itself releases with `ligo apply -f ... --unmanaged`.
 
 ## Managing accounts
 
@@ -40,7 +66,7 @@ Use the **Accounts** page of the web UI, or the CLI, as an `account_admin`:
 ```bash
 ligo account register acme --display-name "Acme Corp"
 ligo account list
-ligo account get acme      # with its counts of sources, targets and bindings
+ligo account show acme      # with its counts of sources, targets and bindings
 ligo account retire acme   # asks you to type the name
 ```
 
@@ -66,13 +92,13 @@ An approver of the platform's jurisdiction may also decide a binding's `TARGET` 
 Platforms, identity provider instances and secret store instances change through change requests, like sources and targets; `server.yaml` holds only their plugin types.
 
 ```bash
-ligo get platform pg-ledger -o yaml   # revision and definition, for operators and approvers of its jurisdiction
+ligo platform show pg-ledger -o yaml   # revision and definition, for operators and approvers of its jurisdiction
 # save the definition as pg-ledger.yaml, change it, add expectedRevision: <revision>
 ligo apply -f pg-ledger.yaml
 ligo audit list platform pg-ledger
 ```
 
-A second person of the instance's jurisdiction approves it, and every replica reconfigures the plugin within seconds. Name, type, realm and jurisdiction never change: retire the instance (`ligo delete platform NAME -r REVISION`) and create another. A platform change that would leave a target outside `targetJurisdictions`, or change `namespaceTemplate` while it has targets, is refused. Tightened privilege bounds are reported once applied, as `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`; existing bindings keep their wiring until changed.
+A second person of the instance's jurisdiction approves it, and every replica reconfigures the plugin within seconds. Name, type, realm and jurisdiction never change: retire the instance (`ligo platform delete NAME -r REVISION`) and create another. A platform change that would leave a target outside `targetJurisdictions`, or change `namespaceTemplate` while it has targets, is refused. Tightened privilege bounds are reported once applied, as `SYSTEM_PRIVILEGE_BOUND_VIOLATIONS`; existing bindings keep their wiring until changed.
 
 An endpoint outside the type's `instance_bounds` is refused: widening those bounds is a change of `server.yaml`, under the platform team's own change control, and a rolling restart.
 

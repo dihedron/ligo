@@ -80,6 +80,9 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	b := req.Binding
+	if err := checkHold(ctx, s.DB, b.Name, b.Source, b.Target, b.AccessLevel); err != nil {
+		return nil, err
+	}
 	if req.InlineSource != nil {
 		return s.createInline(ctx, c, req)
 	}
@@ -158,6 +161,31 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	return s.file(ctx, c, "UPDATE", consent, cur, &b, res, &req.Common)
 }
 
+// Release files the release of a managed binding by an administrator (POST
+// /v1/admin/bindings/{name}/release): an update that changes nothing but the
+// lock, with consent ALL, decided by people only
+// (.specs/ligo-managed-resources.md §3.3).
+func (s *Service) Release(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, justification string) (*changerequests.Request, error) {
+	cur, err := s.current(ctx, c, name)
+	if err != nil {
+		return nil, err
+	}
+	if cur.breakGlassCR != nil {
+		return nil, breakGlassOpen(cur)
+	}
+	if expectedRevision != cur.revision {
+		return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
+	}
+	b := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
+		Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, changerequests.ConsentAll, nil)
+	if err != nil {
+		return nil, err
+	}
+	off := false
+	return s.file(ctx, c, "UPDATE", changerequests.ConsentAll, cur, &b, res, &changerequests.Common{ExpectedRevision: &expectedRevision, Managed: &off, ReleaseJustification: justification})
+}
+
 // Delete files the revocation of a binding (DELETE /v1/admin/bindings/{name}):
 // consent ANY, decided by any one of the jurisdictions the requester acts for.
 func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, approvalReference string, automationContext json.RawMessage) (*changerequests.Request, error) {
@@ -226,6 +254,7 @@ type stored struct {
 	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
 	platform, phase, purpose, realm                              string
 	revision, attempt                                            int64
+	managedBy                                                    string // the owner of the lock, or empty
 	parameters                                                   json.RawMessage
 	labels                                                       map[string]string
 	expiresAt                                                    *time.Time
@@ -236,7 +265,7 @@ type stored struct {
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
 	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction,
-		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id
+		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id, coalesce(b.managed_by, '')
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
@@ -244,7 +273,7 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceJurisdiction,
 		&st.targetJurisdiction, &st.platformJurisdiction, &st.platform, &st.phase, &st.purpose, &st.realm, &st.revision, &st.attempt, &st.parameters,
-		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR)
+		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR, &st.managedBy)
 	return st, err
 }
 
@@ -462,9 +491,9 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
 		Realm: res.platform.Realm, SourceJurisdiction: res.sourceJurisdiction, TargetJurisdiction: res.targetJurisdiction, PlatformJurisdiction: res.platformJurisdiction,
 		InterconnectRule: res.decision.Rule, DistinctApprovers: res.decision.DistinctApprovers, ExpectedRevision: common.ExpectedRevision,
-		Payload: payload, AutomationContext: common.AutomationContext}
+		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed, ReleaseJustification: common.ReleaseJustification}
 	if cur != nil {
-		r.ResourceID = &cur.id
+		r.ResourceID, r.LockOwner = &cur.id, cur.managedBy
 	}
 	sides := anySides
 	if consent == changerequests.ConsentAll {
@@ -544,6 +573,11 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, breakGlassOpen(cur)
 		}
 	}
+	if cur != nil {
+		if err := changerequests.ApplyLock(ctx, tx, "bindings", cur.id, r, cur.managedBy); err != nil {
+			return nil, err
+		}
+	}
 	if r.Operation == "DELETE" {
 		entries, err := s.applyDelete(ctx, tx, r, cur)
 		return revertStarted(r, cur, entries), err
@@ -572,6 +606,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		if err != nil {
 			return nil, err
 		}
+		if err := checkHold(ctx, tx, b.Name, b.Source, b.Target, b.AccessLevel); err != nil {
+			return nil, err
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy,
 			derived_principal_name, source_jurisdiction, target_jurisdiction, platform_jurisdiction, parameters, purpose, labels, expires_at, workflow_id,
@@ -597,6 +634,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 			return nil, err
 		}
 		r.ResourceID = &id
+		if err := changerequests.ApplyLock(ctx, tx, "bindings", id, r, ""); err != nil {
+			return nil, err
+		}
 	} else {
 		id = cur.id
 		if revision, attempt, err = revise(ctx, tx, cur, &b, snap, r.RequestedBy); err != nil {
@@ -693,6 +733,11 @@ func (s *Service) applyDelete(ctx context.Context, tx pgx.Tx, r *changerequests.
 	}
 	entries := []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
 		Action: "DELETE_STARTED", Revision: &cur.revision, Attempt: &attempt, WorkflowID: wf}}
+	held, err := createHold(ctx, tx, r, cur)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, held...)
 	if r.Kind == kindExpiry {
 		entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
 			Action: "BINDING_EXPIRED", Revision: &cur.revision})

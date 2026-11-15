@@ -145,6 +145,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /ui/bindings/{name}", s.bindingDelete)
 	mux.HandleFunc("POST /ui/bindings/{name}/retry", s.bindingOperate)
 	mux.HandleFunc("POST /ui/bindings/{name}/rotate", s.bindingOperate)
+	mux.HandleFunc("POST /ui/holds/{id}/lift", s.liftHold)
 	mux.HandleFunc("GET /ui/break-glass/new-form", s.breakGlassForm)
 	mux.HandleFunc("POST /ui/break-glass", s.breakGlassSubmit)
 	mux.HandleFunc("GET /ui/change-requests", s.changeRequests)

@@ -89,7 +89,7 @@ func (p Page) query(kv ...string) url.Values {
 	return q
 }
 
-// ResourceArgs names one resource: ligo get binding NAME.
+// ResourceArgs names one resource by kind and name (ligo audit list binding NAME).
 type ResourceArgs struct {
 	Kind string `positional-arg-name:"kind" choice:"source" choice:"target" choice:"binding" choice:"platform" choice:"identity-provider" choice:"secret-store" description:"Resource kind."`
 	Name string `positional-arg-name:"name" description:"Resource name."`
@@ -124,6 +124,8 @@ var columns = map[string][]client.Column{
 		col("REVISION", "metadata.revision"), col("EXPIRES", "expiresAt")},
 	"request": {col("ID", "id"), col("TYPE", "resourceType"), col("NAME", "resourceName"), col("OPERATION", "operation"), col("KIND", "kind"),
 		col("STATUS", "status"), col("AWAITING", "awaitingApproval"), col("REQUESTED BY", "requestedBy")},
+	"hold": {col("ID", "id"), col("BINDING", "bindingName"), col("OWNER", "managedBy"), col("BASIS", "basis"), col("DELETED BY", "deletedBy"),
+		col("DELETED AT", "deletedAt"), col("LIFTED BY", "liftedBy")},
 	"account":           {col("NAME", "name"), col("DISPLAY NAME", "displayName"), col("STATUS", "status"), col("REGISTERED BY", "registeredBy"), col("REGISTERED AT", "registeredAt")},
 	"platform":          {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("SERVING", "health.serving")},
 	"identity-provider": {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("REVISION", "revision")},
@@ -132,4 +134,30 @@ var columns = map[string][]client.Column{
 	"audit":             {col("ID", "id"), col("AT", "occurredAt"), col("ACTION", "action"), col("ACTOR", "actor"), col("REVISION", "revision")},
 	"flow": {col("NAME", "name"), col("PURPOSE", "purpose"), col("PROTOCOL", "protocol"), col("DESTINATION", "destination"), col("PORTS", "ports"),
 		col("TLS", "tls"), col("DECLARED BY", "declaredBy")},
+}
+
+// Kind fixes the resource kind of a generic verb: ligo source show, ligo
+// binding list. A type parameter keeps one implementation of each verb while
+// go-flags still sees one concrete type per group.
+type Kind interface{ Name() string }
+
+type (
+	SourceKind           struct{}
+	TargetKind           struct{}
+	BindingKind          struct{}
+	PlatformKind         struct{}
+	IdentityProviderKind struct{}
+	SecretStoreKind      struct{}
+)
+
+func (SourceKind) Name() string           { return "source" }
+func (TargetKind) Name() string           { return "target" }
+func (BindingKind) Name() string          { return "binding" }
+func (PlatformKind) Name() string         { return "platform" }
+func (IdentityProviderKind) Name() string { return "identity-provider" }
+func (SecretStoreKind) Name() string      { return "secret-store" }
+
+func kindName[K Kind]() string {
+	var k K
+	return k.Name()
 }

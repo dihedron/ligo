@@ -13,8 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dihedron/ligo/cmd/ligo/command"
 	"github.com/dihedron/ligo/internal/config"
 	"github.com/dihedron/ligo/internal/instances"
+	"github.com/jessevdk/go-flags"
 )
 
 const (
@@ -246,6 +248,30 @@ func checkInstances(t *testing.T, cfg *config.Config, manifest string) {
 		for k, w := range map[instances.Kind]*instances.Wiring{instances.IdentityProvider: p.IdentityProvider, instances.SecretStore: p.SecretStore} {
 			if in, ok := set.Get(k, w.Instance); !ok || in.Type != w.Type || in.Metadata.Realm != p.Metadata.Realm {
 				t.Errorf("%s: platform %s: %s %s/%s is not an instance of its realm", manifest, p.Metadata.Name, k, w.Type, w.Instance)
+			}
+		}
+	}
+}
+
+// TestCLIExamplesExist: a command shown in a guide, `ligo <object> <verb>`, is
+// one the binary has (an old name left behind fails here).
+func TestCLIExamplesExist(t *testing.T) {
+	p := flags.NewParser(&command.Commands{}, flags.None)
+	re := regexp.MustCompile("(?m)(?:^|[`$(] ?|\\| )ligo ((?:--?[a-z-]+(?:[ =][^ -][^ ]*)? )*)([a-z][a-z-]*)(?: ([a-z][a-z-]*))?")
+	for _, dir := range []string{"operators-guide", "setup-guide", "developers-guide", "architecture"} {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+		for _, f := range files {
+			for _, m := range re.FindAllStringSubmatch(read(t, f), -1) {
+				root := p.Find(m[2])
+				if slices.Contains([]string{"get", "list", "ls", "delete", "rm", "release", "retry", "rotate", "flows"}, m[2]) {
+					t.Errorf("%s: ligo %s: the verb comes after the object", f, m[2])
+				}
+				if root == nil {
+					continue // prose: "ligo retries", "ligo is"
+				}
+				if m[3] != "" && len(root.Commands()) > 0 && root.Find(m[3]) == nil && !strings.ContainsAny(m[3], "A-Z") {
+					t.Errorf("%s: ligo %s %s: %s has no %q", f, m[2], m[3], m[2], m[3])
+				}
 			}
 		}
 	}

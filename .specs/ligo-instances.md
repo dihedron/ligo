@@ -243,9 +243,9 @@ Rows T-22 to T-22f replace the T-22 row of the main spec. The "Read configuratio
   - It files them before sources, targets and bindings, in that order.
   - Create and update follow the existing manifest rule: no `expectedRevision` means create.
   - A platform whose wiring instance is still a pending request is refused by validation. `ligo apply` reports it and goes on with the rest, and a second run after approval files it. The guides show the two runs.
-- **`ligo list platforms|identity-providers|secret-stores`, `ligo get <kind> <name>` and `ligo delete <kind> <name>`** join the existing nouns.
+- **`ligo platform|identity-provider|secret-store list|show|delete`** join the existing nouns (`ligo platform list|show|schema|delete`).
   - `ligo platform list|show|schema` stays; `ligo audit list platform|identity-provider|secret-store <name>` shows an instance's history.
-  - `ligo delete <kind> <name> -r N` files the retirement, a `DELETE` with `expectedRevision`.
+  - `ligo <kind> delete <name> -r N` files the retirement, a `DELETE` with `expectedRevision`.
 - Approval uses the existing `ligo change-request approve` and `review`.
 
 ### 10.3 Web UI

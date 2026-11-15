@@ -46,6 +46,14 @@ The emergency path must be faster than the workaround, or people will use the wo
 - It applies at once, and a `CREATE` or `UPDATE` **reverts automatically** at its TTL, unless each side is ratified by another person. So the default outcome is that access disappears again.
 - An emergency `DELETE` is never reverted, as restoring it could re-grant access to a compromised workload.
 
+## The lock and consent
+
+Delegation (above) lets an automation decide the sides in its own jurisdictions. The lock adds only a restriction after that: while a resource is managed, only its owner files changes to it, so a person's approval can no longer replace the pipeline's configuration. Three paths stay open:
+
+- **Unilateral revocation** (consent `ANY`, above) of a managed binding. It leaves a hold, which only a person who approves a side lifts.
+- **Break-glass.** An update or create is applied at once and is always reverted at its TTL: ratification is refused. A `DELETE` is final and leaves a hold.
+- **Adoption and release by an administrator** go through consent among people. Adopting an existing resource needs the consent that a change to it needs, with `ALL` sides and people only. Releasing an orphaned lock is an `UPDATE` by a person with `admin.full_access` with a justification of at least 20 characters, consent `ALL`, never `DELEGATED` or `AUTO`. A requester cannot decide their own request.
+
 ## Visibility
 
 Sources and targets are `PRIVATE` by default. A binding and its requests are visible only to those holding a role on its jurisdictions. For everyone else they do not exist: `404`, so `409` conflicts do not reveal what exists. Name prefixes per jurisdiction stop owners squatting on each other's names.

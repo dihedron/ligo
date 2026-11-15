@@ -272,7 +272,7 @@ visibility: {mode: PRIVATE}
 	approveAll("binding", "cli2-"+x, "")
 
 	out.Reset()
-	if err := (&Get{Base: olga, Args: ResourceArgs{"binding", "cli-" + x}}).Execute(nil); err != nil {
+	if err := (&Show[BindingKind]{Base: olga, Args: NameArg{"cli-" + x}}).Execute(nil); err != nil {
 		t.Fatal(err)
 	}
 	var b map[string]any
@@ -300,12 +300,12 @@ visibility: {mode: PRIVATE}
 	}
 	revision := int64(client.Lookup(b, "metadata.revision").(float64))
 	out.Reset()
-	if err := (&Delete{Base: olga, ExpectedRevision: revision, Args: ResourceArgs{"binding", "cli-" + x}}).Execute(nil); err != nil {
+	if err := (&Delete[BindingKind]{Base: olga, ExpectedRevision: revision, Args: NameArg{"cli-" + x}}).Execute(nil); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	approveAll("binding", "cli-"+x, "")
 	out.Reset()
-	if err := (&Get{Base: olga, Args: ResourceArgs{"binding", "cli-" + x}}).Execute(nil); err != nil {
+	if err := (&Show[BindingKind]{Base: olga, Args: NameArg{"cli-" + x}}).Execute(nil); err != nil {
 		t.Fatal(err)
 	}
 	_ = json.Unmarshal(out.Bytes(), &b)
@@ -327,7 +327,7 @@ func TestCLIAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := (&AccountGet{Base: reg, Args: accountName{Name: name}}).Execute(nil); err != nil || !strings.Contains(out.String(), `"displayName":"CLI"`) && !strings.Contains(out.String(), `"displayName": "CLI"`) {
+	if err := (&AccountShow{Base: reg, Args: accountName{Name: name}}).Execute(nil); err != nil || !strings.Contains(out.String(), `"displayName":"CLI"`) && !strings.Contains(out.String(), `"displayName": "CLI"`) {
 		t.Errorf("get: %v %s", err, out.String())
 	}
 	out.Reset()

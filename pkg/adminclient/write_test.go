@@ -249,7 +249,7 @@ func TestFilingBody(t *testing.T) {
 	if _, err := c.CreateSource(ctx, someSource(), Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if b := ws.lastBody(t); b["expectedRevision"] != nil || b["approvalReference"] != nil || b["automationContext"] != nil {
+	if b := ws.lastBody(t); b["expectedRevision"] != nil || b["approvalReference"] != nil || b["automationContext"] != nil || b["managed"] != nil {
 		t.Errorf("a creation carries no revision and no empty options: %v", b)
 	}
 	// a deletion: the revision is in the query, the options in the body
@@ -313,12 +313,33 @@ func TestAccounts(t *testing.T) {
 	}
 }
 
+// TestManagedOption: Managed is sent as it is, true to set the lock, false to
+// release it, and left out when nil.
+func TestManagedOption(t *testing.T) {
+	c, ws := newWriteServer(t)
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		m    *bool
+		want any
+	}{"set": {ptr(true), true}, "release": {ptr(false), false}, "unchanged": {nil, nil}} {
+		if _, err := c.CreateSource(ctx, someSource(), Options{Managed: tc.m}); err != nil {
+			t.Fatal(err)
+		}
+		if got := ws.lastBody(t)["managed"]; got != tc.want {
+			t.Errorf("%s: managed = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
 // TestNoDecisionMethods is T-A4: the package has no method for the decisions
 // of people.
 func TestNoDecisionMethods(t *testing.T) {
 	for _, op := range operations(t) {
 		switch op.id {
-		case "approveChangeRequest", "declineChangeRequest", "ratifyChangeRequest", "revertChangeRequest", "breakGlass":
+		case "approveChangeRequest", "declineChangeRequest", "ratifyChangeRequest", "revertChangeRequest", "breakGlass",
+			"liftHold", "releaseSource", "releaseTarget", "releaseBinding":
 			if !contains(notYet, op.id) {
 				t.Errorf("%s is in the package", op.id)
 			}

@@ -99,11 +99,9 @@ func TestReadCommands(t *testing.T) {
 		request string
 		output  []string
 	}{
-		{"get", (&Get{Base: b, Args: ResourceArgs{"binding", "b1"}}).Execute, "GET /v1/admin/bindings/b1", []string{"b1 s1 t1 read ACTIVE 3 -"}},
-		{"list", (&List{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Jurisdiction: "dc/*", Args: struct {
-			Kind string `positional-arg-name:"kind" choice:"sources" choice:"targets" choice:"bindings" choice:"platforms" choice:"identity-providers" choice:"secret-stores" description:"Resource kind."`
-		}{"bindings"}}).Execute, "GET /v1/admin/bindings?jurisdiction=dc%2F%2A&pageSize=10&phase=ACTIVE", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
-		{"flows", (&Flows{Base: b, Args: struct {
+		{"binding show", (&Show[BindingKind]{Base: b, Args: NameArg{"b1"}}).Execute, "GET /v1/admin/bindings/b1", []string{"b1 s1 t1 read ACTIVE 3 -"}},
+		{"binding list", (&List[BindingKind]{Base: b, Page: Page{PageSize: 10}, Phase: "ACTIVE", Jurisdiction: "dc/*"}).Execute, "GET /v1/admin/bindings?jurisdiction=dc%2F%2A&pageSize=10&phase=ACTIVE", []string{"NAME SOURCE TARGET", "b1 s1 t1"}},
+		{"binding flows", (&Flows{Base: b, Args: struct {
 			Binding string `positional-arg-name:"binding" description:"Binding name."`
 		}{"b1"}}).Execute, "GET /v1/admin/bindings/b1/flows", []string{"db DATA TCP pg 5432 true target:t1"}},
 		{"platform list", (&PlatformList{Base: b}).Execute, "GET /v1/admin/platforms", []string{"pg-ledger postgres.v1 prod dc/x true"}},
@@ -120,7 +118,7 @@ func TestReadCommands(t *testing.T) {
 			"GET /v1/admin/change-requests?awaitingMe=true&resourceType=BINDING", []string{"c1 BINDING b1 CREATE STANDARD PENDING TARGET olga"}},
 		{"cr list --kind identity-provider", (&ChangeRequestList{Base: b, Kind: "identity-provider"}).Execute,
 			"GET /v1/admin/change-requests?resourceType=IDENTITY_PROVIDER", nil},
-		{"cr get", (&ChangeRequestGet{Base: b, Args: struct {
+		{"cr show", (&ChangeRequestShow{Base: b, Args: struct {
 			ID string `positional-arg-name:"cr-id" description:"Change request UUID."`
 		}{"c1"}}).Execute, "GET /v1/admin/change-requests/c1", []string{"payloadSha256: ff"}},
 		{"break-glass list --open", (&BreakGlassList{Base: b, Open: true}).Execute, "GET /v1/admin/break-glass", []string{"open"}},
@@ -145,10 +143,10 @@ func TestReadCommands(t *testing.T) {
 
 	out.Reset()
 	j := f.base(t, "json", &out)
-	if err := (&Get{Base: j, Args: ResourceArgs{"binding", "b1"}}).Execute(nil); err != nil || !strings.Contains(out.String(), `"accessLevel": "read"`) {
+	if err := (&Show[BindingKind]{Base: j, Args: NameArg{"b1"}}).Execute(nil); err != nil || !strings.Contains(out.String(), `"accessLevel": "read"`) {
 		t.Errorf("json: %v %s", err, out.String())
 	}
-	if err := (&Get{Base: b, Args: ResourceArgs{"source", "nope"}}).Execute(nil); err == nil || err.Error() != "404 not-found: nothing at /v1/admin/sources/nope" {
+	if err := (&Show[SourceKind]{Base: b, Args: NameArg{"nope"}}).Execute(nil); err == nil || err.Error() != "404 not-found: nothing at /v1/admin/sources/nope" {
 		t.Errorf("a problem: %v", err)
 	}
 }

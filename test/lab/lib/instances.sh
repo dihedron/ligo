@@ -100,7 +100,7 @@ kind_path() { case "$1" in IdentityProvider) echo identity-provider ;; SecretSto
 instance_file() {
 	local user="$1" doc="$2" kind name rev
 	kind="$(kind_path "$(jq -r .kind <<<"$doc")")" name="$(jq -r .metadata.name <<<"$doc")"
-	rev="$(cli "$user" -o json get "$kind" "$name" 2>/dev/null </dev/null | jq -r '.revision // empty')" || rev=""
+	rev="$(cli "$user" -o json "$kind" show "$name" 2>/dev/null </dev/null | jq -r '.revision // empty')" || rev=""
 	[[ -z "$rev" ]] || doc="$(jq -c --argjson r "$rev" '. + {expectedRevision: $r}' <<<"$doc")"
 	cli "$user" apply -f - <<<"$doc" >/dev/null || die "apply $kind $name"
 }
@@ -153,7 +153,7 @@ serve_instances() {
 listed() {
 	local out name missing
 	for _ in $(seq 1 30); do
-		out="$(cli ligo-ops -o json list "$1s" </dev/null 2>/dev/null)" || out='{}'
+		out="$(cli ligo-ops -o json "$1" list </dev/null 2>/dev/null)" || out='{}'
 		missing=""
 		for name in $2; do
 			jq -e --arg n "$name" '.items[]? | select(.name == $n)' <<<"$out" >/dev/null || missing="$missing $name"
@@ -236,8 +236,8 @@ YAML
 	info "tightened bounds reported $target's write level"
 	# retirement refused while the target is on it
 	local rev
-	rev="$(cli "$INSTANCE_FILER" -o json get platform "$name" | jq -r .revision)"
-	if out="$(cli "$INSTANCE_FILER" delete platform "$name" -r "$rev" 2>&1)"; then
+	rev="$(cli "$INSTANCE_FILER" -o json platform show "$name" | jq -r .revision)"
+	if out="$(cli "$INSTANCE_FILER" platform delete "$name" -r "$rev" 2>&1)"; then
 		die "retired $name while $target is on it"
 	fi
 	grep -q instance-in-use <<<"$out" || die "retire $name: $out"

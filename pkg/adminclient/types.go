@@ -23,6 +23,7 @@ type (
 	Instance            = gen.Instance // an identity provider or a secret store
 	Definition          = gen.InstanceDefinition
 	ChangeRequest       = gen.ChangeRequest
+	Hold                = gen.Hold // a hold on a binding that a person removed in an emergency
 	Side                = gen.Side
 	AuditEntry          = gen.AuditEntry
 	Account             = gen.Account

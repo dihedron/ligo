@@ -221,7 +221,8 @@ notifications:                            # §7.5
       timeout: 5s
       events: [BREAK_GLASS_USED, BREAK_GLASS_EXPIRING, BREAK_GLASS_REVERTED, BREAK_GLASS_REVERT_FAILED,
                BREAK_GLASS_RATIFIED, BREAK_GLASS_REVIEW_OVERDUE, CONFIG_APPROVAL_POLICY_WEAKENED,
-               CONFIG_CHARTER_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS]
+               CONFIG_CHARTER_CHANGED, SYSTEM_INTERCONNECT_VIOLATIONS,
+               RESOURCE_RELEASED_BY_ADMIN, LOCK_VIOLATION_REFUSED, HOLD_CREATED]
     - name: dba-queue                     # the data centre DBAs' ticket queue: only their own decisions
       url: "https://tickets.corp.internal/hooks/ligo-dba"
       ca_cert_file: "/etc/ligo/tls/corp-ca.crt"

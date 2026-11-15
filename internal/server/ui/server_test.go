@@ -274,6 +274,8 @@ func samples() map[string]any {
 	id := uuid.NewV7()
 	now := time.Now()
 	v := &bindings.View{Source: "s", Target: "t", AccessLevel: "read", ExpiresAt: &now, Spec: []byte(`{"host":"db"}`), Auth: []byte(`{}`)}
+	owner := "spiffe://x/ns/ci/sa/terraform"
+	v.Metadata.ManagedBy = &owner
 	v.Metadata.Name, v.Metadata.ActiveRevision, v.Status.Phase, v.Status.PendingChangeRequestID = "b", new(int64), "PROVISIONING", &id
 	v.Status.BreakGlass = &bindings.BreakGlassStatus{ChangeRequestID: id, ExpiresAt: now}
 	v.Active = &bindings.ViewActive{SVIDRegex: "^x$", Since: now}
@@ -296,8 +298,9 @@ func samples() map[string]any {
 		Sources: []SourceChoice{{Name: "s", Allowed: true}, {Name: "d", Rule: "r"}}, Source: "s", TrustDomains: []string{"prod.internal"},
 		Params: fields, Name: "s-t", Flows: []flows.Flow{{Name: "f"}}, Targets: []catalog.Target{{Name: "t"}}}
 	return map[string]any{
-		"login":    map[string]string{"Prelogin": "p"},
-		"bindings": Dashboard{Phases: phases, Bindings: []*bindings.View{v}, Next: "b", AwaitingMe: []*changerequests.Request{cr}},
+		"login": map[string]string{"Prelogin": "p"},
+		"bindings": Dashboard{Phases: phases, Bindings: []*bindings.View{v}, Next: "b", AwaitingMe: []*changerequests.Request{cr},
+			Holds: []bindings.Hold{{ID: id, BindingName: "h", Source: "s", Target: "t", AccessLevel: "read", ManagedBy: owner, Basis: "CONTAINMENT", DeletedBy: "dino", DeletedAt: now}}},
 		"binding": BindingPage{Binding: v, Row: row, Stages: []bindings.Stage{{Stage: "TARGET", Status: "ENSURED"}}, Audit: trail,
 			Flows: []flows.Flow{{Name: "f", Ports: []flows.Port{{Low: 1, High: 1}}, TLS: true}}},
 		"change-requests": Requests{Requests: []*changerequests.Request{cr}, Next: id.String()},
@@ -473,5 +476,56 @@ func TestINV12(t *testing.T) {
 	}
 	if !seen {
 		t.Error("the plugin data was not rendered anywhere: the test checks nothing")
+	}
+}
+
+// TestManagedPages: a managed resource shows its owner, and its edit and state
+// buttons give way to the reason; a binding still offers Revoke (containment is
+// never blocked); an unmanaged one keeps its buttons.
+func TestManagedPages(t *testing.T) {
+	s := newServer(t)
+	owner := "spiffe://x/ns/ci/sa/terraform"
+	render := func(name string, content any) string {
+		rec := httptest.NewRecorder()
+		s.secure(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.page(w, r, 200, name, Page{Title: "t", CSRF: "c", User: "u", Content: content})
+		})).ServeHTTP(rec, httptest.NewRequest("GET", "/ui/x", nil))
+		return rec.Body.String()
+	}
+	for _, managed := range []bool{true, false} {
+		src := &sources.View{}
+		src.Metadata.Name, src.Metadata.State = "s", "ACTIVE"
+		tgt := &targets.View{Target: targets.Target{Definition: []byte(`{}`)}}
+		tgt.Metadata.Name, tgt.Metadata.State = "t", "ACTIVE"
+		b := &bindings.View{Source: "s", Target: "t", AccessLevel: "read", Spec: []byte(`{}`), Auth: []byte(`{}`)}
+		b.Metadata.Name, b.Status.Phase = "b", "ACTIVE"
+		if managed {
+			src.Metadata.ManagedBy, tgt.Metadata.ManagedBy, b.Metadata.ManagedBy = &owner, &owner, &owner
+		}
+		for _, tc := range []struct {
+			page    string
+			content any
+			kept    string // what a managed resource keeps showing
+			edit    string // what only an unmanaged one offers
+		}{
+			{"source", SourcePage{Source: src}, "", "/ui/sources/s/edit-form"},
+			{"target", TargetPage{Target: tgt}, "", "/ui/targets/t/edit-form"},
+			{"binding", BindingPage{Binding: b, Row: StatusRow{Name: "b", Phase: "ACTIVE"}}, `hx-delete="/ui/bindings/b"`, "/ui/bindings/b/edit-form"},
+		} {
+			got := render(tc.page, tc.content)
+			if has := strings.Contains(got, "managed by "+owner); has != managed {
+				t.Errorf("%s managed=%v: badge %v", tc.page, managed, has)
+			}
+			if has := strings.Contains(got, tc.edit); has == managed {
+				t.Errorf("%s managed=%v: edit link %v", tc.page, managed, has)
+			}
+			if managed && tc.kept != "" && !strings.Contains(got, tc.kept) {
+				t.Errorf("%s: a managed binding lost Revoke", tc.page)
+			}
+		}
+	}
+	if got := render("bindings", Dashboard{Phases: phases, Holds: []bindings.Hold{{ID: uuid.NewV7(), BindingName: "held", ManagedBy: owner, Basis: "CONTAINMENT"}}}); !strings.Contains(got, "Open holds") ||
+		!strings.Contains(got, "/lift") {
+		t.Error("the dashboard shows no open hold")
 	}
 }

@@ -31,6 +31,8 @@ var (
 	descRequests      = desc("ligo_change_requests", "Change requests by status and realm.", "status", "realm")
 	descSidesPending  = desc("ligo_change_request_sides_pending", "Undecided sides of pending change requests.", "resource_type", "side_kind")
 	descSources       = desc("ligo_sources", "Sources by state.", "state")
+	descManaged       = desc("ligo_managed_resources", "Sources, targets and bindings locked to an automation (.specs/ligo-managed-resources.md), by type.", "type")
+	descHolds         = desc("ligo_holds_open", "Holds on bindings removed in an emergency, not yet lifted.")
 	descTargets       = desc("ligo_targets", "Targets by state.", "state")
 	descQueueDepth    = desc("ligo_propagation_queue_depth", "Bindings waiting for propagation, by priority.", "priority")
 	descQueueOldest   = desc("ligo_propagation_oldest_seconds", "Age of the oldest queued propagation, by priority.", "priority")
@@ -46,7 +48,7 @@ func desc(name, help string, labels ...string) *prometheus.Desc {
 
 // Describe sends the gauges' descriptions.
 func (d *DB) Describe(ch chan<- *prometheus.Desc) {
-	for _, x := range []*prometheus.Desc{descBindings, descRequests, descSidesPending, descSources, descTargets, descQueueDepth,
+	for _, x := range []*prometheus.Desc{descBindings, descRequests, descSidesPending, descSources, descManaged, descHolds, descTargets, descQueueDepth,
 		descQueueOldest, descExpiring, descBreakGlass, descRotationOver, descScrapeSuccess} {
 		ch <- x
 	}
@@ -90,6 +92,9 @@ func (d *DB) queries() []query {
 		{descSidesPending, `SELECT r.resource_type::text, split_part(s.side, ':', 1), count(*) FROM change_requests r
 			JOIN change_request_sides s ON s.change_request_id = r.id WHERE r.status = 'PENDING' AND s.decision IS NULL GROUP BY 1, 2`, 2, nil},
 		{descSources, `SELECT state::text, count(*) FROM sources GROUP BY 1`, 1, nil},
+		{descManaged, `SELECT t, count(*) FROM (SELECT 'source' AS t, managed_by FROM sources UNION ALL SELECT 'target', managed_by FROM targets
+			UNION ALL SELECT 'binding', managed_by FROM bindings) x WHERE managed_by IS NOT NULL GROUP BY 1`, 1, nil},
+		{descHolds, `SELECT count(*) FROM managed_holds WHERE lifted_at IS NULL`, 0, nil},
 		{descTargets, `SELECT state::text, count(*) FROM targets GROUP BY 1`, 1, nil},
 		{descQueueDepth, `SELECT p::text, (SELECT count(*) FROM binding_propagation_queue WHERE priority = p) FROM (VALUES (0), (1)) v(p)`, 1, nil},
 		{descQueueOldest, `SELECT p::text, coalesce((SELECT extract(epoch FROM now() - min(enqueued_at)) FROM binding_propagation_queue

@@ -135,7 +135,7 @@ soak_fault() {
 soak_answers() {
 	local h
 	for h in $(ligo_hosts); do
-		CLI_SERVER="$h.ligo.lab" cli ligo-approver -o json list bindings >/dev/null 2>&1 || return 1
+		CLI_SERVER="$h.ligo.lab" cli ligo-approver -o json binding list >/dev/null 2>&1 || return 1
 	done
 }
 

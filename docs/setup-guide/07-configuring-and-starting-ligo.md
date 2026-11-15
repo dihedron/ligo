@@ -81,6 +81,8 @@ charter:
       - { name: dc-to-apps, from: ["dc/corp-prod"], to: ["dc/corp-prod/*"], action: allow }
 ```
 
+A pipeline that also locks its resources (`managed: true`, see the Operator's Guide) needs `trusted_automation` on every jurisdiction involved: the resource's owner, source, target and platform. Register the SVID as in §10.6 of the specification (it must not be obtainable by a person), and it needs no other setting.
+
 The **charter** is the set of rules every jurisdiction must comply with: how a workload's jurisdiction follows from its SPIFFE path, each jurisdiction's name prefix, which jurisdictions may bind to which and with whose further consent, and how account jurisdictions are formed. There is one charter per installation, in `server.yaml` under `charter:`. Jurisdictions say who decides; the charter says how jurisdictions are formed and how they may deal with each other. Every change request records the charter in force by its hash, and a change decided under a charter that has since changed is refused.
 
 Each trust domain a platform accepts needs one `source_jurisdictions` entry. Across jurisdictions, `ligo` denies by default: add a rule for each flow you intend.
@@ -167,7 +169,7 @@ At startup `ligo` checks the configuration, connects to SPIRE and the sealer, re
 The same binary is the client. It authenticates with an SVID from a Workload API socket, or with an LDAP user when `allow_basic_auth` is on:
 
 ```bash
-ligo --server https://ligo-admin.corp.internal:9443 --spiffe-socket /run/spire/prod/agent.sock list bindings
+ligo --server https://ligo-admin.corp.internal:9443 --spiffe-socket /run/spire/prod/agent.sock binding list
 ```
 
 Workloads and administrators verify `ligo`'s SVID against the socket's bundle; `--server-id` names the identity it must have, by default the core identity of the service. Use `--ca-cert` when the admin listener has a certificate from a file.

@@ -17,7 +17,8 @@ var sameName = []string{"BREAK_GLASS_USED", "BREAK_GLASS_EXPIRING", "BREAK_GLASS
 	"BREAK_GLASS_RATIFIED", "BREAK_GLASS_REVIEW_OVERDUE", "CR_INTERCONNECT_DENIED", "BINDING_EXPIRED", "SOURCE_DEPRECATED",
 	"TARGET_DEPRECATED", "ACCESS_LEVEL_DEPRECATED", "CONFIG_APPROVAL_POLICY_WEAKENED", "CONFIG_CHARTER_CHANGED",
 	"CONFIG_PLATFORM_CHANGED", "PROPAGATION_FAILED", "SYSTEM_INTERCONNECT_VIOLATIONS", "SYSTEM_PRIVILEGE_BOUND_VIOLATIONS", "SYSTEM_MAINTENANCE_ENABLED",
-	"SYSTEM_MAINTENANCE_DISABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_TARGET_DECIDED_BY_PLATFORM"}
+	"SYSTEM_MAINTENANCE_DISABLED", "SYSTEM_EXECUTOR_RECOVERED", "BINDING_TARGET_DECIDED_BY_PLATFORM",
+	"RESOURCE_MANAGED", "RESOURCE_RELEASED", "RESOURCE_RELEASED_BY_ADMIN", "LOCK_VIOLATION_REFUSED", "HOLD_CREATED", "HOLD_LIFTED"}
 
 // derived are the events announced by audit actions of another name.
 var derived = map[string]string{"BINDING_EXPIRY_WARNED": "BINDING_EXPIRING", "CR_CREATED": "CR_AWAITING_APPROVAL",
@@ -148,6 +149,10 @@ func (o *Outbox) events(ctx context.Context, tx pgx.Tx, name string, e audit.Ent
 			return nil, nil
 		}
 		jurisdictions = []string{*cr.jurisdictions[2]}
+	case "LOCK_VIOLATION_REFUSED", "HOLD_CREATED", "HOLD_LIFTED": // the jurisdictions are in the snapshot: there may be no change request, or no binding left
+		var snap struct{ Jurisdictions []string }
+		_ = json.Unmarshal(e.Snapshot, &snap)
+		jurisdictions = slices.Compact(slices.Sorted(slices.Values(append(jurisdictions, snap.Jurisdictions...))))
 	case "CR_INTERCONNECT_DENIED": // no change request: the jurisdictions are in the snapshot
 		var snap struct{ SourceJurisdiction, TargetJurisdiction string }
 		_ = json.Unmarshal(e.Snapshot, &snap)

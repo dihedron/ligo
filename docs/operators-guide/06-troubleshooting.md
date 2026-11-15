@@ -23,7 +23,7 @@ The entry selects on `unix:sha256`, and an upgrade changed the binary. Compare `
 
 1. Is it the identity you expect? Print its SVID's URI SAN.
 2. Does the source's regex match it? `ligo source test --trust-domain ... --regex ... --id <its SPIFFE ID>`.
-3. Is the binding `ACTIVE`, with a snapshot? `ligo get binding <name>`. `PROVISIONING` with no earlier snapshot serves nothing yet.
+3. Is the binding `ACTIVE`, with a snapshot? `ligo binding show <name>`. `PROVISIONING` with no earlier snapshot serves nothing yet.
 4. Is its trust domain in `accepted_trust_domains`? Is the bundle current?
 5. A `503` means fail closed: a bundle error, or the cache beyond `max_staleness`. Check the agent and PostgreSQL.
 
@@ -48,7 +48,7 @@ Run `ligo charter check -f <manifest>`: it shows the jurisdictions, the name pre
 
 - **`PROVISIONING` for long.** Its replica may be down: `ligo executors list`. See *A replica died*.
 - **Drift keeps returning.** Someone changes the role by hand. The reconciler repairs it; `ligo audit list` shows `REAPPLY_STARTED`.
-- **`DELETE_FAILED`.** Read the code. A retryable one, such as `VAULT_UNAVAILABLE`, clears by itself once the dependency is back. `ROLE_OWNS_OBJECTS`, which is final, is the usual one that does not: reassign the objects, then `ligo retry`.
+- **`DELETE_FAILED`.** Read the code. A retryable one, such as `VAULT_UNAVAILABLE`, clears by itself once the dependency is back. `ROLE_OWNS_OBJECTS`, which is final, is the usual one that does not: reassign the objects, then `ligo binding retry`.
 
 ## The web UI
 

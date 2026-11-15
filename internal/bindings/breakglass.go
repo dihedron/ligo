@@ -107,6 +107,11 @@ func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller,
 		filings = append(filings, f)
 	}
 	var cur *stored
+	if in.Operation == "CREATE" {
+		if err := checkHold(ctx, s.DB, b.Name, b.Source, b.Target, b.AccessLevel); err != nil {
+			return nil, err
+		}
+	}
 	if in.Operation == "UPDATE" {
 		if req.ExpectedRevision == nil {
 			return nil, invalid("expectedRevision is required")
@@ -207,10 +212,10 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 	}
 	left := -1 // the BREAK_GLASS sides still unratified once this commits
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		var name, operation string
+		var name, operation, managed string
 		var open *uuid.UUID
-		err := tx.QueryRow(ctx, "SELECT name, operation, break_glass_cr_id FROM bindings WHERE id = $1 FOR UPDATE",
-			*r.ResourceID).Scan(&name, &operation, &open)
+		err := tx.QueryRow(ctx, "SELECT name, operation, break_glass_cr_id, coalesce(managed_by, '') FROM bindings WHERE id = $1 FOR UPDATE",
+			*r.ResourceID).Scan(&name, &operation, &open, &managed)
 		exists := err == nil
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -223,6 +228,9 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 		// A binding deleted normally (gone, DELETING or a failed delete) closed the change, which still needs its review.
 		if reverted || exists && r.Operation != "DELETE" && operation != "DELETE" && (open == nil || *open != id) {
 			return refuse(409, "break-glass-not-open", "the break-glass change %s was reverted or closed", id)
+		}
+		if managed != "" && r.Operation != "DELETE" { // a lasting change of a managed binding goes through its owner (§3.5)
+			return refuse(409, "resource-managed", "binding %q is managed by %s: its break-glass change is never ratified and is reverted at its TTL", name, managed)
 		}
 		tag, err := tx.Exec(ctx, `UPDATE change_request_sides SET ratified_by = $3, ratified_at = now(), ratification_comment = $4
 			WHERE change_request_id = $1 AND side = ANY($2) AND basis = 'BREAK_GLASS' AND ratified_by IS NULL`, id, names, c.ID(), comment)
@@ -243,6 +251,11 @@ func (s *Service) Ratify(ctx context.Context, c changerequests.Caller, id uuid.U
 			}
 		}
 		var entries []audit.Entry
+		if left == 0 && r.Operation == "DELETE" {
+			if entries, err = liftRatified(ctx, tx, id, r.ResourceName, c.ID()); err != nil {
+				return err
+			}
+		}
 		var jurisdictions []string
 		for _, n := range names {
 			detail := map[string]any{"side": n, "fullyRatified": left == 0}

@@ -56,6 +56,16 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-42 | A tool uses the admin client to approve its own change request, or a hostile server exhausts the tool's memory or time. | 2, 6 | The typed methods have no approve, decline, ratify, revert or break-glass, and a test fails if one appears; the server still requires a person and a distinct approver; answers are read through an 8 MiB limit, every call has the caller's context and a timeout, and a wait is bounded by its context. The package's raw call, which can reach a decision, is not a method: the CLI reaches it through `internal/adminraw`, which only code of this module can import, so the compiler stops the provider and the MCP server from making it. |
 | T-43 | A stale read overwrites someone's change, or a retry files a change twice. | 2, 6 | An update, a state change and a deletion need the revision they are based on and fail before any request without one; a stale revision is `ErrConflict` and is never retried; a mutation is sent once, whatever the answer; only a GET is repeated. |
 | T-44 | The generated code drifts from the contract, or a generator update changes behaviour. | 2 | The code is checked in and CI fails when it differs from the OpenAPI document (`make generate-check`); the generator is pinned by `go.mod` and `go.sum`; contract tests check that what the server sends satisfies the document's schemas; the exported API has its own names for the types. |
+| T-45 | A person or another automation changes a managed resource through some write path. | 2, 6 | The check at filing and again in the applying transaction, for every write; a table test fails the build when a write has no decision; a trigger guards `managed_by`. |
+| T-46 | Lock squatting: a hostile automation locks resources it can reach. | 2, 6 | Only `trusted_automation`, on every jurisdiction involved; adoption needs the sides, decided by people; release by an administrator; containment never blocked. |
+| T-47 | A compromised owner SVID uses the lock to hide its changes. | 2, 5 | Every change is audited with `approvalReference` and `automationContext`; the refusals are audited; containment is not blocked. |
+| T-48 | An orphaned lock: the automation is gone and nobody can change the resource. | 2, 6 | Release by an administrator: four eyes, people only, a justification, audited with the former owner. |
+| T-49 | The lock blocks incident response. | 2 | Containment and break-glass are not blocked. |
+| T-50 | The pipeline re-grants access that a person removed in an emergency. | 2, 6 | The hold, lifted only by a person; time never ends it. |
+| T-51 | A break-glass change of a managed binding becomes permanent by ratification. | 2, 6 | Ratification is refused; the change reverts at its TTL. |
+| T-52 | A race between a lock being set and a change being applied, or between two owners. | 2, 6 | The owner is checked in the applying transaction under the row lock; the lab races two automations for one name. |
+| T-53 | The refusals flood the audit log. | 5 | `LOCK_VIOLATION_REFUSED` at most once a minute per principal and resource; `ligo_lock_violations_total` counts all. |
+| T-54 | The owner column is changed outside a change request, in the database. | 6 | A trigger refuses the update; a test with the application's role. |
 
 :::
 

@@ -36,6 +36,8 @@ source "$LAB_DIR/lib/snapshot.sh"
 source "$LAB_DIR/lib/serve.sh"
 # shellcheck source=lib/instances.sh
 source "$LAB_DIR/lib/instances.sh"
+# shellcheck source=lib/managed.sh
+source "$LAB_DIR/lib/managed.sh"
 # shellcheck source=lib/lb.sh
 source "$LAB_DIR/lib/lb.sh"
 # shellcheck source=lib/otel.sh
@@ -86,6 +88,9 @@ commands:
                             which stops the receiver and the replicas
                             test-adminclient runs pkg/adminclient against ligo and
                             restarts ligo1 under a wait;
+                            test-managed the lock of resources managed by
+                            automation (.specs/ligo-managed-resources.md): owner,
+                            refusals, containment, hold, release, race, audit;
                             test-faults stops the secrets backend and PostgreSQL
                             under bindings being applied; test-audit exports the
                             audit log, verifies the file offline and prunes it

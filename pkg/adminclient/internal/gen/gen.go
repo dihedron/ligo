@@ -255,6 +255,45 @@ func (e EvaluationInterconnectAction) Valid() bool {
 	}
 }
 
+// Defines values for HoldBasis.
+const (
+	HoldBasisBREAKGLASS  HoldBasis = "BREAK_GLASS"
+	HoldBasisCONTAINMENT HoldBasis = "CONTAINMENT"
+)
+
+// Valid indicates whether the value is a known member of the HoldBasis enum.
+func (e HoldBasis) Valid() bool {
+	switch e {
+	case HoldBasisBREAKGLASS:
+		return true
+	case HoldBasisCONTAINMENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HoldLiftBasis.
+const (
+	HoldLiftBasisLessThannil HoldLiftBasis = "<nil>"
+	HoldLiftBasisPERSON      HoldLiftBasis = "PERSON"
+	HoldLiftBasisRATIFIED    HoldLiftBasis = "RATIFIED"
+)
+
+// Valid indicates whether the value is a known member of the HoldLiftBasis enum.
+func (e HoldLiftBasis) Valid() bool {
+	switch e {
+	case HoldLiftBasisLessThannil:
+		return true
+	case HoldLiftBasisPERSON:
+		return true
+	case HoldLiftBasisRATIFIED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InstanceKind.
 const (
 	InstanceKindIdentityProvider InstanceKind = "IdentityProvider"
@@ -356,19 +395,19 @@ func (e SideBasis) Valid() bool {
 
 // Defines values for SideDecision.
 const (
-	APPROVED    SideDecision = "APPROVED"
-	DECLINED    SideDecision = "DECLINED"
-	LessThannil SideDecision = "<nil>"
+	SideDecisionAPPROVED    SideDecision = "APPROVED"
+	SideDecisionDECLINED    SideDecision = "DECLINED"
+	SideDecisionLessThannil SideDecision = "<nil>"
 )
 
 // Valid indicates whether the value is a known member of the SideDecision enum.
 func (e SideDecision) Valid() bool {
 	switch e {
-	case APPROVED:
+	case SideDecisionAPPROVED:
 		return true
-	case DECLINED:
+	case SideDecisionDECLINED:
 		return true
-	case LessThannil:
+	case SideDecisionLessThannil:
 		return true
 	default:
 		return false
@@ -468,6 +507,24 @@ func (e SearchCatalogParamsState) Valid() bool {
 	case SearchCatalogParamsStateACTIVE:
 		return true
 	case SearchCatalogParamsStateDEPRECATED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListHoldsParamsState.
+const (
+	All  ListHoldsParamsState = "all"
+	Open ListHoldsParamsState = "open"
+)
+
+// Valid indicates whether the value is a known member of the ListHoldsParamsState enum.
+func (e ListHoldsParamsState) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Open:
 		return true
 	default:
 		return false
@@ -659,21 +716,24 @@ type BindingDetail struct {
 
 // BindingMetadata defines model for BindingMetadata.
 type BindingMetadata struct {
-	ActiveRevision       *int64             `json:"activeRevision"`
-	CreatedAt            time.Time          `json:"createdAt"`
-	CreatedBy            string             `json:"createdBy"`
-	Id                   openapi_types.UUID `json:"id"`
-	Name                 string             `json:"name"`
-	Platform             string             `json:"platform"`
-	PlatformJurisdiction string             `json:"platformJurisdiction"`
-	PlatformType         string             `json:"platformType"`
-	Realm                string             `json:"realm"`
-	Revision             int64              `json:"revision"`
-	SourceJurisdiction   string             `json:"sourceJurisdiction"`
-	TargetJurisdiction   string             `json:"targetJurisdiction"`
-	UpdatedAt            time.Time          `json:"updatedAt"`
-	UpdatedBy            string             `json:"updatedBy"`
-	Wiring               BindingWiring      `json:"wiring"`
+	ActiveRevision *int64             `json:"activeRevision"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	CreatedBy      string             `json:"createdBy"`
+	Id             openapi_types.UUID `json:"id"`
+
+	// ManagedBy The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does.
+	ManagedBy            *string       `json:"managedBy"`
+	Name                 string        `json:"name"`
+	Platform             string        `json:"platform"`
+	PlatformJurisdiction string        `json:"platformJurisdiction"`
+	PlatformType         string        `json:"platformType"`
+	Realm                string        `json:"realm"`
+	Revision             int64         `json:"revision"`
+	SourceJurisdiction   string        `json:"sourceJurisdiction"`
+	TargetJurisdiction   string        `json:"targetJurisdiction"`
+	UpdatedAt            time.Time     `json:"updatedAt"`
+	UpdatedBy            string        `json:"updatedBy"`
+	Wiring               BindingWiring `json:"wiring"`
 }
 
 // BindingPhase Kept equal to the database's binding_phase by the contract test.
@@ -807,6 +867,9 @@ type ChangeEnvelope struct {
 
 	// ExpectedRevision Required on an update.
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed *bool `json:"managed,omitempty"`
 }
 
 // ChangeRequest A change request (§7.2.3). Its terminal states are every status but PENDING.
@@ -953,6 +1016,35 @@ type Health struct {
 	Serving bool    `json:"serving"`
 }
 
+// Hold A hold on a binding that a person removed in an emergency; nobody creates it again until a person lifts it.
+type Hold struct {
+	AccessLevel     string             `json:"accessLevel"`
+	Basis           HoldBasis          `json:"basis"`
+	BindingName     string             `json:"bindingName"`
+	ChangeRequestId openapi_types.UUID `json:"changeRequestId"`
+	DeletedAt       time.Time          `json:"deletedAt"`
+	DeletedBy       string             `json:"deletedBy"`
+	Id              openapi_types.UUID `json:"id"`
+	LiftBasis       *HoldLiftBasis     `json:"liftBasis"`
+	LiftComment     *string            `json:"liftComment"`
+	LiftedAt        *time.Time         `json:"liftedAt"`
+	LiftedBy        *string            `json:"liftedBy"`
+
+	// ManagedBy The owner of the binding when it was removed.
+	ManagedBy            string `json:"managedBy"`
+	PlatformJurisdiction string `json:"platformJurisdiction"`
+	Source               string `json:"source"`
+	SourceJurisdiction   string `json:"sourceJurisdiction"`
+	Target               string `json:"target"`
+	TargetJurisdiction   string `json:"targetJurisdiction"`
+}
+
+// HoldBasis defines model for Hold.Basis.
+type HoldBasis string
+
+// HoldLiftBasis defines model for Hold.LiftBasis.
+type HoldLiftBasis string
+
 // Instance An identity provider or secret store instance as any viewer sees it; revision and definition only for those who file and decide its requests.
 type Instance struct {
 	ApiVersion string     `json:"apiVersion"`
@@ -1020,6 +1112,11 @@ type InstanceDefinition struct {
 type InstanceRef struct {
 	Instance string `json:"instance"`
 	Type     string `json:"type"`
+}
+
+// LiftRequest defines model for LiftRequest.
+type LiftRequest struct {
+	Comment string `json:"comment"`
 }
 
 // Maintenance defines model for Maintenance.
@@ -1124,6 +1221,14 @@ type Problem struct {
 
 	// Type Examples: urn:ligo:problem:not-found
 	Type string `json:"type"`
+}
+
+// ReleaseRequest The release of a managed resource by an administrator (a four-eyes request of people only).
+type ReleaseRequest struct {
+	ExpectedRevision int64 `json:"expectedRevision"`
+
+	// Justification Why the owner cannot release it.
+	Justification string `json:"justification"`
 }
 
 // ResourceState defines model for ResourceState.
@@ -1235,10 +1340,13 @@ type SourceIdentity struct {
 
 // SourceMetadata defines model for SourceMetadata.
 type SourceMetadata struct {
-	CreatedAt              time.Time           `json:"createdAt"`
-	CreatedBy              string              `json:"createdBy"`
-	Id                     openapi_types.UUID  `json:"id"`
-	Jurisdiction           string              `json:"jurisdiction"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	CreatedBy    string             `json:"createdBy"`
+	Id           openapi_types.UUID `json:"id"`
+	Jurisdiction string             `json:"jurisdiction"`
+
+	// ManagedBy The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does.
+	ManagedBy              *string             `json:"managedBy"`
 	Name                   string              `json:"name"`
 	PendingChangeRequestId *openapi_types.UUID `json:"pendingChangeRequestId"`
 	Revision               int64               `json:"revision"`
@@ -1381,10 +1489,13 @@ type TargetDetail struct {
 
 // TargetMetadata defines model for TargetMetadata.
 type TargetMetadata struct {
-	CreatedAt              time.Time           `json:"createdAt"`
-	CreatedBy              string              `json:"createdBy"`
-	Id                     openapi_types.UUID  `json:"id"`
-	Jurisdiction           string              `json:"jurisdiction"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	CreatedBy    string             `json:"createdBy"`
+	Id           openapi_types.UUID `json:"id"`
+	Jurisdiction string             `json:"jurisdiction"`
+
+	// ManagedBy The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does.
+	ManagedBy              *string             `json:"managedBy"`
 	Name                   string              `json:"name"`
 	PendingChangeRequestId *openapi_types.UUID `json:"pendingChangeRequestId"`
 	Platform               string              `json:"platform"`
@@ -1575,6 +1686,12 @@ type Flows struct {
 	NetworkFlows *[]NetworkFlow `json:"networkFlows,omitempty"`
 }
 
+// HoldPage defines model for HoldPage.
+type HoldPage struct {
+	Items         []Hold  `json:"items"`
+	NextPageToken *string `json:"nextPageToken,omitempty"`
+}
+
 // InstanceResponse An identity provider or secret store instance as any viewer sees it; revision and definition only for those who file and decide its requests.
 type InstanceResponse = Instance
 
@@ -1640,7 +1757,10 @@ type BindingRequestBody struct {
 	// Kind Always Binding.
 	Kind   *string            `json:"kind,omitempty"`
 	Labels *map[string]string `json:"labels,omitempty"`
-	Name   string             `json:"name"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed *bool  `json:"managed,omitempty"`
+	Name    string `json:"name"`
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
@@ -1674,9 +1794,12 @@ type InstanceRequestBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -1701,6 +1824,9 @@ type InstanceRequestBody struct {
 	Type string `json:"type"`
 }
 
+// Release The release of a managed resource by an administrator (a four-eyes request of people only).
+type Release = ReleaseRequest
+
 // SourceRequestBody defines model for Source.
 type SourceRequestBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
@@ -1715,8 +1841,11 @@ type SourceRequestBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed    *bool              `json:"managed,omitempty"`
 	Metadata   SourceSpecMetadata `json:"metadata"`
 	Visibility *Visibility        `json:"visibility,omitempty"`
 }
@@ -1745,8 +1874,11 @@ type TargetRequestBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed      *bool              `json:"managed,omitempty"`
 	Metadata     TargetSpecMetadata `json:"metadata"`
 	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
 	Visibility   *Visibility        `json:"visibility,omitempty"`
@@ -1810,7 +1942,10 @@ type CreateBindingJSONBody struct {
 	// Kind Always Binding.
 	Kind   *string            `json:"kind,omitempty"`
 	Labels *map[string]string `json:"labels,omitempty"`
-	Name   string             `json:"name"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed *bool  `json:"managed,omitempty"`
+	Name    string `json:"name"`
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
@@ -1869,7 +2004,10 @@ type UpdateBindingJSONBody struct {
 	// Kind Always Binding.
 	Kind   *string            `json:"kind,omitempty"`
 	Labels *map[string]string `json:"labels,omitempty"`
-	Name   string             `json:"name"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed *bool  `json:"managed,omitempty"`
+	Name    string `json:"name"`
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
@@ -1889,6 +2027,11 @@ type UpdateBinding202JSONResponseBody_Resource struct {
 type BindingAuditParams struct {
 	PageSize  *PageSize  `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 	PageToken *PageToken `form:"pageToken,omitempty" json:"pageToken,omitempty"`
+}
+
+// ReleaseBinding202JSONResponseBody_Resource defines parameters for ReleaseBinding.
+type ReleaseBinding202JSONResponseBody_Resource struct {
+	union json.RawMessage
 }
 
 // ListBreakGlassParams defines parameters for ListBreakGlass.
@@ -2017,6 +2160,17 @@ type EvaluateCharterJSONBody1 struct {
 	Kind interface{} `json:"kind"`
 }
 
+// ListHoldsParams defines parameters for ListHolds.
+type ListHoldsParams struct {
+	Binding   *string               `form:"binding,omitempty" json:"binding,omitempty"`
+	State     *ListHoldsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	PageSize  *PageSize             `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+	PageToken *PageToken            `form:"pageToken,omitempty" json:"pageToken,omitempty"`
+}
+
+// ListHoldsParamsState defines parameters for ListHolds.
+type ListHoldsParamsState string
+
 // CreateIdentityProviderJSONBody defines parameters for CreateIdentityProvider.
 type CreateIdentityProviderJSONBody struct {
 	// AllowedSourceTrustDomains Platforms only.
@@ -2034,9 +2188,12 @@ type CreateIdentityProviderJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2099,9 +2256,12 @@ type UpdateIdentityProviderJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2154,9 +2314,12 @@ type CreatePlatformJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2219,9 +2382,12 @@ type UpdatePlatformJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2274,9 +2440,12 @@ type CreateSecretStoreJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2339,9 +2508,12 @@ type UpdateSecretStoreJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// IdentityProvider Names an instance of a plugin type; platforms only.
-	IdentityProvider *Wiring            `json:"identityProvider,omitempty"`
-	Kind             DefinitionKind     `json:"kind"`
-	Metadata         DefinitionMetadata `json:"metadata"`
+	IdentityProvider *Wiring        `json:"identityProvider,omitempty"`
+	Kind             DefinitionKind `json:"kind"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed  *bool              `json:"managed,omitempty"`
+	Metadata DefinitionMetadata `json:"metadata"`
 
 	// NamespaceTemplate Platforms only.
 	NamespaceTemplate *string        `json:"namespaceTemplate,omitempty"`
@@ -2410,8 +2582,11 @@ type CreateSourceJSONBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed    *bool              `json:"managed,omitempty"`
 	Metadata   SourceSpecMetadata `json:"metadata"`
 	Visibility *Visibility        `json:"visibility,omitempty"`
 }
@@ -2435,8 +2610,11 @@ type UpdateSourceJSONBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed    *bool              `json:"managed,omitempty"`
 	Metadata   SourceSpecMetadata `json:"metadata"`
 	Visibility *Visibility        `json:"visibility,omitempty"`
 }
@@ -2479,6 +2657,11 @@ type ReactivateSourceJSONBody struct {
 
 // ReactivateSource202JSONResponseBody_Resource defines parameters for ReactivateSource.
 type ReactivateSource202JSONResponseBody_Resource struct {
+	union json.RawMessage
+}
+
+// ReleaseSource202JSONResponseBody_Resource defines parameters for ReleaseSource.
+type ReleaseSource202JSONResponseBody_Resource struct {
 	union json.RawMessage
 }
 
@@ -2531,8 +2714,11 @@ type CreateTargetJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed      *bool              `json:"managed,omitempty"`
 	Metadata     TargetSpecMetadata `json:"metadata"`
 	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
 	Visibility   *Visibility        `json:"visibility,omitempty"`
@@ -2560,8 +2746,11 @@ type UpdateTargetJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
+	Kind   *string            `json:"kind,omitempty"`
+	Labels *map[string]string `json:"labels,omitempty"`
+
+	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
+	Managed      *bool              `json:"managed,omitempty"`
 	Metadata     TargetSpecMetadata `json:"metadata"`
 	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
 	Visibility   *Visibility        `json:"visibility,omitempty"`
@@ -2644,6 +2833,11 @@ type ReactivateTarget202JSONResponseBody_Resource struct {
 	union json.RawMessage
 }
 
+// ReleaseTarget202JSONResponseBody_Resource defines parameters for ReleaseTarget.
+type ReleaseTarget202JSONResponseBody_Resource struct {
+	union json.RawMessage
+}
+
 // RetireTargetJSONBody defines parameters for RetireTarget.
 type RetireTargetJSONBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
@@ -2671,6 +2865,9 @@ type DeleteBindingJSONRequestBody DeleteBindingJSONBody
 // UpdateBindingJSONRequestBody defines body for UpdateBinding for application/json ContentType.
 type UpdateBindingJSONRequestBody UpdateBindingJSONBody
 
+// ReleaseBindingJSONRequestBody defines body for ReleaseBinding for application/json ContentType.
+type ReleaseBindingJSONRequestBody = ReleaseRequest
+
 // BreakGlassJSONRequestBody defines body for BreakGlass for application/json ContentType.
 type BreakGlassJSONRequestBody BreakGlassJSONBody
 
@@ -2691,6 +2888,9 @@ type WithdrawChangeRequestJSONRequestBody = WithdrawRequest
 
 // EvaluateCharterJSONRequestBody defines body for EvaluateCharter for application/json ContentType.
 type EvaluateCharterJSONRequestBody EvaluateCharterJSONBody
+
+// LiftHoldJSONRequestBody defines body for LiftHold for application/json ContentType.
+type LiftHoldJSONRequestBody = LiftRequest
 
 // CreateIdentityProviderJSONRequestBody defines body for CreateIdentityProvider for application/json ContentType.
 type CreateIdentityProviderJSONRequestBody CreateIdentityProviderJSONBody
@@ -2737,6 +2937,9 @@ type DeprecateSourceJSONRequestBody DeprecateSourceJSONBody
 // ReactivateSourceJSONRequestBody defines body for ReactivateSource for application/json ContentType.
 type ReactivateSourceJSONRequestBody ReactivateSourceJSONBody
 
+// ReleaseSourceJSONRequestBody defines body for ReleaseSource for application/json ContentType.
+type ReleaseSourceJSONRequestBody = ReleaseRequest
+
 // RetireSourceJSONRequestBody defines body for RetireSource for application/json ContentType.
 type RetireSourceJSONRequestBody RetireSourceJSONBody
 
@@ -2763,6 +2966,9 @@ type DeprecateTargetJSONRequestBody DeprecateTargetJSONBody
 
 // ReactivateTargetJSONRequestBody defines body for ReactivateTarget for application/json ContentType.
 type ReactivateTargetJSONRequestBody ReactivateTargetJSONBody
+
+// ReleaseTargetJSONRequestBody defines body for ReleaseTarget for application/json ContentType.
+type ReleaseTargetJSONRequestBody = ReleaseRequest
 
 // RetireTargetJSONRequestBody defines body for RetireTarget for application/json ContentType.
 type RetireTargetJSONRequestBody RetireTargetJSONBody
@@ -3265,6 +3471,94 @@ func (t UpdateBinding202JSONResponseBody_Resource) MarshalJSON() ([]byte, error)
 }
 
 func (t *UpdateBinding202JSONResponseBody_Resource) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsSource returns the union data inside the ReleaseBinding202JSONResponseBody_Resource as a Source
+func (t ReleaseBinding202JSONResponseBody_Resource) AsSource() (Source, error) {
+	var body Source
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSource overwrites any union data inside the ReleaseBinding202JSONResponseBody_Resource as the provided Source
+func (t *ReleaseBinding202JSONResponseBody_Resource) FromSource(v Source) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSource performs a merge with any union data inside the ReleaseBinding202JSONResponseBody_Resource, using the provided Source
+func (t *ReleaseBinding202JSONResponseBody_Resource) MergeSource(v Source) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTarget returns the union data inside the ReleaseBinding202JSONResponseBody_Resource as a Target
+func (t ReleaseBinding202JSONResponseBody_Resource) AsTarget() (Target, error) {
+	var body Target
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTarget overwrites any union data inside the ReleaseBinding202JSONResponseBody_Resource as the provided Target
+func (t *ReleaseBinding202JSONResponseBody_Resource) FromTarget(v Target) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTarget performs a merge with any union data inside the ReleaseBinding202JSONResponseBody_Resource, using the provided Target
+func (t *ReleaseBinding202JSONResponseBody_Resource) MergeTarget(v Target) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBinding returns the union data inside the ReleaseBinding202JSONResponseBody_Resource as a Binding
+func (t ReleaseBinding202JSONResponseBody_Resource) AsBinding() (Binding, error) {
+	var body Binding
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBinding overwrites any union data inside the ReleaseBinding202JSONResponseBody_Resource as the provided Binding
+func (t *ReleaseBinding202JSONResponseBody_Resource) FromBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBinding performs a merge with any union data inside the ReleaseBinding202JSONResponseBody_Resource, using the provided Binding
+func (t *ReleaseBinding202JSONResponseBody_Resource) MergeBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ReleaseBinding202JSONResponseBody_Resource) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ReleaseBinding202JSONResponseBody_Resource) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -4625,6 +4919,94 @@ func (t *ReactivateSource202JSONResponseBody_Resource) UnmarshalJSON(b []byte) e
 	return err
 }
 
+// AsSource returns the union data inside the ReleaseSource202JSONResponseBody_Resource as a Source
+func (t ReleaseSource202JSONResponseBody_Resource) AsSource() (Source, error) {
+	var body Source
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSource overwrites any union data inside the ReleaseSource202JSONResponseBody_Resource as the provided Source
+func (t *ReleaseSource202JSONResponseBody_Resource) FromSource(v Source) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSource performs a merge with any union data inside the ReleaseSource202JSONResponseBody_Resource, using the provided Source
+func (t *ReleaseSource202JSONResponseBody_Resource) MergeSource(v Source) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTarget returns the union data inside the ReleaseSource202JSONResponseBody_Resource as a Target
+func (t ReleaseSource202JSONResponseBody_Resource) AsTarget() (Target, error) {
+	var body Target
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTarget overwrites any union data inside the ReleaseSource202JSONResponseBody_Resource as the provided Target
+func (t *ReleaseSource202JSONResponseBody_Resource) FromTarget(v Target) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTarget performs a merge with any union data inside the ReleaseSource202JSONResponseBody_Resource, using the provided Target
+func (t *ReleaseSource202JSONResponseBody_Resource) MergeTarget(v Target) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBinding returns the union data inside the ReleaseSource202JSONResponseBody_Resource as a Binding
+func (t ReleaseSource202JSONResponseBody_Resource) AsBinding() (Binding, error) {
+	var body Binding
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBinding overwrites any union data inside the ReleaseSource202JSONResponseBody_Resource as the provided Binding
+func (t *ReleaseSource202JSONResponseBody_Resource) FromBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBinding performs a merge with any union data inside the ReleaseSource202JSONResponseBody_Resource, using the provided Binding
+func (t *ReleaseSource202JSONResponseBody_Resource) MergeBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ReleaseSource202JSONResponseBody_Resource) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ReleaseSource202JSONResponseBody_Resource) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsSource returns the union data inside the RetireSource202JSONResponseBody_Resource as a Source
 func (t RetireSource202JSONResponseBody_Resource) AsSource() (Source, error) {
 	var body Source
@@ -5329,6 +5711,94 @@ func (t *ReactivateTarget202JSONResponseBody_Resource) UnmarshalJSON(b []byte) e
 	return err
 }
 
+// AsSource returns the union data inside the ReleaseTarget202JSONResponseBody_Resource as a Source
+func (t ReleaseTarget202JSONResponseBody_Resource) AsSource() (Source, error) {
+	var body Source
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSource overwrites any union data inside the ReleaseTarget202JSONResponseBody_Resource as the provided Source
+func (t *ReleaseTarget202JSONResponseBody_Resource) FromSource(v Source) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSource performs a merge with any union data inside the ReleaseTarget202JSONResponseBody_Resource, using the provided Source
+func (t *ReleaseTarget202JSONResponseBody_Resource) MergeSource(v Source) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTarget returns the union data inside the ReleaseTarget202JSONResponseBody_Resource as a Target
+func (t ReleaseTarget202JSONResponseBody_Resource) AsTarget() (Target, error) {
+	var body Target
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTarget overwrites any union data inside the ReleaseTarget202JSONResponseBody_Resource as the provided Target
+func (t *ReleaseTarget202JSONResponseBody_Resource) FromTarget(v Target) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTarget performs a merge with any union data inside the ReleaseTarget202JSONResponseBody_Resource, using the provided Target
+func (t *ReleaseTarget202JSONResponseBody_Resource) MergeTarget(v Target) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBinding returns the union data inside the ReleaseTarget202JSONResponseBody_Resource as a Binding
+func (t ReleaseTarget202JSONResponseBody_Resource) AsBinding() (Binding, error) {
+	var body Binding
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBinding overwrites any union data inside the ReleaseTarget202JSONResponseBody_Resource as the provided Binding
+func (t *ReleaseTarget202JSONResponseBody_Resource) FromBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBinding performs a merge with any union data inside the ReleaseTarget202JSONResponseBody_Resource, using the provided Binding
+func (t *ReleaseTarget202JSONResponseBody_Resource) MergeBinding(v Binding) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ReleaseTarget202JSONResponseBody_Resource) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ReleaseTarget202JSONResponseBody_Resource) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsSource returns the union data inside the RetireTarget202JSONResponseBody_Resource as a Source
 func (t RetireTarget202JSONResponseBody_Resource) AsSource() (Source, error) {
 	var body Source
@@ -5614,6 +6084,20 @@ type ClientInterface interface {
 	// Corresponds with GET /v1/admin/bindings/{name}/flows (the `GetBindingFlows` operationId).
 	GetBindingFlows(ctx context.Context, name Name, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReleaseBindingWithBody File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+	ReleaseBindingWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseBinding File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+	ReleaseBinding(ctx context.Context, name Name, body ReleaseBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RetryBinding Retry a FAILED or DELETE_FAILED binding.
 	//
 	// Corresponds with POST /v1/admin/bindings/{name}/retry (the `RetryBinding` operationId).
@@ -5771,6 +6255,25 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/admin/executors/{id}/recover (the `RecoverExecutor` operationId).
 	RecoverExecutor(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListHolds The holds on bindings the caller sees (open ones; state=all adds the lifted).
+	//
+	// Corresponds with GET /v1/admin/holds (the `ListHolds` operationId).
+	ListHolds(ctx context.Context, params *ListHoldsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// LiftHoldWithBody Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+	LiftHoldWithBody(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// LiftHold Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+	LiftHold(ctx context.Context, id Id, body LiftHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListIdentityProviders The identity provider instances in force, to any viewer (.specs/ligo-instances.md §10.1).
 	//
@@ -6052,6 +6555,20 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/admin/sources/{name}/reactivate (the `ReactivateSource` operationId).
 	ReactivateSource(ctx context.Context, name Name, body ReactivateSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReleaseSourceWithBody File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+	ReleaseSourceWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseSource File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+	ReleaseSource(ctx context.Context, name Name, body ReleaseSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RetireSourceWithBody File the retirement of a source (409 resource-in-use while bindings exist).
 	//
 	// Takes any type of body and a specified content type.
@@ -6197,6 +6714,20 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/admin/targets/{name}/reactivate (the `ReactivateTarget` operationId).
 	ReactivateTarget(ctx context.Context, name Name, body ReactivateTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseTargetWithBody File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+	ReleaseTargetWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseTarget File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+	ReleaseTarget(ctx context.Context, name Name, body ReleaseTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RetireTargetWithBody File the retirement of a target (409 resource-in-use while bindings exist).
 	//
@@ -6516,6 +7047,40 @@ func (c *Client) BindingAudit(ctx context.Context, name Name, params *BindingAud
 // Corresponds with GET /v1/admin/bindings/{name}/flows (the `GetBindingFlows` operationId).
 func (c *Client) GetBindingFlows(ctx context.Context, name Name, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBindingFlowsRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseBindingWithBody File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+func (c *Client) ReleaseBindingWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseBindingRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseBinding File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+func (c *Client) ReleaseBinding(ctx context.Context, name Name, body ReleaseBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseBindingRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6934,6 +7499,55 @@ func (c *Client) ListExecutors(ctx context.Context, reqEditors ...RequestEditorF
 // Corresponds with POST /v1/admin/executors/{id}/recover (the `RecoverExecutor` operationId).
 func (c *Client) RecoverExecutor(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRecoverExecutorRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListHolds The holds on bindings the caller sees (open ones; state=all adds the lifted).
+//
+// Corresponds with GET /v1/admin/holds (the `ListHolds` operationId).
+func (c *Client) ListHolds(ctx context.Context, params *ListHoldsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListHoldsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// LiftHoldWithBody Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+func (c *Client) LiftHoldWithBody(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLiftHoldRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// LiftHold Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+func (c *Client) LiftHold(ctx context.Context, id Id, body LiftHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLiftHoldRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7664,6 +8278,40 @@ func (c *Client) ReactivateSource(ctx context.Context, name Name, body Reactivat
 	return c.Client.Do(req)
 }
 
+// ReleaseSourceWithBody File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+func (c *Client) ReleaseSourceWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseSourceRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseSource File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+func (c *Client) ReleaseSource(ctx context.Context, name Name, body ReleaseSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseSourceRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RetireSourceWithBody File the retirement of a source (409 resource-in-use while bindings exist).
 //
 // Takes any type of body and a specified content type.
@@ -8020,6 +8668,40 @@ func (c *Client) ReactivateTargetWithBody(ctx context.Context, name Name, conten
 // Corresponds with POST /v1/admin/targets/{name}/reactivate (the `ReactivateTarget` operationId).
 func (c *Client) ReactivateTarget(ctx context.Context, name Name, body ReactivateTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReactivateTargetRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseTargetWithBody File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+func (c *Client) ReleaseTargetWithBody(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseTargetRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseTarget File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+func (c *Client) ReleaseTarget(ctx context.Context, name Name, body ReleaseTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseTargetRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -8905,6 +9587,53 @@ func NewGetBindingFlowsRequest(server string, name Name) (*http.Request, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewReleaseBindingRequest calls the generic ReleaseBinding builder with application/json body
+func NewReleaseBindingRequest(server string, name Name, body ReleaseBindingJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseBindingRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewReleaseBindingRequestWithBody constructs an http.Request for the ReleaseBinding method, with any body, and a specified content type
+func NewReleaseBindingRequestWithBody(server string, name Name, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/bindings/%s/release", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -9898,6 +10627,143 @@ func NewRecoverExecutorRequest(server string, id string) (*http.Request, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListHoldsRequest constructs an http.Request for the ListHolds method
+func NewListHoldsRequest(server string, params *ListHoldsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/holds")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Binding != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "binding", *params.Binding, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PageSize != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "pageSize", *params.PageSize, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.PageToken != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "pageToken", *params.PageToken, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewLiftHoldRequest calls the generic LiftHold builder with application/json body
+func NewLiftHoldRequest(server string, id Id, body LiftHoldJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewLiftHoldRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewLiftHoldRequestWithBody constructs an http.Request for the LiftHold method, with any body, and a specified content type
+func NewLiftHoldRequestWithBody(server string, id Id, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/holds/%s/lift", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -11369,6 +12235,53 @@ func NewReactivateSourceRequestWithBody(server string, name Name, contentType st
 	return req, nil
 }
 
+// NewReleaseSourceRequest calls the generic ReleaseSource builder with application/json body
+func NewReleaseSourceRequest(server string, name Name, body ReleaseSourceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseSourceRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewReleaseSourceRequestWithBody constructs an http.Request for the ReleaseSource method, with any body, and a specified content type
+func NewReleaseSourceRequestWithBody(server string, name Name, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/sources/%s/release", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRetireSourceRequest calls the generic RetireSource builder with application/json body
 func NewRetireSourceRequest(server string, name Name, body RetireSourceJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -12124,6 +13037,53 @@ func NewReactivateTargetRequestWithBody(server string, name Name, contentType st
 	return req, nil
 }
 
+// NewReleaseTargetRequest calls the generic ReleaseTarget builder with application/json body
+func NewReleaseTargetRequest(server string, name Name, body ReleaseTargetJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseTargetRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewReleaseTargetRequestWithBody constructs an http.Request for the ReleaseTarget method, with any body, and a specified content type
+func NewReleaseTargetRequestWithBody(server string, name Name, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/admin/targets/%s/release", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRetireTargetRequest calls the generic RetireTarget builder with application/json body
 func NewRetireTargetRequest(server string, name Name, body RetireTargetJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -12356,6 +13316,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /v1/admin/bindings/{name}/flows (the `GetBindingFlows` operationId).
 	GetBindingFlowsWithResponse(ctx context.Context, name Name, reqEditors ...RequestEditorFn) (*GetBindingFlowsResponse, error)
 
+	// ReleaseBindingWithBodyWithResponse File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+	ReleaseBindingWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseBindingResponse, error)
+
+	// ReleaseBindingWithResponse File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+	ReleaseBindingWithResponse(ctx context.Context, name Name, body ReleaseBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseBindingResponse, error)
+
 	// RetryBindingWithResponse Retry a FAILED or DELETE_FAILED binding.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -12537,6 +13511,27 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/admin/executors/{id}/recover (the `RecoverExecutor` operationId).
 	RecoverExecutorWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*RecoverExecutorResponse, error)
+
+	// ListHoldsWithResponse The holds on bindings the caller sees (open ones; state=all adds the lifted).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/admin/holds (the `ListHolds` operationId).
+	ListHoldsWithResponse(ctx context.Context, params *ListHoldsParams, reqEditors ...RequestEditorFn) (*ListHoldsResponse, error)
+
+	// LiftHoldWithBodyWithResponse Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+	LiftHoldWithBodyWithResponse(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LiftHoldResponse, error)
+
+	// LiftHoldWithResponse Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+	LiftHoldWithResponse(ctx context.Context, id Id, body LiftHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*LiftHoldResponse, error)
 
 	// ListIdentityProvidersWithResponse The identity provider instances in force, to any viewer (.specs/ligo-instances.md §10.1).
 	//
@@ -12846,6 +13841,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/admin/sources/{name}/reactivate (the `ReactivateSource` operationId).
 	ReactivateSourceWithResponse(ctx context.Context, name Name, body ReactivateSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*ReactivateSourceResponse, error)
 
+	// ReleaseSourceWithBodyWithResponse File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+	ReleaseSourceWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseSourceResponse, error)
+
+	// ReleaseSourceWithResponse File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+	ReleaseSourceWithResponse(ctx context.Context, name Name, body ReleaseSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseSourceResponse, error)
+
 	// RetireSourceWithBodyWithResponse File the retirement of a source (409 resource-in-use while bindings exist).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -12999,6 +14008,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/admin/targets/{name}/reactivate (the `ReactivateTarget` operationId).
 	ReactivateTargetWithResponse(ctx context.Context, name Name, body ReactivateTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*ReactivateTargetResponse, error)
+
+	// ReleaseTargetWithBodyWithResponse File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+	ReleaseTargetWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseTargetResponse, error)
+
+	// ReleaseTargetWithResponse File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+	ReleaseTargetWithResponse(ctx context.Context, name Name, body ReleaseTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseTargetResponse, error)
 
 	// RetireTargetWithBodyWithResponse File the retirement of a target (409 resource-in-use while bindings exist).
 	//
@@ -13779,6 +14802,61 @@ func (r GetBindingFlowsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBindingFlowsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReleaseBindingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Filed
+	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
+	ApplicationproblemJSON4XX *ProblemResponse
+	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
+	ApplicationproblemJSON5XX *ProblemResponse
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReleaseBindingResponse) GetJSON202() *Filed {
+	return r.JSON202
+}
+
+// GetApplicationproblemJSON4XX returns the response for an HTTP 4XX `application/problem+json` response
+func (r ReleaseBindingResponse) GetApplicationproblemJSON4XX() *ProblemResponse {
+	return r.ApplicationproblemJSON4XX
+}
+
+// GetApplicationproblemJSON5XX returns the response for an HTTP 5XX `application/problem+json` response
+func (r ReleaseBindingResponse) GetApplicationproblemJSON5XX() *ProblemResponse {
+	return r.ApplicationproblemJSON5XX
+}
+
+// GetBody returns the raw response body bytes
+func (r ReleaseBindingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseBindingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseBindingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReleaseBindingResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -14824,6 +15902,109 @@ func (r RecoverExecutorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RecoverExecutorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListHoldsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *HoldPage
+	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
+	ApplicationproblemJSON4XX *ProblemResponse
+	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
+	ApplicationproblemJSON5XX *ProblemResponse
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListHoldsResponse) GetJSON200() *HoldPage {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON4XX returns the response for an HTTP 4XX `application/problem+json` response
+func (r ListHoldsResponse) GetApplicationproblemJSON4XX() *ProblemResponse {
+	return r.ApplicationproblemJSON4XX
+}
+
+// GetApplicationproblemJSON5XX returns the response for an HTTP 5XX `application/problem+json` response
+func (r ListHoldsResponse) GetApplicationproblemJSON5XX() *ProblemResponse {
+	return r.ApplicationproblemJSON5XX
+}
+
+// GetBody returns the raw response body bytes
+func (r ListHoldsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListHoldsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListHoldsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListHoldsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type LiftHoldResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
+	ApplicationproblemJSON4XX *ProblemResponse
+	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
+	ApplicationproblemJSON5XX *ProblemResponse
+}
+
+// GetApplicationproblemJSON4XX returns the response for an HTTP 4XX `application/problem+json` response
+func (r LiftHoldResponse) GetApplicationproblemJSON4XX() *ProblemResponse {
+	return r.ApplicationproblemJSON4XX
+}
+
+// GetApplicationproblemJSON5XX returns the response for an HTTP 5XX `application/problem+json` response
+func (r LiftHoldResponse) GetApplicationproblemJSON5XX() *ProblemResponse {
+	return r.ApplicationproblemJSON5XX
+}
+
+// GetBody returns the raw response body bytes
+func (r LiftHoldResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r LiftHoldResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r LiftHoldResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r LiftHoldResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16425,6 +17606,61 @@ func (r ReactivateSourceResponse) ContentType() string {
 	return ""
 }
 
+type ReleaseSourceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Filed
+	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
+	ApplicationproblemJSON4XX *ProblemResponse
+	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
+	ApplicationproblemJSON5XX *ProblemResponse
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReleaseSourceResponse) GetJSON202() *Filed {
+	return r.JSON202
+}
+
+// GetApplicationproblemJSON4XX returns the response for an HTTP 4XX `application/problem+json` response
+func (r ReleaseSourceResponse) GetApplicationproblemJSON4XX() *ProblemResponse {
+	return r.ApplicationproblemJSON4XX
+}
+
+// GetApplicationproblemJSON5XX returns the response for an HTTP 5XX `application/problem+json` response
+func (r ReleaseSourceResponse) GetApplicationproblemJSON5XX() *ProblemResponse {
+	return r.ApplicationproblemJSON5XX
+}
+
+// GetBody returns the raw response body bytes
+func (r ReleaseSourceResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseSourceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseSourceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReleaseSourceResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RetireSourceResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -17140,6 +18376,61 @@ func (r ReactivateTargetResponse) ContentType() string {
 	return ""
 }
 
+type ReleaseTargetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Filed
+	// ApplicationproblemJSON4XX the response for an HTTP 4XX `application/problem+json` response
+	ApplicationproblemJSON4XX *ProblemResponse
+	// ApplicationproblemJSON5XX the response for an HTTP 5XX `application/problem+json` response
+	ApplicationproblemJSON5XX *ProblemResponse
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReleaseTargetResponse) GetJSON202() *Filed {
+	return r.JSON202
+}
+
+// GetApplicationproblemJSON4XX returns the response for an HTTP 4XX `application/problem+json` response
+func (r ReleaseTargetResponse) GetApplicationproblemJSON4XX() *ProblemResponse {
+	return r.ApplicationproblemJSON4XX
+}
+
+// GetApplicationproblemJSON5XX returns the response for an HTTP 5XX `application/problem+json` response
+func (r ReleaseTargetResponse) GetApplicationproblemJSON5XX() *ProblemResponse {
+	return r.ApplicationproblemJSON5XX
+}
+
+// GetBody returns the raw response body bytes
+func (r ReleaseTargetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseTargetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseTargetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReleaseTargetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RetireTargetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -17448,6 +18739,32 @@ func (c *ClientWithResponses) GetBindingFlowsWithResponse(ctx context.Context, n
 		return nil, err
 	}
 	return ParseGetBindingFlowsResponse(rsp)
+}
+
+// ReleaseBindingWithBodyWithResponse File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+func (c *ClientWithResponses) ReleaseBindingWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseBindingResponse, error) {
+	rsp, err := c.ReleaseBindingWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseBindingResponse(rsp)
+}
+
+// ReleaseBindingWithResponse File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/bindings/{name}/release (the `ReleaseBinding` operationId).
+func (c *ClientWithResponses) ReleaseBindingWithResponse(ctx context.Context, name Name, body ReleaseBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseBindingResponse, error) {
+	rsp, err := c.ReleaseBinding(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseBindingResponse(rsp)
 }
 
 // RetryBindingWithResponse Retry a FAILED or DELETE_FAILED binding.
@@ -17786,6 +19103,45 @@ func (c *ClientWithResponses) RecoverExecutorWithResponse(ctx context.Context, i
 		return nil, err
 	}
 	return ParseRecoverExecutorResponse(rsp)
+}
+
+// ListHoldsWithResponse The holds on bindings the caller sees (open ones; state=all adds the lifted).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/admin/holds (the `ListHolds` operationId).
+func (c *ClientWithResponses) ListHoldsWithResponse(ctx context.Context, params *ListHoldsParams, reqEditors ...RequestEditorFn) (*ListHoldsResponse, error) {
+	rsp, err := c.ListHolds(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListHoldsResponse(rsp)
+}
+
+// LiftHoldWithBodyWithResponse Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+func (c *ClientWithResponses) LiftHoldWithBodyWithResponse(ctx context.Context, id Id, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LiftHoldResponse, error) {
+	rsp, err := c.LiftHoldWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLiftHoldResponse(rsp)
+}
+
+// LiftHoldWithResponse Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/holds/{id}/lift (the `LiftHold` operationId).
+func (c *ClientWithResponses) LiftHoldWithResponse(ctx context.Context, id Id, body LiftHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*LiftHoldResponse, error) {
+	rsp, err := c.LiftHold(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLiftHoldResponse(rsp)
 }
 
 // ListIdentityProvidersWithResponse The identity provider instances in force, to any viewer (.specs/ligo-instances.md §10.1).
@@ -18360,6 +19716,32 @@ func (c *ClientWithResponses) ReactivateSourceWithResponse(ctx context.Context, 
 	return ParseReactivateSourceResponse(rsp)
 }
 
+// ReleaseSourceWithBodyWithResponse File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+func (c *ClientWithResponses) ReleaseSourceWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseSourceResponse, error) {
+	rsp, err := c.ReleaseSourceWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseSourceResponse(rsp)
+}
+
+// ReleaseSourceWithResponse File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/sources/{name}/release (the `ReleaseSource` operationId).
+func (c *ClientWithResponses) ReleaseSourceWithResponse(ctx context.Context, name Name, body ReleaseSourceJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseSourceResponse, error) {
+	rsp, err := c.ReleaseSource(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseSourceResponse(rsp)
+}
+
 // RetireSourceWithBodyWithResponse File the retirement of a source (409 resource-in-use while bindings exist).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -18644,6 +20026,32 @@ func (c *ClientWithResponses) ReactivateTargetWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseReactivateTargetResponse(rsp)
+}
+
+// ReleaseTargetWithBodyWithResponse File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+func (c *ClientWithResponses) ReleaseTargetWithBodyWithResponse(ctx context.Context, name Name, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseTargetResponse, error) {
+	rsp, err := c.ReleaseTargetWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseTargetResponse(rsp)
+}
+
+// ReleaseTargetWithResponse File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/admin/targets/{name}/release (the `ReleaseTarget` operationId).
+func (c *ClientWithResponses) ReleaseTargetWithResponse(ctx context.Context, name Name, body ReleaseTargetJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseTargetResponse, error) {
+	rsp, err := c.ReleaseTarget(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseTargetResponse(rsp)
 }
 
 // RetireTargetWithBodyWithResponse File the retirement of a target (409 resource-in-use while bindings exist).
@@ -19212,6 +20620,46 @@ func ParseGetBindingFlowsResponse(rsp *http.Response) (*GetBindingFlowsResponse,
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON4XX = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 5:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON5XX = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReleaseBindingResponse parses an HTTP response from a ReleaseBindingWithResponse call
+func ParseReleaseBindingResponse(rsp *http.Response) (*ReleaseBindingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseBindingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Filed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
 		var dest ProblemResponse
@@ -19972,6 +21420,82 @@ func ParseRecoverExecutorResponse(rsp *http.Response) (*RecoverExecutorResponse,
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON4XX = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 5:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON5XX = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListHoldsResponse parses an HTTP response from a ListHoldsWithResponse call
+func ParseListHoldsResponse(rsp *http.Response) (*ListHoldsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListHoldsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HoldPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON4XX = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 5:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON5XX = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseLiftHoldResponse parses an HTTP response from a LiftHoldWithResponse call
+func ParseLiftHoldResponse(rsp *http.Response) (*LiftHoldResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &LiftHoldResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
 		var dest ProblemResponse
@@ -21152,6 +22676,46 @@ func ParseReactivateSourceResponse(rsp *http.Response) (*ReactivateSourceRespons
 	return response, nil
 }
 
+// ParseReleaseSourceResponse parses an HTTP response from a ReleaseSourceWithResponse call
+func ParseReleaseSourceResponse(rsp *http.Response) (*ReleaseSourceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseSourceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Filed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON4XX = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 5:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON5XX = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRetireSourceResponse parses an HTTP response from a RetireSourceWithResponse call
 func ParseRetireSourceResponse(rsp *http.Response) (*RetireSourceResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -21641,6 +23205,46 @@ func ParseReactivateTargetResponse(rsp *http.Response) (*ReactivateTargetRespons
 	}
 
 	response := &ReactivateTargetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Filed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 4:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON4XX = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode/100 == 5:
+		var dest ProblemResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON5XX = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReleaseTargetResponse parses an HTTP response from a ReleaseTargetWithResponse call
+func ParseReleaseTargetResponse(rsp *http.Response) (*ReleaseTargetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseTargetResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

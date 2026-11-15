@@ -59,6 +59,7 @@ type Dashboard struct {
 	Next       string // the after= of the next page, "" on the last
 	AwaitingMe []*changerequests.Request
 	BreakGlass []OpenBreakGlass
+	Holds      []bindings.Hold
 }
 
 var phases = []string{"PENDING", "PROVISIONING", "ACTIVE", "FAILED", "DELETING", "DELETE_FAILED"}
@@ -83,11 +84,15 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		open, err = s.openBreakGlass(r.Context(), c)
 	}
+	var holds []bindings.Hold
+	if err == nil {
+		holds, err = s.openHolds(r)
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	d := Dashboard{Filter: f, Phases: phases, Bindings: list, AwaitingMe: awaiting, BreakGlass: open}
+	d := Dashboard{Filter: f, Phases: phases, Bindings: list, AwaitingMe: awaiting, BreakGlass: open, Holds: holds}
 	if more {
 		d.Next = list[len(list)-1].Metadata.Name
 	}
