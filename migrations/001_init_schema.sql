@@ -684,6 +684,49 @@ CREATE TRIGGER trg_sources_managed_by BEFORE INSERT OR UPDATE ON sources FOR EAC
 CREATE TRIGGER trg_targets_managed_by BEFORE INSERT OR UPDATE ON targets FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
 CREATE TRIGGER trg_bindings_managed_by BEFORE INSERT OR UPDATE ON bindings FOR EACH ROW EXECUTE FUNCTION managed_by_guard();
 
+-- A hold: a person removed a managed binding (containment or break-glass
+-- DELETE), so nobody creates it again until a person lifts the hold, or its
+-- break-glass review ratifies the deletion. It never ends with time
+-- (.specs/ligo-managed-resources.md §3.5).
+CREATE TABLE managed_holds (
+    id                    UUID PRIMARY KEY,                  -- UUIDv7
+    binding_name          resource_name NOT NULL,
+    source                resource_name NOT NULL,
+    target                resource_name NOT NULL,
+    access_level          resource_name NOT NULL,
+    source_jurisdiction   jurisdiction_path NOT NULL,
+    target_jurisdiction   jurisdiction_path NOT NULL,
+    platform_jurisdiction jurisdiction_path NOT NULL,
+    managed_by            VARCHAR(255) NOT NULL CHECK (managed_by LIKE 'spiffe://%'),   -- the owner at the deletion
+    basis                 VARCHAR(16) NOT NULL CHECK (basis IN ('CONTAINMENT', 'BREAK_GLASS')),
+    deleted_by            VARCHAR(255) NOT NULL,
+    deleted_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    change_request_id     UUID NOT NULL REFERENCES change_requests(id),
+    lifted_by             VARCHAR(255),
+    lifted_at             TIMESTAMPTZ,
+    lift_basis            VARCHAR(16) CHECK (lift_basis IN ('PERSON', 'RATIFIED')),
+    lift_comment          TEXT CHECK (length(lift_comment) <= 2048),
+    CONSTRAINT chk_hold_lift CHECK ((lifted_by IS NULL) = (lifted_at IS NULL) AND (lifted_by IS NULL) = (lift_basis IS NULL)),
+    CONSTRAINT chk_hold_lifter CHECK (lifted_by IS NULL OR (lifted_by NOT LIKE 'spiffe://%' AND lifted_by NOT LIKE 'system:%'))   -- a person lifts, or a ratification by one
+);
+CREATE UNIQUE INDEX uq_holds_open_pair ON managed_holds (source, target, access_level) WHERE lifted_at IS NULL;
+CREATE INDEX idx_holds_open_name ON managed_holds (binding_name) WHERE lifted_at IS NULL;
+
+CREATE FUNCTION managed_holds_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.id <> OLD.id OR NEW.binding_name <> OLD.binding_name OR NEW.source <> OLD.source OR NEW.target <> OLD.target
+     OR NEW.access_level <> OLD.access_level OR NEW.managed_by <> OLD.managed_by OR NEW.basis <> OLD.basis
+     OR NEW.deleted_by <> OLD.deleted_by OR NEW.deleted_at <> OLD.deleted_at OR NEW.change_request_id <> OLD.change_request_id
+     OR NEW.source_jurisdiction <> OLD.source_jurisdiction OR NEW.target_jurisdiction <> OLD.target_jurisdiction
+     OR NEW.platform_jurisdiction <> OLD.platform_jurisdiction
+     OR (OLD.lifted_at IS NOT NULL AND (NEW.lifted_by IS DISTINCT FROM OLD.lifted_by OR NEW.lifted_at IS DISTINCT FROM OLD.lifted_at
+         OR NEW.lift_basis IS DISTINCT FROM OLD.lift_basis OR NEW.lift_comment IS DISTINCT FROM OLD.lift_comment)) THEN
+    RAISE EXCEPTION 'immutable managed_holds column modified';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_managed_holds_guard BEFORE UPDATE ON managed_holds FOR EACH ROW EXECUTE FUNCTION managed_holds_guard();
+
 CREATE FUNCTION change_request_sides_immutable_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.change_request_id <> OLD.change_request_id OR NEW.side <> OLD.side OR NEW.jurisdiction <> OLD.jurisdiction
@@ -969,7 +1012,8 @@ BEGIN
     SELECT coalesce(array_agg(c.id), '{}') INTO ids FROM change_requests c
     WHERE c.status <> 'PENDING' AND c.decided_at < older_than
       AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.change_request_id = c.id)
-      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id);
+      AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.break_glass_cr_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM managed_holds h WHERE h.change_request_id = c.id);
     LOOP -- drop what a request that stays still refers to, until nothing changes
         kept := ARRAY(SELECT x FROM unnest(ids) AS x WHERE NOT EXISTS (
             SELECT 1 FROM change_requests r WHERE (r.depends_on_cr_id = x OR r.reverts_cr_id = x) AND NOT r.id = ANY (ids)));
@@ -1053,6 +1097,7 @@ GRANT SELECT, INSERT, UPDATE ON accounts, instances, sources, targets, target_ac
 GRANT SELECT, INSERT, UPDATE, DELETE ON target_network_flows TO ligo_app;           -- flows are replaced on target change
 GRANT SELECT, INSERT, UPDATE, DELETE ON bindings, binding_stage_state, binding_propagation_queue, admin_sessions TO ligo_app;
 GRANT SELECT, INSERT, UPDATE ON change_requests TO ligo_app;    -- no DELETE: change_requests_prune is the only way
+GRANT SELECT, INSERT, UPDATE ON managed_holds TO ligo_app;       -- no DELETE: a hold is lifted, never removed
 GRANT SELECT, INSERT, UPDATE ON change_request_sides TO ligo_app;   -- no DELETE: decisions are never removed
 GRANT SELECT, INSERT ON audit_log TO ligo_app;
 GRANT USAGE ON SEQUENCE audit_log_id_seq TO ligo_app;

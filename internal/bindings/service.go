@@ -80,6 +80,9 @@ func (s *Service) Create(ctx context.Context, c changerequests.Caller, body []by
 		return nil, invalid("expectedRevision is only for updates")
 	}
 	b := req.Binding
+	if err := checkHold(ctx, s.DB, b.Name, b.Source, b.Target, b.AccessLevel); err != nil {
+		return nil, err
+	}
 	if req.InlineSource != nil {
 		return s.createInline(ctx, c, req)
 	}
@@ -578,6 +581,9 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		if err != nil {
 			return nil, err
 		}
+		if err := checkHold(ctx, tx, b.Name, b.Source, b.Target, b.AccessLevel); err != nil {
+			return nil, err
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy,
 			derived_principal_name, source_jurisdiction, target_jurisdiction, platform_jurisdiction, parameters, purpose, labels, expires_at, workflow_id,
@@ -702,6 +708,11 @@ func (s *Service) applyDelete(ctx context.Context, tx pgx.Tx, r *changerequests.
 	}
 	entries := []audit.Entry{{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
 		Action: "DELETE_STARTED", Revision: &cur.revision, Attempt: &attempt, WorkflowID: wf}}
+	held, err := createHold(ctx, tx, r, cur)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, held...)
 	if r.Kind == kindExpiry {
 		entries = append(entries, audit.Entry{ResourceType: "BINDING", ResourceID: &cur.id, ResourceName: cur.name, ChangeRequestID: &r.ID,
 			Action: "BINDING_EXPIRED", Revision: &cur.revision})
