@@ -1,6 +1,7 @@
 # Resources managed by automation (the lock)
 
 - **Version:** 0.2 (2026-11-15), approved by the user on 2026-11-15 with the five recommended decisions of §8; implementation starts with chunk 1 (AGENTS.md rules 1 and 3).
+- **Status:** implemented (chunks 1 to 5, 2026-11-15); not released yet.
 - **Backlog:** item 16 (this one); it unblocks the resources of item 8, the Terraform and OpenTofu provider (`terraform-provider-ligo/.specs/ligo-terraform-provider.md` §3.7, chunk 4)
 - **Builds on:** ADR-09 (maker-checker), ADR-11 (delegated approval for `trusted_automation`), ADR-12 (break-glass), ADR-13 (jurisdictions and two-sided consent), `.specs/ligo-adminclient.md`
 - **Direction of the user (2026-11-08, restated 2026-11-15):** a resource that automation creates is marked "managed by automation"; people cannot change it, except a binding through break-glass, and break-glass changes are always reverted; a lasting change goes only through the automation's own source of truth (the Terraform configuration) again.
@@ -72,7 +73,7 @@ The user's rule, "break-glass is always reverted", and ADR-12 rule 4, "an emerge
 
 - The OpenAPI document gains `managedBy` (string, null) on sources, targets and bindings, `managed` (boolean) on the create and update bodies (an `Options` field of the client, `Options.Managed`), `release` and `holds` operations, and the problems `resource-managed` and `resource-held` (both mapped by `pkg/adminclient` to `ErrState`, with a test that the slug list is complete, as `TestSlugsAreMapped` already requires).
 - `pkg/adminclient`: `Options.Managed`, the `ManagedBy` field of the types, `ListHolds`. `LiftHold` and the release by an administrator are a person's acts: the package has no method for them (they are in `notYet`, like the decisions, so that the compiler keeps them out of every tool).
-- The CLI: `--managed` on `ligo apply` for automation users; `--unmanaged` for the owner's own release; `ligo hold list|lift`; `ligo release source|target|binding NAME` (verb first, like the rest of the CLI).
+- The CLI: `--managed` on `ligo apply` for automation users; `--unmanaged` for the owner's own release; `ligo hold list|lift`; `ligo source|target|binding release NAME`.
 - The UI: a "managed by `<owner>`" badge on a managed resource and the reason that edit buttons are off; a banner for a hold on the binding's page.
 
 ### 3.8 Audit, webhooks and metrics
@@ -121,7 +122,7 @@ Proposed, for the user to accept: a fuzz target for the lock decision (random se
 
 ## 6. Documentation
 
-Main specification: a new ADR-17 and the threats T-M1 to T-M10 in its register; the admin API chapter; the changelog. Guides: the Operator's Guide (what a lock is, who may release, the hold and how to lift it, the orphan procedure), the Architecture and Design Guide (the rules and the threat model), the Setup Guide (nothing to configure; the upgrade note says that nothing is locked after the migration), the Developer's Guide (Part 3: `Options.Managed` and what a tool sees). The README's status lists it.
+Main specification: a new ADR-17 and the threats T-M1 to T-M10 (T-45 to T-54 in the register) in its register; the admin API chapter; the changelog. Guides: the Operator's Guide (what a lock is, who may release, the hold and how to lift it, the orphan procedure), the Architecture and Design Guide (the rules and the threat model), the Setup Guide (nothing to configure; the upgrade note says that nothing is locked after the migration), the Developer's Guide (Part 3: `Options.Managed` and what a tool sees). The README's status lists it.
 
 ## 7. Chunks
 
@@ -132,7 +133,7 @@ Main specification: a new ADR-17 and the threats T-M1 to T-M10 in its register; 
 | 2 | Containment, break-glass and holds (AC-M5 to AC-M8). Done: `managed_holds`, `bindings.LiftHold`, the refusal at filing and at apply, no ratification of a managed binding's break-glass change. A hold ends when every side of its break-glass deletion is ratified. The audit entries of an open hold are not yet kept from pruning (chunk 4). |
 | 3 | The OpenAPI document, `pkg/adminclient`, the CLI (AC-M10), and the release by an administrator (§3.3: a four-eyes UPDATE request of people with a justification; adoption also needs the people's sides). `TestEveryWriteIsClassified` makes a new write route say whether the lock covers it (T-M1). |
 | 4 | The UI badge, the audit, webhook and metric events. Done: `RESOURCE_MANAGED`, `RESOURCE_RELEASED`, `RESOURCE_RELEASED_BY_ADMIN` (written when the lock changes hands, in the applying transaction), `LOCK_VIOLATION_REFUSED` (at filing, once a minute per principal and resource and process; the metric counts every refusal, also at apply, where the transaction rolls back and nothing is audited), and the webhook events of all six actions with `HOLD_*`; `ligo_lock_violations_total`, `ligo_managed_resources`, `ligo_holds_open`; the badge and the replaced buttons on source, target and binding pages (Revoke stays); the open holds, with a Lift form, on the bindings dashboard (a removed binding has no page, so the banner of §3.7 is a panel there); pruning stops before the audit entry that created a hold still open (the chain is pruned from its head, so single entries cannot be kept). |
-| 5 | The lab suite and the release run (AC-M11); the documentation. |
+| 5 | The lab suite and the release run (AC-M11); the documentation. Done: `lab.sh serve test-managed` (also a step of `release-run`), ADR-17, T-45 to T-54 and AC-92 to AC-96 in the main specification, the Operator's, Architecture and Setup guides, the README. The release itself (with the PDFs) is not part of this chunk. |
 
 Each chunk is committed only on the user's word, after `go test ./...`, `make lint`, `make vuln` and `make secrets`.
 

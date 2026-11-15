@@ -102,7 +102,7 @@ echo_wait() {
 # approves it as ligo-approver, unless it exists.
 echo_target() {
 	local name="$1" platform="$2" port="$3" what="$4"
-	if cli ligo-ops get target "$name" >/dev/null 2>&1; then
+	if cli ligo-ops target show "$name" >/dev/null 2>&1; then
 		info "the target $name exists"
 		return
 	fi
@@ -172,7 +172,7 @@ echo_smoke() {
 		expect 2 '^no binding$' echo-bound "$target" --transport grpc
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
-		if ! cli ligo-ops get source echo-bound-src >/dev/null 2>&1; then
+		if ! cli ligo-ops source show echo-bound-src >/dev/null 2>&1; then
 			cli ligo-ops apply -f - <"$REPO_DIR/test/lab/echo/manifests/source.yaml" >/dev/null || die "apply the source"
 			cli_approve source echo-bound-src
 		fi
@@ -189,15 +189,15 @@ echo_smoke() {
 		if [[ "$mode" == ns ]]; then namespace_holds_binding; fi
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-unbound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
-		revision="$(cli ligo-ops -o json get binding "$binding" | jq -r '.metadata.revision')"
-		cli ligo-ops delete binding "$binding" -r "$revision" >/dev/null || die "delete $binding"
+		revision="$(cli ligo-ops -o json binding show "$binding" | jq -r '.metadata.revision')"
+		cli ligo-ops binding delete "$binding" -r "$revision" >/dev/null || die "delete $binding"
 		cli_approve binding "$binding"
 		cli_phase "$binding" ""
 		expect 2 '^no binding$' echo-bound "$target"
 		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
 	done
-	revision="$(cli ligo-ops -o json get source echo-bound-src | jq -r '.metadata.revision')"
-	cli ligo-ops delete source echo-bound-src -r "$revision" >/dev/null || die "retire the source"
+	revision="$(cli ligo-ops -o json source show echo-bound-src | jq -r '.metadata.revision')"
+	cli ligo-ops source delete echo-bound-src -r "$revision" >/dev/null || die "retire the source"
 	cli_approve source echo-bound-src
 	info "echo smoke test passed; the source is retired, so the guide starts clean"
 }
@@ -216,12 +216,12 @@ echo_ui() {
 echo_ui_smoke() {
 	section "Echo UI smoke test"
 	local mode target binding port direct register=1 ours=1 revision bound=spiffe://prod.lab/ns/echo/sa/bound
-	if cli ligo-ops get source echo-bound-src >/dev/null 2>&1; then
+	if cli ligo-ops source show echo-bound-src >/dev/null 2>&1; then
 		register=0 ours=0 # someone's source, e.g. from the guide: kept at the end
 	fi
 	for mode in svid local; do
 		target="echo-$mode-target" binding="echo-bound-src-$target"
-		cli ligo-ops get binding "$binding" >/dev/null 2>&1 && die "the binding $binding exists: revoke it first"
+		cli ligo-ops binding show "$binding" >/dev/null 2>&1 && die "the binding $binding exists: revoke it first"
 		port=7101 direct=(--mode svid)
 		if [[ "$mode" == local ]]; then
 			port=7201 direct=(--mode password --user anyone --password anything)
@@ -244,8 +244,8 @@ echo_ui_smoke() {
 		expect 3 '^denied$' echo-bound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
 	done
 	if [[ "$ours" == 1 ]]; then
-		revision="$(cli ligo-ops -o json get source echo-bound-src | jq -r '.metadata.revision')"
-		cli ligo-ops delete source echo-bound-src -r "$revision" >/dev/null || die "retire the source"
+		revision="$(cli ligo-ops -o json source show echo-bound-src | jq -r '.metadata.revision')"
+		cli ligo-ops source delete echo-bound-src -r "$revision" >/dev/null || die "retire the source"
 		cli_approve source echo-bound-src
 	fi
 	info "echo UI smoke test passed"

@@ -18,16 +18,28 @@ They sign in again with their password, and their LDAP groups are read afresh, s
 
 If a revert fails, the emergency state stays served until you retry it: `BREAK_GLASS_REVERT_FAILED` must page someone.
 
+## A pipeline keeps failing to create a binding (a hold)
+
+`409 resource-held` on a binding that a pipeline manages: a person removed it in an emergency (containment or break-glass `DELETE`) and nobody has lifted the hold. This is deliberate. The pipeline would otherwise give the access back at its next run.
+
+1. `ligo hold list --binding <name>`: who removed it, when, and why (the comment of the request).
+2. Close the incident first. Fix the cause, in the pipeline's configuration as well: if the binding stays in it, the next run asks again.
+3. A person who approves a side lifts it: `ligo hold lift <id> -m "..."`. The next run creates the binding.
+
+## A resource is locked and its pipeline is gone
+
+`409 resource-managed` for everyone on a resource nobody can update. Check `managedBy` (`ligo source show <name>`): if that SPIFFE ID no longer exists, release the lock: see "Holds and orphaned locks" in the routine procedures. If the pipeline still exists, ask its team to change the file, or to set `managed: false`. Containment and break-glass are not blocked by a lock, so an emergency never waits for this.
+
 ## A compromised workload
 
-1. Revoke it: `ligo break-glass delete <name> ...`, or with one owner's approval through `ligo delete`. To contain a whole source or jurisdiction on a target, use `ligo target revoke-bindings`.
+1. Revoke it: `ligo break-glass delete <name> ...`, or with one owner's approval through `ligo binding delete`. To contain a whole source or jurisdiction on a target, use `ligo target revoke-bindings`.
 2. The API stops serving it at once. The workflow then removes its credential and role, and ends the role's sessions on PostgreSQL.
-3. Check it reached the end: `ligo get binding <name>` answers `404`, and the audit shows `DELETE_COMPLETED`.
+3. Check it reached the end: `ligo binding show <name>` answers `404`, and the audit shows `DELETE_COMPLETED`.
 4. If you need the workload's SPIRE entry gone too, that is SPIRE's: `ligo` does not manage it.
 
 ## A plugin or platform is down
 
-Workloads keep the last good snapshot. Retryable errors are retried within the step, up to `plugins.retry`, then the binding is `FAILED`, and retried by itself every minute or so until the platform is back; propagations resume by themselves too. `ligo retry <binding>` starts one at once. A plugin process that dies is restarted, with a back-off.
+Workloads keep the last good snapshot. Retryable errors are retried within the step, up to `plugins.retry`, then the binding is `FAILED`, and retried by itself every minute or so until the platform is back; propagations resume by themselves too. `ligo binding retry <binding>` starts one at once. A plugin process that dies is restarted, with a back-off.
 
 ## Vault or OpenBao is down
 
@@ -78,7 +90,7 @@ If `ligo audit verify` answers `503 unavailable` instead, the chain is not broke
 
 1. Find who wrote to the database, as for an audit chain that does not verify.
 2. Compare the row with the instance's audit (`ligo audit list platform NAME`) and its last applied change request.
-3. File the intended definition again (`ligo apply`, with `expectedRevision` the row's revision: `ligo get platform NAME -o yaml` shows it with `quarantined: true` to the operators and approvers of its jurisdiction), and have it approved: the new, signed row ends the quarantine and the metric returns to 0.
+3. File the intended definition again (`ligo apply`, with `expectedRevision` the row's revision: `ligo platform show NAME -o yaml` shows it with `quarantined: true` to the operators and approvers of its jurisdiction), and have it approved: the new, signed row ends the quarantine and the metric returns to 0.
 
 ## A trust bundle conflict
 

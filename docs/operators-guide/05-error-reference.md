@@ -60,7 +60,7 @@ The admin API answers errors as `application/problem+json`, with `type` `urn:lig
 
 ## Plugin errors
 
-A binding's `status.message` gives the code. A retryable error is retried within the step, then the binding is `FAILED` and retried by itself, as `system:auto-retry`, until the cause is gone. For a terminal error, fix the cause and `ligo retry`. Messages are fixed: backends' texts can echo statements or data, and are never copied.
+A binding's `status.message` gives the code. A retryable error is retried within the step, then the binding is `FAILED` and retried by itself, as `system:auto-retry`, until the cause is gone. For a terminal error, fix the cause and `ligo binding retry`. Messages are fixed: backends' texts can echo statements or data, and are never copied.
 
 ::: landscape
 
@@ -71,7 +71,7 @@ A binding's `status.message` gives the code. A retryable error is retried within
 | `SVID_SELECTION_FAILED` | all | no | Not exactly one SVID matched | Check the SPIRE entries, with `-svids` |
 | `WORKLOAD_API_UNAVAILABLE` | all | yes | The agent's socket does not answer | Check the agent |
 | `SVID_UNAVAILABLE` | `vault.v1` | yes | The JWT-SVID cannot be fetched | Check the agent and the entry |
-| `UNKNOWN_INSTANCE` | all | no | The plugin does not serve the instance | Check that it is ACTIVE (`ligo list platforms`), not quarantined, and that `ligo_plugin_reconfigure_failures_total` did not grow |
+| `UNKNOWN_INSTANCE` | all | no | The plugin does not serve the instance | Check that it is ACTIVE (`ligo platform list`), not quarantined, and that `ligo_plugin_reconfigure_failures_total` did not grow |
 | `INVALID_BINDING` | all | no | The binding's ID is not valid | Report it |
 | `INVALID_PRINCIPAL` | `postgres.v1`, `openldap.v1` | no | The principal name is outside the grammar | Check `principal_prefix` |
 | `INCOMPATIBLE_IDENTITY_MODE` | `postgres.v1`, `vault.v1` | no | The wiring gave the wrong mode | Check the platform's wiring |

@@ -15,6 +15,7 @@ A release's evidence comes from one command that refuses a modified tree, destro
 | `serve test-ha` | Maintenance across replicas, concurrent approvals applied once, a replica killed and one frozen mid-workflow. |
 | `serve test-otel` | Traces reach a collector across replicas, with no secrets or error text. |
 | `serve test-webhook` | Signed notifications, a receiver down, and jurisdiction filters. |
+| `serve test-managed` | The lock on both replicas: refusals for people and rivals, containment and holds, break-glass, release by an administrator, a race between two automations, and an adoption with a replica down. |
 | `serve test-faults` | The secrets backend and PostgreSQL stopped under load. |
 | Browser tests | Forms, CSP, hostile data through every page. |
 

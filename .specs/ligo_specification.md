@@ -86,6 +86,8 @@ The Go client SDK is specified in `.specs/ligo-client-sdk.md`; the row below nam
 | Vault plugin (§5.6, `.specs/ligo-vault-plugin.md`) | The finalized client auth of a binding gains `audience`: the instance's `workload_jwt_audience`, which a workload needs for the JWT-SVID it logs in to the store with. A binding applied before the change gains it at its next apply. It also gains `namespace` when the instance has one, so that the workload logs in to the same Vault namespace. |
 | Dynamic credentials (§5.6, §8.1, `.specs/ligo-postgres-plugin.md` §3) | The lease of a `vault-dynamic` credential is configurable: per platform (`credential_ttl`, `credential_max_ttl` in a `postgres.v1` platform's config), else `plugins.dynamic_credentials.default_ttl` and `max_ttl` in `server.yaml`, else the built-in 1 h and 24 h, which were fixed before. A platform plugin sends 0 for a value it has no opinion on, and the engine fills it; each value is between 1 minute and 720 hours. |
 | Workload API over gRPC (§7.1) | An `UNAVAILABLE` (stale cache) or `RESOURCE_EXHAUSTED` (rate limit) error carries a `google.rpc.RetryInfo` detail with the delay REST sends in `Retry-After` (5 s and 1 s). |
+| CLI command shape (§8.4) | Every command is `ligo <object> <verb>`: `ligo get|list|delete|release KIND`, `ligo retry|rotate|flows` become `ligo <kind> show|list|delete|release` and `ligo binding retry|rotate|flows`, with the new groups `binding`, `identity-provider` and `secret-store`; `get` is `show` everywhere (`cr show`, `account show`). The old names are removed (no compatibility before 1.0). The admin API is unchanged. |
+| Resources managed by automation (ADR-17, §3, §6.2, §9.2, §10.1, T-45–T-54, AC-92–AC-96, `.specs/ligo-managed-resources.md`) | A source, target or binding filed with `managed: true` by a `trusted_automation` principal belongs to its SPIFFE ID and only it may change it (`409 resource-managed`); containment and break-glass stay open; a removal in an emergency leaves a hold that only a person lifts (`409 resource-held`); an administrator releases an orphaned lock by a four-eyes request. New audit actions, webhook events, metrics and `ligo <kind> release`, `ligo hold`. |
 
 ### 0.6 Changelog from 4.0.9 (4.1.0)
 
@@ -600,6 +602,18 @@ Code generators and maintainers MUST preserve these decisions.
   4. **Effective flows are computed, never stored:** the target's flows, plus its platform's flows, plus the flows of the binding's secret store when the credential is retrieved from it, plus the flow to `ligo`. They are served to administrators (`GET /v1/admin/bindings/{name}/flows`), in the catalog for a target before any binding exists (`GET /v1/admin/catalog/targets/{name}/flows`), and to workloads for their own bindings (`GET /v1/flows`, §7.1).
   5. **Declarative only.** `ligo` neither opens nor tests flows. Verification is done by the external tool, on the workload host, with the workload's own network position.
 - **Rationale.** The flows a workload needs are a property of the resources it uses, so they belong to those resources and change with them through the same consent. Computing the effective list per binding gives exactly the set a host needs, without duplication. Serving it on the workload API, authenticated by the host's SVID, lets the verification tool ask "what should be open from here?" without any administrator credential. Bounding destinations by the platform's allowlist stops flows from becoming a way to direct workloads elsewhere (T-35).
+
+### ADR-17: Resources Managed by Automation (the Lock)
+- **Problem:** ADR-11 lets a `trusted_automation` principal change resources without a human approver. A pipeline's configuration is then the declared truth, and a person who edits the same resource in the UI or the CLI makes the truth and the system disagree: the next run silently overwrites the person's change, or the person's change outlives the review the pipeline went through.
+- **Decision:** (full text: `.specs/ligo-managed-resources.md`)
+  1. **An owner, by SPIFFE ID.** A source, target or binding filed with `managed: true` by a principal holding `trusted_automation` on every jurisdiction involved (owner, source, target and platform) is owned by that principal's SPIFFE ID (`managed_by`). Anyone else's `managed: true` is `403`. Instances (platforms, identity providers, secret stores) and accounts are never managed.
+  2. **Only the owner changes it.** Update, state change and deletion of a managed resource by anyone else, whatever their role, are `409 resource-managed` and nothing is filed. The check is made at filing and again in the transaction that applies the change; a database trigger refuses any change of `managed_by` outside a pending change request that sets it.
+  3. **Containment is never blocked.** A revocation by an owner of a side or the platform (consent `ANY`, ADR-13 rule 5) is allowed on a managed binding.
+  4. **Holds.** A containment revocation by someone other than the owner, and a break-glass `DELETE`, leave a hold on the binding. While it stands, nobody creates the binding again, the owner's pipeline included (`409 resource-held`). Only a person who approves a side of the binding lifts it (with a comment), or the ratification of the emergency deletion by every side. Time never ends a hold. An open hold holds audit pruning back at the entry that created it.
+  5. **Break-glass.** A break-glass change of a managed binding is allowed, can never be ratified (`409 resource-managed`) and is always reverted at its TTL; a break-glass create of a held or managed name is refused.
+  6. **Adoption and release.** An owner takes over an unmanaged resource only with the consent of the sides that a change of that resource needs (decided by people). The owner releases with `managed: false`. When the owner is gone, a person with `admin.full_access` files a release (`POST /v1/admin/{type}/{name}/release`) with a justification of 20 characters or more: consent `ALL`, four eyes, people only (never `DELEGATED` or `AUTO`).
+  7. **Visible.** `managedBy` on every view, audit actions `RESOURCE_MANAGED`, `RESOURCE_RELEASED`, `RESOURCE_RELEASED_BY_ADMIN`, `LOCK_VIOLATION_REFUSED` (rate-limited per principal and resource), `HOLD_CREATED`, `HOLD_LIFTED`, all webhook events, and the metrics `ligo_lock_violations_total`, `ligo_managed_resources` and `ligo_holds_open`.
+- **Rationale.** Delegation stays what it is; the lock only narrows who may change a resource after it exists, so the pipeline's configuration stays the single source of truth and a person's emergency access is never blocked. The owner is a SPIFFE ID because that is the identity the pipeline already presents; a registry of automations (the alternative) is a second authorization model that the lock does not need. A hold, instead of a time limit, is the only way to keep a pipeline from re-granting at its next run what a person removed in an emergency.
 
 ---
 
@@ -3368,8 +3382,8 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 
 | Action | viewer | operator | approver |
 | :--- | :---: | :---: | :---: |
-| List and get sources, targets, bindings, change requests and audit entries (any role on the resource, or visibility, §7.2.4) | ✓ | ✓ | ✓ |
-| Browse the catalog, list platforms and their UI schemas, read the charter, evaluate a planned binding, verify the audit chain, view maintenance status | ✓ | ✓ | ✓ |
+| List and source show, targets, bindings, change requests and audit entries (any role on the resource, or visibility, §7.2.4) | ✓ | ✓ | ✓ |
+| Browse the catalog, platform list and their UI schemas, read the charter, evaluate a planned binding, verify the audit chain, view maintenance status | ✓ | ✓ | ✓ |
 | Register, change or retire a source (role on its jurisdiction) | | ✓ | |
 | Publish, change or retire a target (role on its jurisdiction or its platform's jurisdiction) | | ✓ | |
 | Create or change a binding (role on its source or target jurisdiction) | | ✓ | |
@@ -3854,7 +3868,7 @@ service:
   application_version: "4.0.1"          # passed to DBOS (EXT-09)
   instance_id_env: "LIGO_INSTANCE_ID"  # unique per replica
   startup_timeout: 60s                   # SPIRE and the sealer must be ready within it (5s–10m, default 60s), §8.2
-  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16); the same on every replica, so that every replica serves the same flows and ETags
+  workload_advertise:                    # how workloads reach the workload API; served as the "ligo" flow (ADR-16); the same on every replica, so that every replica serves the same binding flows and ETags
     destination: "ligo.prod.internal"
     port: 8443
     server_name: "ligo.prod.internal"
@@ -4223,6 +4237,7 @@ ligo/
 The `ligo` binary uses `github.com/jessevdk/go-flags` with command/subcommand struct embedding. (Informative: these are the same conventions as `github.com/dihedron/openstack-spiffe` and `github.com/dihedron/lxd-spiffe`. The struct listing below is the authoritative definition; implementers need not consult those repositories.) Every subcommand implements `flags.Commander` (`Execute(args []string) error`).
 
 - **Server verification (Normative).** With `--ca-cert`, the Admin server's certificate is verified against that bundle and the URL's host name (`tls_source: file`). Without it and with `--spiffe-socket`, it is verified against the X.509 bundle of the socket for the client SVID's trust domain, and its SPIFFE ID MUST equal `--server-id` (`tls_source: spiffe`); any other ID is refused, so that no other workload of the trust domain can pose as the Admin API. Without either, the system roots and the host name apply. With `--username`, the CLI sends LDAP Basic credentials and presents no SVID: `--spiffe-socket` then only verifies the server, so that a person can reach a server whose certificate comes from SPIRE.
+- **Command shape (Normative).** Every command is `ligo <object> <verb>`: `source`, `target`, `binding`, `platform`, `identity-provider` and `secret-store` each have `list`, `show` and `delete`; a source, a target and a binding also have `release`; `cr` and `account` have `show`. One verb displays one object: `show`, never `get`. The exceptions are `apply` (the kind comes from the manifest), `migrate`, `serve` and `version`. Enforced by `TestCommandTree`.
 - **Output (Normative).** Every command writes its result to standard output as `table` (aligned columns), `json` or `yaml` (`--output`) and needs no terminal, so that automation can parse it; errors, including the server's problem details, go to standard error with a non-zero exit status. Interactive views, such as a review queue of pending change requests, are separate commands, never the default of a scriptable one.
 - **Credentials (Normative).** The CLI MUST NOT accept a password as a flag value or environment variable, because those are visible in the process list, shell history and the process environment. The password is read from `--password-file` (which MUST NOT be group- or world-readable; the CLI refuses otherwise), or prompted for on a terminal without echo. Automation SHOULD authenticate with an X.509-SVID (`--spiffe-socket`) instead of LDAP.
 
@@ -4252,17 +4267,14 @@ type Options struct {
 
 	Serve    ServeCommand         `command:"serve" description:"Run the ligo control-plane daemon."`
 	Apply    ApplyCommand         `command:"apply" description:"Submit create or update change requests from a YAML/JSON manifest (kind Source, Target or Binding)."`
-	Get      GetCommand           `command:"get" description:"Display a source, target or binding."`
-	List     ListCommand          `command:"list" alias:"ls" description:"List sources, targets or bindings."`
-	Delete   DeleteCommand        `command:"delete" alias:"rm" description:"Revoke a binding, or retire a source or target."`
-	Retry    RetryCommand         `command:"retry" description:"Retry a binding in FAILED or DELETE_FAILED phase."`
-	Rotate   RotateCommand        `command:"rotate" description:"Trigger an immediate credential rotation (reapply) on an ACTIVE binding."`
-	Source   SourceCommand        `command:"source" description:"Source operations: test a regex, deprecate, reactivate."`
-	Target   TargetCommand        `command:"target" description:"Target operations: deprecate, reactivate, access levels, bulk revocation."`
+	Source   SourceCommand        `command:"source" description:"Sources: list, show, delete, release, test a regex, deprecate, reactivate."`
+	Target   TargetCommand        `command:"target" description:"Targets: list, show, delete, release, deprecate, reactivate, access levels, bulk revocation."`
+	Binding  BindingCommand       `command:"binding" description:"Bindings: list, show, delete, release, retry, rotate, flows."`
+	IdP      IdentityProviderCommand `command:"identity-provider" description:"Identity provider instances: list, show, delete."`
+	Store    SecretStoreCommand   `command:"secret-store" description:"Secret store instances: list, show, delete."`
 	Platform PlatformCommand      `command:"platform" description:"Inspect configured platforms and their UI schemas."`
 	Catalog  CatalogCommand       `command:"catalog" description:"Search the catalog of targets and show their flows."`
-	Flows    FlowsCommand         `command:"flows" description:"Show the effective network flows of a binding (JSON for the verification tool)."`
-	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, get, approve, decline, withdraw)."`
+	CR       ChangeRequestCommand `command:"cr" description:"Manage change requests (list, show, approve, decline, withdraw, ratify, revert, review)."`
 	Audit    AuditCommand         `command:"audit" description:"Query and verify the cryptographic audit log."`
 	Maint  MaintenanceCommand   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	Exec   ExecutorsCommand     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
@@ -4278,7 +4290,7 @@ type MigrateCommand struct {
 	DSNEnv string `long:"dsn-env" default:"LIGO_MIGRATOR_DSN" description:"Environment variable holding the ligo_migrator DSN."`
 }
 
-// ResourceArgs names one resource: `ligo get binding payments-ledger-workers-ledger`.
+// ResourceArgs names one resource: `ligo binding show payments-ledger-workers-ledger`.
 type ResourceArgs struct {
 	Kind string `positional-arg-name:"kind" choice:"source" choice:"target" choice:"binding" description:"Resource kind."`
 	Name string `positional-arg-name:"name" description:"Resource name."`
@@ -4296,7 +4308,7 @@ type ServeCommand struct {
 }
 
 // ---------------------------------------------------------------------------
-// Resource commands: `ligo apply|get|list|delete|retry|rotate`
+// Resource commands: `ligo apply`, and `ligo <kind> list|show|delete|release` (binding also retry|rotate|flows)
 // ---------------------------------------------------------------------------
 type ApplyCommand struct {
 	ClientOptions
@@ -4684,7 +4696,7 @@ type GovCheckCommand struct {
 
 **Create or update in `ligo apply` (Normative):** if a document contains `expectedRevision`, the CLI sends `PUT` to the resource (update); otherwise it sends `POST` (create). Replacing an existing resource therefore always requires stating which revision is being replaced. A create for a name that already exists fails with `409 invalid-transition` (`409 binding-exists` for a second binding of the same pair); the CLI then prints the current revision and tells the user to add `expectedRevision`.
 
-**CLI Output Behavior for `ligo apply` and `ligo delete` (Normative):**
+**CLI Output Behavior for `ligo apply` and `ligo <kind> delete` (Normative):**
 - When the change was applied at creation (`changeRequest.status == "APPLIED"`), the CLI prints the Change Request ID and, for a binding, its current phase (`PROVISIONING` or `ACTIVE` if `--wait` was passed) and `workflowId`; for a source or target, its new revision and the number of bindings queued for propagation.
 - When sides are still pending (`changeRequest.status == "PENDING"`), the CLI prints a clear notice containing `changeRequest.id`, `changeRequest.payloadSha256`, each pending side with its jurisdiction, and the exact command an approver of each side needs to run:
   `ligo cr approve <cr-id> --sha256 <payloadSha256> --side <side> -m "<comment>"`.
@@ -4744,6 +4756,16 @@ type GovCheckCommand struct {
 | T-34 | EoP / Repudiation | 2/6 | **Overlapping sources.** Two sources of the same jurisdiction match overlapping workloads, so a workload receives bindings that were approved for the other source's audience, without the reviewers noticing. | Overlaps reported by the regex tester and shown on the source change request (§7.2.3); the source owner is the same jurisdiction in both cases, so no cross-owner escalation is possible; "what can this workload reach" queries in the admin API; access reviews (FW-4). Residual risk R-10. |
 | T-35 | Tampering / Spoofing | 2/4 | **Misleading flows.** A target owner declares flows that point workloads, or the verification tool, at a host they control, or the platform's flows are edited to hide a required route. | Target flow destinations restricted to the platform's `allowed_endpoints` (INV-24), checked at creation, at apply and at startup; flow changes need the platform owner's consent; platform and secret-store flows only in `server.yaml`; flows are declarative (`ligo` never connects to them) and the served connection coordinates still pass output validation (INV-13). |
 | T-36 | Denial of service | 2/4 | **Login lockout.** An attacker without an account sends wrong passwords for an administrator's user name, so the login limits refuse that administrator, the right password included, and during an incident also the break-glass re-authentication of the people responding. | The per-user limit is per address and user; the limit per user from any address is ten times higher, so a lockout needs many addresses; a break-glass re-authentication in a session is limited per session, not per user; refused logins are audited (`SESSION_LOGIN_FAILED`). Residual: a distributed attacker can still lock out logins (not open sessions) for a user; the limits are per replica (§10.2), so guessing across N replicas gets N times the attempts, bounded by the directory's lockout policy. |
+| T-45 | Tampering | 2/6 | **Bypass of the lock.** A person or another automation changes a managed resource through some write path. | The check is made where the change request is created and again in the applying transaction, for every write that reaches a source, a target or a binding; a table-driven test fails the build when a write operation of the API has no decision (`TestEveryWriteIsClassified`); a trigger refuses any change of `managed_by` outside a pending change request. |
+| T-46 | Elevation of privilege | 2/6 | **Lock squatting.** A hostile or compromised automation locks resources it can reach so that their owners cannot change them. | Only `trusted_automation` locks, only where it holds the role on every jurisdiction involved; adoption needs the existing sides, decided by people; the release by an administrator exists; containment is never blocked. The blast radius is the one ADR-11 accepts (T-25). |
+| T-47 | Repudiation | 2/5 | **A compromised owner SVID hides its changes behind the lock.** | Every change is audited with `approvalReference` and `automationContext`; `RESOURCE_MANAGED` and the refusals are audited; the lock cannot block containment. |
+| T-48 | Denial of service | 2/6 | **An orphaned lock:** the automation is gone and nobody can change the resource. | Release by an administrator: four eyes, people only, with a justification, audited with the original owner. |
+| T-49 | Denial of service | 2/6 | **The lock blocks incident response.** | Containment and break-glass are not blocked (lab and integration tests). |
+| T-50 | Elevation of privilege | 2/6 | **The pipeline re-grants access that a person removed in an emergency.** | The hold: the re-creation is refused until a person lifts it; time never ends it. |
+| T-51 | Elevation of privilege | 2/6 | **A break-glass change on a managed binding becomes permanent by ratification.** | Ratification is refused (`409 resource-managed`); the change is reverted at its TTL. |
+| T-52 | Tampering | 2/4 | **A race between a lock being set and a change being applied, or between two owners.** | The owner is checked in the applying transaction under the row lock; the lab races two automations for one name (exactly one owner). |
+| T-53 | Denial of service | 5 | **The refusals flood the audit log.** | `LOCK_VIOLATION_REFUSED` is audited at most once a minute per principal and resource (per process); `ligo_lock_violations_total` counts every refusal. |
+| T-54 | Tampering | 5 | **The owner column is changed outside a change request, in the database.** | A trigger refuses any update of `managed_by` that is not part of a pending change request that sets it; a test with the application's role. |
 
 ### 9.3 Accepted residual risks
 | ID | Risk |
@@ -5032,6 +5054,11 @@ Each scenario MUST be an automated test run on the lab (§11.1). Tests live next
 | AC-89 | An export of the chain | `ligo audit verify --file` with the public keys from Vault | `valid: true`. Any changed entry, forged checkpoint, missing tail or other key gives `valid: false`, with the first broken entry and a reason, and a non-zero exit (§4.3). |
 | AC-90 | `notifications.delivered_retention: 24h`, `abandoned_retention: 720h` | The dispatcher's pass | Rows delivered over 24 hours ago and rows abandoned over 30 days ago are deleted; younger ones stay (§7.5). |
 | AC-91 | `storage.change_requests.retention: 720h`; a request withdrawn 40 days ago whose audit entries were pruned; another named by an entry still in the log; a binding's open break-glass change | The daily prune pass | The first request and its sides are deleted, `SYSTEM_CR_PRUNED` records it; the others stay. Who sees each binding does not change (`party_jurisdictions`). An export taken before the audit prune holds the deleted request, whose payload verifies against `payloadSha256` (§4.3). |
+| AC-92 | `ci/terraform` holds `trusted_automation` on `dc/corp-prod/*` | It files a source, a target and a binding with `managed: true` and an `approvalReference` | Each is applied at once; `managedBy` is its SPIFFE ID; an operator, a person with full access and another automation get `409 resource-managed` for every update, state change and deletion, nothing is filed; a person's `managed: true` is `403`. |
+| AC-93 | A managed binding is ACTIVE | The operator of the target revokes it and one approver decides a side | The binding is deleted, a hold is recorded; the pipeline and people get `409 resource-held` for its re-creation; a person who approves a side lifts the hold with a comment (an SVID or an operator gets `403`); the pipeline creates the binding again. |
+| AC-94 | A managed binding, a person in the break-glass group | A break-glass update | It is applied, the owner is unchanged, its ratification is `409 resource-managed`, and it is reverted at its TTL. |
+| AC-95 | A managed source whose pipeline is gone | A person with `admin.full_access` files its release with a justification of 20 characters or more | A short justification is `422`; an SVID or an operator is `403`; the request needs a second person (consent `ALL`, never delegated); once applied the source is unmanaged and an operator edits it; the audit log has `RESOURCE_RELEASED_BY_ADMIN`. |
+| AC-96 | Two automations file the same new managed name at once | Ten rounds | Exactly one creation wins each round; the other is `409`. |
 
 ---
 
@@ -6197,7 +6224,7 @@ sequenceDiagram
     D->>PG: delete TARGET stage row
     D->>IP: CleanupIdentity(stage artifact)
     IP-->>D: done
-    D->>PG: delete IDENTITY stage row, delete binding row, audit DELETE_COMPLETED
+    D->>PG: delete IDENTITY stage row, binding delete row, audit DELETE_COMPLETED
 ```
 
 If the tenancy's own operator had filed the delete instead, the request would have only a `SOURCE` side; in a self-service tenancy that side is approved automatically and the delete starts at once. A central DBA of `dc/corp-prod` (the platform owner) could also revoke it, with a `PLATFORM` side. Lowering the access level follows the same path, with an `UPDATE` and a re-apply instead of the delete workflow, and `BINDING_REVOKED` is announced to the other jurisdictions in both cases.

@@ -29,7 +29,7 @@ These guides are run by hand, one step at a time, against the lab. Two LDAP user
 2. **File it:** `ligo apply -f store.yaml`. Expect one change request, `PENDING`, with one `OWNER` side on `dc/corp-prod`.
 3. **`carol` tries to approve:** `ligo change-request approve <id>`. Expect `403 four-eyes-violation`.
 4. **As `dave`:** `ligo change-request get <id>` shows the definition and its `payloadSha256`. Then `ligo change-request approve <id>`. Expect `APPLIED`.
-5. **Check it on every replica:** `ligo list secret-stores` shows `vault-test` ACTIVE. On both replicas, the log shows `plugin instance resolved … instance=vault-test`. No replica restarted (`systemctl status ligo`: same start time).
+5. **Check it on every replica:** `ligo secret-store list` shows `vault-test` ACTIVE. On both replicas, the log shows `plugin instance resolved … instance=vault-test`. No replica restarted (`systemctl status ligo`: same start time).
 6. **A platform wired to it:** as `carol`, write a `kind: Platform` manifest with `secretStore: {type: vault, instance: vault-test}`. Then `ligo apply`, and `dave` approves. `ligo platform list` shows it with health `serving`.
 
 ## G-2. Bulk creation with `ligo apply`
@@ -44,7 +44,7 @@ These guides are run by hand, one step at a time, against the lab. Two LDAP user
 1. **An endpoint outside `instance_bounds`:** set `address: https://evil.example:8200` and apply. Expect `422 validation-failed`, naming the endpoint and the type's bounds.
 2. **A file path:** `ca_file: /etc/shadow`. Expect `422`: the key is unknown to the schema.
 3. **A shared SVID across jurisdictions:** a second store instance in `dc/corp-test` with the same `matchExpr`. Expect `422`.
-4. **Retiring an instance in use:** `ligo delete secret-store vault-test` while the platform of G-1 uses it. Expect `409 instance-in-use`.
+4. **Retiring an instance in use:** `ligo secret-store delete vault-test` while the platform of G-1 uses it. Expect `409 instance-in-use`.
 5. **An old `server.yaml`:** start ligo with a `platforms:` section. Startup refuses it, and the error names `.specs/ligo-instances.md`.
 
 ## G-4. Drift
@@ -56,7 +56,7 @@ These guides are run by hand, one step at a time, against the lab. Two LDAP user
    - `ligo_instance_drift{kind="SECRET_STORE",name="vault-test"} 1`;
    - `ligo audit list` shows `SYSTEM_INSTANCE_DRIFT`.
 
-   `ligo list secret-stores` no longer offers it.
+   `ligo secret-store list` no longer offers it.
 3. **Fix it:** `carol` files the intended definition with `expectedRevision`, and `dave` approves. The metric returns to 0, and the instance is offered again.
 
 ## G-5. Web UI

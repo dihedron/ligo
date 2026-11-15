@@ -133,7 +133,7 @@ A mutation is **never repeated** by the client, whatever the answer: a repeated 
 cr, err := c.CreateSource(ctx, spec, adminclient.Options{Managed: ptr(true)})
 ```
 
-When a person removes a managed binding in an emergency, a **hold** stops everybody from creating it again until a person lifts it; a creation under a hold is refused with `ErrState` (`resource-held`). `ListHolds` (and `ListHoldsPage`) shows the holds, open ones by default. Lifting a hold and the release of a resource by an administrator are decisions of people: they are in the CLI (`ligo hold lift`, `ligo release`) and not in this package.
+When a person removes a managed binding in an emergency, a **hold** stops everybody from creating it again until a person lifts it; a creation under a hold is refused with `ErrState` (`resource-held`). `ListHolds` (and `ListHoldsPage`) shows the holds, open ones by default. Lifting a hold and the release of a resource by an administrator are decisions of people: they are in the CLI (`ligo hold lift`, `ligo source|target|binding release`) and not in this package.
 
 ## Waiting for the approval
 

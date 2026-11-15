@@ -161,7 +161,7 @@ func TestWriteCommands(t *testing.T) {
 	tstate := StateChange{Base: b, ExpectedRevision: 2, Args: NameArg{"t1"}}
 	op := operation{Base: b}
 	op.Args.Name = "b1"
-	del := &Delete{Base: b, ExpectedRevision: 3, ApprovalRef: "CHG-2", Wait: true, Args: ResourceArgs{"binding", "b1"}}
+	del := &Delete[BindingKind]{Base: b, ExpectedRevision: 3, ApprovalRef: "CHG-2", Wait: true, Args: NameArg{"b1"}}
 	level := &TargetLevel{Base: b, ExpectedRevision: 5}
 	level.Args.Action, level.Args.Target, level.Args.Level = "retire", "t1", "write"
 	bgDel := &BreakGlassDelete{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1", TTL: "4h"}, ExpectedRevision: 3}
@@ -175,9 +175,9 @@ func TestWriteCommands(t *testing.T) {
 		request, body string
 	}{
 		{"delete binding", del.Execute, "DELETE /v1/admin/bindings/b1?expectedRevision=3", `"approvalReference":"CHG-2"`},
-		{"delete source", (&Delete{Base: b, ExpectedRevision: 1, Args: ResourceArgs{"source", "s1"}}).Execute, "POST /v1/admin/sources/s1/retire", `"expectedRevision":1`},
-		{"retry", (&Retry{op}).Execute, "POST /v1/admin/bindings/b1/retry", ""},
-		{"rotate", (&Rotate{op}).Execute, "POST /v1/admin/bindings/b1/rotate", ""},
+		{"delete source", (&Delete[SourceKind]{Base: b, ExpectedRevision: 1, Args: NameArg{"s1"}}).Execute, "POST /v1/admin/sources/s1/retire", `"expectedRevision":1`},
+		{"binding retry", (&Retry{op}).Execute, "POST /v1/admin/bindings/b1/retry", ""},
+		{"binding rotate", (&Rotate{op}).Execute, "POST /v1/admin/bindings/b1/rotate", ""},
 		{"source test", (&SourceTest{Base: b, TrustDomain: "prod.lab", Regex: "^x$", SpiffeIDs: []string{"spiffe://prod.lab/x"}, Current: "s1"}).Execute,
 			"POST /v1/admin/sources/test", `"currentSource":"s1"`},
 		{"source deprecate", (&SourceDeprecate{state}).Execute, "POST /v1/admin/sources/s1/deprecate", `{"expectedRevision":2}`},
@@ -197,7 +197,7 @@ func TestWriteCommands(t *testing.T) {
 		{"break-glass apply", (&BreakGlassApply{Base: b, BGOptions: BGOptions{Justification: "j", Incident: "INC1"}, File: bgFile}).Execute,
 			"POST /v1/admin/break-glass", `"inlineSource":{"kind":"Source","metadata":{"name":"s9"}}`},
 		{"break-glass delete", bgDel.Execute, "POST /v1/admin/break-glass", `"operation":"DELETE"`},
-		{"release", (&Release{Base: b, ExpectedRevision: 4, Justification: "the pipeline was retired in March", Args: ResourceArgs{"binding", "b1"}}).Execute,
+		{"release", (&Release[BindingKind]{Base: b, ExpectedRevision: 4, Justification: "the pipeline was retired in March", Args: NameArg{"b1"}}).Execute,
 			"POST /v1/admin/bindings/b1/release", `"justification":"the pipeline was retired in March"`},
 		{"hold lift", (&HoldLift{Base: b, Comment: "contained", Args: holdID{"h1"}}).Execute, "POST /v1/admin/holds/h1/lift", `{"comment":"contained"}`},
 		{"charter check", (&CharterCheck{Base: b, File: bgFile}).Execute, "POST /v1/admin/charter/evaluate", `"source":{"svidRegex":null,"trustDomain":null}`},
@@ -313,7 +313,7 @@ metadata: {name: ldap-a}
 	if !strings.Contains(f.bodies[0], `"kind":"IdentityProvider"`) {
 		t.Errorf("an instance's body keeps its kind: %s", f.bodies[0])
 	}
-	if err := (&Delete{Base: f.base(t, "table", &out), ExpectedRevision: 3, Args: ResourceArgs{Kind: "secret-store", Name: "vault-a"}}).Execute(nil); err != nil {
+	if err := (&Delete[SecretStoreKind]{Base: f.base(t, "table", &out), ExpectedRevision: 3, Args: NameArg{"vault-a"}}).Execute(nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.last(); got != "DELETE /v1/admin/secret-stores/vault-a?expectedRevision=3" {

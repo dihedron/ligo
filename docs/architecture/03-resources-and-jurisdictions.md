@@ -24,6 +24,12 @@ A binding has three jurisdictions, copied from what it links: source, target and
 
 A principal's name is derived from the binding's UUID, in 20 characters, so two bindings cannot collide. Resources are tagged `ligo:binding_id=<uuid>`. Finding a resource tagged otherwise fails `Ensure`, and is skipped by `Cleanup`.
 
+## Managed resources
+
+A source, target or binding filed with `managed: true` by a `trusted_automation` principal carries `managed_by`, that principal's SPIFFE ID. The principal needs the role on every jurisdiction the resource involves: the owner, and for a binding its source, its target and the platform. The column is set by the change request that applies, and a database trigger refuses any other update of it. Instances, platforms and accounts have no such column.
+
+A change to a managed resource by anyone else is refused at filing (`409 resource-managed`, nothing stored) and again in the applying transaction, under the row lock, so a change filed before a lock was set does not apply after it. Revoking a binding that people removed in an emergency leaves a row in `managed_holds`, and the owner's creation of the same name is refused (`409 resource-held`) until a person who approves a side lifts it. The lock changes who may edit a resource, not what it may reach: the charter, the consent of the sides and the platform's bounds apply as before.
+
 ## Network flows
 
 A target and a platform declare the flows needed to reach them, within `allowed_endpoints`. Workloads read their effective flows from `GET /v1/flows`, so a verification tool on the host can check them, before any traffic depends on them.

@@ -30,6 +30,7 @@ cmd_serve() {
 	test-faults) serve_test_faults ;;
 	test-audit) serve_test_audit ;;
 	test-adminclient) serve_test_adminclient ;;
+	test-managed) serve_test_managed ;;
 	test-instances) serve_test_instances ;;
 	test-accounts) serve_test_accounts ;;
 	test-accounts-chaos) serve_test_accounts_chaos ;;
@@ -44,7 +45,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-managed, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -102,7 +103,7 @@ serve_proxy() {
 
 # CLI_USERS: the users on ligo1 that run the CLI, and their SPIFFE IDs on
 # the prod agent (unix:uid only, like the core entry).
-CLI_USERS=("ligo-ops ops/olga" "ligo-approver ops/dora" "ligo-platform ops/ada" "ligo-platform-approver ops/ivy")
+CLI_USERS=("ligo-ops ops/olga" "ligo-approver ops/dora" "ligo-platform ops/ada" "ligo-platform-approver ops/ivy" "ligo-ci ci/terraform")
 
 # serve_cli_users: the CLI users and their SVIDs.
 serve_cli_users() {
@@ -172,7 +173,7 @@ cli_approve() {
 cli_phase() {
 	local phase=""
 	for _ in $(seq 1 60); do
-		phase="$(cli ligo-ops -o json get binding "$1" 2>/dev/null | jq -r '.status.phase')" || phase=""
+		phase="$(cli ligo-ops -o json binding show "$1" 2>/dev/null | jq -r '.status.phase')" || phase=""
 		[[ "$phase" == "$2" ]] && return
 		sleep 1
 	done
@@ -219,16 +220,16 @@ YAML
 	cli_approve binding "$binding"
 	cli_phase "$binding" ACTIVE
 	# captured first: grep -q would cut the pipe, which pipefail reports as a failure
-	out="$(cli ligo-ops flows "$binding")" || die "flows of $binding"
+	out="$(cli ligo-ops binding flows "$binding")" || die "flows of $binding"
 	grep -q "target:$target" <<<"$out" || die "flows of $binding: $out"
 	info "CLI: $binding is ACTIVE, with its flows"
 	pw="$LIGO1_E2E/olivia.pw"
 	ldap_password olivia | inner_exec ligo1 sh -c "umask 077 && cat >$pw && chown ligo:ligo $pw"
-	out="$(cli ligo get binding "$binding" --username olivia --password-file "$pw")" || die "olivia cannot read $binding"
+	out="$(cli ligo binding show "$binding" --username olivia --password-file "$pw")" || die "olivia cannot read $binding"
 	grep -q "$binding" <<<"$out" || die "olivia reads: $out"
 	info "CLI: olivia reads $binding with LDAP Basic credentials"
-	revision="$(cli ligo-ops -o json get binding "$binding" | jq -r '.metadata.revision')"
-	cli ligo-ops delete binding "$binding" -r "$revision" >/dev/null || die "delete $binding"
+	revision="$(cli ligo-ops -o json binding show "$binding" | jq -r '.metadata.revision')"
+	cli ligo-ops binding delete "$binding" -r "$revision" >/dev/null || die "delete $binding"
 	cli_approve binding "$binding"
 	cli_phase "$binding" ""
 	[[ "$(cli ligo-approver -o json audit verify | jq -r .valid)" == true ]] || die "audit verify"
@@ -370,6 +371,9 @@ authorization:
   bindings:
     - { spiffe_id: "spiffe://prod.lab/ops/olga", role: operator, jurisdictions: ["dc/corp-prod/*"] }
     - { spiffe_id: "spiffe://prod.lab/ops/dora", role: approver, jurisdictions: ["dc/corp-prod/*"] }
+    # the lock's e2e (.specs/ligo-managed-resources.md): a pipeline that owns resources, and a rival automation
+    - { spiffe_id: "spiffe://prod.lab/ci/terraform", role: trusted_automation, jurisdictions: ["dc/corp-prod/*"] }
+    - { spiffe_id: "spiffe://prod.lab/ci/other", role: trusted_automation, jurisdictions: ["dc/corp-prod/*"] }
     # the HA e2e: a second approver (AC-50), and an administrator for maintenance (AC-26)
     - { spiffe_id: "spiffe://prod.lab/ops/sam", role: approver, jurisdictions: ["dc/corp-prod/*"] }
     - { spiffe_id: "spiffe://prod.lab/ops/ada", role: admin.full_access, jurisdictions: ["*"] }
@@ -389,6 +393,8 @@ authorization:
     # the web UI's echo guide: carol files, dave approves (.specs/ligo-echo-target.md)
     - { ldap_group_dn: "cn=ledger-dbas,ou=groups,$LDAP_BASE", role: operator, jurisdictions: ["dc/corp-prod/*"] }
     - { ldap_group_dn: "cn=ligo-approvers-prod,ou=groups,$LDAP_BASE", role: approver, jurisdictions: ["dc/corp-prod/*"] }
+    # the lock's e2e: a person with full access releases a lock (bob), a person approves a side and lifts a hold (dave, above)
+    - { ldap_group_dn: "cn=ledger-leads,ou=groups,$LDAP_BASE", role: admin.full_access, jurisdictions: ["*"] }
     - { ldap_group_dn: "cn=ligo-breakglass-prod,ou=groups,$LDAP_BASE", role: break_glass, jurisdictions: ["dc/corp-prod/*"] } # livia
 $([[ -n "$LAB_SOAK" ]] && echo '    - { ldap_group_dn: "cn=soak-breakglass,ou=groups,'"$LDAP_BASE"'", role: break_glass, jurisdictions: ["tenants/*"] } # the soak')
   approval:
@@ -460,7 +466,7 @@ serve_admins() {
 	local who dir="/root/e2e" f
 	local load="ns/e2e/sa/w$E2E_SUFFIX"
 	[[ -z "$LAB_ACCOUNTS" ]] || load="acct/acme/project/app01/sa/w$E2E_SUFFIX"
-	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean [peter]=ops/peter [rita]=ops/rita
+	local -A ids=([olga]=ops/olga [dora]=ops/dora [sam]=ops/sam [ada]=ops/ada [paula]=ops/paula [pia]=ops/pia [hana]=ops/hana [sean]=ops/sean [peter]=ops/peter [rita]=ops/rita [pipeline]=ci/terraform [rival]=ci/other
 		[workload]="$load" [stranger]="ns/e2e/sa/v$E2E_SUFFIX" [dcload]="ns/topo/sa/w$E2E_SUFFIX")
 	inner_exec spire-prod sh -c "rm -rf $dir && mkdir -m 0700 $dir"
 	for who in "${!ids[@]}"; do

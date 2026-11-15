@@ -10,6 +10,10 @@
 | Maker-checker per side, in the database | A bug or the application's role cannot approve | Checks in code only |
 | Consent from both owners | One owner alone allows hijacking and injection | The proposer holding rights on both ends, which needs a global administrator |
 | Unilateral revocation | No one may veto cutting off a compromised client | Symmetric consent |
+| The owner of a managed resource is the filer's SPIFFE ID | It is the identity the pipeline already presents, and delegation already checks it per jurisdiction | A registry of automations: a second authorization model |
+| A removal in an emergency leaves a hold that only a person lifts | A pipeline re-grants at its next run what was removed; no timer knows the incident is closed | Letting the owner re-create: undoes containment. A time limit: reopens the access on a schedule |
+| Break-glass on a managed binding is never ratified | A permanent change would make the person's edit the truth, against the pipeline | Allowing ratification: the lock would end with the first incident |
+| Release of an orphaned lock is a four-eyes request by people | The only way out of a lock must not be a single credential's decision, nor an automation's | A release by one administrator; an owner-only release (a lost pipeline locks the resource for ever) |
 | Default-deny interconnection policy | Two owners agreeing is not always enough | Consent alone |
 | Maintenance as one database setting | Enabling it per process lets replicas accept changes during a drain | A startup flag |
 | Targets are registered, not created | A database's owner keeps its schema and group roles | `ligo` provisioning the target itself |

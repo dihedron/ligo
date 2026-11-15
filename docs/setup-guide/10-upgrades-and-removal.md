@@ -17,6 +17,8 @@ The workload API and all reads keep serving during maintenance.
 
 **From v0.5.x to v0.6.0.** There is no migration to run (the database schema is unchanged), no change to `server.yaml`, and the plugins need no upgrade. The `ligo` CLI is now built on the Go admin client (`pkg/adminclient`), and three things change for people who run it: a read (GET) is repeated up to twice after a broken connection or a 429, 502, 503 or 504; the standard `HTTPS_PROXY` and `NO_PROXY` variables are honoured, so a CLI behind a corporate proxy reaches the server through it; and when a server or a proxy answers with something that is not an RFC 9457 problem, the CLI reports the status only, not the text of the page. The admin API's OpenAPI document (`api/openapi/admin.v1alpha1.yaml`) now types every answer, which changes no behaviour of the server.
 
+**From v0.6.x to the release that adds managed resources.** `ligo migrate` adds the owner columns and the `managed_holds` table. Nothing is locked afterwards: a resource is locked only when an automation files it with `managed: true` (or `ligo apply --managed`). `server.yaml` needs no change. Before 1.0.0 the migration is edited in place, so a database built by an earlier build of this branch fails with `applied migration changed`: rebuild it. To let a pipeline lock resources, see "Who may do what" in chapter 7: its SPIFFE ID needs `trusted_automation` on every jurisdiction its resources involve.
+
 ## Upgrading a plugin
 
 A package update changes the binary's hash, and two things pin it: the type's `sha256` in `server.yaml`, and the `unix:sha256` selector in SPIRE. Until both match, `ligo` refuses to start the new binary and the agent issues it no SVID. A running plugin keeps working, but it cannot start again if it stops, so do these steps together. A reload is not enough: `SIGHUP` only reloads certificates.
@@ -31,7 +33,7 @@ A plugin's binary carries only its version, so you can compare the hash with you
 
 ## Retiring an instance
 
-Revoke its bindings and retire its targets first, and rewire or retire the platforms that use it: `ligo delete platform|identity-provider|secret-store NAME -r REVISION` is refused while any of them remains (`instance-in-use`). A second person of its jurisdiction approves the retirement; its name is never reused.
+Revoke its bindings and retire its targets first, and rewire or retire the platforms that use it: `ligo platform|identity-provider|secret-store delete NAME -r REVISION` is refused while any of them remains (`instance-in-use`). A second person of its jurisdiction approves the retirement; its name is never reused.
 
 ## Removing a plugin type
 

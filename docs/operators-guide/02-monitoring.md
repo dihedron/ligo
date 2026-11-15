@@ -8,7 +8,7 @@ Logs are structured JSON, with `request_id`, `binding_id`, `workflow_id` and `at
 | :------------------------------- | :------------- | :---------------------------- |
 | `ligo_audit_chain_valid` | 0 | Treat as a security incident: *Incident procedures* |
 | `ligo_db_scrape_success` | 0 | The database's gauges are stale: check PostgreSQL |
-| `ligo_bindings{phase="FAILED"}`, `{phase="DELETE_FAILED"}` | Above 0 for long | `ligo list bindings`, then the error reference |
+| `ligo_bindings{phase="FAILED"}`, `{phase="DELETE_FAILED"}` | Above 0 for long | `ligo binding list`, then the error reference |
 | `ligo_propagation_oldest_seconds{priority="0"}` | Rising | Removals of access are waiting: a platform is likely down |
 | `ligo_privilege_bound_violations` | Above 0 | An access level grants beyond its platform's current bounds |
 | `ligo_interconnect_violations` | Above 0 | Existing bindings the policy would now deny |
