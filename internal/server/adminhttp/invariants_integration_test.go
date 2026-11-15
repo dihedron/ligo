@@ -239,6 +239,24 @@ func TestINV11Routes(t *testing.T) {
 			t.Errorf("list holds ?%s: %d %v", q, r.code, r.body)
 		}
 	}
+	hold2 := uuid.NewV7()
+	if _, err := v.owner.Exec(ctx, `insert into managed_holds (id, binding_name, source, target, access_level, source_jurisdiction, target_jurisdiction,
+		platform_jurisdiction, managed_by, basis, deleted_by, change_request_id) values ($1, $2, $3, $4, 'read', 'dc/corp-prod', 'dc/corp-prod/ledger', 'dc/corp-prod',
+		$5, 'CONTAINMENT', 'olga', $6)`, hold2, "held2-"+x, "src-"+x, "tgt-"+x, managedBy, v.request.ID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from managed_holds where id = any($1)", []uuid.UUID{hold, hold2}) })
+	if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?pageSize=1&state=all", nil, "lena", "pw"); r.code != 200 || r.body["nextPageToken"] == nil {
+		t.Errorf("first page of holds: %d %v", r.code, r.body)
+	} else if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?pageSize=1&state=all&pageToken="+r.body["nextPageToken"].(string), nil, "lena", "pw"); r.code != 200 {
+		t.Errorf("second page of holds: %d %v", r.code, r.body)
+	}
+	if r := v.do(t, v.client(t, ""), "POST", "/v1/admin/holds/"+hold2.String()+"/lift", "not an object", "lena", "pw"); r.code != 422 && r.code != 400 {
+		t.Errorf("a lift with a malformed body: %d %v", r.code, r.body)
+	}
+	if r := v.do(t, v.client(t, ""), "POST", "/v1/admin/sources/rel-"+x+"/release", map[string]any{"justification": "the pipeline that owned it was retired"}, "lara", "pw"); r.code != 422 {
+		t.Errorf("a release without expectedRevision: %d %v", r.code, r.body)
+	}
 	exercised["GET /v1/admin/holds"] = true
 
 	// operations
