@@ -2,6 +2,7 @@ package changerequests
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -19,6 +20,7 @@ func TestLockAudit(t *testing.T) {
 	}{
 		{"created managed", Request{Managed: &on, RequestedBy: owner, Operation: "CREATE"}, "", "RESOURCE_MANAGED"},
 		{"adopted", Request{Managed: &on, RequestedBy: owner, Operation: "UPDATE"}, "", "RESOURCE_MANAGED"},
+		{"taken over from another owner", Request{Managed: &on, RequestedBy: owner, Operation: "UPDATE"}, other, "RESOURCE_MANAGED"},
 		{"the owner keeps it", Request{Managed: &on, RequestedBy: owner, Operation: "UPDATE"}, owner, ""},
 		{"released by the owner", Request{Managed: &off, RequestedBy: owner, Operation: "UPDATE"}, owner, "RESOURCE_RELEASED"},
 		{"released by an administrator", Request{Managed: &off, RequestedBy: "root", Operation: "UPDATE", ReleaseJustification: "the pipeline was retired"}, other, "RESOURCE_RELEASED_BY_ADMIN"},
@@ -51,5 +53,23 @@ func TestAuditable(t *testing.T) {
 	}
 	if !auditable("a\x00SOURCE\x00s1", now.Add(violationWindow)) {
 		t.Error("not audited again after the window")
+	}
+}
+
+// TestAuditableForgets: what is out of its window is forgotten when the table is large.
+func TestAuditableForgets(t *testing.T) {
+	now := time.Now()
+	recentViolations.Lock()
+	for i := range 4096 {
+		recentViolations.at[fmt.Sprintf("old-%d", i)] = now.Add(-2 * violationWindow)
+	}
+	recentViolations.Unlock()
+	if !auditable("fresh", now) {
+		t.Fatal("a new key was not audited")
+	}
+	recentViolations.Lock()
+	defer recentViolations.Unlock()
+	if _, ok := recentViolations.at["old-0"]; ok || len(recentViolations.at) > 4096 {
+		t.Errorf("%d keys remain, old ones included: %v", len(recentViolations.at), ok)
 	}
 }

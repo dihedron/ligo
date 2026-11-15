@@ -209,6 +209,12 @@ func TestINV11Routes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = v.owner.Exec(context.Background(), "delete from managed_holds where id = $1", hold) })
+	if resp, _ := a.do("POST", "/ui/holds/"+hold.String()+"/lift", url.Values{"comment": {" "}}); resp.StatusCode != 422 {
+		t.Errorf("a lift without a comment: %d", resp.StatusCode)
+	}
+	if resp, _ := a.do("POST", "/ui/holds/"+uuid.NewV7().String()+"/lift", url.Values{"comment": {"contained"}}); resp.StatusCode != 404 {
+		t.Errorf("a lift of no hold: %d", resp.StatusCode)
+	}
 	act(a, "POST /ui/holds/{id}/lift", "HOLD_LIFTED", "/ui/holds/"+hold.String()+"/lift", url.Values{"comment": {"contained"}})
 
 	source2, err := os.ReadFile("server.go")

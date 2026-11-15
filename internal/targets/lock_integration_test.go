@@ -145,6 +145,9 @@ func TestLockAC_M4(t *testing.T) {
 	if _, err := s.Release(ctx, pipeline, name, 2, why); slug(err) != "forbidden" {
 		t.Errorf("a machine releases: %v", err)
 	}
+	if _, err := s.Release(ctx, root, name, 1, why); slug(err) != "revision-conflict" {
+		t.Errorf("a stale revision: %v", err)
+	}
 	r, err = s.Release(ctx, root, name, 2, why)
 	if err != nil {
 		t.Fatal(err)

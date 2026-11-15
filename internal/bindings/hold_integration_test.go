@@ -242,3 +242,65 @@ func TestLockSetBeforeApply(t *testing.T) {
 		t.Errorf("level %q (%v): the person's update applied to a managed binding", level, err)
 	}
 }
+
+// held leaves a hold on a fresh managed binding: the platform owner revokes it
+// with consent ANY, and the delete workflow ends.
+func held(t *testing.T, s *Service, o *pgxpool.Pool, w *world, n string) string {
+	t.Helper()
+	ctx := context.Background()
+	name, _ := managedBinding(t, s, o, w, n)
+	r, err := s.Delete(ctx, dcOp, name, 1, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, s, r, dcApp)
+	if _, err := o.Exec(ctx, "delete from bindings where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+// TestListHolds: the holds a caller sees, by binding, with the lifted ones on
+// request, and one page at a time.
+func TestListHolds(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	a := held(t, s, o, w, "la")
+	held(t, s, o, w, "lb")
+	names := func(hs []Hold) (out []string) {
+		for _, h := range hs {
+			out = append(out, h.BindingName)
+		}
+		return out
+	}
+	list, more, err := s.ListHolds(ctx, ledgerApp, HoldFilter{Binding: a, Limit: 10})
+	if err != nil || more || len(list) != 1 || list[0].BindingName != a || list[0].ManagedBy == "" {
+		t.Fatalf("by binding: %v %v %v", names(list), more, err)
+	}
+	// one hold per page: the second page follows the first, and neither repeats
+	first, more, err := s.ListHolds(ctx, ledgerApp, HoldFilter{Binding: "", Limit: 1})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first page: %v %v", names(first), err)
+	}
+	if !more {
+		t.Fatal("two open holds, one per page: the first page has no successor")
+	}
+	next, _, err := s.ListHolds(ctx, ledgerApp, HoldFilter{After: first[0].ID.String(), Limit: 1})
+	if err != nil || len(next) != 1 || next[0].ID == first[0].ID {
+		t.Fatalf("second page: %v %v", names(next), err)
+	}
+	// a caller who sees none of the jurisdictions sees none of the holds
+	if list, _, err := s.ListHolds(ctx, testOp, HoldFilter{Binding: a, Limit: 10}); err != nil || len(list) != 0 {
+		t.Errorf("an operator of another jurisdiction sees %v (%v)", names(list), err)
+	}
+	// a lifted hold is listed only on request
+	if err := s.LiftHold(ctx, ledgerApp, list[0].ID.String(), "restored after the review"); err != nil {
+		t.Fatal(err)
+	}
+	if open, _, err := s.ListHolds(ctx, ledgerApp, HoldFilter{Binding: a, Limit: 10}); err != nil || len(open) != 0 {
+		t.Errorf("open holds of %s after the lift: %v (%v)", a, names(open), err)
+	}
+	if all, _, err := s.ListHolds(ctx, ledgerApp, HoldFilter{Binding: a, All: true, Limit: 10}); err != nil || len(all) != 1 || all[0].LiftedBy == nil {
+		t.Errorf("all holds of %s: %v (%v)", a, names(all), err)
+	}
+}

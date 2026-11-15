@@ -229,6 +229,17 @@ func TestINV11Routes(t *testing.T) {
 		t.Fatal(err)
 	}
 	act("POST /v1/admin/holds/{id}/lift", "HOLD_LIFTED", v.client(t, ""), "/v1/admin/holds/"+hold.String()+"/lift", map[string]string{"comment": "contained"}, "lena", "pw")
+	if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?state=all&binding=held-"+x, nil, "lena", "pw"); r.code != 200 {
+		t.Errorf("list holds: %d %v", r.code, r.body)
+	} else if items, _ := r.body["items"].([]any); len(items) != 1 {
+		t.Errorf("list holds: %v", r.body)
+	}
+	for _, q := range []string{"pageSize=0", "pageToken=%21"} {
+		if r := v.do(t, v.client(t, ""), "GET", "/v1/admin/holds?"+q, nil, "lena", "pw"); r.code != 422 {
+			t.Errorf("list holds ?%s: %d %v", q, r.code, r.body)
+		}
+	}
+	exercised["GET /v1/admin/holds"] = true
 
 	// operations
 	fake := v.s.Workflows.(*fakeWorkflows)

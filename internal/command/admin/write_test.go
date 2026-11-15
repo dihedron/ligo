@@ -153,6 +153,7 @@ func TestWriteCommands(t *testing.T) {
 		"/v1/admin/charter/evaluate":                      {`{"resourceType":"BINDING","name":"b1","consent":"ALL","sides":[]}`},
 		"/v1/admin/bindings/b1/release":                   {applied},
 		"/v1/admin/holds/h1/lift":                         {`{}`},
+		"/v1/admin/holds":                                 {`{"items":[]}`},
 	})
 	var out bytes.Buffer
 	b := f.base(t, "table", &out)
@@ -199,6 +200,7 @@ func TestWriteCommands(t *testing.T) {
 		{"break-glass delete", bgDel.Execute, "POST /v1/admin/break-glass", `"operation":"DELETE"`},
 		{"release", (&Release[BindingKind]{Base: b, ExpectedRevision: 4, Justification: "the pipeline was retired in March", Args: NameArg{"b1"}}).Execute,
 			"POST /v1/admin/bindings/b1/release", `"justification":"the pipeline was retired in March"`},
+		{"hold list --all", (&HoldList{Base: b, Binding: "b1", All: true}).Execute, "GET /v1/admin/holds?binding=b1&state=all", ""},
 		{"hold lift", (&HoldLift{Base: b, Comment: "contained", Args: holdID{"h1"}}).Execute, "POST /v1/admin/holds/h1/lift", `{"comment":"contained"}`},
 		{"charter check", (&CharterCheck{Base: b, File: bgFile}).Execute, "POST /v1/admin/charter/evaluate", `"source":{"svidRegex":null,"trustDomain":null}`},
 	} {
