@@ -138,7 +138,8 @@ Working:
 - Prometheus metrics on their own listener (`server.metrics_listener`, default `127.0.0.1:9090`);
 - the external plugins, each with its own package: `ligo-plugin-openldap` (identity provider), `ligo-plugin-postgres` (platform provider) and `ligo-plugin-vault` (secret store, for Vault and OpenBao).
 
-Known limits of v0.5.0:
+Known limits of v0.6.0:
+- the admin client is for Go only and its API may change between minor versions until 1.0.0; it has no method for the decisions of people (approve, decline, ratify, revert, break-glass), by design, and the Terraform and OpenTofu provider and the MCP server are not written yet (backlog items 8 and 11);
 - the client SDK is for Go only: SDKs for Java, Python and JavaScript/TypeScript are not written yet (backlog item 7); `pkg/client`'s API may change between minor versions until 1.0.0;
 - the SDK's `Watch` polls (every 30 s by default), as the workload API has no stream, so a revocation reaches a watching workload within one poll; and every `Credential` call on a `vault-dynamic` binding makes a new database user, which the SDK does not cache;
 - the SDK reads credentials from Vault and OpenBao only; a binding applied before v0.5.0 has no `audience` (and no `namespace`) in its `auth` until its next apply or reconciliation, and the SDK reports that as an error;
