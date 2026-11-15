@@ -60,6 +60,7 @@ type ViewMetadata struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 	CreatedBy      string    `json:"createdBy"`
 	UpdatedBy      string    `json:"updatedBy"`
+	ManagedBy      *string   `json:"managedBy"` // the owner of the lock, or null
 }
 
 type Instance struct {
@@ -103,7 +104,7 @@ const viewQuery = `SELECT b.id, b.name, b.realm, b.source_jurisdiction, b.target
 	b.break_glass_cr_id, coalesce(g.requested_by, ''), coalesce(g.external_approval_ref, ''), b.break_glass_expires_at,
 	b.source_revision, b.target_revision, b.source_trust_domain, b.source_svid_regex, b.requested_spec,
 	coalesce(b.active_source_svid_regex, ''), b.active_since, b.active_auth_config, b.active_spec,
-	b.party_jurisdictions::text[]
+	b.party_jurisdictions::text[], b.managed_by
 	FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 	LEFT JOIN change_requests g ON g.id = b.break_glass_cr_id`
 
@@ -119,7 +120,7 @@ func scanView(row pgx.Row) (*View, error) {
 		&v.Parameters, &v.Purpose, &v.Labels, &v.ExpiresAt, &st.Phase, &st.Operation, &st.Attempt, &st.WorkflowID, &st.CurrentStep,
 		&st.Message, &st.LastTransitionTime, &st.PendingChangeRequestID, &st.PropagationPending, &bg, &bgBy, &bgRef, &bgExpires,
 		&v.Requested.SourceRevision, &v.Requested.TargetRevision, &v.Requested.TrustDomain, &v.Requested.SVIDRegex, &v.Requested.Spec,
-		&activeRegex, &since, &v.Auth, &v.Spec, &v.partyJurisdictions)
+		&activeRegex, &since, &v.Auth, &v.Spec, &v.partyJurisdictions, &m.ManagedBy)
 	if bg != nil && bgExpires != nil {
 		st.BreakGlass = &BreakGlassStatus{ChangeRequestID: *bg, RequestedBy: bgBy, IncidentReference: bgRef, ExpiresAt: *bgExpires}
 	}

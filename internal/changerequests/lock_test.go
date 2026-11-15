@@ -49,6 +49,13 @@ func TestLock(t *testing.T) {
 		{"automation outside its jurisdictions", owner, Request{Operation: "CREATE", Managed: on(true), OwnerJurisdiction: "cloud/fin-01/payments"}, "forbidden"},
 		{"binding with one jurisdiction not delegated", owner, Request{ResourceType: "BINDING", Operation: "CREATE", Managed: on(true), SourceJurisdiction: "dc/corp-prod/ledger", TargetJurisdiction: "cloud/fin-01/payments", PlatformJurisdiction: "dc/corp-prod/ledger"}, "forbidden"},
 		{"binding with every jurisdiction delegated", owner, Request{ResourceType: "BINDING", Operation: "CREATE", Managed: on(true), SourceJurisdiction: "dc/corp-prod/ledger", TargetJurisdiction: "dc/corp-prod/ledger", PlatformJurisdiction: "dc/corp-prod/ledger"}, ""},
+		{"admin releases", person, Request{ResourceType: "SOURCE", Operation: "UPDATE", LockOwner: pipeline, Managed: on(false), ReleaseJustification: "the pipeline was retired in March"}, ""},
+		{"release by an operator", Caller{Principal: authz.Principal{Name: "bob"}, Grants: authz.Grants{grant(config.RoleOperator, "*")}}, Request{ResourceType: "SOURCE", Operation: "UPDATE", LockOwner: pipeline, Managed: on(false), ReleaseJustification: "the pipeline was retired in March"}, "forbidden"},
+		{"release by a machine", spiffeCaller(other, grant(config.RoleFullAccess, "*")), Request{ResourceType: "SOURCE", Operation: "UPDATE", LockOwner: pipeline, Managed: on(false), ReleaseJustification: "the pipeline was retired in March"}, "forbidden"},
+		{"release of an unmanaged resource", person, Request{ResourceType: "SOURCE", Operation: "UPDATE", Managed: on(false), ReleaseJustification: "the pipeline was retired in March"}, "validation-failed"},
+		{"release with a short justification", person, Request{ResourceType: "SOURCE", Operation: "UPDATE", LockOwner: pipeline, Managed: on(false), ReleaseJustification: "retired"}, "validation-failed"},
+		{"a person adopts", person, Request{ResourceType: "SOURCE", Operation: "UPDATE", Managed: on(true), OwnerJurisdiction: "dc/corp-prod/ledger"}, "forbidden"},
+		{"automation adopts", owner, Request{ResourceType: "SOURCE", Operation: "UPDATE", Managed: on(true), OwnerJurisdiction: "dc/corp-prod/ledger"}, ""},
 		{"an instance cannot be managed", owner, Request{ResourceType: "PLATFORM", Operation: "CREATE", Managed: on(true), OwnerJurisdiction: "dc/corp-prod/ledger"}, "validation-failed"},
 		{"unmanaged create by anyone", person, Request{Operation: "CREATE", Managed: on(false)}, ""},
 	} {

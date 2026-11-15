@@ -71,8 +71,8 @@ The user's rule, "break-glass is always reverted", and ADR-12 rule 4, "an emerge
 ### 3.7 Admin API, client, CLI and UI
 
 - The OpenAPI document gains `managedBy` (string, null) on sources, targets and bindings, `managed` (boolean) on the create and update bodies (an `Options` field of the client, `Options.Managed`), `release` and `holds` operations, and the problems `resource-managed` and `resource-held` (both mapped by `pkg/adminclient` to `ErrState`, with a test that the slug list is complete, as `TestSlugsAreMapped` already requires).
-- `pkg/adminclient`: `Options.Managed`, the `ManagedBy` field of the types, `ReleaseResource`, `ListHolds`, `LiftHold` (a person's act, so not for the provider: it joins the methods that a tool's tests keep out, like the decisions).
-- The CLI: `--managed` on `ligo apply` for automation users; `ligo hold list|lift`; `ligo <type> release`.
+- `pkg/adminclient`: `Options.Managed`, the `ManagedBy` field of the types, `ListHolds`. `LiftHold` and the release by an administrator are a person's acts: the package has no method for them (they are in `notYet`, like the decisions, so that the compiler keeps them out of every tool).
+- The CLI: `--managed` on `ligo apply` for automation users; `--unmanaged` for the owner's own release; `ligo hold list|lift`; `ligo release source|target|binding NAME` (verb first, like the rest of the CLI).
 - The UI: a "managed by `<owner>`" badge on a managed resource and the reason that edit buttons are off; a banner for a hold on the binding's page.
 
 ### 3.8 Audit, webhooks and metrics
@@ -130,7 +130,7 @@ Main specification: a new ADR-17 and the threats T-M1 to T-M10 in its register; 
 | 0 | This spec, approved. |
 | 1 | The tests of AC-M1 to AC-M3 and AC-M9, then the migration and the service rules for sources, targets and bindings. |
 | 2 | Containment, break-glass and holds (AC-M5 to AC-M8). Done: `managed_holds`, `bindings.LiftHold`, the refusal at filing and at apply, no ratification of a managed binding's break-glass change. A hold ends when every side of its break-glass deletion is ratified. The audit entries of an open hold are not yet kept from pruning (chunk 4). |
-| 3 | The OpenAPI document, `pkg/adminclient`, the CLI (AC-M10). |
+| 3 | The OpenAPI document, `pkg/adminclient`, the CLI (AC-M10), and the release by an administrator (§3.3: a four-eyes UPDATE request of people with a justification; adoption also needs the people's sides). `TestEveryWriteIsClassified` makes a new write route say whether the lock covers it (T-M1). |
 | 4 | The UI badge, the audit, webhook and metric events. |
 | 5 | The lab suite and the release run (AC-M11); the documentation. |
 

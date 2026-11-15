@@ -153,6 +153,14 @@ type Request struct {
 	// LockOwner is the SPIFFE ID that owns the resource at filing, or empty.
 	Managed   *bool
 	LockOwner string
+	// ReleaseJustification is why a person with full access takes the lock
+	// off a resource whose owner cannot (release by administrator, §3.3).
+	ReleaseJustification string
+}
+
+// adopts reports whether r hands an unmanaged resource over to an automation.
+func (r *Request) adopts() bool {
+	return r.Operation == "UPDATE" && r.Managed != nil && *r.Managed && r.LockOwner == ""
 }
 
 // jurisdictions are every jurisdiction of the request and its sides, for visibility.
@@ -411,6 +419,9 @@ type Common struct {
 	// Managed sets (true) or releases (false) the lock of a source, target or
 	// binding (.specs/ligo-managed-resources.md); omitted, it is unchanged.
 	Managed *bool `json:"managed,omitempty"`
+	// ReleaseJustification is set by the service, never by a body: a release
+	// by administrator (§3.3).
+	ReleaseJustification string `json:"-"`
 }
 
 // Decode decodes a request body into v, refusing unknown fields, and checks
@@ -479,16 +490,32 @@ func Lock(c Caller, r *Request) error {
 	if r.Managed != nil && r.ResourceType != "" && !slices.Contains([]string{"SOURCE", "TARGET", "BINDING"}, r.ResourceType) {
 		return refuse(422, "validation-failed", "managed: only a source, a target or a binding can be managed")
 	}
-	if r.Operation == "CREATE" {
-		if r.Managed == nil || !*r.Managed {
-			return nil
-		}
-		if c.Principal.SPIFFEID == "" || !delegates(c, r) {
-			return refuse(403, "forbidden", "only a trusted_automation principal can create a managed resource")
+	if r.ReleaseJustification != "" {
+		switch {
+		case c.Principal.SPIFFEID != "" || !c.Grants.FullAccess():
+			return refuse(403, "forbidden", "only a person with full access releases a lock by administrator")
+		case r.LockOwner == "" || r.Operation != "UPDATE" || r.Managed == nil || *r.Managed:
+			return refuse(422, "validation-failed", "%s %q is not managed", strings.ToLower(r.ResourceType), r.ResourceName)
+		case len([]rune(strings.TrimSpace(r.ReleaseJustification))) < 20:
+			e := refuse(422, "validation-failed", "justification: at least 20 characters")
+			e.Fields = map[string]string{"justification": "At least 20 characters: say why the owner cannot release it."}
+			return e
 		}
 		return nil
 	}
-	if r.LockOwner == "" || c.ID() == r.LockOwner {
+	if r.Managed != nil && *r.Managed && (c.Principal.SPIFFEID == "" || !delegates(c, r)) {
+		return refuse(403, "forbidden", "only a trusted_automation principal can set the lock of a resource")
+	}
+	if r.Operation == "CREATE" {
+		return nil
+	}
+	return notOwner(c.ID(), r)
+}
+
+// notOwner refuses a change of a managed resource by anyone but its owner
+// id, containment excepted.
+func notOwner(id string, r *Request) error {
+	if r.LockOwner == "" || id == r.LockOwner {
 		return nil
 	}
 	if r.ResourceType == "BINDING" && r.Operation == "DELETE" && r.Consent == "ANY" {
@@ -510,10 +537,10 @@ func delegates(c Caller, r *Request) bool {
 // (T-M8), and sets or clears the owner as r says. For a CREATE the row has
 // just been inserted and curOwner is empty.
 func ApplyLock(ctx context.Context, tx pgx.Tx, table string, id uuid.UUID, r *Request, curOwner string) error {
-	if r.Operation != "CREATE" && r.kind() == "STANDARD" { // break-glass and system changes: §3.5, chunk 2
+	if r.Operation != "CREATE" && r.kind() == "STANDARD" && r.ReleaseJustification == "" { // break-glass and system changes: §3.5; a release by administrator is checked when filed
 		check := *r
 		check.LockOwner = curOwner
-		if err := Lock(Caller{Principal: authz.Principal{Name: r.RequestedBy}}, &check); err != nil {
+		if err := notOwner(r.RequestedBy, &check); err != nil {
 			return err
 		}
 	}

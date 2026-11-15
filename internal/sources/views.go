@@ -41,6 +41,7 @@ type ViewMetadata struct {
 	CreatedBy              string     `json:"createdBy"`
 	UpdatedBy              string     `json:"updatedBy"`
 	PendingChangeRequestID *uuid.UUID `json:"pendingChangeRequestId"`
+	ManagedBy              *string    `json:"managedBy"` // the owner of the lock, or null
 }
 
 const viewColumns = columns + `, created_at, updated_at, created_by, updated_by,
@@ -59,6 +60,9 @@ func scanView(row pgx.Row) (*View, *stored, error) {
 		st.Visibility.VisibleTo = nil
 	}
 	v.Source = st.Source
+	if st.ManagedBy != "" {
+		m.ManagedBy = &st.ManagedBy
+	}
 	m.ID, m.Name, m.Jurisdiction, m.State, m.Revision = st.ID, st.Metadata.Name, st.Metadata.Jurisdiction, st.Metadata.State, st.Revision
 	return v, st, err
 }

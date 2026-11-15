@@ -193,6 +193,43 @@ func TestINV11Routes(t *testing.T) {
 	}
 	act("POST /v1/admin/change-requests/{id}/revert", "BREAK_GLASS_REVERT_STARTED", dora, base+id(bg2)+"/revert", map[string]string{"comment": "the incident is over"})
 
+	// the lock: an administrator asks to release a managed source (four eyes, a
+	// person), and a person lifts a hold
+	managedBy := "spiffe://prod.internal/ns/ci/sa/" + x
+	for _, q := range []string{
+		`insert into sources (id, name, jurisdiction, trust_domain, svid_regex, visibility, created_by, updated_by) values ($1, $2, 'dc/corp-prod/ledger',
+			'prod.internal', $3, 'PUBLIC', 't', 't')`,
+	} {
+		if _, err := v.owner.Exec(ctx, q, uuid.NewV7(), "rel-"+x, `^spiffe://prod\.internal/ns/rel/sa/`+x+`$`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// managed_by changes only with a change request (a trigger): a test writes it as the owner does
+	for _, q := range []string{"alter table sources disable trigger trg_sources_managed_by",
+		"update sources set managed_by = '" + managedBy + "' where name = 'rel-" + x + "'",
+		"alter table sources enable trigger trg_sources_managed_by"} {
+		if _, err := v.owner.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	act("POST /v1/admin/{kind}/{name}/release", "CR_CREATED", v.client(t, ""), "/v1/admin/sources/rel-"+x+"/release",
+		map[string]any{"expectedRevision": 1, "justification": "the pipeline that owned it was retired"}, "lara", "pw")
+	for _, kind := range []string{"targets", "bindings"} { // the same route family, answered 404 here: no such resource, and no state changed
+		if r := v.do(t, v.client(t, ""), "POST", "/v1/admin/"+kind+"/none-"+x+"/release",
+			map[string]any{"expectedRevision": 1, "justification": "the pipeline that owned it was retired"}, "lara", "pw"); r.code != 404 {
+			t.Errorf("release of a missing %s: %d %v", kind, r.code, r.body)
+		}
+	}
+	exercised["POST /v1/admin/targets/{name}/release"], exercised["POST /v1/admin/bindings/{name}/release"] = true, true
+	exercised["POST /v1/admin/sources/{name}/release"] = true
+	hold := uuid.NewV7()
+	if _, err := v.owner.Exec(ctx, `insert into managed_holds (id, binding_name, source, target, access_level, source_jurisdiction, target_jurisdiction,
+		platform_jurisdiction, managed_by, basis, deleted_by, change_request_id) values ($1, $2, $3, $4, 'read', 'dc/corp-prod', 'dc/corp-prod/ledger', 'dc/corp-prod',
+		$5, 'CONTAINMENT', 'olga', $6)`, hold, "held-"+x, "src-"+x, "tgt-"+x, managedBy, v.request.ID); err != nil {
+		t.Fatal(err)
+	}
+	act("POST /v1/admin/holds/{id}/lift", "HOLD_LIFTED", v.client(t, ""), "/v1/admin/holds/"+hold.String()+"/lift", map[string]string{"comment": "contained"}, "lena", "pw")
+
 	// operations
 	fake := v.s.Workflows.(*fakeWorkflows)
 	fake.pending = []dbos.WorkflowStatus{{ID: "w1", ExecutorID: "gone-" + x, ApplicationVersion: "v2", CreatedAt: time.Now()}}

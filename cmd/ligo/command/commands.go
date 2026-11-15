@@ -32,6 +32,8 @@ type Commands struct {
 	Maint    admin.Maintenance   `command:"maintenance" description:"Show, enable or disable cluster-wide maintenance mode."`
 	Exec     admin.Executors     `command:"executors" description:"Show the executors' pending workflows, and recover those of a replica gone for good (§10.2)."`
 	BG       admin.BreakGlass    `command:"break-glass" description:"Emergency changes in approval-required jurisdictions (ADR-12)."`
+	Release  admin.Release       `command:"release" description:"Ask people to unlock a managed source, target or binding whose owner cannot (four eyes)."`
+	Hold     admin.Hold          `command:"hold" description:"List and lift the holds left by emergency removals of managed bindings."`
 	Account  admin.Account       `command:"account" description:"Manage the registry of accounts (tenants): list, get, register, retire."`
 	Gov      admin.Charter       `command:"charter" description:"Show the charter and evaluate a planned change (ADR-13, ADR-14)."`
 	Migrate  migrate.Migrate     `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`

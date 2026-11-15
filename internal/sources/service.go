@@ -135,6 +135,23 @@ func (s *Service) update(ctx context.Context, c changerequests.Caller, cur *stor
 	return s.file(ctx, c, "UPDATE", cur, src, req)
 }
 
+// Release files the release of a managed source by an administrator
+// (POST /v1/admin/sources/{name}/release), for an owner that cannot release
+// it: an update that changes nothing but the lock, decided by people only
+// (.specs/ligo-managed-resources.md §3.3).
+func (s *Service) Release(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, justification string) (*changerequests.Request, error) {
+	cur, err := s.current(ctx, c, name)
+	if err != nil {
+		return nil, err
+	}
+	if expectedRevision != cur.Revision {
+		return nil, refuse(409, "revision-conflict", "the source is at revision %d", cur.Revision)
+	}
+	off := false
+	req := &request{Common: changerequests.Common{ExpectedRevision: &expectedRevision, Managed: &off, ReleaseJustification: justification}}
+	return s.file(ctx, c, "UPDATE", cur, &cur.Source, req)
+}
+
 // current reads a source the caller can see by name (404 otherwise).
 func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := s.load(ctx, s.DB, name, false)
@@ -194,7 +211,7 @@ func compose(op string, cur *stored, src *Source, req *request) (*changerequests
 	}
 	r := &changerequests.Request{ResourceType: "SOURCE", ResourceName: src.Metadata.Name, Operation: op,
 		Consent: changerequests.ConsentAll, OwnerJurisdiction: src.Metadata.Jurisdiction, ExpectedRevision: req.ExpectedRevision,
-		Payload: payload, AutomationContext: req.AutomationContext, Managed: req.Managed}
+		Payload: payload, AutomationContext: req.AutomationContext, Managed: req.Managed, ReleaseJustification: req.ReleaseJustification}
 	if cur != nil {
 		r.ResourceID, r.LockOwner = &cur.ID, cur.ManagedBy
 	}

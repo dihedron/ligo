@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"uuid"
 
 	"github.com/dihedron/ligo/internal/audit"
@@ -117,4 +118,71 @@ func (s *Service) LiftHold(ctx context.Context, c changerequests.Caller, id, com
 		_, err = audit.Append(ctx, tx, audit.Entry{ResourceType: "BINDING", ResourceName: name, Action: "HOLD_LIFTED", Actor: c.ID(), Approver: c.ID(), Snapshot: snap})
 		return err
 	})
+}
+
+// Hold is a hold as the admin API shows it.
+type Hold struct {
+	ID                   uuid.UUID  `json:"id"`
+	BindingName          string     `json:"bindingName"`
+	Source               string     `json:"source"`
+	Target               string     `json:"target"`
+	AccessLevel          string     `json:"accessLevel"`
+	SourceJurisdiction   string     `json:"sourceJurisdiction"`
+	TargetJurisdiction   string     `json:"targetJurisdiction"`
+	PlatformJurisdiction string     `json:"platformJurisdiction"`
+	ManagedBy            string     `json:"managedBy"`
+	Basis                string     `json:"basis"`
+	DeletedBy            string     `json:"deletedBy"`
+	DeletedAt            time.Time  `json:"deletedAt"`
+	ChangeRequestID      uuid.UUID  `json:"changeRequestId"`
+	LiftedBy             *string    `json:"liftedBy"`
+	LiftedAt             *time.Time `json:"liftedAt"`
+	LiftBasis            *string    `json:"liftBasis"`
+	LiftComment          *string    `json:"liftComment"`
+}
+
+// HoldFilter selects holds (GET /v1/admin/holds): the open ones, or every one.
+type HoldFilter struct {
+	Binding string // by binding name
+	All     bool   // lifted holds too
+	After   string // keyset on id
+	Limit   int
+}
+
+// ListHolds returns the holds on bindings the caller sees, by id, at most
+// f.Limit, and whether more follow.
+func (s *Service) ListHolds(ctx context.Context, c changerequests.Caller, f HoldFilter) ([]Hold, bool, error) {
+	var out []Hold
+	after := f.After
+	for {
+		rows, err := s.DB.Query(ctx, `SELECT id, binding_name, source, target, access_level, source_jurisdiction, target_jurisdiction,
+			platform_jurisdiction, managed_by, basis, deleted_by, deleted_at, change_request_id, lifted_by, lifted_at, lift_basis, lift_comment
+			FROM managed_holds WHERE id::text > $1 AND ($2 = '' OR binding_name = $2) AND ($3 OR lifted_at IS NULL)
+			ORDER BY id::text LIMIT $4`, after, f.Binding, f.All, 2*f.Limit)
+		if err != nil {
+			return nil, false, err
+		}
+		batch, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Hold, error) {
+			var h Hold
+			err := row.Scan(&h.ID, &h.BindingName, &h.Source, &h.Target, &h.AccessLevel, &h.SourceJurisdiction, &h.TargetJurisdiction,
+				&h.PlatformJurisdiction, &h.ManagedBy, &h.Basis, &h.DeletedBy, &h.DeletedAt, &h.ChangeRequestID, &h.LiftedBy, &h.LiftedAt, &h.LiftBasis, &h.LiftComment)
+			return h, err
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		for _, h := range batch {
+			after = h.ID.String()
+			if !c.Grants.Sees(h.SourceJurisdiction, h.TargetJurisdiction, h.PlatformJurisdiction) {
+				continue
+			}
+			if len(out) == f.Limit {
+				return out, true, nil
+			}
+			out = append(out, h)
+		}
+		if len(batch) < 2*f.Limit {
+			return out, false, nil
+		}
+	}
 }

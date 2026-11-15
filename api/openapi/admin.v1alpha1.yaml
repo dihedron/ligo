@@ -95,6 +95,9 @@ paths:
   /v1/admin/sources/{name}/retire:
     parameters: [{ $ref: "#/components/parameters/name" }]
     post: { tags: [sources], operationId: retireSource, summary: File the retirement of a source (409 resource-in-use while bindings exist)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/sources/{name}/release:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [sources], operationId: releaseSource, summary: "File the release of a managed source by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).", requestBody: { $ref: "#/components/requestBodies/Release" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/sources/{name}/bindings:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -160,6 +163,9 @@ paths:
   /v1/admin/targets/{name}/access-levels/{level}/retire:
     parameters: [{ $ref: "#/components/parameters/name" }, { $ref: "#/components/parameters/level" }]
     post: { tags: [targets], operationId: retireAccessLevel, summary: File the retirement of an access level (refused while bindings use it)., requestBody: { $ref: "#/components/requestBodies/StateChange" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
+  /v1/admin/targets/{name}/release:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [targets], operationId: releaseTarget, summary: "File the release of a managed target by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).", requestBody: { $ref: "#/components/requestBodies/Release" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/targets/{name}/bindings:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get:
@@ -415,6 +421,9 @@ paths:
                 approvalReference: { type: string }
                 automationContext: { type: object }
       responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/bindings/{name}/release:
+    parameters: [{ $ref: "#/components/parameters/name" }]
+    post: { tags: [bindings], operationId: releaseBinding, summary: "File the release of a managed binding by an administrator: the owner cannot, so people take the lock off (full access, four eyes, a justification).", requestBody: { $ref: "#/components/requestBodies/Release" }, responses: { "202": { $ref: "#/components/responses/Filed" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/bindings/{name}/flows:
     parameters: [{ $ref: "#/components/parameters/name" }]
     get: { tags: [bindings], operationId: getBindingFlows, summary: The binding's effective network flows (§3.6)., responses: { "200": { $ref: "#/components/responses/Flows" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
@@ -429,6 +438,20 @@ paths:
     get: { tags: [bindings], operationId: bindingAudit, summary: The audit entries of a binding., parameters: [{ $ref: "#/components/parameters/pageSize" }, { $ref: "#/components/parameters/pageToken" }], responses: { "200": { $ref: "#/components/responses/AuditPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
 
   # --- change requests ---------------------------------------------------------
+  /v1/admin/holds:
+    get:
+      tags: [bindings]
+      operationId: listHolds
+      summary: The holds on bindings the caller sees (open ones; state=all adds the lifted).
+      parameters:
+        - { name: binding, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [open, all] } }
+        - $ref: "#/components/parameters/pageSize"
+        - $ref: "#/components/parameters/pageToken"
+      responses: { "200": { $ref: "#/components/responses/HoldPage" }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } }
+  /v1/admin/holds/{id}/lift:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post: { tags: [bindings], operationId: liftHold, summary: "Lift a hold: a person who approves a side of the binding, with a comment. It only restores the right to ask.", requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LiftRequest" } } } }, responses: { "204": { description: Lifted. }, "4XX": { $ref: "#/components/responses/Problem" }, "5XX": { $ref: "#/components/responses/Problem" } } }
   /v1/admin/change-requests:
     get:
       tags: [change-requests]
@@ -728,6 +751,9 @@ components:
             allOf:
               - { $ref: "#/components/schemas/TargetSpec" }
               - { $ref: "#/components/schemas/ChangeEnvelope" }
+    Release:
+      required: true
+      content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseRequest" } } }
     StateChange:
       required: true
       content:
@@ -829,6 +855,41 @@ components:
         expectedRevision: { type: integer, format: int64, description: "Required on an update." }
         approvalReference: { type: string }
         automationContext: { type: object }
+        managed: { type: boolean, description: "true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is." }
+    ReleaseRequest:
+      description: The release of a managed resource by an administrator (a four-eyes request of people only).
+      type: object
+      required: [expectedRevision, justification]
+      properties:
+        expectedRevision: { type: integer, format: int64 }
+        justification: { type: string, minLength: 20, maxLength: 2048, description: "Why the owner cannot release it." }
+    Hold:
+      description: A hold on a binding that a person removed in an emergency; nobody creates it again until a person lifts it.
+      type: object
+      required: [id, bindingName, source, target, accessLevel, sourceJurisdiction, targetJurisdiction, platformJurisdiction, managedBy, basis, deletedBy, deletedAt, changeRequestId, liftedBy, liftedAt, liftBasis, liftComment]
+      properties:
+        id: { type: string, format: uuid }
+        bindingName: { type: string }
+        source: { type: string }
+        target: { type: string }
+        accessLevel: { type: string }
+        sourceJurisdiction: { type: string }
+        targetJurisdiction: { type: string }
+        platformJurisdiction: { type: string }
+        managedBy: { type: string, description: "The owner of the binding when it was removed." }
+        basis: { type: string, enum: [CONTAINMENT, BREAK_GLASS] }
+        deletedBy: { type: string }
+        deletedAt: { type: string, format: date-time }
+        changeRequestId: { type: string, format: uuid }
+        liftedBy: { type: [string, "null"] }
+        liftedAt: { type: [string, "null"], format: date-time }
+        liftBasis: { type: [string, "null"], enum: [PERSON, RATIFIED, null] }
+        liftComment: { type: [string, "null"] }
+    LiftRequest:
+      type: object
+      required: [comment]
+      properties:
+        comment: { type: string, minLength: 1, maxLength: 2048 }
     Contact:
       type: object
       required: [name]
@@ -874,7 +935,7 @@ components:
         visibility: { $ref: "#/components/schemas/Visibility" }
     SourceMetadata:
       type: object
-      required: [id, name, jurisdiction, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      required: [id, name, jurisdiction, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId, managedBy]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -886,6 +947,7 @@ components:
         createdBy: { type: string }
         updatedBy: { type: string }
         pendingChangeRequestId: { type: [string, "null"], format: uuid }
+        managedBy: { type: [string, "null"], description: "The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does." }
     SourceIdentity:
       type: object
       required: [trustDomain, svidRegex, sampleSpiffeIds]
@@ -948,7 +1010,7 @@ components:
         visibility: { $ref: "#/components/schemas/Visibility" }
     TargetMetadata:
       type: object
-      required: [id, name, jurisdiction, platform, platformType, platformJurisdiction, realm, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId]
+      required: [id, name, jurisdiction, platform, platformType, platformJurisdiction, realm, state, revision, createdAt, updatedAt, createdBy, updatedBy, pendingChangeRequestId, managedBy]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -964,6 +1026,7 @@ components:
         createdBy: { type: string }
         updatedBy: { type: string }
         pendingChangeRequestId: { type: [string, "null"], format: uuid }
+        managedBy: { type: [string, "null"], description: "The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does." }
     Target:
       description: A target as the server returns it (§3.3).
       type: object
@@ -1040,7 +1103,7 @@ components:
         secretStore: { $ref: "#/components/schemas/InstanceRef" }
     BindingMetadata:
       type: object
-      required: [id, name, realm, sourceJurisdiction, targetJurisdiction, platformJurisdiction, platformType, platform, wiring, revision, activeRevision, createdAt, updatedAt, createdBy, updatedBy]
+      required: [id, name, realm, sourceJurisdiction, targetJurisdiction, platformJurisdiction, platformType, platform, wiring, revision, activeRevision, createdAt, updatedAt, createdBy, updatedBy, managedBy]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -1057,6 +1120,7 @@ components:
         updatedAt: { type: string, format: date-time }
         createdBy: { type: string }
         updatedBy: { type: string }
+        managedBy: { type: [string, "null"], description: "The SPIFFE ID that owns the lock of a resource managed by automation; null if nobody does." }
     BreakGlassStatus:
       type: object
       required: [changeRequestId, requestedBy, incidentReference, expiresAt]
@@ -1528,6 +1592,16 @@ components:
     Binding:
       description: A binding with its stages and last 20 audit entries.
       content: { application/json: { schema: { $ref: "#/components/schemas/BindingDetail" } } }
+    HoldPage:
+      description: A page of holds.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: "#/components/schemas/Hold" } }
+              nextPageToken: { type: [string, "null"] }
     BindingPage:
       description: A page of bindings.
       content:

@@ -96,3 +96,75 @@ func TestLock(t *testing.T) {
 		t.Error("the application's role set managed_by")
 	}
 }
+
+var root = caller("root", config.RoleFullAccess, "*")
+
+const why = "the pipeline was retired and its owner is gone"
+
+// TestLockAC_M4: adoption needs the sides' consent, a release by an
+// administrator is a four-eyes request of people only.
+func TestLockAC_M4(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	tg := ledger()
+	unique(t, owner, &tg)
+	name := tg.Metadata.Name
+	r, err := s.Create(ctx, alice, body(t, tg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, marco, r.ID, r.PayloadSHA256, "OWNER", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Requests.Approve(ctx, dora, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err = s.Update(ctx, pipeline, name, lockBody(t, tg, map[string]any{"expectedRevision": 1, "managed": true, "approvalReference": "CHG-1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" {
+		t.Fatalf("adoption %s: the existing sides must agree", r.Status)
+	}
+	for _, sd := range r.Sides {
+		if sd.Basis != "HUMAN" {
+			t.Fatalf("side %+v", sd)
+		}
+	}
+	if _, err := s.Requests.Approve(ctx, marco, r.ID, r.PayloadSHA256, "", "ok"); err != nil { // a change of the lock alone asks the owner only
+		t.Fatal(err)
+	}
+	if got := managedBy(t, s, name); got != pipelineID {
+		t.Fatalf("adopted, managed_by %q", got)
+	}
+
+	if _, err := s.Release(ctx, alice, name, 2, why); slug(err) != "forbidden" {
+		t.Errorf("an operator releases: %v", err)
+	}
+	if _, err := s.Release(ctx, pipeline, name, 2, why); slug(err) != "forbidden" {
+		t.Errorf("a machine releases: %v", err)
+	}
+	r, err = s.Release(ctx, root, name, 2, why)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || r.Consent != "ALL" {
+		t.Fatalf("release %s %s", r.Status, r.Consent)
+	}
+	if _, err := s.Requests.Approve(ctx, root, r.ID, r.PayloadSHA256, "OWNER", "ok"); slug(err) == "" {
+		t.Error("the administrator approves their own release")
+	}
+	if _, err := s.Requests.Approve(ctx, marco, r.ID, r.PayloadSHA256, "OWNER", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := managedBy(t, s, name); got != pipelineID {
+		t.Fatalf("released before every side: %q", got)
+	}
+	if _, err := s.Requests.Approve(ctx, dora, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := managedBy(t, s, name); got != "" {
+		t.Errorf("released, managed_by %q", got)
+	}
+}

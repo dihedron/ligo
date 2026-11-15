@@ -49,9 +49,14 @@ type Apply struct {
 	Wait              bool   `short:"w" long:"wait" description:"If a binding change is applied at creation, block up to 10s until provisioning reaches a terminal phase."`
 	ApprovalRef       string `long:"approval-ref" env:"LIGO_APPROVAL_REF" description:"Upstream approval reference (required for delegated approval, ADR-11)."`
 	AutomationContext string `long:"automation-context" env:"LIGO_AUTOMATION_CONTEXT" description:"Optional JSON object describing the calling automation (informative only)."`
+	Managed           bool   `long:"managed" description:"Lock the sources, targets and bindings of the file to the caller: only it may change them (trusted_automation on every jurisdiction involved)."`
+	Unmanaged         bool   `long:"unmanaged" description:"Release the lock of the sources, targets and bindings of the file (the owner only; an administrator uses 'ligo release')."`
 }
 
 func (cmd *Apply) Execute([]string) error {
+	if cmd.Managed && cmd.Unmanaged {
+		return errors.New("--managed and --unmanaged exclude each other")
+	}
 	docs, err := readManifest(cmd.File)
 	if err != nil {
 		return err
@@ -71,6 +76,9 @@ func (cmd *Apply) Execute([]string) error {
 		submit := func(d document) error {
 			if err := automation(d.body, cmd.ApprovalRef, cmd.AutomationContext); err != nil {
 				return err
+			}
+			if _, set := d.body["managed"]; !set && (cmd.Managed || cmd.Unmanaged) && lockable[d.kind] {
+				d.body["managed"] = cmd.Managed
 			}
 			kind := kindPaths[d.kind]
 			method, p := "POST", path(kind+"s")
@@ -613,5 +621,67 @@ func (cmd *AccountRetire) Execute([]string) error {
 	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
 		var v any
 		return v, columns["account"], c.Do(ctx, "POST", path("accounts", name, "retire"), nil, nil, &v)
+	})
+}
+
+// lockable are the kinds the lock covers (.specs/ligo-managed-resources.md §3.1).
+var lockable = map[string]bool{"Source": true, "Target": true, "Binding": true}
+
+// Release: ligo release KIND NAME, a four-eyes request by people to unlock a
+// resource whose owner cannot (§3.3).
+type Release struct {
+	Base
+	ExpectedRevision int64        `short:"r" long:"expected-revision" required:"true" description:"Expected current revision of the resource."`
+	Justification    string       `long:"justification" required:"true" description:"Why the owner cannot release it (at least 20 characters)."`
+	Args             ResourceArgs `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *Release) Execute([]string) error {
+	kind, name := cmd.Args.Kind, cmd.Args.Name
+	if !lockable[strings.ToUpper(kind[:1])+kind[1:]] {
+		return fmt.Errorf("only a source, a target or a binding can be released, not a %s", kind)
+	}
+	return cmd.changed("release requested", func(ctx context.Context, c *client.Client) ([]filed, error) {
+		f, err := cmd.post(ctx, c, "POST", path(kind+"s", name, "release"), nil,
+			map[string]any{"expectedRevision": cmd.ExpectedRevision, "justification": cmd.Justification})
+		return answers(f, err)
+	})
+}
+
+// Hold: ligo hold list|lift.
+type Hold struct {
+	List HoldList `command:"list" alias:"ls" description:"List the holds on bindings: removals in an emergency that nobody may undo until a person lifts them."`
+	Lift HoldLift `command:"lift" description:"Lift a hold (a person who approves a side of the binding): it only restores the right to ask."`
+}
+
+type holdID struct {
+	ID string `positional-arg-name:"id" description:"Hold id."`
+}
+
+type HoldList struct {
+	Base
+	Page
+	Binding string `long:"binding" description:"Only the holds of this binding name."`
+	All     bool   `long:"all" description:"Include the holds already lifted."`
+}
+
+func (cmd *HoldList) Execute([]string) error {
+	state := ""
+	if cmd.All {
+		state = "all"
+	}
+	return cmd.get(path("holds"), cmd.query("binding", cmd.Binding, "state", state), columns["hold"]...)
+}
+
+type HoldLift struct {
+	Base
+	Comment string `short:"m" long:"comment" required:"true" description:"Why the binding may be asked for again."`
+	Args    holdID `positional-args:"yes" required:"yes"`
+}
+
+func (cmd *HoldLift) Execute([]string) error {
+	return cmd.call(func(ctx context.Context, c *client.Client) (any, []client.Column, error) {
+		return map[string]any{"lifted": cmd.Args.ID}, []client.Column{col("LIFTED", "lifted")},
+			c.Do(ctx, "POST", path("holds", cmd.Args.ID, "lift"), nil, map[string]any{"comment": cmd.Comment}, nil)
 	})
 }

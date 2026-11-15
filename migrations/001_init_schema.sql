@@ -519,6 +519,7 @@ CREATE TABLE change_requests (
     review_overdue_notified_at TIMESTAMPTZ,                 -- BREAK_GLASS_REVIEW_OVERDUE already emitted
     managed            BOOLEAN,                             -- SOURCE, TARGET, BINDING: sets (true) or clears (false) the lock; NULL leaves it (.specs/ligo-managed-resources.md)
     lock_owner         VARCHAR(255),                        -- the resource's owner at filing, checked again at apply
+    release_justification TEXT CHECK (length(release_justification) BETWEEN 20 AND 2048),   -- release by administrator: why a person takes the lock off (§3.3)
     requested_by       VARCHAR(255) NOT NULL,
     requested_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     decided_by         VARCHAR(255),                        -- the principal whose action closed the request
@@ -529,6 +530,8 @@ CREATE TABLE change_requests (
     CONSTRAINT uq_cr_id_requester_kind UNIQUE (id, requested_by, kind),  -- target of the sides' composite foreign key
     CONSTRAINT chk_expected_revision CHECK (operation = 'CREATE' OR expected_revision IS NOT NULL),
     CONSTRAINT chk_managed CHECK (managed IS NOT TRUE OR (requested_by LIKE 'spiffe://%' AND resource_type IN ('SOURCE', 'TARGET', 'BINDING'))),
+    CONSTRAINT chk_release CHECK (release_justification IS NULL OR (operation = 'UPDATE' AND managed IS FALSE AND kind = 'STANDARD'
+        AND requested_by NOT LIKE 'spiffe://%' AND requested_by NOT LIKE 'system:%')),
     CONSTRAINT chk_cr_jurisdiction_columns CHECK (
         (resource_type = 'SOURCE'  AND owner_jurisdiction IS NOT NULL AND source_jurisdiction IS NULL AND target_jurisdiction IS NULL
                                    AND platform_jurisdiction IS NULL AND realm IS NULL)
@@ -654,6 +657,7 @@ BEGIN
      OR NEW.reverts_cr_id IS DISTINCT FROM OLD.reverts_cr_id
      OR NEW.depends_on_cr_id IS DISTINCT FROM OLD.depends_on_cr_id
      OR NEW.managed IS DISTINCT FROM OLD.managed OR NEW.lock_owner IS DISTINCT FROM OLD.lock_owner
+     OR NEW.release_justification IS DISTINCT FROM OLD.release_justification
      OR NEW.requested_by <> OLD.requested_by OR NEW.payload_sha256 <> OLD.payload_sha256
      OR (OLD.status <> 'PENDING' AND NEW.status <> OLD.status) THEN
     RAISE EXCEPTION 'immutable change_request column modified';

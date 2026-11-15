@@ -310,3 +310,30 @@ func (c *Client) GetAccount(ctx context.Context, name string) (Account, error) {
 		return c.gen.GetAccount(ctx, name, e...)
 	})
 }
+
+// HoldFilter selects holds: the open ones, or every one with All.
+type HoldFilter struct {
+	Binding  string // by binding name
+	All      bool   // lifted holds too
+	PageSize int
+}
+
+// ListHoldsPage is one page of the holds on bindings the caller sees.
+func (c *Client) ListHoldsPage(ctx context.Context, f HoldFilter, pageToken string) (Page[Hold], error) {
+	p := &gen.ListHoldsParams{Binding: opt[string](f.Binding), PageSize: optSize(f.PageSize), PageToken: opt[string](pageToken)}
+	if f.All {
+		all := gen.All
+		p.State = &all
+	}
+	r, err := fetch[gen.HoldPage](ctx, c, func(ctx context.Context, e ...gen.RequestEditorFn) (*http.Response, error) {
+		return c.gen.ListHolds(ctx, p, e...)
+	})
+	return Page[Hold]{r.Items, deref(r.NextPageToken)}, err
+}
+
+// ListHolds iterates over the holds on bindings the caller sees. A hold
+// stops everyone from creating the binding again until a person lifts it
+// (a decision of people: the package has no method for it).
+func (c *Client) ListHolds(ctx context.Context, f HoldFilter) iter.Seq2[Hold, error] {
+	return pages(func(t string) (Page[Hold], error) { return c.ListHoldsPage(ctx, f, t) })
+}

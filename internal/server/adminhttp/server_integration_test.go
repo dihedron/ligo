@@ -121,6 +121,8 @@ func (fakeDirectory) Authenticate(_ context.Context, user, password string) (aut
 		return authz.Principal{Name: "olivia", Groups: []string{"cn=ligo-viewers,ou=groups,dc=ligo,dc=lab"}}, nil
 	case user == "lena" && password == "pw":
 		return authz.Principal{Name: "lena", Groups: []string{"cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab"}}, nil
+	case user == "lara" && password == "pw":
+		return authz.Principal{Name: "lara", Groups: []string{"cn=ligo-admins,ou=groups,dc=ligo,dc=lab"}}, nil
 	case user == "livia" && password == "pw":
 		return authz.Principal{Name: "livia", Groups: []string{"cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab"}}, nil
 	}
@@ -271,6 +273,7 @@ func setup(t *testing.T, listener config.AdminListener) *env {
 		{SPIFFEID: viewerID, Role: config.RoleViewer, Jurisdictions: []string{"*"}},
 		{SPIFFEID: regID, Role: config.RoleAccountAdmin},
 		{SPIFFEID: bgID, Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/*"}},
+		{LDAPGroupDN: "cn=ligo-admins,ou=groups,dc=ligo,dc=lab", Role: config.RoleFullAccess, Jurisdictions: []string{"*"}},
 		{LDAPGroupDN: "cn=ligo-viewers,ou=groups,dc=ligo,dc=lab", Role: config.RoleViewer, Jurisdictions: []string{"*"}},
 		{LDAPGroupDN: "cn=ligo-breakglass-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleBreakGlass, Jurisdictions: []string{"dc/corp-prod/*"}},
 		{LDAPGroupDN: "cn=ligo-approvers-prod,ou=groups,dc=ligo,dc=lab", Role: config.RoleApprover, Jurisdictions: []string{"dc/*"}},

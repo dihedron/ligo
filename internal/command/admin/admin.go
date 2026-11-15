@@ -124,6 +124,8 @@ var columns = map[string][]client.Column{
 		col("REVISION", "metadata.revision"), col("EXPIRES", "expiresAt")},
 	"request": {col("ID", "id"), col("TYPE", "resourceType"), col("NAME", "resourceName"), col("OPERATION", "operation"), col("KIND", "kind"),
 		col("STATUS", "status"), col("AWAITING", "awaitingApproval"), col("REQUESTED BY", "requestedBy")},
+	"hold": {col("ID", "id"), col("BINDING", "bindingName"), col("OWNER", "managedBy"), col("BASIS", "basis"), col("DELETED BY", "deletedBy"),
+		col("DELETED AT", "deletedAt"), col("LIFTED BY", "liftedBy")},
 	"account":           {col("NAME", "name"), col("DISPLAY NAME", "displayName"), col("STATUS", "status"), col("REGISTERED BY", "registeredBy"), col("REGISTERED AT", "registeredAt")},
 	"platform":          {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("SERVING", "health.serving")},
 	"identity-provider": {col("NAME", "name"), col("TYPE", "type"), col("REALM", "realm"), col("JURISDICTION", "jurisdiction"), col("REVISION", "revision")},

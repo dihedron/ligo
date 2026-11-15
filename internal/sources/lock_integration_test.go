@@ -140,3 +140,67 @@ func TestLockAC_M9(t *testing.T) {
 }
 
 func lockSuffix() string { return uuid.NewV7().String()[24:] }
+
+var root = caller("root", config.RoleFullAccess, "*")
+
+const why = "the pipeline was retired and its owner is gone"
+
+// TestLockAC_M4: adoption needs the sides' consent, a release by an
+// administrator is a four-eyes request of people only.
+func TestLockAC_M4(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+
+	// adoption: the pipeline hands a person's source over to itself; no delegation applies, a person approves.
+	src := registered(t, s, owner)
+	name := src.Metadata.Name
+	r, err := s.Update(ctx, pipeline, name, body(t, src, map[string]any{"expectedRevision": 1, "managed": true, "approvalReference": "CHG-1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || r.Sides[0].Basis != changerequests.BasisHuman {
+		t.Fatalf("adoption %s, side %+v: the existing sides must agree", r.Status, r.Sides[0])
+	}
+	if got := managedBy(t, owner, name); got != "" {
+		t.Fatalf("managed before the approval: %q", got)
+	}
+	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := managedBy(t, owner, name); got != pipelineID {
+		t.Fatalf("adopted, managed_by %q", got)
+	}
+
+	// release by administrator
+	if _, err := s.Release(ctx, alice, name, 2, why); slug(err) != "forbidden" {
+		t.Errorf("an operator releases: %v", err)
+	}
+	if _, err := s.Release(ctx, pipeline, name, 2, why); slug(err) != "forbidden" {
+		t.Errorf("a machine releases: %v", err)
+	}
+	if _, err := s.Release(ctx, root, name, 2, "retired"); slug(err) != "validation-failed" {
+		t.Errorf("a short justification: %v", err)
+	}
+	r, err = s.Release(ctx, root, name, 2, why)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || r.Consent != changerequests.ConsentAll || r.Sides[0].Basis != changerequests.BasisHuman {
+		t.Fatalf("release %s %s %+v", r.Status, r.Consent, r.Sides)
+	}
+	if _, err := s.Requests.Approve(ctx, root, r.ID, r.PayloadSHA256, "", "ok"); slug(err) == "" {
+		t.Error("the administrator approves their own release")
+	}
+	if got := managedBy(t, owner, name); got != pipelineID {
+		t.Fatalf("released before the second person: %q", got)
+	}
+	if _, err := s.Requests.Approve(ctx, bob, r.ID, r.PayloadSHA256, "", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if got := managedBy(t, owner, name); got != "" {
+		t.Errorf("released, managed_by %q", got)
+	}
+	if _, err := s.Release(ctx, root, name, 3, why); slug(err) != "validation-failed" {
+		t.Errorf("releasing an unmanaged source: %v", err)
+	}
+}

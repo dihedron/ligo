@@ -161,6 +161,31 @@ func (s *Service) Update(ctx context.Context, c changerequests.Caller, name stri
 	return s.file(ctx, c, "UPDATE", consent, cur, &b, res, &req.Common)
 }
 
+// Release files the release of a managed binding by an administrator (POST
+// /v1/admin/bindings/{name}/release): an update that changes nothing but the
+// lock, with consent ALL, decided by people only
+// (.specs/ligo-managed-resources.md §3.3).
+func (s *Service) Release(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, justification string) (*changerequests.Request, error) {
+	cur, err := s.current(ctx, c, name)
+	if err != nil {
+		return nil, err
+	}
+	if cur.breakGlassCR != nil {
+		return nil, breakGlassOpen(cur)
+	}
+	if expectedRevision != cur.revision {
+		return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
+	}
+	b := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
+		Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, changerequests.ConsentAll, nil)
+	if err != nil {
+		return nil, err
+	}
+	off := false
+	return s.file(ctx, c, "UPDATE", changerequests.ConsentAll, cur, &b, res, &changerequests.Common{ExpectedRevision: &expectedRevision, Managed: &off, ReleaseJustification: justification})
+}
+
 // Delete files the revocation of a binding (DELETE /v1/admin/bindings/{name}):
 // consent ANY, decided by any one of the jurisdictions the requester acts for.
 func (s *Service) Delete(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, approvalReference string, automationContext json.RawMessage) (*changerequests.Request, error) {
@@ -466,7 +491,7 @@ func compose(op, consent string, cur *stored, b *Binding, res *resolved, common 
 	r := &changerequests.Request{ResourceType: "BINDING", ResourceName: b.Name, Operation: op, Consent: consent,
 		Realm: res.platform.Realm, SourceJurisdiction: res.sourceJurisdiction, TargetJurisdiction: res.targetJurisdiction, PlatformJurisdiction: res.platformJurisdiction,
 		InterconnectRule: res.decision.Rule, DistinctApprovers: res.decision.DistinctApprovers, ExpectedRevision: common.ExpectedRevision,
-		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed}
+		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed, ReleaseJustification: common.ReleaseJustification}
 	if cur != nil {
 		r.ResourceID, r.LockOwner = &cur.id, cur.managedBy
 	}

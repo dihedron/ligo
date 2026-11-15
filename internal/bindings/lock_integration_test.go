@@ -92,3 +92,62 @@ func TestLock(t *testing.T) {
 		t.Error("the application's role set managed_by")
 	}
 }
+
+var root = caller("root", role(config.RoleFullAccess, "*"))
+
+const why = "the pipeline was retired and its owner is gone"
+
+// TestLockAC_M4: adoption needs the sides' consent, a release by an
+// administrator is a four-eyes request of people only.
+func TestLockAC_M4(t *testing.T) {
+	s, o, w, _ := setup(t)
+	ctx := context.Background()
+	name, source := "ledger-adopt-"+w.suffix, ledgerSource(t, o, w, "a")
+	active(t, s, o, ledgerOp, name, source, w.ledger, "read", "", ledgerApp)
+
+	r, err := s.Update(ctx, pipeline, name, body(name, source, w.ledger, "read", `"expectedRevision":1`, `"managed":true`, `"approvalReference":"CHG-1"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || r.Sides[0].Basis != changerequests.BasisHuman {
+		t.Fatalf("adoption %s, sides %s: the existing sides must agree", r.Status, sides(r))
+	}
+	approve(t, s, r, ledgerApp)
+	if got := lockOwner(t, s, name); got != pipelineID {
+		t.Fatalf("adopted, managed_by %q", got)
+	}
+	if _, err := o.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
+		t.Fatal(err)
+	}
+	rev := func() int64 { _, _, _, _, r := bindingRow(t, o, name); return r }
+
+	if _, err := s.Release(ctx, ledgerOp, name, rev(), why); slug(err) != "forbidden" {
+		t.Errorf("an operator releases: %v", err)
+	}
+	if _, err := s.Release(ctx, pipeline, name, rev(), why); slug(err) != "forbidden" {
+		t.Errorf("a machine releases: %v", err)
+	}
+	if _, err := s.Release(ctx, root, name, rev(), "retired"); slug(err) != "validation-failed" {
+		t.Errorf("a short justification: %v", err)
+	}
+	r, err = s.Release(ctx, root, name, rev(), why)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != "PENDING" || r.Consent != changerequests.ConsentAll || r.Sides[0].Basis != changerequests.BasisHuman {
+		t.Fatalf("release %s %s %s", r.Status, r.Consent, sides(r))
+	}
+	if _, err := s.Requests.Approve(ctx, root, r.ID, r.PayloadSHA256, "", "ok"); slug(err) == "" {
+		t.Error("the administrator approves their own release")
+	}
+	if got := lockOwner(t, s, name); got != pipelineID {
+		t.Fatalf("released before the second person: %q", got)
+	}
+	approve(t, s, r, ledgerApp)
+	if got := lockOwner(t, s, name); got != "" {
+		t.Errorf("released, managed_by %q", got)
+	}
+	if _, err := s.Release(ctx, root, name, rev(), why); slug(err) != "validation-failed" {
+		t.Errorf("releasing an unmanaged binding: %v", err)
+	}
+}

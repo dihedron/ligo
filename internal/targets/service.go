@@ -189,6 +189,22 @@ func retirable(ctx context.Context, q store.Querier, cur *stored, t *Target) err
 	return nil
 }
 
+// Release files the release of a managed target by an administrator (POST
+// /v1/admin/targets/{name}/release): an update that changes nothing but the
+// lock, with the sides of a material change, decided by people only
+// (.specs/ligo-managed-resources.md §3.3).
+func (s *Service) Release(ctx context.Context, c changerequests.Caller, name string, expectedRevision int64, justification string) (*changerequests.Request, error) {
+	cur, err := s.current(ctx, c, name)
+	if err != nil {
+		return nil, err
+	}
+	if expectedRevision != cur.Revision {
+		return nil, refuse(409, "revision-conflict", "the target is at revision %d", cur.Revision)
+	}
+	off := false
+	return s.file(ctx, c, "UPDATE", cur, &cur.Target, &changerequests.Common{ExpectedRevision: &expectedRevision, Managed: &off, ReleaseJustification: justification}, true)
+}
+
 // current reads a target the caller can see by name (404 otherwise).
 func (s *Service) current(ctx context.Context, c changerequests.Caller, name string) (*stored, error) {
 	cur, err := load(ctx, s.DB, "name = $1 AND state <> 'RETIRED'", name, false)
@@ -209,7 +225,7 @@ func (s *Service) file(ctx context.Context, c changerequests.Caller, op string, 
 	m := t.Metadata
 	r := &changerequests.Request{ResourceType: "TARGET", ResourceName: m.Name, Operation: op, Consent: changerequests.ConsentAll,
 		Realm: m.Realm, OwnerJurisdiction: m.Jurisdiction, PlatformJurisdiction: m.PlatformJurisdiction, ExpectedRevision: common.ExpectedRevision,
-		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed}
+		Payload: payload, AutomationContext: common.AutomationContext, Managed: common.Managed, ReleaseJustification: common.ReleaseJustification}
 	if cur != nil {
 		r.ResourceID, r.LockOwner = &cur.ID, cur.ManagedBy
 	}

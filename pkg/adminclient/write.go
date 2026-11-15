@@ -21,12 +21,17 @@ import (
 // on fails before any call (T-A5): a stale one is ErrConflict.
 //
 // The package has no method to approve, decline, ratify or revert a change
-// request, or to break glass: those are decisions of people (T-A4).
+// request, to break glass, to lift a hold or to release a resource by an
+// administrator: those are decisions of people (T-A4).
 
 // Options go with every filing; the zero value is fine.
 type Options struct {
 	ApprovalReference string         // the external ticket or decision; delegated approval (ADR-11) needs it
 	AutomationContext map[string]any // who runs the automation, passed through to the server
+	// Managed sets the lock of a source, target or binding (true: the filer,
+	// a trusted_automation principal, becomes its owner and only it may change
+	// it) or, for its owner, releases it (false). nil leaves it as it is.
+	Managed *bool
 }
 
 const contentJSON = "application/json"
@@ -56,6 +61,11 @@ func encode(spec any, revision int64, o Options) (io.Reader, error) {
 	}
 	if o.ApprovalReference != "" {
 		if err := set("approvalReference", o.ApprovalReference); err != nil {
+			return nil, err
+		}
+	}
+	if o.Managed != nil {
+		if err := set("managed", *o.Managed); err != nil {
 			return nil, err
 		}
 	}
