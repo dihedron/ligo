@@ -728,10 +728,6 @@ components:
             allOf:
               - { $ref: "#/components/schemas/TargetSpec" }
               - { $ref: "#/components/schemas/ChangeEnvelope" }
-    Resource:
-      required: true
-      description: The resource (§3.2, §3.3, §3.5) plus expectedRevision (updates), approvalReference and automationContext.
-      content: { application/json: { schema: { type: object } } }
     StateChange:
       required: true
       content:
@@ -1493,16 +1489,6 @@ components:
     Object:
       description: The resource or result.
       content: { application/json: { schema: { type: object } } }
-    Page:
-      description: A page of items.
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [items]
-            properties:
-              items: { type: array, items: { type: object } }
-              nextPageToken: { type: [string, "null"] }
     AuditPage:
       description: A page of audit entries, newest first.
       content:
