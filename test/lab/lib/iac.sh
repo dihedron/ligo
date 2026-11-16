@@ -100,10 +100,10 @@ iac_test() {
 	for tool in terraform tofu; do
 		info "with $tool"
 		# the reads and the hermetic tests, as the operators: by the SVID of ligo-ops
-		iac_exec ligo-ops "$tool" -test.skip 'TestLabPipeline|TestLabTarget|TestLabPending' ${run:+-test.run "$run"}
+		iac_exec ligo-ops "$tool" -test.skip 'TestLabPipeline|TestLabTarget|TestLabBinding|TestLabPending' ${run:+-test.run "$run"}
 		# the pipeline: trusted automation, its writes apply at once
-		if [[ -z "$run" || "TestLabPipeline TestLabTarget" =~ $run ]]; then
-			iac_exec ligo-ci "$tool" -test.run '^(TestLabPipeline|TestLabTarget)$'
+		if [[ -z "$run" || "TestLabPipeline TestLabTarget TestLabBinding" =~ $run ]]; then
+			iac_exec ligo-ci "$tool" -test.run '^(TestLabPipeline|TestLabTarget|TestLabBinding)$'
 		fi
 		# an operator's write waits for a person, and a second apply waits for the same request
 		if [[ -z "$run" || "TestLabPending" =~ $run ]]; then
