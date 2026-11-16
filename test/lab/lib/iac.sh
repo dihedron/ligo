@@ -76,8 +76,10 @@ YAML
 # iac_test [-run REGEX]: builds the provider's tests (tag lab) on the host,
 # copies them to ligo1 and runs them as the operator ligo-ops, once per tool, with the
 # environment of the e2e of ligo serve and the SVIDs that serve_admins mints.
+IAC_ENV=()
+
 iac_test() {
-	local provider="${LIGO_PROVIDER_DIR:-$REPO_DIR/../terraform-provider-ligo}" run="" uid host tool
+	local provider="${LIGO_PROVIDER_DIR:-$REPO_DIR/../terraform-provider-ligo}" run="" host tool
 	[[ "${1:-}" == -run ]] && run="$2"
 	[[ -d "$provider/internal/provider" ]] || die "the provider is not at $provider: set LIGO_PROVIDER_DIR"
 	inner_exec ligo1 test -x "$IAC_BIN/terraform" || die "terraform is not installed on ligo1: lab.sh iac install"
@@ -89,20 +91,63 @@ iac_test() {
 	inner_push "$out/provider.test" ligo1 /tmp/provider.test 0755
 	E2E_SUFFIX="$(openssl rand -hex 4)"
 	serve_admins
-	uid="$(env_get .ligo1.ligo_uid)"
-	host=ligo1
 	local managed="iac-m-$E2E_SUFFIX" free="iac-f-$E2E_SUFFIX"
 	iac_fixtures "$managed" "$free"
-	inner_exec ligo1 sh -c "rm -rf /tmp/iac && install -d -o ligo-ops -m 0700 /tmp/iac"
-	uid="$(inner_exec ligo1 id -u ligo-ops </dev/null)" # the provider reads as the operators do: by its SVID
+	local user tool pend="iac-w-$E2E_SUFFIX"
+	for user in ligo-ops ligo-ci; do
+		inner_exec ligo1 sh -c "rm -rf /tmp/iac-$user && install -d -o $user -m 0700 /tmp/iac-$user"
+	done
 	for tool in terraform tofu; do
 		info "with $tool"
-		local envs=(--env "LIGO_LAB_SOCKET=unix:///run/spire/prod/agent.sock" --env "LIGO_LAB_SERVER_ID=spiffe://prod.lab/ns/sys/sa/ligo" --env "LIGO_LAB_MANAGED_SOURCE=$managed" --env "LIGO_LAB_FREE_SOURCE=$free" --env "LIGO_LAB_TARGET=iac-t-${managed##*-}"
-			--env "LIGO_LAB_OWNER=spiffe://prod.lab/ci/terraform" --env "TF_ACC=1" --env "TF_ACC_TERRAFORM_PATH=$IAC_BIN/$tool" --env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443"
-			--env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SUFFIX=$E2E_SUFFIX")
-		[[ "$tool" == tofu ]] && envs+=(--env "TF_ACC_PROVIDER_NAMESPACE=hashicorp" --env "TF_ACC_PROVIDER_HOST=registry.opentofu.org")
-		lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp/iac --env TMPDIR=/tmp/iac --env HOME=/tmp/iac "${envs[@]}" -- \
-			/tmp/provider.test -test.count=1 -test.v ${run:+-test.run "$run"} | sed 's/^/        /'
-		[[ "${PIPESTATUS[0]}" == 0 ]] || die "the provider's tests failed with $tool"
+		# the reads and the hermetic tests, as the operators: by the SVID of ligo-ops
+		iac_exec ligo-ops "$tool" -test.skip 'TestLabPipeline|TestLabPending' ${run:+-test.run "$run"}
+		# the pipeline: trusted automation, its writes apply at once
+		if [[ -z "$run" || "TestLabPipeline" =~ $run ]]; then
+			iac_exec ligo-ci "$tool" -test.run '^TestLabPipeline$'
+		fi
+		# an operator's write waits for a person, and a second apply waits for the same request
+		if [[ -z "$run" || "TestLabPending" =~ $run ]]; then
+			iac_pending "$tool" "$pend-$tool"
+		fi
 	done
+}
+
+# iac_exec USER TOOL TESTARGS...: the provider's tests, as USER, with TOOL.
+iac_exec() {
+	local user="$1" tool="$2" uid
+	shift 2
+	uid="$(inner_exec ligo1 id -u "$user" </dev/null)"
+	local envs=(--env "LIGO_LAB_SOCKET=unix:///run/spire/prod/agent.sock" --env "LIGO_LAB_SERVER_ID=spiffe://prod.lab/ns/sys/sa/ligo"
+		--env "LIGO_LAB_MANAGED_SOURCE=$managed" --env "LIGO_LAB_FREE_SOURCE=$free" --env "LIGO_LAB_TARGET=iac-t-${managed##*-}"
+		--env "LIGO_LAB_OWNER=spiffe://prod.lab/ci/terraform" --env "TF_ACC=1" --env "TF_ACC_TERRAFORM_PATH=$IAC_BIN/$tool"
+		--env "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" "${IAC_ENV[@]}")
+	[[ "$tool" == tofu ]] && envs+=(--env "TF_ACC_PROVIDER_NAMESPACE=hashicorp" --env "TF_ACC_PROVIDER_HOST=registry.opentofu.org")
+	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "/tmp/iac-$user" --env "TMPDIR=/tmp/iac-$user" --env "HOME=/tmp/iac-$user" "${envs[@]}" -- \
+		/tmp/provider.test -test.count=1 -test.v "$@" | sed 's/^/        /'
+	[[ "${PIPESTATUS[0]}" == 0 ]] || die "the provider's tests failed with $tool, as $user"
+}
+
+# iac_pending TOOL NAME: an operator's source waits for approval. The first
+# apply ends at its timeout with the request open; the second waits for that
+# same request while ligo-approver approves it (no second filing), and its
+# removal is approved the same way. The requests are counted at the end.
+iac_pending() {
+	local tool="$1" name="$2" n approver
+	IAC_ENV=(--env "LIGO_LAB_PENDING_SOURCE=$name" --env "LIGO_LAB_PHASE=file")
+	iac_exec ligo-ops "$tool" -test.run '^TestLabPending$'
+	n="$(cli ligo-approver -o json cr list --kind source --name "$name" | jq '.items | length')"
+	[[ "$n" == 1 ]] || die "$name: $n change requests after the first apply, want 1"
+	(for _ in $(seq 1 45); do
+		sleep 3
+		(cli_approve source "$name") >/dev/null 2>&1 || true
+	done) &
+	approver=$!
+	IAC_ENV=(--env "LIGO_LAB_PENDING_SOURCE=$name" --env "LIGO_LAB_PHASE=adopt")
+	iac_exec ligo-ops "$tool" -test.run '^TestLabPending$'
+	kill "$approver" 2>/dev/null || true
+	wait "$approver" 2>/dev/null || true
+	IAC_ENV=()
+	n="$(cli ligo-approver -o json cr list --kind source --name "$name" | jq '.items | length')"
+	[[ "$n" == 2 ]] || die "$name: $n change requests, want 2 (the creation, waited for once, and the removal)"
+	info "$tool: a pending request is waited for, not filed again; the requests of $name are 2"
 }
