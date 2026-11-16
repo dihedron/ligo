@@ -261,3 +261,11 @@ Integration tests are Go tests behind the build tag `integration`, next to the c
 2. `lab.env`, `lib/common.sh`, `preflight`.
 3. `up` / `down` / `status` / `ssh` / `logs` / `env` / `psql`, `sql/roles.sql`, PKI, snapshot / reset / stop / start. Done when `lab.sh psql --as app -c 'select 1'` works over TLS and `reset` restores an empty database.
 4. The migration, the runner and its integration tests (chunk 2.1 proper), run with `lab.sh test`; the CI job with `postgres:16`.
+
+## The provider's acceptance suite (`lab.sh iac`)
+
+The Terraform/OpenTofu provider (`terraform-provider-ligo`) is tested against the lab, not the host: neither tool is installed there.
+
+- `lab.sh iac install` downloads Terraform (`LAB_TERRAFORM_VERSION`) and OpenTofu (`LAB_TOFU_VERSION`) from their release servers on the host, verifies the SHA-256 sums over HTTPS (the signatures are not checked), and pushes both binaries to `ligo1:/usr/local/bin`. `lab.sh iac status` shows what is installed. The versions go into the release run's `versions.txt`.
+- `lab.sh iac test [-run REGEX]` builds the provider's tests (`go test -c -tags lab`, from `$LIGO_PROVIDER_DIR`, by default `../terraform-provider-ligo`) and runs them on `ligo1` once with each tool, as the operator `ligo-ops`: the provider reads by that user's SVID (`spiffe_socket`, `server_id`). Before the run it creates a source that the pipeline owns (`ligo-ci apply --managed`), an unmanaged one and a target; the test reads them back and checks `managed_by`.
+- It needs the baseline install (`serve install` with no `LAB_ACCOUNTS`): the sources' regexes resolve to `dc/corp-prod`. It is not a step of `release-run` until the provider has a suite worth running (its chunk 6).

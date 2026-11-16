@@ -37,6 +37,7 @@ release_versions() {
 	go version
 	printf 'slapd %s\n' "$(inner_exec ldap dpkg-query -W -f='${Version}' slapd)"
 	printf 'haproxy %s\n' "$(inner_exec lb dpkg-query -W -f='${Version}' haproxy)"
+	inner_exec ligo1 test -x /usr/local/bin/terraform && printf 'terraform %s\ntofu %s\n' "$(inner_exec ligo1 /usr/local/bin/terraform version | head -1)" "$(inner_exec ligo1 /usr/local/bin/tofu version | head -1)"
 }
 
 # cmd_release_run destroys the lab, builds a new one and runs every suite on

@@ -28,6 +28,8 @@ source "$LAB_DIR/lib/ldap.sh"
 source "$LAB_DIR/lib/deploy.sh"
 # shellcheck source=lib/echo.sh
 source "$LAB_DIR/lib/echo.sh"
+# shellcheck source=lib/iac.sh
+source "$LAB_DIR/lib/iac.sh"
 # shellcheck source=lib/pg.sh
 source "$LAB_DIR/lib/pg.sh"
 # shellcheck source=lib/snapshot.sh
@@ -104,6 +106,9 @@ commands:
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
                             echo-client on ligo1 as USER (echo-bound, echo-unbound)
+  iac install|status         Terraform and OpenTofu on ligo1 (versions pinned in lab.env)
+  iac test [-run REGEX]     the provider's tests (tag lab, TF_ACC=1) on ligo1, with each tool;
+                            the provider is at LIGO_PROVIDER_DIR (default ../terraform-provider-ligo)
   cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);
                             stdin passes through, for manifests
   spire <prod|test> [args]  spire-server on that realm's server
@@ -298,6 +303,7 @@ main() {
 	test) cmd_test "$@" ;;
 	serve) cmd_serve "$@" ;;
 	echo) cmd_echo "$@" ;;
+	iac) cmd_iac "$@" ;;
 	cli) require_lab && [[ $# -ge 1 ]] && cli "$@" ;;
 	psql) cmd_psql "$@" ;;
 	spire) require_lab && spire "$@" ;;
