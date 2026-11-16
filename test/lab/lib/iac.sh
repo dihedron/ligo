@@ -100,10 +100,14 @@ iac_test() {
 	for tool in terraform tofu; do
 		info "with $tool"
 		# the reads and the hermetic tests, as the operators: by the SVID of ligo-ops
-		iac_exec ligo-ops "$tool" -test.skip 'TestLabPipeline|TestLabTarget|TestLabBinding|TestLabPending' ${run:+-test.run "$run"}
+		iac_exec ligo-ops "$tool" -test.skip 'TestLabPipeline|TestLabTarget|TestLabBinding|TestLabInstances|TestLabPending' ${run:+-test.run "$run"}
 		# the pipeline: trusted automation, its writes apply at once
 		if [[ -z "$run" || "TestLabPipeline TestLabTarget TestLabBinding" =~ $run ]]; then
 			iac_exec ligo-ci "$tool" -test.run '^(TestLabPipeline|TestLabTarget|TestLabBinding)$'
+		fi
+		# instances are always decided by a person: the apply waits for the platform approver
+		if [[ -z "$run" || "TestLabInstances" =~ $run ]]; then
+			iac_instances "$tool" "$E2E_SUFFIX-$tool"
 		fi
 		# an operator's write waits for a person, and a second apply waits for the same request
 		if [[ -z "$run" || "TestLabPending" =~ $run ]]; then
@@ -125,6 +129,29 @@ iac_exec() {
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "/tmp/iac-$user" --env "TMPDIR=/tmp/iac-$user" --env "HOME=/tmp/iac-$user" "${envs[@]}" -- \
 		/tmp/provider.test -test.count=1 -test.v "$@" | sed 's/^/        /'
 	[[ "${PIPESTATUS[0]}" == 0 ]] || die "the provider's tests failed with $tool, as $user"
+}
+
+# iac_instances TOOL SUFFIX: an operator files an identity provider and a secret
+# store, which wait for a person; the platform approver approves them (and their
+# removal) in the background. Each is two requests, filed once.
+iac_instances() {
+	local tool="$1" sfx="$2" approver kind name n
+	(for _ in $(seq 1 60); do
+		sleep 3
+		(approve_all ligo-platform-approver identity-provider && approve_all ligo-platform-approver secret-store) >/dev/null 2>&1 || true
+	done) &
+	approver=$!
+	IAC_ENV=(--env "LIGO_LAB_INSTANCE_SUFFIX=$sfx")
+	iac_exec ligo-ops "$tool" -test.run '^TestLabInstances$'
+	kill "$approver" 2>/dev/null || true
+	wait "$approver" 2>/dev/null || true
+	IAC_ENV=()
+	for kind in identity-provider:iac-idp secret-store:iac-ss; do
+		name="${kind#*:}-$sfx"
+		n="$(cli ligo-platform-approver -o json cr list --kind "${kind%%:*}" --name "$name" | jq '.items | length')"
+		[[ "$n" == 2 ]] || die "$name: $n change requests, want 2 (the creation, waited for once, and the removal)"
+	done
+	info "$tool: the instances waited for a person; two requests each"
 }
 
 # iac_pending TOOL NAME: an operator's source waits for approval. The first
