@@ -131,22 +131,22 @@ iac_exec() {
 	[[ "${PIPESTATUS[0]}" == 0 ]] || die "the provider's tests failed with $tool, as $user"
 }
 
-# iac_instances TOOL SUFFIX: an operator files an identity provider and a secret
-# store, which wait for a person; the platform approver approves them (and their
+# iac_instances TOOL SUFFIX: an operator files an identity provider, a secret
+# store and a platform that wires them, which wait for a person; the platform approver approves them (and their
 # removal) in the background. Each is two requests, filed once.
 iac_instances() {
 	local tool="$1" sfx="$2" approver kind name n
 	(for _ in $(seq 1 60); do
 		sleep 3
-		(approve_all ligo-platform-approver identity-provider && approve_all ligo-platform-approver secret-store) >/dev/null 2>&1 || true
+		(approve_all ligo-platform-approver identity-provider && approve_all ligo-platform-approver secret-store && approve_all ligo-platform-approver platform) >/dev/null 2>&1 || true
 	done) &
 	approver=$!
-	IAC_ENV=(--env "LIGO_LAB_INSTANCE_SUFFIX=$sfx")
+	IAC_ENV=(--env "LIGO_LAB_INSTANCE_SUFFIX=$sfx" --env "LIGO_LAB_CA_B64=$(base64 -w0 <"$LAB_STATE_DIR/pki/ca.crt")")
 	iac_exec ligo-ops "$tool" -test.run '^TestLabInstances$'
 	kill "$approver" 2>/dev/null || true
 	wait "$approver" 2>/dev/null || true
 	IAC_ENV=()
-	for kind in identity-provider:iac-idp secret-store:iac-ss; do
+	for kind in identity-provider:iac-idp secret-store:iac-ss platform:iac-pf; do
 		name="${kind#*:}-$sfx"
 		n="$(cli ligo-platform-approver -o json cr list --kind "${kind%%:*}" --name "$name" | jq '.items | length')"
 		[[ "$n" == 2 ]] || die "$name: $n change requests, want 2 (the creation, waited for once, and the removal)"
