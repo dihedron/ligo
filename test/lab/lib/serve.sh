@@ -31,6 +31,8 @@ cmd_serve() {
 	test-audit) serve_test_audit ;;
 	test-adminclient) serve_test_adminclient ;;
 	test-managed) serve_test_managed ;;
+	test-campaign) serve_test_campaign ;;
+	test-attestation) serve_test_attestation ;;
 	test-instances) serve_test_instances ;;
 	test-accounts) serve_test_accounts ;;
 	test-accounts-chaos) serve_test_accounts_chaos ;;
@@ -45,7 +47,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-managed, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
