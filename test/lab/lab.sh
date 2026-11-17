@@ -40,6 +40,10 @@ source "$LAB_DIR/lib/serve.sh"
 source "$LAB_DIR/lib/instances.sh"
 # shellcheck source=lib/managed.sh
 source "$LAB_DIR/lib/managed.sh"
+# shellcheck source=lib/campaign.sh
+source "$LAB_DIR/lib/campaign.sh"
+# shellcheck source=lib/attestation.sh
+source "$LAB_DIR/lib/attestation.sh"
 # shellcheck source=lib/lb.sh
 source "$LAB_DIR/lib/lb.sh"
 # shellcheck source=lib/otel.sh
@@ -101,12 +105,18 @@ commands:
                             charter.accounts and runs the accounts' e2e; reset
                             and install again before any other suite;
                             test-accounts-chaos likewise: 300 accounts, races under
-                            killed replicas, PostgreSQL and the directory stopped
+                            killed replicas, PostgreSQL and the directory stopped;
+                            test-campaign (pre-release campaign) the lifecycle of
+                            releases, binding expiry, break-glass limits, the rate
+                            limit and the CLI's hold lift; test-attestation the
+                            lxd_iid agents' IDs, an agent restarted and stopped
   echo install|status|logs|smoke
                             the echo target on ligo1 (.specs/ligo-echo-target.md)
   echo client USER TARGET [args]
                             echo-client on ligo1 as USER (echo-bound, echo-unbound)
   iac install|status         Terraform and OpenTofu on ligo1 (versions pinned in lab.env)
+  iac campaign [NAME...]    the pre-release campaign scenarios (Approval, Hold, Lock, Restart, AgentRestart, Crash, Replica, Burst) with each tool;
+                            people's actions are done by a responder on the host
   iac test [-run REGEX]     the provider's tests (tag lab, TF_ACC=1) on ligo1, with each tool;
                             the provider is at LIGO_PROVIDER_DIR (default ../terraform-provider-ligo)
   cli USER ARGS             the ligo CLI on ligo1 as USER (ligo-ops, ligo-approver);

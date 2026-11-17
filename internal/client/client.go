@@ -58,6 +58,9 @@ var prompt = func(user string) (string, error) {
 	return password, err
 }
 
+// socketTimeout bounds the wait for the Workload API's first SVID.
+var socketTimeout = 20 * time.Second
+
 // Connect prepares a client: with --spiffe-socket it presents the SVID of
 // the Workload API, otherwise LDAP Basic credentials (§8.4).
 func (o *Options) Connect(ctx context.Context) (*Client, error) {
@@ -79,8 +82,11 @@ func (o *Options) Connect(ctx context.Context) (*Client, error) {
 	}
 	c := &Client{}
 	if o.SpiffeSocket != "" {
-		if c.source, err = workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(o.SpiffeSocket))); err != nil {
-			return nil, fmt.Errorf("client: --spiffe-socket: %w", err)
+		sctx, cancel := context.WithTimeout(ctx, socketTimeout)
+		c.source, err = workloadapi.NewX509Source(sctx, workloadapi.WithClientOptions(workloadapi.WithAddr(o.SpiffeSocket)))
+		cancel() // the context only bounds the wait for the first SVID
+		if err != nil {
+			return nil, fmt.Errorf("client: --spiffe-socket %s: no answer from the Workload API (is the SPIRE agent running?): %w", o.SpiffeSocket, err)
 		}
 	}
 	if o.Username != "" || o.SpiffeSocket == "" {

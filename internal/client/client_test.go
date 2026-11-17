@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dihedron/ligo/internal/spiffetest"
 	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
@@ -219,5 +220,24 @@ func TestPrint(t *testing.T) {
 	b.Reset()
 	if err := Print(&b, "table", map[string]any{"policy": "p"}); err != nil || !strings.Contains(b.String(), "policy: p") {
 		t.Errorf("no columns: %s", b.String())
+	}
+}
+
+// With no Workload API behind the socket, Connect gives up after
+// socketTimeout with a clear error instead of waiting for ever.
+func TestConnectWithoutAgentFailsFast(t *testing.T) {
+	old := socketTimeout
+	socketTimeout = 300 * time.Millisecond
+	defer func() { socketTimeout = old }()
+	o := &Options{ServerURL: "https://127.0.0.1:1", SpiffeSocket: "unix://" + filepath.Join(t.TempDir(), "none.sock")}
+	done := make(chan error, 1)
+	go func() { _, err := o.Connect(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "--spiffe-socket") || !strings.Contains(err.Error(), "Workload API") {
+			t.Fatalf("err = %v, want a --spiffe-socket Workload API error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Connect did not return")
 	}
 }

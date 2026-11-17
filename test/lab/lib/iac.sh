@@ -26,7 +26,11 @@ cmd_iac() {
 		shift
 		iac_test "$@"
 		;;
-	*) die "iac: install, status or test [-run REGEX]" ;;
+	campaign)
+		shift
+		iac_campaign "$@"
+		;;
+	*) die "iac: install, status, test [-run REGEX] or campaign [SCENARIO...]" ;;
 	esac
 }
 
@@ -126,10 +130,15 @@ iac_exec() {
 		--env "LIGO_LAB_OWNER=spiffe://prod.lab/ci/terraform" --env "TF_ACC=1" --env "TF_ACC_TERRAFORM_PATH=$IAC_BIN/$tool"
 		--env "LIGO_E2E_ADMIN=https://ligo1.ligo.lab:9443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" "${IAC_ENV[@]}")
 	[[ "$tool" == tofu ]] && envs+=(--env "TF_ACC_PROVIDER_NAMESPACE=hashicorp" --env "TF_ACC_PROVIDER_HOST=registry.opentofu.org")
+	envs+=(--env "LIGO_LAB_LB_URL=https://lb.ligo.lab:9443" --env "LIGO_LAB_CAMPAIGN=${IAC_CAMPAIGN:-}")
+	set +e # a failing scenario is reported, not fatal, when IAC_TOLERATE is set
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "/tmp/iac-$user" --env "TMPDIR=/tmp/iac-$user" --env "HOME=/tmp/iac-$user" "${envs[@]}" -- \
-		/tmp/provider.test -test.count=1 -test.v "$@" | sed 's/^/        /'
-	[[ "${PIPESTATUS[0]}" == 0 ]] || die "the provider's tests failed with $tool, as $user"
+		/tmp/provider.test -test.count=1 -test.v "$@" | sed 's/^/        /' | tee -a "${IAC_OUT:-/dev/null}"
+	IAC_RC="${PIPESTATUS[0]}"
+	set -e
+	[[ "$IAC_RC" == 0 || -n "$IAC_TOLERATE" ]] || die "the provider's tests failed with $tool, as $user"
 }
+IAC_TOLERATE="" IAC_RC=0
 
 # iac_instances TOOL SUFFIX: an operator files an identity provider, a secret
 # store and a platform that wires them, which wait for a person; the platform approver approves them (and their
@@ -177,4 +186,223 @@ iac_pending() {
 	n="$(cli ligo-approver -o json cr list --kind source --name "$name" | jq '.items | length')"
 	[[ "$n" == 2 ]] || die "$name: $n change requests, want 2 (the creation, waited for once, and the removal)"
 	info "$tool: a pending request is waited for, not filed again; the requests of $name are 2"
+}
+
+# ---------------------------------------------------------------------------
+# The pre-release campaign (terraform-provider-ligo
+# .specs/ligo-prerelease-campaign.md, phase 2): scenarios with people and
+# incidents. The provider's tests run on ligo1 and ask for them through files
+# (req-N in their directory); camp_responder performs each with the CLI, as the
+# right person, and answers in ack-N ("ok", or why not).
+
+# camp_pending KIND NAME: the id of the pending request of the resource, waiting
+# up to 5 minutes for it to exist.
+camp_pending() {
+	local id
+	for _ in $(seq 1 150); do
+		id="$(cli ligo-ops -o json cr list --status PENDING --kind "$1" --name "$2" 2>/dev/null | jq -r '.items[0].id // empty')" || id=""
+		[[ -n "$id" ]] && {
+			echo "$id"
+			return 0
+		}
+		sleep 2
+	done
+	return 1
+}
+
+# camp_count KIND NAME: how many change requests the resource has had.
+camp_count() { cli ligo-ops -o json cr list --kind "$1" --name "$2" --page-size 200 | jq '.items | length'; }
+
+# camp_person_pw USER: the LDAP password of a person, on ligo1, for --password-file.
+camp_person_pw() {
+	local pw="$LIGO1_E2E/$1.pw"
+	ldap_password "$1" | inner_exec ligo1 sh -c "umask 077 && cat >$pw && chown ligo:ligo $pw"
+	echo "$pw"
+}
+
+# camp_source_doc NAME DESC [REV]: a source of the campaign, as JSON.
+camp_source_doc() {
+	jq -nc --arg n "$1" --arg d "$2" --arg re "^spiffe://prod\\.lab/ns/cmp/sa/$1\$" --arg r "${3:-}" \
+		'{kind: "Source", metadata: {name: $n}, description: $d, identity: {trustDomain: "prod.lab", svidRegex: $re}, visibility: {mode: "PRIVATE"}} + (if $r == "" then {} else {expectedRevision: ($r | tonumber)} end)'
+}
+
+# camp_act ACTION ARGS...: one request; prints why it failed, and returns 1.
+camp_act() {
+	local action="$1" id rev pw out holds n
+	shift
+	case "$action" in
+	approve)
+		camp_pending "$1" "$2" >/dev/null || { echo "nothing is pending for $1 $2"; return 1; }
+		cli_approve "$1" "$2" >/dev/null 2>&1 || { echo "cannot approve $1 $2"; return 1; }
+		;;
+	approve-after-restart)
+		for _ in $(seq 1 150); do [[ -e "$CAMP_DIR/restarted" ]] && break; sleep 2; done
+		[[ -e "$CAMP_DIR/restarted" ]] || { echo "ligo was not restarted"; return 1; }
+		camp_act approve "$@"
+		;;
+	decline)
+		id="$(camp_pending "$1" "$2")" || { echo "nothing is pending for $1 $2"; return 1; }
+		cli ligo-approver cr decline "$id" -m "campaign: declined" >/dev/null 2>&1 || { echo "cannot decline $id"; return 1; }
+		;;
+	withdraw)
+		id="$(camp_pending "$1" "$2")" || { echo "nothing is pending for $1 $2"; return 1; }
+		cli ligo-ops cr withdraw "$id" >/dev/null 2>&1 || { echo "cannot withdraw $id"; return 1; }
+		;;
+	pending)
+		camp_pending "$1" "$2" >/dev/null || { echo "nothing is pending for $1 $2"; return 1; }
+		;;
+	nopending)
+		id="$(cli ligo-ops -o json cr list --status PENDING --kind "$1" --name "$2" | jq -r '.items[0].id // empty')"
+		[[ -z "$id" ]] || { echo "request $id of $1 $2 is pending: the provider filed over a hold"; return 1; }
+		;;
+	count)
+		n="$(camp_count "$1" "$2")"
+		[[ "$n" == "$3" ]] || { echo "$1 $2 has $n change requests, want $3"; return 1; }
+		;;
+	contain)
+		rev="$(cli ligo-ops -o json binding show "$1" | jq -r '.metadata.revision')"
+		cli ligo-ops binding delete "$1" -r "$rev" >/dev/null 2>&1 || { echo "cannot contain $1"; return 1; }
+		cli_approve binding "$1" >/dev/null 2>&1 || { echo "cannot approve the containment of $1"; return 1; }
+		cli_phase "$1" "" >/dev/null 2>&1 || { echo "$1 is not gone"; return 1; }
+		holds="$(cli ligo-ops -o json hold list --binding "$1" | jq '.items | length')"
+		[[ "$holds" == 1 ]] || { echo "$1 has $holds holds, want 1"; return 1; }
+		;;
+	lift)
+		id="$(cli ligo-ops -o json hold list --binding "$1" | jq -r '.items[0].id // empty')"
+		[[ -n "$id" ]] || { echo "no hold for $1"; return 1; }
+		pw="$(camp_person_pw dave)"
+		cli ligo hold lift "$id" -m "campaign: reviewed" --username dave --password-file "$pw" >/dev/null 2>&1 || { echo "cannot lift $id"; return 1; }
+		;;
+	edit-refused)
+		rev="$(cli ligo-ops -o json source show "$2" | jq -r '.metadata.revision')"
+		if out="$(camp_source_doc "$2" "edited by a person" "$rev" | cli ligo-ops apply -f - 2>&1)"; then
+			echo "a person's edit of the managed source $2 was accepted: $out"
+			return 1
+		fi
+		grep -qi "managed" <<<"$out" || { echo "the edit of $2 was refused, but not as managed: $out"; return 1; }
+		;;
+	edit)
+		rev="$(cli ligo-ops -o json source show "$2" | jq -r '.metadata.revision')"
+		camp_source_doc "$2" "$3" "$rev" | cli ligo-ops apply -f - >/dev/null 2>&1 || { echo "cannot edit $2"; return 1; }
+		cli_approve source "$2" >/dev/null 2>&1 || { echo "cannot approve the edit of $2"; return 1; }
+		;;
+	drain)
+		# the removal that ends a scenario waits too: approve this scenario's requests until it is over
+		(while [[ ! -e "$CAMP_DIR/stop" ]]; do
+			for id in $(cli ligo-approver -o json cr list --awaiting-me --kind source --page-size 200 2>/dev/null | jq -r --arg s "-$E2E_SUFFIX" '.items[]? | select(.resourceName | endswith($s)) | .resourceName'); do
+				cli_approve source "$id" >/dev/null 2>&1 || true
+			done
+			sleep 3
+		done) >/dev/null 2>&1 &
+		;;
+	restart-ligo)
+		camp_pending source "cmp-rs-$E2E_SUFFIX" >/dev/null || { echo "nothing is pending to restart ligo under"; return 1; }
+		inner_exec "$1" systemctl restart ligo || { echo "cannot restart ligo on $1"; return 1; }
+		serve_wait "$1" >/dev/null 2>&1 || { echo "ligo on $1 does not come back"; return 1; }
+		touch "$CAMP_DIR/restarted"
+		;;
+	restart-agent)
+		# the SPIRE agent of ligo1 restarts while the provider waits on a request: its SVID source reconnects
+		camp_pending source "cmp-ag-$E2E_SUFFIX" >/dev/null || { echo "nothing is pending to restart the agent under"; return 1; }
+		inner_exec ligo1 systemctl restart spire-agent-prod || { echo "cannot restart the prod agent"; return 1; }
+		for _ in $(seq 1 60); do
+			cli ligo-ops -o json source list >/dev/null 2>&1 && break
+			sleep 2
+		done
+		touch "$CAMP_DIR/restarted"
+		;;
+	kill-ligo)
+		for _ in $(seq 1 120); do
+			n="$(cli ligo-ops -o json cr list --kind source --page-size 200 2>/dev/null | jq "[.items[]? | select(.resourceName | test(\"^cmp-rp[0-9]+-$E2E_SUFFIX\$\"))] | length")" || n=0
+			[[ "${n:-0}" -ge 10 ]] && break
+			sleep 0.2
+		done
+		inner_exec "$1" pkill -9 -x ligo || { echo "cannot kill ligo on $1"; return 1; }
+		;;
+	start-ligo)
+		inner_exec "$1" systemctl start ligo >/dev/null 2>&1 || true
+		serve_wait "$1" >/dev/null 2>&1 || { echo "ligo on $1 does not run"; return 1; }
+		;;
+	*) echo "unknown action $action"; return 1 ;;
+	esac
+}
+
+# camp_responder USER: performs the provider tests' requests (as files in
+# /tmp/iac-USER on ligo1) until $CAMP_DIR/stop exists.
+camp_responder() {
+	local user="$1" dir="/tmp/iac-$1" line f id
+	while [[ ! -e "$CAMP_DIR/stop" ]]; do
+		while IFS= read -r line; do
+			[[ -n "$line" ]] || continue
+			f="${line%%|*}" id="${f#req-}"
+			(
+				# shellcheck disable=SC2086 # the request is words
+				out="$(camp_act ${line#*|} </dev/null 2>&1)" && out=ok
+				printf '%s\n' "$out" | inner_exec ligo1 sh -c "cat >$dir/ack-$id.tmp && mv $dir/ack-$id.tmp $dir/ack-$id"
+			) &
+		done < <(inner_exec ligo1 sh -c "cd $dir 2>/dev/null && for f in req-*; do [ -e \"\$f\" ] || continue; [ -e \"ack-\${f#req-}\" ] && continue; [ -e \"seen-\${f#req-}\" ] && continue; touch \"seen-\${f#req-}\"; printf '%s|%s\n' \"\$f\" \"\$(cat \"\$f\")\"; done")
+		sleep 1
+	done
+}
+
+# camp_run USER TOOL REGEX: the provider's scenario REGEX as USER with TOOL,
+# with the responder running; returns the tests' status in IAC_RC.
+camp_run() {
+	local user="$1" tool="$2" regex="$3" responder
+	CAMP_DIR="$(mktemp -d)"
+	inner_exec ligo1 sh -c "rm -rf /tmp/iac-$user && install -d -o $user -m 0700 /tmp/iac-$user"
+	camp_responder "$user" &
+	responder=$!
+	IAC_CAMPAIGN=1 IAC_OUT="$CAMP_DIR/out" IAC_TOLERATE=1 iac_exec "$user" "$tool" -test.run "$regex"
+	if grep -q "no tests to run" "$CAMP_DIR/out"; then IAC_RC=1; fi # a scenario that does not exist is not a pass
+	touch "$CAMP_DIR/stop"
+	wait "$responder" 2>/dev/null || true
+	sleep 4 # the drain loops see the stop file
+	rm -rf "$CAMP_DIR"
+}
+
+# iac_campaign [SCENARIO...]: the scenarios, once per tool, against the lab as
+# it is (lab.sh serve install first). A failed scenario is reported, and the
+# next one runs; the status is the number of failures.
+iac_campaign() {
+	local provider="${LIGO_PROVIDER_DIR:-$REPO_DIR/../terraform-provider-ligo}" tool s user failed=0 only=" $* "
+	[[ -d "$provider/internal/provider" ]] || die "the provider is not at $provider: set LIGO_PROVIDER_DIR"
+	inner_exec ligo1 test -x "$IAC_BIN/terraform" || die "terraform is not installed on ligo1: lab.sh iac install"
+	inner_exec ligo1 systemctl -q is-active ligo || die "ligo does not run on ligo1: lab.sh serve install"
+	section "Provider campaign on ligo1"
+	local out="$LAB_STATE_DIR/iac"
+	mkdir -p "$out"
+	(cd "$provider" && go test -c -tags lab -o "$out/provider.test" ./internal/provider) || die "cannot build the provider's tests"
+	inner_push "$out/provider.test" ligo1 /tmp/provider.test 0755
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	local managed="iac-m-$E2E_SUFFIX" free="iac-f-$E2E_SUFFIX"
+	iac_fixtures "$managed" "$free"
+	local scenarios=(Approval:ligo-ops Hold:ligo-ci Lock:ligo-ci Restart:ligo-ops AgentRestart:ligo-ops Crash:ligo-ops Replica:ligo-ci Burst:ligo-ci)
+	for tool in terraform tofu; do
+		for s in "${scenarios[@]}"; do
+			user="${s#*:}" s="${s%%:*}"
+			[[ "$only" == "  " || "$only" == *" $s "* ]] || continue
+			info "$tool: $s as $user"
+			E2E_SUFFIX="$(openssl rand -hex 4)"
+			IAC_ENV=()
+			if [[ "$s" == Crash ]]; then
+				IAC_ENV=(--env "LIGO_LAB_PHASE=file")
+				camp_run "$user" "$tool" '^TestLabCampaignCrash$'
+				# the killed process is the expected result of the first phase
+				[[ "$IAC_RC" != 0 ]] || { info "FAIL $tool $s: the provider was not killed"; failed=$((failed + 1)); continue; }
+				IAC_ENV=(--env "LIGO_LAB_PHASE=adopt")
+				camp_run "$user" "$tool" '^TestLabCampaignCrash$'
+			else
+				camp_run "$user" "$tool" "^TestLabCampaign$s\$"
+			fi
+			IAC_ENV=()
+			if [[ "$IAC_RC" == 0 ]]; then info "PASS $tool $s"; else info "FAIL $tool $s (rc $IAC_RC)"; failed=$((failed + 1)); fi
+			# a killed replica must run again whatever happened
+			inner_exec ligo1 systemctl start ligo >/dev/null 2>&1 || true
+			inner_exec ligo2 systemctl start ligo >/dev/null 2>&1 || true
+		done
+	done
+	info "campaign: $failed scenario(s) failed"
+	return "$failed"
 }
