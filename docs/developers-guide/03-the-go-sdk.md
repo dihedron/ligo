@@ -81,4 +81,21 @@ conn, err := tls.Dial("tcp", b.Endpoint(), c.TLSConfig(id))
 flows, err := c.Flows(ctx, client.Filter{Target: "orders-db"})
 ```
 
-returns the network flows each binding needs: destination, ports, protocol and whether TLS is used. It is data: the SDK does not test them.
+returns the network flows each binding needs: destination, ports, protocol and whether TLS is used. `Flows` is data. To see which flow a firewall still blocks before the application connects, check them with the sub-package `flowcheck`, which runs [netcheck](https://github.com/dihedron/netcheck) on the flows:
+
+```go
+import "github.com/dihedron/ligo/pkg/client/flowcheck"
+
+results, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "orders-db"})
+for _, r := range results.Unreachable() {
+    log.Printf("blocked: %s to %s:%d: %s", r.Flow, r.Destination, r.Port, r.Reason)
+}
+```
+
+The check runs on demand, when the application calls it; the SDK never checks on its own.
+
+- A TCP flow without TLS is a connection test. A TCP flow with `tls: true` is checked up to the TLS handshake, verifying the flow's `serverName` (or the destination, when it is a name) against the system roots; `flowcheck.WithRoots` gives other roots. A flow to a bare IP address with `tls: true` and no `serverName` is skipped: there is no name to verify.
+- A UDP flow passes when no ICMP error comes back, so a silent peer passes: it means "not refused", not "the service is up".
+- A flow whose destination is a CIDR, or whose ports are a range, is `Skipped` with the reason, never reported as reachable or blocked.
+- Destinations in link-local and cloud metadata ranges are never checked (`WithDeniedNetworks` changes the list), and one call runs at most 1,024 checks.
+- `WithICMP` adds one echo check for each destination host. ICMP is not a flow, so this is a hint. **The process must be allowed to open ICMP sockets.** With `WithICMP(true)` it uses raw sockets, which need the capability `cap_net_raw` on the application's binary: `sudo setcap cap_net_raw=+ep /path/to/application` (the netcheck package does this for `/usr/bin/netcheck`). Grant it to a dedicated binary, never to a shell or an interpreter, and set it again after every rebuild. With `WithICMP(false)` it uses unprivileged ICMP sockets, which need a `net.ipv4.ping_group_range` that includes the process's group. Without either, the ICMP results are `Unreachable` with a reason that names the capability.

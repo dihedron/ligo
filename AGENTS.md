@@ -21,6 +21,7 @@
 11. **Up-to-date Documentation:** Always keep documentation up to date and aligned with the code and the product behaviour.
 12. **Publish Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. Additional documents may be produced on a per-project basis.
 13. **Sane Commits:** run `go test ./...` before every commit and check that everything is still sane.
+14. **Overnight Runs:** Any run that takes hours (soak and chaos runs, full lab rebuilds, release-run campaigns) is written up as a plan and run in an overnight, unattended session, never started in the middle of a working day: propose it, say how long it takes, and report the outcome in the morning.
 
 ## Coding Style & Architecture Standards
 * **Language/Framework:** Go (Golang), standard library routers; propose additional libraries where applicable.

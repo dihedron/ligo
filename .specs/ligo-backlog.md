@@ -13,11 +13,11 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
 | 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; the other languages not started |
-| 8 | Terraform and OpenTofu provider | 2026-11-08 | Spec 0.1 drafted in `terraform-provider-ligo/.specs/`; chunk 1 (configuration) written; resources wait for item 16; uses the Go admin client, released in v0.6.0 |
+| 8 | Terraform and OpenTofu provider | 2026-11-08 | Released as v0.1.0 on GitHub (2026-11-17), on `ligo` v0.7.0 and the Go admin client; resources and data sources done, pre-release campaign passed. Left: the soak before v0.2.0 and the registries, in the provider's own backlog (`terraform-provider-ligo/.specs/ligo-provider-backlog.md`) |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
-| 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Not started; depends on item 7 |
+| 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | In progress on `feature/network-checks`: `.specs/ligo-network-checks.md`; netcheck pinned to a commit until v2.0.0 |
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 | 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
