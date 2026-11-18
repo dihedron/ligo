@@ -19,6 +19,10 @@ before:
     - go mod download
     - go mod tidy
     - go generate ./...
+    # the completion scripts and the pages of the commands come from the option
+    # parser; the pages are compressed without a timestamp, so that a build is
+    # reproducible
+    - sh -c 'mkdir -p build/completions build/man/gz && go run ./cmd/ligo completion bash >build/completions/ligo && go run ./cmd/ligo completion zsh >build/completions/_ligo && go run ./cmd/ligo completion fish >build/completions/ligo.fish && go run ./cmd/ligo completion powershell >build/completions/ligo.ps1 && go run ./internal/tools/genman build/man && cp docs/man/ligo.1 build/man/ligo.1 && for f in build/man/*.1; do gzip -9nc "$f" >"build/man/gz/$(basename "$f").gz"; done'
 
 builds:
   - id: ligo
@@ -186,6 +190,11 @@ archives:
       - goos: windows
         formats:
           - zip
+    files:
+      - src: build/man/*.1
+        dst: man/
+      - src: build/completions/*
+        dst: completions/
   - id: ligo-plugin-openldap
     ids:
       - ligo-plugin-openldap
@@ -266,6 +275,18 @@ nfpms:
         file_info: { mode: 0644, owner: root, group: root }
       - src: test/lab/sql/roles.sql
         dst: /usr/share/ligo/examples/roles.sql
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: build/man/gz/*.1.gz
+        dst: /usr/share/man/man1/
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: build/completions/ligo
+        dst: /usr/share/bash-completion/completions/ligo
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: build/completions/_ligo
+        dst: /usr/share/zsh/site-functions/_ligo
+        file_info: { mode: 0644, owner: root, group: root }
+      - src: build/completions/ligo.fish
+        dst: /usr/share/fish/vendor_completions.d/ligo.fish
         file_info: { mode: 0644, owner: root, group: root }
     scripts:
       postinstall: packaging/postinstall.sh
