@@ -59,3 +59,10 @@
 ## 7. Out of scope
 
 Dynamic completion (asking the server for names of sources or bindings); a `man` command; pages for the plugins; sharing the code with netcheck through a module (a later refactor).
+
+## 8. Results (2026-11-18)
+
+- CX-1 to CX-6 pass (`go test ./...`); bash completion is exercised in a real bash, fish and PowerShell in containers (the completions behave); zsh is syntax-checked only (`zsh -n`), its completion behaviour is not tested.
+- CX-7 was checked in an Ubuntu 24.04 container with the snapshot `.deb` (not on a lab VM: the ligo lab was not running): the pages and the scripts are readable by an ordinary user, `man -w ligo-source` finds the page and it renders, bash completes `ligo so` to `source` and `ligo source l` to `list ls`.
+- The connection options (`--server`, `--ca-cert`, ...) are described once, in `ligo(1)`; the pages of the commands leave them out.
+- `completion` joins the process commands in the `<object> <verb>` rule of AGENTS.md.

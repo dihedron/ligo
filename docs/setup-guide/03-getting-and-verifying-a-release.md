@@ -56,9 +56,9 @@ sudo apt install ./ligo_<version>_linux_amd64.deb ./ligo-plugin-postgres_<versio
   ./ligo-plugin-vault_<version>_linux_amd64.deb
 ```
 
-The `ligo` package creates the system user `ligo`, the directory `/etc/ligo` (`root:ligo`, `0750`), the plugin directory `/usr/lib/ligo/plugins` (`root:root`, `0755`) and the unit `ligo.service`, which it neither enables nor starts. Examples are in `/usr/share/ligo/examples`.
+The `ligo` package creates the system user `ligo`, the directory `/etc/ligo` (`root:ligo`, `0750`), the plugin directory `/usr/lib/ligo/plugins` (`root:root`, `0755`) and the unit `ligo.service`, which it neither enables nor starts. Examples are in `/usr/share/ligo/examples`. It also installs the manual pages (`ligo(1)` and one `ligo-<command>(1)` for each command, in `/usr/share/man/man1`) and the shell completions for bash, zsh and fish.
 
-If you use the archives instead, reproduce those owners and modes: `ligo` refuses a plugin unless the directory and the binary are owned by `root:root`, are not writable by anyone else, and are not symbolic links.
+If you use the archives instead, the pages are in `man/` and the completion scripts in `completions/` (`ligo completion powershell` prints the script for PowerShell); reproduce those owners and modes: `ligo` refuses a plugin unless the directory and the binary are owned by `root:root`, are not writable by anyone else, and are not symbolic links.
 
 Compute the hash of each plugin you installed. You will need it twice, in SPIRE and in `server.yaml`:
 

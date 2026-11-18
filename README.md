@@ -167,7 +167,11 @@ The specification is in [.specs/ligo_specification.md](.specs/ligo_specification
 ```bash
 make          # lint, then build into dist/
 make help     # list the targets
+make man      # build docs/man/ligo.1 from its Markdown; make man-check fails when it is stale
+make man-pages # generate the ligo-<command>(1) pages into build/man
 ```
+
+The packages install the manual pages (`man ligo`, `man ligo-source`, ...) and the shell completions for bash, zsh and fish; `ligo completion bash|zsh|fish|powershell` prints the script of a shell.
 
 ## Install
 
