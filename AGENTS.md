@@ -41,5 +41,5 @@ The command line arguments parsing is based on `github.com/jessevdk/go-flags`. W
 ```bash
 $> my-application <object> <verb>
 ```
-where the <object> is the type of resource to act upon and <verb> is the action. This is similar to how docker works (e.g. docker image list). The one verb that displays an object is `show`. The exceptions are the commands that act on a manifest (`apply`, whose kinds come from the file) and the process commands (`serve`, `migrate`, `version`). 
+where the <object> is the type of resource to act upon and <verb> is the action. This is similar to how docker works (e.g. docker image list). The one verb that displays an object is `show`. The exceptions are the commands that act on a manifest (`apply`, whose kinds come from the file) and the process commands (`serve`, `migrate`, `version`, `completion`). 
 All applications should provide a version switch, with a one-liner compact mode and a verbose mode providing more detailed information at least about the application, its version, license, author, build and packaging environments.
