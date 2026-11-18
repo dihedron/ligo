@@ -118,7 +118,7 @@ type Credential struct {
 ### 3.4 TLS configuration and flows
 
 - `c.TLSConfig(serverID)` returns a `*tls.Config` for mTLS with the workload's SVID that accepts only `serverID`. It is for targets that speak SPIFFE mTLS (`Spec["serverId"]`).
-- `c.Flows(ctx, filter)` returns `[]BindingFlows` (`Binding`, `Source`, `Target`, `Flows []Flow` with name, purpose, protocol, destination, ports, tls, serverName, description, declaredBy). It is data only: checking the flows is backlog item 12. Only `Filter.Target` applies.
+- `c.Flows(ctx, filter)` returns `[]BindingFlows` (`Binding`, `Source`, `Target`, `Flows []Flow` with name, purpose, protocol, destination, ports, tls, serverName, description, declaredBy). It is data only: checking the flows is `pkg/client/flowcheck` (backlog item 12, `.specs/ligo-network-checks.md`). Only `Filter.Target` applies.
 
 ### 3.5 Watching
 
@@ -252,7 +252,7 @@ Each chunk ends with `go test ./...`, `make lint`, `make vuln` and `make secrets
 ## 11. Out of scope
 
 - Ready connections per platform type (a `database/sql` connector, an LDAP bind).
-- Network checks on the flows (backlog item 12).
+- Network checks on the flows: done in `pkg/client/flowcheck`, `.specs/ligo-network-checks.md`.
 - SDKs in Java, Python and JavaScript/TypeScript (backlog item 7, later).
 - A streaming watch on the server.
 - Secret stores other than Vault and OpenBao.
