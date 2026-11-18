@@ -1,7 +1,7 @@
 # Resources managed by automation (the lock)
 
 - **Version:** 0.2 (2026-11-15), approved by the user on 2026-11-15 with the five recommended decisions of §8; implementation starts with chunk 1 (AGENTS.md rules 1 and 3).
-- **Status:** implemented (chunks 1 to 5, 2026-11-15); not released yet.
+- **Status:** implemented (chunks 1 to 5, 2026-11-15); released in v0.7.0.
 - **Backlog:** item 16 (this one); it unblocks the resources of item 8, the Terraform and OpenTofu provider (`terraform-provider-ligo/.specs/ligo-terraform-provider.md` §3.7, chunk 4)
 - **Builds on:** ADR-09 (maker-checker), ADR-11 (delegated approval for `trusted_automation`), ADR-12 (break-glass), ADR-13 (jurisdictions and two-sided consent), `.specs/ligo-adminclient.md`
 - **Direction of the user (2026-11-08, restated 2026-11-15):** a resource that automation creates is marked "managed by automation"; people cannot change it, except a binding through break-glass, and break-glass changes are always reverted; a lasting change goes only through the automation's own source of truth (the Terraform configuration) again.

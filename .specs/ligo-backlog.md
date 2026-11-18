@@ -17,12 +17,12 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
 | 11 | An MCP server for the admin API | 2026-11-08 | Not started; tools proposed; needs the Go admin client, `.specs/ligo-adminclient.md` (approved; built on `feature/adminclient`, chunks 0 to 6 done 2026-11-14, PR pending) |
-| 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | In progress on `feature/network-checks`: `.specs/ligo-network-checks.md`; netcheck on its tagged v2.0.0 |
+| 12 | Network checks in the client SDK, from netcheck | 2026-11-09 | Done in v0.8.0 (PRs #60, #62): `.specs/ligo-network-checks.md`, on netcheck v2.0.0; its lab scenario (chunk 3) is not written, a known limit |
 | 13 | Outbox retention: delivered events kept 30 days | 2026-11-09 | Done in v0.3.0 (PR #42): `notifications.delivered_retention`, `abandoned_retention` |
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 | 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
-| 16 | Resources managed by automation (the lock) | 2026-11-15 | Spec 0.1 drafted: `.specs/ligo-managed-resources.md`; blocks the resources of item 8 |
-| 17 | Man pages and shell completions for `ligo` | 2026-11-18 | Done on `feature/cli-extras` (PR pending): `.specs/ligo-cli-extras.md` (netcheck's: PR #34) |
+| 16 | Resources managed by automation (the lock) | 2026-11-15 | Done in v0.7.0 (PRs #53 and after): `.specs/ligo-managed-resources.md` |
+| 17 | Man pages and shell completions for `ligo` | 2026-11-18 | Done in v0.8.0 (PR #61): `.specs/ligo-cli-extras.md` (netcheck's: v2.0.0) |
 
 ## 1. Audit pruning
 
