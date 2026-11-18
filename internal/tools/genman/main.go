@@ -19,7 +19,7 @@ func main() {
 		os.Exit(2)
 	}
 	dir := os.Args[1]
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // a build tool: the directory is the caller's argument
 		fmt.Fprintln(os.Stderr, "genman:", err)
 		os.Exit(1)
 	}
