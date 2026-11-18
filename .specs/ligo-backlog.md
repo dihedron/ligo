@@ -22,6 +22,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 14 | Post-quantum signatures for audit checkpoints | 2026-11-10 | Waiting for OpenBao or Vault Community |
 | 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
 | 16 | Resources managed by automation (the lock) | 2026-11-15 | Spec 0.1 drafted: `.specs/ligo-managed-resources.md`; blocks the resources of item 8 |
+| 17 | Man pages and shell completions for `ligo` | 2026-11-18 | In progress on `feature/cli-extras`: `.specs/ligo-cli-extras.md` (netcheck's are done, PR #34) |
 
 ## 1. Audit pruning
 
