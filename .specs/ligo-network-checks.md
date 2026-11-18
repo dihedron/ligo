@@ -3,7 +3,7 @@
 - **Version:** 0.1 (2026-11-18), approved by the user in plan mode
 - **Backlog:** item 12
 - **Branch:** `feature/network-checks`
-- **Depends on:** `.specs/ligo-client-sdk.md` (flows as data, §3.4) and netcheck v2, pinned to a commit until v2.0.0 is released
+- **Depends on:** `.specs/ligo-client-sdk.md` (flows as data, §3.4) and netcheck v2 (v2.0.0, tagged 2026-11-18)
 
 ## 1. Why
 
@@ -14,7 +14,7 @@ Each binding carries its network flows (`c.Flows`). Today a workload learns that
 | Question | Decision |
 |---|---|
 | Where | Sub-package `pkg/client/flowcheck`. `pkg/client` stays free of the netcheck dependency. |
-| Library | netcheck's own module, `github.com/dihedron/netcheck/v2`, only its core package `pkg/netcheck`. The dependency is pinned to a commit (a pseudo-version) until v2.0.0 is tagged; then it moves to `v2.0.0`. |
+| Library | netcheck's own module, `github.com/dihedron/netcheck/v2`, only its core package `pkg/netcheck`. The dependency is netcheck `v2.0.0` (it was pinned to a commit until the tag, 2026-11-18). |
 | `tls: true` | Checked up to the TLS handshake against the system roots; the caller may give a `*x509.CertPool`. |
 | CIDR destination, port range | Skipped and reported with the reason: never a false pass or fail. |
 | When | On demand only. |
@@ -41,7 +41,7 @@ for _, r := range res { fmt.Println(r.Flow, r.Destination, r.Port, r.Status, r.R
 | T-N1 | A compromised `ligo` makes the SDK probe hosts of its choice. | The server bounds destinations by the platform's `allowed_endpoints` (INV-24, ADR-16); the SDK denies link-local and metadata ranges by default, caps the number of checks and never expands a CIDR or a range. |
 | T-N2 | A check leaks secrets. | None are involved; results carry statuses and netcheck's scrubbed errors; logs carry binding, flow, destination, port and status only. |
 | T-N3 | False assurance from UDP. | Documented; the `Reason` of a UDP pass says "no ICMP error". |
-| T-N4 | Supply chain: the netcheck module brings its requirements into `go.mod`. | `make vuln` on every change; the pin is a commit until v2.0.0; only the core package is imported. |
+| T-N4 | Supply chain: the netcheck module brings its requirements into `go.mod`. | `make vuln` on every change; the dependency is a tagged release; only the core package is imported. |
 | T-N5 | An application given raw sockets for ICMP does more than ping. | The guide says to grant the capability to a dedicated binary and not to a shell or an interpreter; unprivileged ping sockets are the alternative. |
 
 ## 5. Tests first
@@ -65,7 +65,7 @@ for _, r := range res { fmt.Println(r.Flow, r.Destination, r.Port, r.Status, r.R
 | 1 | The dependency (pinned), the tests red, then `flowcheck` (FC-1 to FC-9), fuzz, benchmark. |
 | 2 | Package doc, `Example`, the Developer's Guide chapter (with the ICMP capability note), README. |
 | 3 | Lab scenario in `lab.sh serve test`: a binding's flows checked against the real servers, one blocked (proposed, not in this chunk). |
-| 4 | After the netcheck soak: the dependency moves to `v2.0.0`. |
+| 4 | After the netcheck soak: the dependency moves to `v2.0.0` (done 2026-11-18). |
 
 ## 7. Out of scope
 
