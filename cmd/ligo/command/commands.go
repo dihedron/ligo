@@ -3,6 +3,7 @@ package command
 import (
 	"github.com/dihedron/ligo/internal/client"
 	"github.com/dihedron/ligo/internal/command/admin"
+	"github.com/dihedron/ligo/internal/command/completion"
 	"github.com/dihedron/ligo/internal/command/migrate"
 	"github.com/dihedron/ligo/internal/command/serve"
 	"github.com/dihedron/ligo/internal/command/version"
@@ -32,5 +33,6 @@ type Commands struct {
 	Hold     admin.Hold             `command:"hold" description:"List and lift the holds left by emergency removals of managed bindings."`
 	Account  admin.Account          `command:"account" description:"Manage the registry of accounts (tenants): list, show, register, retire."`
 	Gov      admin.Charter          `command:"charter" description:"Show the charter and evaluate a planned change (ADR-13, ADR-14)."`
+	Compl    completion.Completion  `command:"completion" description:"Print the shell completion script: bash, zsh, fish or powershell."`
 	Migrate  migrate.Migrate        `command:"migrate" description:"Apply the database migrations as ligo_migrator (before a rollout, §10.3)."`
 }

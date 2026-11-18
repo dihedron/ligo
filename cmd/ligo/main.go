@@ -24,6 +24,9 @@ func run() int {
 		if cmd == nil {
 			return nil
 		}
+		if c, ok := cmd.(interface{ SetParser(*flags.Parser) }); ok {
+			c.SetParser(parser)
+		}
 		if g, ok := cmd.(interface{ SetGlobals(*client.Globals) }); ok {
 			g.SetGlobals(&options.Globals)
 		}

@@ -159,3 +159,14 @@ The schemas `public` and `dbos` live in one database and must be backed up toget
 | TLS certificates from files | Replace the files, `systemctl reload ligo`. A file that fails to load keeps the old one, and logs `ERROR` |
 | SVIDs | SPIRE rotates them; nothing to do |
 | Transit key | Rotate it in Vault: versions keep older ciphertext readable |
+
+## Reading the manual and completing commands
+
+`man ligo` describes the command line, its global options, the way each command authenticates, the environment variables and the exit status; `man ligo-source`, `man ligo-cr` and so on describe each command with its subcommands, arguments and options. The pages are installed by the package, and are generated from the command line itself, so they always agree with the `ligo` they come with.
+
+The package also installs the completions of bash, zsh and fish, which a new shell loads. They complete commands, aliases, options and the choices of `--output` and `--log-level`; pressing Tab never runs `ligo`, so it never contacts a server or asks for a password. From an archive, or for PowerShell, ask the binary for the script of your shell:
+
+```bash
+$> source <(ligo completion bash)
+$> ligo completion fish >~/.config/fish/completions/ligo.fish
+```

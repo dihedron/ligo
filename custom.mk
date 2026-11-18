@@ -21,6 +21,26 @@ lint: ## check that the code is clean (gofmt, go vet, golangci-lint); every buil
 	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION)\." || echo "warning: golangci-lint is not v$(GOLANGCI_LINT_VERSION), which CI runs: its findings may differ" >&2
 	@golangci-lint run --build-tags integration ./...
 
+# ligo(1) is written in Markdown and built with the pandoc of the docs
+# pipeline; the result is committed, so that a snapshot needs no container. The
+# pages of the commands are generated from the option parser at release time
+# and are not committed.
+PANDOC_IMAGE := $(shell sed -n 's/^readonly PANDOC_IMAGE="\(.*\)"/\1/p' docs/build.sh)
+DOCS_ENGINE ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo podman)
+
+.PHONY: man
+man: ## build docs/man/ligo.1 from its Markdown (needs docker or podman)
+	@$(DOCS_ENGINE) run --rm --user "$$(id -u):$$(id -g)" --volume "$(CURDIR):/data" --workdir /data $(PANDOC_IMAGE) \
+		--standalone --to man --output docs/man/ligo.1 docs/man/ligo.1.md
+
+.PHONY: man-check
+man-check: man ## fail when docs/man/ligo.1 is not what its Markdown builds
+	@git diff --exit-code -- docs/man/ligo.1 || { echo "docs/man/ligo.1 is stale: run make man and commit it" >&2; exit 1; }
+
+.PHONY: man-pages
+man-pages: ## generate the ligo-<command>(1) pages into build/man (read one with man -l)
+	@mkdir -p build/man && go run ./internal/tools/genman build/man && cp docs/man/ligo.1 build/man/ligo.1
+
 # REDOCLY_VERSION is the Redocly CLI that lints the OpenAPI document, here
 # and in CI; telemetry off
 REDOCLY_VERSION := 1.34.3
