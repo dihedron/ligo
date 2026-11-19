@@ -30,7 +30,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Not started; needs the user's PyPI project and trusted publishing; see §20 |
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
-| 25 | A description and a metadata map on each binding, sent to the client | 2026-11-19 | Not started; see §25 |
+| 25 | A description and a metadata map on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-metadata.md`, branch `feature/binding-metadata`; see §25 |
 
 ## 1. Audit pruning
 

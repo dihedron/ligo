@@ -77,6 +77,8 @@ type Binding struct {
     UpdatedAt                time.Time
     Spec                     map[string]any // differs per platform type (endpoint, database, user, serverId, …)
     Auth                     Auth
+    Description              string            // what the binding is for; plain text, never interpreted
+    Metadata                 map[string]string // operator-defined keys; a copy, never shared
 }
 
 type Auth struct {
