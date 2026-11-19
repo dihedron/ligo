@@ -184,9 +184,10 @@ jobs:
       - name: Test (make py-test)
         run: make py-test
 
-      # the SDK's own package is not on PyPI, so it is left out of the audit
+      # the project's own dependencies, resolved afresh: the runner's setuptools
+      # and pip are not the SDK's
       - name: Audit the dependencies
-        run: python -m pip_audit --skip-editable
+        run: python -m pip_audit sdk/python
 
       - name: Build the wheel and the sdist (make py-build)
         run: make py-build

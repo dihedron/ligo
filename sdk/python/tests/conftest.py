@@ -62,6 +62,7 @@ class CA:
                 ),
                 critical=True,
             )
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(self.key.public_key()), critical=False)
             .sign(self.key, hashes.SHA256())
         )
 
@@ -95,6 +96,7 @@ class CA:
                 x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH]),
                 critical=False,
             )
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(self.key.public_key()), critical=False)
             .sign(self.key, hashes.SHA256())
         )
         return X509Svid(SpiffeId(spiffe_id), [cert], key)
@@ -288,6 +290,7 @@ class StoreServer:
             .add_extension(
                 x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False
             )
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.key.public_key()), critical=False)
             .sign(ca.key, hashes.SHA256())
         )
         self._ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
