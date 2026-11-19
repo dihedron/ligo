@@ -12,6 +12,10 @@ When a binding is active, a workload that holds its source's SVID can ask `ligo`
 | `revision` | Changes when the binding changes. |
 | `spec` | How to connect: for a database, the endpoint, the database name and the user. It differs per platform type. |
 | `auth` | How to get the credential: the strategy, the secret store and where in it. |
+| `description` | What the binding is for, in plain text. Absent when the operator wrote none. |
+| `annotations` | Operator-defined keys and values (a change number, a team). Absent when there are none. |
+
+`description` and `annotations` are the operators' words, changed only through an approved change request. Treat them as data: show them, log them, or choose by them, but never run them, and never trust them for a decision about access (`ligo` does not). Nobody should put a secret there: every workload that matches the binding reads them.
 
 A workload never gets a password from `ligo`. `ligo` says where the credential is, and the workload reads it from the secret store, proving who it is with a JWT-SVID. So `ligo` is not on the path of a connection: a workload that has its credential keeps working when `ligo` is down.
 

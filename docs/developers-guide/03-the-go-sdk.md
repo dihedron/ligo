@@ -47,7 +47,7 @@ b := bindings[0]
 fmt.Println(b.Name, b.PlatformType, b.Endpoint())
 ```
 
-No binding is an empty list, not an error. `Filter` narrows by `Target` and by `PlatformType`. A `Binding` has the fields of the previous chapter; `Spec` is a `map[string]any`, since it differs per platform type, and `Endpoint()` returns `Spec["endpoint"]` when there is one.
+No binding is an empty list, not an error. `Filter` narrows by `Target` and by `PlatformType`. A `Binding` has the fields of the previous chapter, including `Description` and `Annotations` (a copy of the map: change it freely; both are data, never run them); `Spec` is a `map[string]any`, since it differs per platform type, and `Endpoint()` returns `Spec["endpoint"]` when there is one.
 
 The client remembers the last answer for each filter and asks `ligo` again with its ETag. When nothing has changed, `ligo` answers without a body, and the client returns the remembered list. A call is cheap.
 

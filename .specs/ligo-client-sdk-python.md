@@ -52,7 +52,7 @@ with ligo_client.Client(address="ligo1.example.com:8443",
 | `check_flows(target=None, **options) -> FlowResults` and `check_flow_data(flows, **options)` | `CheckFlows`, `CheckFlowData` | §5. |
 | `close()` | `Close` | Drops the store tokens, closes the sources it opened. |
 
-`Binding`, `Auth`, `Credential`, `Event`, `Flow`, `BindingFlows` are frozen dataclasses with the Go fields in snake case. `Binding.endpoint()` returns `spec["endpoint"]` when it is a string. `Credential` hides its password in `__repr__`, `__str__`, `__format__`, logging and `copy`, and refuses to be pickled.
+`Binding` (with `description` and `annotations`, a copy of the map, see `.specs/ligo-binding-annotations.md`), `Auth`, `Credential`, `Event`, `Flow`, `BindingFlows` are frozen dataclasses with the Go fields in snake case. `Binding.endpoint()` returns `spec["endpoint"]` when it is a string. `Credential` hides its password in `__repr__`, `__str__`, `__format__`, logging and `copy`, and refuses to be pickled.
 
 ### 3.3 Errors
 

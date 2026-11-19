@@ -54,7 +54,11 @@ name: payments-ledger
 source: payments-worker
 target: ledger
 accessLevel: read
+description: Ledger posting for the payments workers   # optional; sent to the workload
+annotations: { change: CHG0012345 }                   # optional; sent to the workload
 ```
+
+`description` (up to 4096 characters) and `annotations` (up to 32 keys, values up to 256 characters) are plain text that the workload can read: never put a secret in them. Changing either later is a change request like any other edit.
 
 ```bash
 ligo charter check -f binding.yaml   # the jurisdictions, the rule and the sides it will need
