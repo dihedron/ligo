@@ -155,7 +155,7 @@ func TestINV11Routes(t *testing.T) {
 	if _, err := v.owner.Exec(ctx, "update bindings set phase = 'ACTIVE' where name = $1", name); err != nil {
 		t.Fatal(err)
 	}
-	id := act(b, "PUT /ui/bindings/{name}", "CR_CREATED", "/ui/bindings/"+name, url.Values{"accessLevel": {"read"}, "purpose": {"audits"}, "expectedRevision": {"1"}})
+	id := act(b, "PUT /ui/bindings/{name}", "CR_CREATED", "/ui/bindings/"+name, url.Values{"accessLevel": {"read"}, "description": {"audits"}, "expectedRevision": {"1"}})
 	act(b, decide, "CR_WITHDRAWN", "/ui/change-requests/"+id+"/withdraw", url.Values{})
 	act(b, "POST /ui/targets/{name}/bindings/revoke", "CR_CREATED", "/ui/targets/tgt-"+x+"/bindings/revoke", url.Values{"sourceJurisdiction": {"dc/*"}, "comment": {"incident"}})
 	if err := v.owner.QueryRow(ctx, "select id::text from change_requests where resource_name = $1 and status = 'PENDING'", name).Scan(&id); err != nil {

@@ -323,7 +323,7 @@ func samples() map[string]any {
 		"binding-check":   TargetCheck{Charter: gov},
 		"wizard-form":     wz,
 		"wizard":          wz,
-		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Labels: "a=b"},
+		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Annotations: "a=b"},
 		"status-row":      row,
 		"trail":           trail,
 		"bindings-table":  []*bindings.View{v},

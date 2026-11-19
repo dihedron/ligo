@@ -5,7 +5,8 @@
     <dt>Platform</dt><dd>{{.Metadata.Platform}} ({{.Metadata.PlatformType}}, realm {{.Metadata.Realm}})</dd>
     <dt>Jurisdictions</dt><dd>source {{.Metadata.SourceJurisdiction}}, target {{.Metadata.TargetJurisdiction}}, platform {{.Metadata.PlatformJurisdiction}}</dd>
     <dt>Revision</dt><dd>{{.Metadata.Revision}}{{with .Metadata.ActiveRevision}} (active {{.}}){{end}}</dd>
-    {{with .Purpose}}<dt>Purpose</dt><dd>{{.}}</dd>{{end}}
+    {{with .Description}}<dt>Description</dt><dd style="white-space:pre-wrap">{{.}}</dd>{{end}}
+    {{with .Annotations}}<dt>Annotations</dt><dd>{{range $k, $v := .}}<code>{{$k}}</code>={{$v}}<br>{{end}}</dd>{{end}}
     {{with .ExpiresAt}}<dt>Expires</dt><dd>{{when .}}</dd>{{end}}
     <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
     {{with .Status.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}

@@ -24,19 +24,19 @@ import (
 // refused submission renders the form again with its values (never the
 // password), a message on each field at fault and General for the rest.
 type BreakGlassForm struct {
-	Operation                            string // CREATE, UPDATE or DELETE
-	Name, Source, Target, Level, Purpose string
-	Parameters                           string // JSON object
-	Revision                             string
-	Inline                               bool
-	InlineSource                         Inline
-	Justification, Incident, TTL         string
-	TrustDomains                         []string
-	MinJustification                     int
-	Errors                               map[string]string // by field name
-	General                              string
-	Applied                              string // the binding just changed, for a user who cannot open it
-	Disabled                             bool   // maintenance mode
+	Operation                                string // CREATE, UPDATE or DELETE
+	Name, Source, Target, Level, Description string
+	Parameters                               string // JSON object
+	Revision                                 string
+	Inline                                   bool
+	InlineSource                             Inline
+	Justification, Incident, TTL             string
+	TrustDomains                             []string
+	MinJustification                         int
+	Errors                                   map[string]string // by field name
+	General                                  string
+	Applied                                  string // the binding just changed, for a user who cannot open it
+	Disabled                                 bool   // maintenance mode
 }
 
 // breakGlassMember reports a break_glass grant on any jurisdiction: the form and
@@ -75,7 +75,7 @@ func (s *Server) breakGlassForm(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.Name != "" && sess.Grants.Viewer() {
 		if v, err := s.Bindings.Get(r.Context(), sess.Caller(), f.Name); err == nil {
-			f.Source, f.Target, f.Level, f.Purpose = v.Source, v.Target, v.AccessLevel, v.Purpose
+			f.Source, f.Target, f.Level, f.Description = v.Source, v.Target, v.AccessLevel, v.Description
 			f.Parameters, f.Revision = string(v.Parameters), strconv.FormatInt(v.Metadata.Revision, 10)
 		}
 	}
@@ -88,7 +88,7 @@ func (s *Server) breakGlassForm(w http.ResponseWriter, r *http.Request) {
 func (s *Server) formOf(r *http.Request) BreakGlassForm {
 	v := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	return BreakGlassForm{Operation: v("operation"), Name: v("name"), Source: v("source"), Target: v("target"), Level: v("accessLevel"),
-		Purpose: v("purpose"), Parameters: v("parameters"), Revision: v("expectedRevision"), Inline: r.PostFormValue("sourceMode") == "inline",
+		Description: v("description"), Parameters: v("parameters"), Revision: v("expectedRevision"), Inline: r.PostFormValue("sourceMode") == "inline",
 		InlineSource:  Inline{Name: v("inline.name"), TrustDomain: v("inline.trustDomain"), SVIDRegex: v("inline.svidRegex"), Samples: r.PostFormValue("inline.samples")},
 		Justification: v("justification"), Incident: v("incidentReference"), TTL: v("ttl"), TrustDomains: s.trustDomains(),
 		MinJustification: max(s.Config.BreakGlass.MinJustificationLength, 20), Errors: map[string]string{}, Disabled: s.maintenance(r)}
@@ -141,7 +141,7 @@ func (s *Server) breakGlassSubmit(w http.ResponseWriter, r *http.Request) {
 	if f.Operation == "DELETE" {
 		in["name"], in["expectedRevision"] = f.Name, rev
 	} else {
-		b := map[string]any{"name": f.Name, "source": f.Source, "target": f.Target, "accessLevel": f.Level, "purpose": f.Purpose}
+		b := map[string]any{"name": f.Name, "source": f.Source, "target": f.Target, "accessLevel": f.Level, "description": f.Description}
 		if f.Parameters != "" {
 			var params map[string]any
 			if err := json.Unmarshal([]byte(f.Parameters), &params); err != nil {

@@ -250,7 +250,7 @@ func TestApplied(t *testing.T) {
 	var workflows []uuid.UUID
 	s.Start = func(_ context.Context, id uuid.UUID) error { workflows = append(workflows, id); return nil }
 	name := "dd-" + w.suffix
-	r, err := s.Create(ctx, dcOp, body(name, w.dcSrc, w.dcShared, "write", `"parameters":{"connectionLimit":20}`, `"purpose":"posting"`))
+	r, err := s.Create(ctx, dcOp, body(name, w.dcSrc, w.dcShared, "write", `"parameters":{"connectionLimit":20}`, `"description":"posting","annotations":{"change":"CHG0012345"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +264,11 @@ func TestApplied(t *testing.T) {
 	if phase != "PROVISIONING" || workflow != "ligo:apply:"+id.String()+":r1:a1" || !strings.HasPrefix(principal, "svc_") || len(principal) != 20 ||
 		strategy != "vault-static" || revision != 1 || spec != `{"connectionLimit": 20}` {
 		t.Errorf("binding %s %s %s %s %d %s", phase, workflow, principal, strategy, revision, spec)
+	}
+	var desc, annotations string
+	if err := o.QueryRow(ctx, "select description, annotations::text from bindings where name = $1", name).Scan(&desc, &annotations); err != nil ||
+		desc != "posting" || annotations != `{"change": "CHG0012345"}` {
+		t.Errorf("description %q annotations %s (%v)", desc, annotations, err)
 	}
 	var started int
 	if err := o.QueryRow(ctx, "select count(*) from audit_log where change_request_id = $1 and action = 'APPLY_STARTED'", r.ID).Scan(&started); err != nil || started != 1 {

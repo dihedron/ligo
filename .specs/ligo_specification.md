@@ -2,7 +2,7 @@
 
 - **Document Version:** `4.2.0` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.1.1` (**breaking change**: on a binding, `purpose` becomes `description` and `labels` becomes `metadata`, and both are sent to workloads; `.specs/ligo-binding-metadata.md`). 4.1.1 superseded `4.1.0` (the Vault plugin's client auth gains `audience` and `namespace`, and gRPC errors gain `RetryInfo`, for the Go client SDK, §0.5). 4.1.0 superseded `4.0.9` (**breaking change**: platforms, identity provider instances and secret store instances move from `server.yaml` to the database, changed by four-eyes change requests; `server.yaml` keeps plugin types, §0.6). 4.0.9 superseded `4.0.8` (change requests are pruned once no audit entry names them, and travel in the audit export; a binding's parties are kept on the binding, §0.7). 4.0.8 superseded `4.0.7` (the audit log is pruned, only through a signed checkpoint someone exported, and webhook rows are kept on configurable windows, §0.8). 4.0.7 superseded `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.9). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.10). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.11). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.12). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.13). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.14). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.15). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.16).
+- **Supersedes:** `4.1.1` (**breaking change**: on a binding, `purpose` becomes `description` and `labels` becomes `annotations`, and both are sent to workloads; `.specs/ligo-binding-annotations.md`). 4.1.1 superseded `4.1.0` (the Vault plugin's client auth gains `audience` and `namespace`, and gRPC errors gain `RetryInfo`, for the Go client SDK, §0.5). 4.1.0 superseded `4.0.9` (**breaking change**: platforms, identity provider instances and secret store instances move from `server.yaml` to the database, changed by four-eyes change requests; `server.yaml` keeps plugin types, §0.6). 4.0.9 superseded `4.0.8` (change requests are pruned once no audit entry names them, and travel in the audit export; a binding's parties are kept on the binding, §0.7). 4.0.8 superseded `4.0.7` (the audit log is pruned, only through a signed checkpoint someone exported, and webhook rows are kept on configurable windows, §0.8). 4.0.7 superseded `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.9). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.10). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.11). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.12). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.13). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.14). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.15). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.16).
 - **Target Stack:** Go 1.27.4+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
@@ -829,7 +829,7 @@ Platforms are read-only through the API. Their representation is derived from `s
   "accessLevel": "write",
   "parameters": { "connectionLimit": 20 },
   "description": "Ledger posting for the payments batch",
-  "metadata": { "change": "CHG0012345" },
+  "annotations": { "change": "CHG0012345" },
   "expiresAt": null,
   "status": {
     "phase": "ACTIVE",
@@ -917,13 +917,13 @@ Field rules:
       "auth": { "secretStorageStrategy": "vault-static", "secretStoreType": "vault.v1", "secretStoreInstance": "vault-prod", "config": { } },
       "spec": { },
       "description": "Ledger posting for the payments batch",
-      "metadata": { "change": "CHG0012345" },
+      "annotations": { "change": "CHG0012345" },
       "updatedAt": "2026-10-16T07:02:11Z"
     }
   ]
 }
 ```
-`description` and `metadata` are the binding's text and key/value map (§3.5, limits in `.specs/ligo-binding-metadata.md` §3.2); each is omitted when empty, and neither is ever used to decide access. `revision` is the active revision. Items are sorted by `name` ascending. `?target=<name>` returns only the bindings to that target: normally one, or more if several sources that match the caller are bound to it.
+`description` and `annotations` are the binding's text and key/value map (§3.5, limits in `.specs/ligo-binding-annotations.md` §3.2); each is omitted when empty, and neither is ever used to decide access. `revision` is the active revision. Items are sorted by `name` ascending. `?target=<name>` returns only the bindings to that target: normally one, or more if several sources that match the caller are bound to it.
 
 **Normative.** Effective network flows (`GET /v1/flows`):
 ```json
@@ -995,7 +995,7 @@ When the target jurisdiction equals the platform jurisdiction, "owner and platfo
 | `accessLevel` | Yes | Yes | `ALL`, or `ANY` if the new level's privileges are a subset of the current one's | The new level MUST be `ACTIVE`. |
 | `parameters` | Yes | Yes | `ALL` | Validated by `ValidateBinding`. |
 | `expiresAt` | Yes | Yes | `ANY` if brought forward or set where there was none, `ALL` if extended or removed | |
-| `description`, `metadata` | Yes | Yes | `ALL` | Sent to workloads; limits in `.specs/ligo-binding-metadata.md` §3.2 |
+| `description`, `annotations` | Yes | Yes | `ALL` | Sent to workloads; limits in `.specs/ligo-binding-annotations.md` §3.2 |
 
 An update with several changes uses consent `ANY` only if **every** change in it qualifies for `ANY`. An update that attempts to change an immutable field of any resource MUST be rejected with `422 immutable-field`.
 
@@ -1639,7 +1639,7 @@ CREATE TABLE bindings (
     platform_jurisdiction              jurisdiction_path NOT NULL,            -- copied from the target's platform
     parameters                  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- per-binding parameters, validated by ValidateBinding
     description                 TEXT CHECK (length(description) <= 4096),
-    metadata                    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    annotations                 JSONB NOT NULL DEFAULT '{}'::jsonb,
     expires_at                  TIMESTAMPTZ,                    -- optional; revoked by the sweeper (§6.3)
     expiry_warned_at            TIMESTAMPTZ,                    -- BINDING_EXPIRING already emitted
 
@@ -1747,7 +1747,7 @@ CREATE TRIGGER trg_bindings_notify_delete
 
 CREATE TRIGGER trg_bindings_notify_update
     AFTER UPDATE OF active_revision, active_source_svid_regex,
-          active_auth_config, active_spec, phase, expires_at, description, metadata
+          active_auth_config, active_spec, phase, expires_at, description, annotations
     ON bindings FOR EACH ROW
     WHEN (
         OLD.active_revision IS DISTINCT FROM NEW.active_revision
@@ -1755,7 +1755,7 @@ CREATE TRIGGER trg_bindings_notify_update
         OR OLD.active_auth_config IS DISTINCT FROM NEW.active_auth_config
         OR OLD.active_spec IS DISTINCT FROM NEW.active_spec
         OR OLD.description IS DISTINCT FROM NEW.description
-        OR OLD.metadata IS DISTINCT FROM NEW.metadata
+        OR OLD.annotations IS DISTINCT FROM NEW.annotations
         OR OLD.expires_at IS DISTINCT FROM NEW.expires_at
         OR (OLD.phase IN ('DELETING', 'DELETE_FAILED')) IS DISTINCT FROM (NEW.phase IN ('DELETING', 'DELETE_FAILED'))
     )
@@ -2296,7 +2296,7 @@ SELECT b.id, b.name, b.platform_type, b.platform, t.name AS target_name, s.name 
        b.access_level, b.source_trust_domain, b.active_revision, b.active_source_svid_regex,
        s.svid_regex AS current_source_svid_regex,
        b.active_auth_config, b.active_spec, b.secret_store_instance, b.expires_at, b.updated_at,
-       b.description, b.metadata
+       b.description, b.annotations
 FROM bindings b
 JOIN targets t ON t.id = b.target_id
 JOIN sources s ON s.id = b.source_id
@@ -3331,7 +3331,7 @@ message WorkloadBinding {
   google.protobuf.Struct spec = 10;
   google.protobuf.Timestamp updated_at = 11;
   string description = 12;
-  map<string, string> metadata = 13;
+  map<string, string> annotations = 13;
 }
 
 message GetFlowsRequest {
@@ -3503,7 +3503,7 @@ All paginated endpoints accept `pageSize` (default `50`, max `200`) and an optio
   "accessLevel": "write",
   "parameters": { "connectionLimit": 20 },
   "description": "Ledger posting for the payments batch",
-  "metadata": { "change": "CHG0012345" },
+  "annotations": { "change": "CHG0012345" },
   "expiresAt": null,
   "expectedRevision": 1,
   "approvalReference": "CHG0012345",
@@ -3544,7 +3544,7 @@ A `trusted_automation` principal whose `platforms` do not include a target's pla
   "target": "...", "targetRevision": 2, "accessLevel": "...",
   "parameters": { "...": "normalized_parameters_json returned by ValidateBinding" },
   "requestedSpec": { "...": "requested_spec_json returned by ValidateBinding" },
-  "description": "...", "metadata": { }, "expiresAt": null }
+  "description": "...", "annotations": { }, "expiresAt": null }
 ```
 
 For a source, it is the §3.2 body (normalized: `identity`, metadata, visibility, state); for a target, the §3.3 body with `definition` and `accessLevels` as returned by `ValidateTarget` (including `privileges`). `payload_sha256` is the SHA-256 of the RFC 8785 (JCS) serialization of this **whole** object, so that any change of what is reviewed changes the hash. A binding payload records the source and target revisions the approver reviewed against; if either resource has changed by the time of approval, the payload is rebuilt, and a different hash means the request must be filed again (`409 normalization-drift`). `expected_revision` is stored in its own column and is not part of the payload. For `DELETE`, the payload is `{}`.
@@ -3772,7 +3772,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `GET` | `/ui/bindings` | Dashboard: filterable table (source, target, level, phase, expiry), phase badges, pending-change-request and propagation indicators. |
 | `GET` | `/ui/bindings/wizard` | Binding wizard (§7.2.4), started from the catalog (`?target=`) or from a target's page to offer a binding (`?offer=1`). Each step is a fragment; the review step renders `/ui/bindings/charter-preview`. |
 | `GET` | `/ui/bindings/{name}` | Detail view: source, target, level, snapshot, effective flows, stage states, audit trail. |
-| `GET` | `/ui/bindings/{name}/edit-form` | Update form: access level (levels with fewer privileges marked "unilateral"), parameters, description, metadata, expiry. |
+| `GET` | `/ui/bindings/{name}/edit-form` | Update form: access level (levels with fewer privileges marked "unilateral"), parameters, description, annotations, expiry. |
 | `POST` | `/ui/bindings` | Submit a create change request (and an inline source's, if any); `200 OK` with `HX-Redirect: /ui/bindings/{name}` (or `/ui/change-requests/{id}` if `PENDING`). |
 | `PUT` | `/ui/bindings/{name}` | Submit an update change request; `200 OK` with `HX-Redirect`. |
 | `DELETE` | `/ui/bindings/{name}` | Submit a revocation (with a confirmation dialog); `200 OK` with `HX-Redirect: /ui/bindings`. |
@@ -6046,7 +6046,7 @@ sequenceDiagram
 
 | Message | Information carried | Protection |
 | :--- | :--- | :--- |
-| `POST /v1/admin/bindings` | Binding name, source and target names, access level, parameters, description, metadata, optional expiry, optional `approvalReference` and `automationContext` | TLS, authenticated principal; no secrets are ever submitted |
+| `POST /v1/admin/bindings` | Binding name, source and target names, access level, parameters, description, annotations, optional expiry, optional `approvalReference` and `automationContext` | TLS, authenticated principal; no secrets are ever submitted |
 | `ValidateBinding` | Platform name, normalized target definition, the level's grants, parameters; back: normalized parameters, requested spec, privileges | AutoMTLS; plugin data rendered only as plain data (INV-12); parameters cannot add privilege (§5.8 rule 8) |
 | Database transaction | Change request with normalized payload and its SHA-256, consent rule, charter SHA-256, side, binding requested state composed from the source and target revisions, audit entries | No secrets; lock order and audit insert last (§4.3) |
 | Workflow start | Workflow ID (`ligo:apply:<id>:r1:a1`), binding ID, revision, wiring | DBOS journal; sweeper starts it if this call is lost (E.11) |

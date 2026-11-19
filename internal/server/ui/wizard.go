@@ -53,8 +53,8 @@ type Wizard struct {
 	Inline       Inline
 	TrustDomains []string
 	Params       []Field
-	Purpose      string
-	Labels       string
+	Description  string
+	Annotations  string
 	ExpiresAt    string // datetime-local, UTC
 	Name         string
 	Flows        []flows.Flow
@@ -72,8 +72,8 @@ func (s *Server) wizard(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ctx, c := r.Context(), session(r).Caller()
 	wz := Wizard{Offer: q.Get("offer") == "1", Level: q.Get("accessLevel"), Source: q.Get("source"), UseInline: q.Get("sourceMode") == "inline",
-		Inline:  Inline{Name: q.Get("inline.name"), TrustDomain: q.Get("inline.trustDomain"), SVIDRegex: q.Get("inline.svidRegex"), Samples: q.Get("inline.samples")},
-		Purpose: q.Get("purpose"), Labels: q.Get("labels"), ExpiresAt: q.Get("expiresAt"), Name: q.Get("name"), TrustDomains: s.trustDomains()}
+		Inline:      Inline{Name: q.Get("inline.name"), TrustDomain: q.Get("inline.trustDomain"), SVIDRegex: q.Get("inline.svidRegex"), Samples: q.Get("inline.samples")},
+		Description: q.Get("description"), Annotations: q.Get("annotations"), ExpiresAt: q.Get("expiresAt"), Name: q.Get("name"), TrustDomains: s.trustDomains()}
 	wz.Step, _ = strconv.Atoi(q.Get("step"))
 	wz.Step = max(1, min(wz.Step, wizardSteps))
 	var err error
@@ -186,13 +186,13 @@ func (s *Server) plannedFlows(t *targets.View) []flows.Flow {
 // body (and the inline source's, for a create).
 func (s *Server) bindingBody(r *http.Request, platform string) (map[string]any, error) {
 	b := map[string]any{"name": strings.TrimSpace(r.PostFormValue("name")), "target": r.PostFormValue("target"),
-		"accessLevel": r.PostFormValue("accessLevel"), "purpose": strings.TrimSpace(r.PostFormValue("purpose"))}
-	labels, err := pairs(r.PostFormValue("labels"))
+		"accessLevel": r.PostFormValue("accessLevel"), "description": strings.TrimSpace(r.PostFormValue("description"))}
+	annotations, err := pairs(r.PostFormValue("annotations"))
 	if err != nil {
 		return nil, err
 	}
-	if len(labels) > 0 {
-		b["labels"] = labels
+	if len(annotations) > 0 {
+		b["annotations"] = annotations
 	}
 	if v := strings.TrimSpace(r.PostFormValue("expiresAt")); v != "" {
 		t, err := time.Parse("2006-01-02T15:04", v)
@@ -250,11 +250,11 @@ func inlineSource(r *http.Request) sources.Source {
 
 // BindingForm is the binding update form's data.
 type BindingForm struct {
-	Binding *bindings.View
-	Levels  []LevelChoice
-	Params  []Field
-	Labels  string
-	Expires string
+	Binding     *bindings.View
+	Levels      []LevelChoice
+	Params      []Field
+	Annotations string
+	Expires     string
 }
 
 // LevelChoice is an access level of the binding's target; Unilateral
@@ -302,8 +302,8 @@ func (s *Server) bindingEditForm(w http.ResponseWriter, r *http.Request) {
 		subset := l.Name != v.AccessLevel && !slices.ContainsFunc(l.Privileges, func(p string) bool { return !slices.Contains(current, p) })
 		f.Levels = append(f.Levels, LevelChoice{Name: l.Name, Current: l.Name == v.AccessLevel, Unilateral: subset})
 	}
-	for k, val := range v.Labels {
-		f.Labels += k + "=" + val + "\n"
+	for k, val := range v.Annotations {
+		f.Annotations += k + "=" + val + "\n"
 	}
 	if v.ExpiresAt != nil {
 		f.Expires = v.ExpiresAt.UTC().Format("2006-01-02T15:04")

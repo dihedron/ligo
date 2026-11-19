@@ -919,13 +919,13 @@ func TestBindingsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	upd := v.do(t, olga, "PUT", "/v1/admin/bindings/"+v.name, map[string]any{"name": v.name, "source": "src-" + x, "target": "tgt-" + x,
-		"accessLevel": "read", "purpose": "reporting", "expectedRevision": 1})
+		"accessLevel": "read", "description": "reporting", "expectedRevision": 1})
 	ucr, _ := upd.body["changeRequest"].(map[string]any)
 	if upd.code != 202 || ucr["status"] != "PENDING" {
 		t.Fatalf("update: %+v", upd)
 	}
 	diff, _ := v.do(t, dora, "GET", "/v1/admin/change-requests/"+ucr["id"].(string), nil).body["diff"].(map[string]any)
-	if changes, _ := diff["changes"].([]any); len(changes) != 1 || changes[0].(map[string]any)["field"] != "purpose" {
+	if changes, _ := diff["changes"].([]any); len(changes) != 1 || changes[0].(map[string]any)["field"] != "description" {
 		t.Errorf("diff: %v", diff)
 	}
 	if r := v.do(t, olga, "POST", "/v1/admin/change-requests/"+ucr["id"].(string)+"/withdraw", nil); r.code != 200 {

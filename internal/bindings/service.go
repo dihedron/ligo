@@ -177,7 +177,7 @@ func (s *Service) Release(ctx context.Context, c changerequests.Caller, name str
 		return nil, refuse(409, "revision-conflict", "the binding is at revision %d", cur.revision)
 	}
 	b := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
-		Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+		Parameters: cur.parameters, Description: cur.description, Annotations: cur.annotations, ExpiresAt: cur.expiresAt}
 	res, err := s.resolve(ctx, &c, &b, cur, s.Requests.Policy, changerequests.ConsentAll, nil)
 	if err != nil {
 		return nil, err
@@ -224,8 +224,8 @@ func (s *Service) removesOnly(ctx context.Context, cur *stored, b *Binding) bool
 	params, _ := jcs.Transform(orEmpty(b.Parameters))
 	stored, _ := jcs.Transform(orEmpty(cur.parameters))
 	if !bytes.Equal(params, stored) || len(changerequests.Changed(
-		changerequests.Field{Name: "purpose", Old: cur.purpose, New: b.Purpose},
-		changerequests.Field{Name: "labels", Old: cur.labels, New: b.Labels})) > 0 {
+		changerequests.Field{Name: "description", Old: cur.description, New: b.Description},
+		changerequests.Field{Name: "annotations", Old: cur.annotations, New: b.Annotations})) > 0 {
 		return false
 	}
 	sameExpiry := cur.expiresAt == nil && b.ExpiresAt == nil || cur.expiresAt != nil && b.ExpiresAt != nil && cur.expiresAt.Equal(*b.ExpiresAt)
@@ -252,11 +252,11 @@ type stored struct {
 	id, targetID                                                 uuid.UUID
 	name, source, target, accessLevel                            string
 	sourceJurisdiction, targetJurisdiction, platformJurisdiction string
-	platform, phase, purpose, realm                              string
+	platform, phase, description, realm                          string
 	revision, attempt                                            int64
 	managedBy                                                    string // the owner of the lock, or empty
 	parameters                                                   json.RawMessage
-	labels                                                       map[string]string
+	annotations                                                  map[string]string
 	expiresAt                                                    *time.Time
 	privileges                                                   []string   // of the current level
 	breakGlassCR                                                 *uuid.UUID // the open break-glass change (ADR-12)
@@ -265,15 +265,15 @@ type stored struct {
 func load(ctx context.Context, q store.Querier, where string, arg any, lock bool) (*stored, error) {
 	st := &stored{}
 	sql := `SELECT b.id, b.target_id, b.name, s.name, t.name, b.access_level, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction,
-		b.platform, b.phase, coalesce(b.purpose, ''), b.realm, b.revision, b.attempt, b.parameters, b.labels, b.expires_at, l.privileges, b.break_glass_cr_id, coalesce(b.managed_by, '')
+		b.platform, b.phase, coalesce(b.description, ''), b.realm, b.revision, b.attempt, b.parameters, b.annotations, b.expires_at, l.privileges, b.break_glass_cr_id, coalesce(b.managed_by, '')
 		FROM bindings b JOIN sources s ON s.id = b.source_id JOIN targets t ON t.id = b.target_id
 		JOIN target_access_levels l ON l.target_id = b.target_id AND l.name = b.access_level WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE OF b"
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.id, &st.targetID, &st.name, &st.source, &st.target, &st.accessLevel, &st.sourceJurisdiction,
-		&st.targetJurisdiction, &st.platformJurisdiction, &st.platform, &st.phase, &st.purpose, &st.realm, &st.revision, &st.attempt, &st.parameters,
-		&st.labels, &st.expiresAt, &st.privileges, &st.breakGlassCR, &st.managedBy)
+		&st.targetJurisdiction, &st.platformJurisdiction, &st.platform, &st.phase, &st.description, &st.realm, &st.revision, &st.attempt, &st.parameters,
+		&st.annotations, &st.expiresAt, &st.privileges, &st.breakGlassCR, &st.managedBy)
 	return st, err
 }
 
@@ -294,6 +294,9 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	b.Kind = "Binding"
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
+	}
+	if err := checkText(b); err != nil {
+		return nil, invalid("%v", err)
 	}
 	if cur != nil && (b.Name != cur.name || b.Source != cur.source || b.Target != cur.target) {
 		return nil, refuse(422, "immutable-field", "the name, source and target of a binding cannot change")
@@ -596,7 +599,7 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 	var id uuid.UUID
 	var revision, attempt int64
 	if cur == nil {
-		labels := labelsJSON(b.Labels)
+		annotations := annotationsJSON(b.Annotations)
 		pl, _ := s.Rules.Platform(snap.platform)
 		if pl.SecretStorageStrategy == "" {
 			return nil, fmt.Errorf("bindings: platform %s has no resolved secret_storage_strategy", snap.platform)
@@ -611,13 +614,13 @@ func (s *Service) Apply(ctx context.Context, tx pgx.Tx, r *changerequests.Reques
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO bindings (id, name, source_id, target_id, access_level, realm, platform_type, platform,
 			identity_provider_type, identity_provider_instance, secret_store_type, secret_store_instance, secret_storage_strategy,
-			derived_principal_name, source_jurisdiction, target_jurisdiction, platform_jurisdiction, parameters, purpose, labels, expires_at, workflow_id,
+			derived_principal_name, source_jurisdiction, target_jurisdiction, platform_jurisdiction, parameters, description, annotations, expires_at, workflow_id,
 			source_revision, target_revision, source_trust_domain, source_svid_regex, requested_spec, created_by, updated_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20::jsonb, $21, $22,
 			$23, $24, $25, $26, $27::jsonb, $28, $28)`,
 			id, b.Name, snap.sourceID, snap.targetID, b.AccessLevel, pl.Realm, pl.Type, pl.Name, pl.IdentityProviderType, pl.IdentityProviderInstance,
 			pl.SecretStoreType, pl.SecretStoreInstance, pl.SecretStorageStrategy, principal, r.SourceJurisdiction, r.TargetJurisdiction, r.PlatformJurisdiction,
-			string(b.Parameters), null(b.Purpose), labels, b.ExpiresAt, workflowID(id, revision, attempt), snap.srcRev, snap.tgtRev, snap.td,
+			string(b.Parameters), null(b.Description), annotations, b.ExpiresAt, workflowID(id, revision, attempt), snap.srcRev, snap.tgtRev, snap.td,
 			snap.regex, string(b.RequestedSpec), r.RequestedBy)
 		if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) {
 			switch pe.ConstraintName {
@@ -697,13 +700,13 @@ func lockSnapshot(ctx context.Context, tx pgx.Tx, b *Binding) (*snapshot, error)
 // includes every applied change: its propagation row goes.
 func revise(ctx context.Context, tx pgx.Tx, cur *stored, b *Binding, sn *snapshot, actor string) (revision, attempt int64, err error) {
 	revision, attempt = cur.revision+1, cur.attempt+1
-	if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, purpose = $4, labels = $5::jsonb,
+	if _, err := tx.Exec(ctx, `UPDATE bindings SET access_level = $2, parameters = $3::jsonb, description = $4, annotations = $5::jsonb,
 		expiry_warned_at = CASE WHEN expires_at IS DISTINCT FROM $6 THEN NULL ELSE expiry_warned_at END, expires_at = $6, revision = $7, attempt = $8, phase = 'PROVISIONING', operation = 'APPLY', workflow_id = $9,
 		current_step = 'INIT', status_message = '', last_transition_at = now(),
 		rotate_static_secrets = (phase = 'FAILED' OR source_svid_regex IS DISTINCT FROM $13),
 		source_revision = $10, target_revision = $11, source_trust_domain = $12, source_svid_regex = $13, requested_spec = $14::jsonb,
 		updated_at = now(), updated_by = $15 WHERE id = $1`,
-		cur.id, b.AccessLevel, string(b.Parameters), null(b.Purpose), labelsJSON(b.Labels), b.ExpiresAt, revision, attempt,
+		cur.id, b.AccessLevel, string(b.Parameters), null(b.Description), annotationsJSON(b.Annotations), b.ExpiresAt, revision, attempt,
 		workflowID(cur.id, revision, attempt), sn.srcRev, sn.tgtRev, sn.td, sn.regex, string(b.RequestedSpec), actor); err != nil {
 		return 0, 0, err
 	}
@@ -711,7 +714,7 @@ func revise(ctx context.Context, tx pgx.Tx, cur *stored, b *Binding, sn *snapsho
 	return revision, attempt, err
 }
 
-func labelsJSON(l map[string]string) string {
+func annotationsJSON(l map[string]string) string {
 	if l == nil {
 		return "{}"
 	}

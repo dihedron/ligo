@@ -1008,7 +1008,7 @@ func TestWizard(t *testing.T) {
 		!strings.Contains(review, "ligo-workload-api") {
 		t.Errorf("review: %s", review)
 	}
-	form := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "source": {"src-" + x}, "name": {name}, "purpose": {"reporting"}}
+	form := url.Values{"target": {"tgt-" + x}, "accessLevel": {"read"}, "source": {"src-" + x}, "name": {name}, "description": {"reporting"}}
 	if _, check := b.do("POST", "/ui/bindings/charter-preview", form); !strings.Contains(check, "TARGET") {
 		t.Errorf("preview: %s", check)
 	}
@@ -1041,7 +1041,7 @@ func TestWizard(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, edit := b.do("GET", "/ui/bindings/"+name+"/edit-form", nil, "HX-Request", "")
-	if !strings.Contains(edit, `<option value="read" selected>`) || !strings.Contains(edit, `value="reporting"`) {
+	if !strings.Contains(edit, `<option value="read" selected>`) || !strings.Contains(edit, `>reporting</textarea>`) {
 		t.Errorf("edit form: %s", edit)
 	}
 	_, page := b.do("GET", "/ui/bindings/"+name, nil, "HX-Request", "")
@@ -1066,7 +1066,7 @@ func TestWizard(t *testing.T) {
 	if resp, _ := viewer.do("POST", "/ui/bindings/"+name+"/retry", url.Values{}); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("retry by a non-operator: %d", resp.StatusCode)
 	}
-	edited := url.Values{"accessLevel": {"read"}, "purpose": {"audits"}, "expectedRevision": {"1"}}
+	edited := url.Values{"accessLevel": {"read"}, "description": {"audits"}, "expectedRevision": {"1"}}
 	resp, body = b.do("PUT", "/ui/bindings/"+name, edited)
 	if resp.StatusCode != 200 || resp.Header.Get("HX-Redirect") == "" {
 		t.Errorf("update: %d %s", resp.StatusCode, body)

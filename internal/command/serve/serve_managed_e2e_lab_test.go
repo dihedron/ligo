@@ -164,7 +164,7 @@ func TestServeManaged(t *testing.T) {
 			{"update target", "PUT", "/v1/admin/targets/" + target, tgtDoc(map[string]any{"description": "x", "expectedRevision": rt, "approvalReference": "CHG-2"})},
 			{"deprecate target", "POST", "/v1/admin/targets/" + target + "/deprecate", map[string]any{"expectedRevision": rt}},
 			{"retire target", "POST", "/v1/admin/targets/" + target + "/retire", map[string]any{"expectedRevision": rt}},
-			{"update binding", "PUT", "/v1/admin/bindings/" + binding, bindDoc(map[string]any{"purpose": "x", "expectedRevision": rb, "approvalReference": "CHG-2"})},
+			{"update binding", "PUT", "/v1/admin/bindings/" + binding, bindDoc(map[string]any{"description": "x", "expectedRevision": rb, "approvalReference": "CHG-2"})},
 		} {
 			code, b := who.a.req(op.method, op.path, op.body)
 			// a retirement of what bindings use is refused as in use first: the spare below proves the lock's answer
@@ -210,7 +210,7 @@ func TestServeManaged(t *testing.T) {
 
 	// 4. the owner changes its own binding and keeps the lock
 	rb := revisionOf(t, pipeline, "bindings", binding)
-	if code, b := pipeline.req("PUT", "/v1/admin/bindings/"+binding, bindDoc(map[string]any{"purpose": "reporting", "expectedRevision": rb, "approvalReference": "CHG-5"})); code/100 != 2 {
+	if code, b := pipeline.req("PUT", "/v1/admin/bindings/"+binding, bindDoc(map[string]any{"description": "reporting", "expectedRevision": rb, "approvalReference": "CHG-5"})); code/100 != 2 {
 		t.Fatalf("the owner updates its binding: %d %v", code, b)
 	}
 	phase(t, olga, binding, "ACTIVE")
@@ -272,7 +272,7 @@ func TestServeManaged(t *testing.T) {
 	// 7. emergency: break-glass may change a managed binding, never ratifiably
 	rb = revisionOf(t, olga, "bindings", binding)
 	code, filed = livia.req("POST", "/v1/admin/break-glass", map[string]any{"operation": "UPDATE", "ttl": "1h",
-		"binding":       bindDoc(map[string]any{"purpose": "emergency", "expectedRevision": rb}),
+		"binding":       bindDoc(map[string]any{"description": "emergency", "expectedRevision": rb}),
 		"justification": "the ledger read path needs a change now", "incidentReference": "INC0012345"})
 	if code/100 != 2 {
 		t.Fatalf("break-glass update of a managed binding: %d %v", code, filed)

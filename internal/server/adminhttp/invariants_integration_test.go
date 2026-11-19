@@ -145,7 +145,7 @@ func TestINV11Routes(t *testing.T) {
 	}
 	act("POST /v1/admin/bindings", "CR_CREATED", olga, "/v1/admin/bindings",
 		map[string]string{"name": "inv2-" + x, "source": "src2-" + x, "target": "tgt-" + x, "accessLevel": "read"})
-	update := map[string]any{"name": v.name, "source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read", "purpose": "reporting", "expectedRevision": 1}
+	update := map[string]any{"name": v.name, "source": "src-" + x, "target": "tgt-" + x, "accessLevel": "read", "description": "reporting", "expectedRevision": 1}
 	r := act("PUT /v1/admin/bindings/{name}", "CR_CREATED", olga, "/v1/admin/bindings/"+v.name, update)
 	act(withdraw, "CR_WITHDRAWN", olga, base+id(r)+"/withdraw", nil)
 	r = v.do(t, olga, "PUT", "/v1/admin/bindings/"+v.name, update)

@@ -21,7 +21,7 @@
   </details>
   <div class="field"><label for="bg-target">Target</label><input id="bg-target" name="target" value="{{.Target}}"></div>
   <div class="field"><label for="bg-level">Access level</label><input id="bg-level" name="accessLevel" value="{{.Level}}"></div>
-  <div class="field"><label for="bg-purpose">Purpose</label><input id="bg-purpose" name="purpose" value="{{.Purpose}}"></div>
+  <div class="field"><label for="bg-description">Description</label><textarea id="bg-description" name="description">{{.Description}}</textarea></div>
   <div class="field"><label for="bg-parameters">Parameters (JSON object, optional)</label><textarea id="bg-parameters" name="parameters" class="mono"{{if index .Errors "parameters"}} aria-invalid="true" aria-describedby="bg-parameters-error"{{end}}>{{.Parameters}}</textarea>
     {{template "bg-error" (field . "parameters")}}</div>
   </div>

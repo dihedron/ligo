@@ -23,8 +23,8 @@ type View struct {
 	Target      string            `json:"target"`
 	AccessLevel string            `json:"accessLevel"`
 	Parameters  json.RawMessage   `json:"parameters"`
-	Purpose     string            `json:"purpose,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 	ExpiresAt   *time.Time        `json:"expiresAt"`
 	Status      ViewStatus        `json:"status"`
 	Requested   struct {
@@ -97,8 +97,8 @@ type ViewActive struct {
 
 const viewQuery = `SELECT b.id, b.name, b.realm, b.source_jurisdiction, b.target_jurisdiction, b.platform_jurisdiction, b.platform_type, b.platform,
 	b.identity_provider_type, b.identity_provider_instance, b.secret_store_type, b.secret_store_instance, b.revision, b.active_revision,
-	b.created_at, b.updated_at, b.created_by, b.updated_by, s.name, t.name, b.access_level, b.parameters, coalesce(b.purpose, ''),
-	b.labels, b.expires_at, b.phase, b.operation, b.attempt, b.workflow_id, b.current_step, b.status_message, b.last_transition_at,
+	b.created_at, b.updated_at, b.created_by, b.updated_by, s.name, t.name, b.access_level, b.parameters, coalesce(b.description, ''),
+	b.annotations, b.expires_at, b.phase, b.operation, b.attempt, b.workflow_id, b.current_step, b.status_message, b.last_transition_at,
 	(SELECT c.id FROM change_requests c WHERE c.resource_type = 'BINDING' AND c.resource_name = b.name AND c.status = 'PENDING'),
 	EXISTS (SELECT 1 FROM binding_propagation_queue q WHERE q.binding_id = b.id),
 	b.break_glass_cr_id, coalesce(g.requested_by, ''), coalesce(g.external_approval_ref, ''), b.break_glass_expires_at,
@@ -117,7 +117,7 @@ func scanView(row pgx.Row) (*View, error) {
 	err := row.Scan(&m.ID, &m.Name, &m.Realm, &m.SourceJurisdiction, &m.TargetJurisdiction, &m.PlatformJurisdiction, &m.PlatformType, &m.Platform,
 		&m.Wiring.IdentityProvider.Type, &m.Wiring.IdentityProvider.Instance, &m.Wiring.SecretStore.Type, &m.Wiring.SecretStore.Instance,
 		&m.Revision, &m.ActiveRevision, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy, &v.Source, &v.Target, &v.AccessLevel,
-		&v.Parameters, &v.Purpose, &v.Labels, &v.ExpiresAt, &st.Phase, &st.Operation, &st.Attempt, &st.WorkflowID, &st.CurrentStep,
+		&v.Parameters, &v.Description, &v.Annotations, &v.ExpiresAt, &st.Phase, &st.Operation, &st.Attempt, &st.WorkflowID, &st.CurrentStep,
 		&st.Message, &st.LastTransitionTime, &st.PendingChangeRequestID, &st.PropagationPending, &bg, &bgBy, &bgRef, &bgExpires,
 		&v.Requested.SourceRevision, &v.Requested.TargetRevision, &v.Requested.TrustDomain, &v.Requested.SVIDRegex, &v.Requested.Spec,
 		&activeRegex, &since, &v.Auth, &v.Spec, &v.partyJurisdictions, &m.ManagedBy)
@@ -266,7 +266,7 @@ func (s *Service) Diff(ctx context.Context, r *changerequests.Request) (any, err
 		return nil, err
 	}
 	old, err := json.Marshal(Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
-		Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt})
+		Parameters: cur.parameters, Description: cur.description, Annotations: cur.annotations, ExpiresAt: cur.expiresAt})
 	if err != nil {
 		return nil, err
 	}
