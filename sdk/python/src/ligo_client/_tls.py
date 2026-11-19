@@ -51,7 +51,7 @@ def build_context(source: X509Source, server_trust_domain: Any) -> tuple[ssl.SSL
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-    ctx.check_hostname = False
+    ctx.check_hostname = False  # NOSONAR: the SPIFFE ID is checked after the handshake; SVIDs carry no DNS name
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cadata=b"".join(_pem(c) for c in authorities).decode())
 

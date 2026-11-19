@@ -24,15 +24,14 @@ import threading
 
 import ligo_client
 
-with ligo_client.Client(address="ligo.example.com:8443",
-                        server_id="spiffe://example.com/ns/sys/sa/ligo") as client:
+with ligo_client.Client(address="ligo.example.com:8443", server_id="spiffe://example.com/ns/sys/sa/ligo") as client:
     for b in client.bindings(target="orders-db"):
         print(b.name, b.endpoint(), b.description, b.annotations)
-        cred = client.credential(b)          # a Credential; its password never shows in repr or logs
+        cred = client.credential(b)  # a Credential; its password never shows in repr or logs
 
     stop = threading.Event()
     for ev in client.watch(target="orders-db", watch_credentials=True, stop=stop):
-        ...                                  # ADDED, CHANGED, REMOVED, CREDENTIAL_ROTATED
+        ...  # ADDED, CHANGED, REMOVED, CREDENTIAL_ROTATED
 
     results = client.check_flows(target="orders-db")
     assert results.ok, results.unreachable
