@@ -661,7 +661,7 @@ type Binding struct {
 	// Auth What the workload API hands the workload: the strategy and its store configuration; never a secret.
 	Auth interface{} `json:"auth"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string    `json:"description,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt"`
 
@@ -702,7 +702,7 @@ type BindingDetail struct {
 	// Auth What the workload API hands the workload: the strategy and its store configuration; never a secret.
 	Auth interface{} `json:"auth"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string    `json:"description,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt"`
 
@@ -765,7 +765,7 @@ type BindingSpec struct {
 	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
 	Annotations *map[string]string `json:"annotations,omitempty"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string    `json:"description,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 
@@ -1762,7 +1762,7 @@ type BindingRequestBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
@@ -1951,7 +1951,7 @@ type CreateBindingJSONBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
@@ -2017,7 +2017,7 @@ type UpdateBindingJSONBody struct {
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 
-	// Description What the binding is for
+	// Description What the binding is for, in plain text; sent to workloads
 	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
