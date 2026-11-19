@@ -138,7 +138,7 @@ A Developer's Guide chapter, "The Python SDK" (client, bindings, credential, con
 | 2 | `credential`, the store, errors, fuzz (PY-6 to PY-10, PY-15). |
 | 3 | `watch` (PY-11, PY-12), `check_flows` (PY-F), the golden documents (PY-G), the benchmark. |
 | 4 | CI, `make` targets, the release wiring. |
-| 5 | The lab (PY-L1 to PY-L3), the guide, the READMEs. |
+| 5 | The lab (PY-L1 to PY-L3), the guide, the READMEs. Guide and READMEs done; the lab is written (`test/lab/lib/python.sh`, `test/lab/echo/client-py`, `test/lab/python/sdk_check.py`, `internal/command/serve/serve_python_e2e_lab_test.go`, `lab.sh serve test-python`, the Python client in `echo smoke`) and **not yet run**: it needs an overnight session (`lab.sh reset`, `serve install`, `echo install`, `echo smoke`, `serve test-python`). ligo1 gets uv from the lab host and Python and the wheel's dependencies from the internet through the VM's NAT. |
 | 6 | The PR. |
 
 ## 10. Out of scope

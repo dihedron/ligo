@@ -127,7 +127,7 @@ echo_client() {
 	shift 2
 	uid="$(inner_exec ligo1 id -u "$user" </dev/null)" || die "no user $user on ligo1"
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd /tmp --env SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/prod/agent.sock -- \
-		/usr/local/bin/echo-client --target "$target" "$@"
+		"${ECHO_CLIENT_BIN:-/usr/local/bin/echo-client}" --target "$target" "$@"
 }
 
 # expect CODE PATTERN USER TARGET ARGS: runs the client and checks its exit
@@ -186,6 +186,7 @@ echo_smoke() {
 			expect 0 "^smoke $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "smoke $mode"
 			expect 0 "^smoke $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "smoke $mode" --transport grpc
 		fi
+		echo_smoke_py "$mode" "$target" "$bound"
 		if [[ "$mode" == ns ]]; then namespace_holds_binding; fi
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-unbound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
@@ -200,6 +201,16 @@ echo_smoke() {
 	cli ligo-ops source delete echo-bound-src -r "$revision" >/dev/null || die "retire the source"
 	cli_approve source echo-bound-src
 	info "echo smoke test passed; the source is retired, so the guide starts clean"
+}
+
+# echo_smoke_py MODE TARGET BOUND: the Python echo client (PY-L1) with the binding in place: the same answer
+# as the Go client's, REST only; and the refusal of the other user.
+echo_smoke_py() {
+	local mode="$1" target="$2" bound="$3" pattern
+	inner_exec ligo1 test -x /usr/local/bin/echo-client-py || py_install
+	if [[ "$mode" == svid ]]; then pattern="^smoke py $mode"$'\t'"$bound\$"; else pattern="^smoke py $mode"$'\t'"bnd_[a-z0-9]+ $bound\$"; fi
+	ECHO_CLIENT_BIN=/usr/local/bin/echo-client-py expect 0 "$pattern" echo-bound "$target" --message "smoke py $mode"
+	ECHO_CLIENT_BIN=/usr/local/bin/echo-client-py expect 2 '^no binding$' echo-unbound "$target"
 }
 
 # echo_ui PHASE TARGET BINDING REGISTER: the human steps of the guide in

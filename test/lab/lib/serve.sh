@@ -31,6 +31,7 @@ cmd_serve() {
 	test-audit) serve_test_audit ;;
 	test-adminclient) serve_test_adminclient ;;
 	test-flowcheck) serve_test_flowcheck ;;
+	test-python) serve_test_python ;;
 	test-managed) serve_test_managed ;;
 	test-campaign) serve_test_campaign ;;
 	test-attestation) serve_test_attestation ;;
@@ -48,7 +49,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-flowcheck, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-flowcheck, test-python, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -608,16 +609,21 @@ serve_test_adminclient() {
 # ligo1 reject, at once, the connections to that host of the processes of one
 # group (the test's; ligo runs as the same user in its own group and keeps
 # its database), and lifts the block on "unblock", or when the run ends.
-serve_test_flowcheck() {
+serve_test_flowcheck() { serve_flowcheck '^TestServeClientFlowcheck$' "Client.CheckFlows"; }
+
+# serve_flowcheck RUN LABEL: the block and unblock steps for the test RUN
+# (TestServeClientFlowcheck, or its Python counterpart).
+serve_flowcheck() {
+	local run="$1" label="$2"
 	local FLOWCHECK_GID=64999 # the test runs under this group, so that the block does not reach ligo itself, which runs as the same user
 	deploy_tests
-	section "e2e of Client.CheckFlows"
+	section "e2e of $label"
 	local pid ip="" step host
 	E2E_SUFFIX="$(openssl rand -hex 4)"
 	serve_admins
 	inner_exec ligo1 sh -c "rm -f $LIGO1_E2E/flowcheck-*"
 	trap 'inner_exec ligo1 nft delete table inet flowcheck 2>/dev/null || true' EXIT
-	E2E_GID=$FLOWCHECK_GID serve_e2e '^TestServeClientFlowcheck$' ligo1 ligo1 &
+	E2E_GID=$FLOWCHECK_GID serve_e2e "$run" ligo1 ligo1 &
 	pid=$!
 	for step in block unblock; do
 		for ((i = 0; i < 300; i++)); do
@@ -625,24 +631,40 @@ serve_test_flowcheck() {
 			kill -0 "$pid" 2>/dev/null || break
 			sleep 1
 		done
-		inner_exec ligo1 test -f "$LIGO1_E2E/flowcheck-$step" || { wait "$pid" || true; die "Client.CheckFlows: the test did not ask to $step"; }
+		inner_exec ligo1 test -f "$LIGO1_E2E/flowcheck-$step" || { wait "$pid" || true; die "$label: the test did not ask to $step"; }
 		if [[ "$step" == block ]]; then
 			host="$(inner_exec ligo1 cat "$LIGO1_E2E/flowcheck-block")"
 			ip="$(inner_exec ligo1 getent ahostsv4 "$host" | awk 'NR == 1 {print $1}')"
-			[[ "$ip" =~ ^[0-9.]+$ ]] || { kill "$pid" 2>/dev/null || true; die "Client.CheckFlows: cannot resolve $host on ligo1"; }
+			[[ "$ip" =~ ^[0-9.]+$ ]] || { kill "$pid" 2>/dev/null || true; die "$label: cannot resolve $host on ligo1"; }
 			inner_exec ligo1 sh -c "nft add table inet flowcheck && nft 'add chain inet flowcheck out { type filter hook output priority 0; }' && nft add rule inet flowcheck out meta skgid $FLOWCHECK_GID ip daddr $ip reject"
-			info "Client.CheckFlows: $host ($ip) is blocked on ligo1 for gid $FLOWCHECK_GID"
+			info "$label: $host ($ip) is blocked on ligo1 for gid $FLOWCHECK_GID"
 		else
 			inner_exec ligo1 nft delete table inet flowcheck
 			ip=""
-			info "Client.CheckFlows: the block is lifted"
+			info "$label: the block is lifted"
 		fi
 		inner_exec ligo1 sh -c "touch $LIGO1_E2E/flowcheck-$step-done && chown ligo:ligo $LIGO1_E2E/flowcheck-$step-done"
 	done
-	wait "$pid" || die "TestServeClientFlowcheck failed"
+	wait "$pid" || die "$run failed"
 	trap - EXIT
-	! inner_exec ligo1 nft list table inet flowcheck >/dev/null 2>&1 || die "Client.CheckFlows: the block is left on ligo1"
-	info "Client.CheckFlows: reachable, one blocked, reachable again, denied, ICMP passed"
+	! inner_exec ligo1 nft list table inet flowcheck >/dev/null 2>&1 || die "$label: the block is left on ligo1"
+	info "$label: reachable, one blocked, reachable again, denied"
+}
+
+# serve_test_python: the Python SDK against the real servers (.specs/ligo-client-sdk-python.md, PY-L2 and
+# PY-L3): the watch of a vault-dynamic binding, its credentials, its revocation, and the flow scenario of
+# serve_test_flowcheck, with ligo-client on ligo1 (python.sh) doing what the Go SDK did there.
+serve_test_python() {
+	py_install
+	deploy_tests
+	section "e2e of the Python SDK"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_e2e '^TestServeClientSDKPython$' ligo1 || die "TestServeClientSDKPython failed"
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_flowcheck '^TestServeClientFlowcheckPython$' "ligo-client check_flows"
+	info "e2e of the Python SDK passed"
 }
 
 # serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,
