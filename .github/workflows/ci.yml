@@ -152,6 +152,45 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+  # the Python SDK (sdk/python): lint, types, tests, the audit of its
+  # dependencies, and the wheel and sdist build, on every supported Python
+  python:
+    name: Python SDK (${{ matrix.python }})
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # hatch-vcs reads the version from git tags
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: sdk/python/pyproject.toml
+
+      - name: Install the SDK and its development tools
+        run: python -m pip install -e "sdk/python[dev]"
+
+      - name: Lint and type-check (make py-lint)
+        run: make py-lint
+
+      - name: Test (make py-test)
+        run: make py-test
+
+      # the SDK's own package is not on PyPI, so it is left out of the audit
+      - name: Audit the dependencies
+        run: python -m pip_audit --skip-editable
+
+      - name: Build the wheel and the sdist (make py-build)
+        run: make py-build
+
   secrets:
     name: Secret scans
     if: github.event_name != 'pull_request'

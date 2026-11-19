@@ -27,7 +27,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 19 | `flowcheck` left out of v0.8.0: a command line, a check on the first fetch, CIDRs and ranges, DTLS, SSH and HTTP flows | 2026-11-19 | Not started; see §19 |
 | 20 | A Python asyncio client | 2026-11-19 | Not started; see §20 |
 | 21 | ICMP in the Python SDK's flow testing | 2026-11-19 | Not started; see §20 |
-| 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Not started; needs the user's PyPI project and trusted publishing; see §20 |
+| 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Waiting for a stable ecosystem, like the Terraform provider's registries; see §20 |
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
 | 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-annotations.md`, branch `feature/binding-annotations`; see §25 |
@@ -299,7 +299,7 @@ Decided with `.specs/ligo-client-sdk-python.md` (2026-11-19).
 
 - **asyncio (item 20).** The v1 client is synchronous and thread-safe; `watch` blocks. An `async` client, with `async for` on `watch`, doubles the surface and its tests, and waits for a user who needs it.
 - **ICMP in flow testing (item 21).** Raw sockets need privileges that a Python program rarely has; unprivileged ICMP sockets need `net.ipv4.ping_group_range`. Go's `WithICMP` has both; Python's `check_flows` does TCP, TLS, PostgreSQL, SPIFFE and UDP.
-- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release. Publishing needs a PyPI project for `ligo-client` and trusted publishing configured for the repository; the workflow can be added without running a first upload on its own.
+- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release (`make py-build`, `release.yml`) and nothing else. **The user's condition (2026-11-19):** like the Terraform and OpenTofu registries (`terraform-provider-ligo/.specs/ligo-provider-backlog.md` item 2), published only when the ecosystem is stable and `ligo`'s API and the SDK's are no longer changing: a published version cannot be replaced, and users pin it. Then: a PyPI project for `ligo-client`, trusted publishing configured for the repository, a publish job in `release.yml` run after the release's checks, and the README's install line changed from the release asset to `pip install ligo-client`.
 - **gRPC (item 23).** The workload API also speaks gRPC, but `grpcio` has no hook for custom peer verification, and ligo's certificate is an SVID with no DNS name, so the SDK could not hold its rule that only ligo's SPIFFE ID is accepted. To revisit when `grpcio` can verify a URI SAN, or with a custom TLS layer.
 - **Connection reuse and signing (item 24).** Each call opens its own connection, which is correct and simple at the SDK's call rates. Keep-alive pooling is possible later. The wheel is covered by the release's signed `checksums.txt`; sigstore attestation of the build is a further step.
 
