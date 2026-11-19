@@ -1,4 +1,4 @@
-package flowcheck
+package client
 
 import (
 	"crypto/ecdsa"
@@ -19,11 +19,9 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
-
-	"github.com/dihedron/ligo/pkg/client"
 )
 
-// pgServer answers an SSLRequest with S and then serves TLS with cert, as PostgreSQL does.
+// pgServer answers an SSLRequest with S and then serves TLS with cert, as HandshakePostgreSQL does.
 func pgServer(t *testing.T, cert tls.Certificate) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -87,8 +85,8 @@ func svidServer(t *testing.T) (p int, bundle *x509bundle.Bundle) {
 	return port(t, l.Addr().String()), x509bundle.FromX509Authorities(spiffeid.RequireTrustDomainFromString("example.org"), []*x509.Certificate{ca})
 }
 
-func tlsFlow(p int, name string) client.Flow {
-	return client.Flow{Name: name, Protocol: "TCP", Destination: "127.0.0.1", Ports: single(p), TLS: true}
+func tlsFlow(p int, name string) Flow {
+	return Flow{Name: name, Protocol: "TCP", Destination: "127.0.0.1", Ports: single(p), TLS: true}
 }
 
 // FC-10: the mapping chooses the check of a TLS flow, and only of a TLS flow.
@@ -96,24 +94,30 @@ func TestHandshakeMapping(t *testing.T) {
 	pg := tlsFlow(5432, "postgres")
 	pg.ServerName = "db.example.org"
 	api := tlsFlow(8443, "api")
-	udp := client.Flow{Name: "u", Protocol: "UDP", Destination: "127.0.0.1", Ports: single(5432), TLS: true}
-	plain := client.Flow{Name: "p", Protocol: "TCP", Destination: "127.0.0.1", Ports: single(5432)}
-	by := func(f client.Flow, _ int) Handshake {
+	udp := Flow{Name: "u", Protocol: "UDP", Destination: "127.0.0.1", Ports: single(5432), TLS: true}
+	plain := Flow{Name: "p", Protocol: "TCP", Destination: "127.0.0.1", Ports: single(5432)}
+	by := func(f Flow, _ int) Handshake {
 		switch f.Name {
 		case "postgres", "u", "p":
-			return PostgreSQL
+			return HandshakePostgreSQL
 		case "api":
-			return SPIFFE
+			return HandshakeSPIFFE
 		}
 		return ""
 	}
 	protocols := func(h HandshakeFunc) map[string]string {
 		got := map[string]string{}
-		for _, it := range plan(one(pg)[0], h) {
+		choose := func(_ BindingFlows, f Flow, p int) Handshake {
+			if h == nil {
+				return ""
+			}
+			return h(f, p)
+		}
+		for _, it := range plan(one(pg)[0], choose) {
 			got["postgres"] = it.res.Protocol
 		}
-		for _, f := range []client.Flow{api, udp, plain} {
-			for _, it := range plan(one(f)[0], h) {
+		for _, f := range []Flow{api, udp, plain} {
+			for _, it := range plan(one(f)[0], choose) {
 				got[f.Name] = it.res.Protocol + "|" + string(it.res.Status)
 			}
 		}
@@ -128,7 +132,7 @@ func TestHandshakeMapping(t *testing.T) {
 	}
 }
 
-// FC-11: a PostgreSQL flow, which a plain TLS check reports unreachable.
+// FC-11: a HandshakePostgreSQL flow, which a plain TLS check reports unreachable.
 func TestHandshakePostgreSQL(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(srv.Close)
@@ -137,10 +141,10 @@ func TestHandshakePostgreSQL(t *testing.T) {
 	p := pgServer(t, srv.TLS.Certificates[0])
 	flow := tlsFlow(p, "postgres")
 	flow.ServerName = "example.com" // the httptest certificate names example.com and 127.0.0.1
-	mapping := WithHandshake(func(client.Flow, int) Handshake { return PostgreSQL })
+	mapping := WithHandshake(func(Flow, int) Handshake { return HandshakePostgreSQL })
 
 	if r := run(t, one(flow), WithRoots(pool))[0]; r.Status != Unreachable {
-		t.Errorf("a plain TLS check of PostgreSQL: %+v", r)
+		t.Errorf("a plain TLS check of HandshakePostgreSQL: %+v", r)
 	}
 	r := run(t, one(flow), WithRoots(pool), mapping)[0]
 	if r.Status != Reachable || r.Protocol != "postgresql" {
@@ -151,11 +155,11 @@ func TestHandshakePostgreSQL(t *testing.T) {
 	}
 }
 
-// FC-12: an SVID has no DNS name, so only the SPIFFE check can verify it.
+// FC-12: an SVID has no DNS name, so only the HandshakeSPIFFE check can verify it.
 func TestHandshakeSPIFFE(t *testing.T) {
 	p, bundle := svidServer(t)
 	flow := tlsFlow(p, "workload-api")
-	mapping := WithHandshake(func(client.Flow, int) Handshake { return SPIFFE })
+	mapping := WithHandshake(func(Flow, int) Handshake { return HandshakeSPIFFE })
 
 	r := run(t, one(flow), mapping, WithSPIFFE(bundle))[0]
 	if r.Status != Reachable || r.Protocol != "spire" {

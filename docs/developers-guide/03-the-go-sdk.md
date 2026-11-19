@@ -81,38 +81,32 @@ conn, err := tls.Dial("tcp", b.Endpoint(), c.TLSConfig(id))
 flows, err := c.Flows(ctx, client.Filter{Target: "orders-db"})
 ```
 
-returns the network flows each binding needs: destination, ports, protocol and whether TLS is used. `Flows` is data. To see which flow a firewall still blocks before the application connects, check them with the sub-package `flowcheck`, which runs [netcheck](https://github.com/dihedron/netcheck) on the flows:
+returns the network flows each binding needs: destination, ports, protocol and whether TLS is used. `Flows` is data. To see which flow a firewall still blocks before the application connects, test them with `CheckFlows`, which runs [netcheck](https://github.com/dihedron/netcheck) on the flows:
 
 ```go
-import "github.com/dihedron/ligo/pkg/client/flowcheck"
-
-results, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "orders-db"})
+results, err := c.CheckFlows(ctx, client.Filter{Target: "orders-db"})
 for _, r := range results.Unreachable() {
     log.Printf("blocked: %s to %s:%d: %s", r.Flow, r.Destination, r.Port, r.Reason)
 }
 ```
 
-The check runs on demand, when the application calls it; the SDK never checks on its own.
+(`client.CheckFlowData(ctx, flows)` tests flows obtained some other way.) The check runs on demand, when the application calls it; the SDK never checks on its own.
 
-- A TCP flow without TLS is a connection test. A TCP flow with `tls: true` is checked up to the TLS handshake, verifying the flow's `serverName` (or the destination, when it is a name) against the system roots; `flowcheck.WithRoots` gives other roots. A flow to a bare IP address with `tls: true` and no `serverName` is skipped: there is no name to verify.
-- A flow says `tls: true` and nothing about how the TLS starts, so two kinds of server need to be named. PostgreSQL negotiates TLS inside its protocol, and ligo's own endpoints present a SPIFFE SVID, which has no DNS name to verify. A plain check reports both as unreachable although their ports are open. Say which flows they are with `flowcheck.WithHandshake`, and give the trust bundles of the SPIFFE ones with `flowcheck.WithSPIFFE`:
+- A TCP flow without TLS is a connection test. A TCP flow with `tls: true` is checked up to the TLS handshake, verifying the flow's `serverName` (or the destination, when it is a name) against the system roots; `client.WithRoots` gives other roots. A flow to a bare IP address with `tls: true` and no `serverName` is skipped: there is no name to verify.
+- A flow says `tls: true` and nothing about how the TLS starts. PostgreSQL negotiates TLS inside its protocol, and ligo's own endpoints present a SPIFFE SVID, which has no DNS name to verify; a plain check would report both as unreachable although their ports are open. `CheckFlows` knows both: a flow declared by ligo is checked as an X509-SVID against the client's own trust bundle, and a flow of a binding whose platform is PostgreSQL's (and declared by a target or a platform) gets the SSLRequest first. `WithHandshake` overrides the choice, and `WithSPIFFE` gives another trust bundle:
 
   ```go
-  results, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "orders-db"},
-      flowcheck.WithHandshake(func(f client.Flow, port int) flowcheck.Handshake {
+  results, err := c.CheckFlows(ctx, client.Filter{Target: "orders-db"},
+      client.WithHandshake(func(f client.Flow, port int) client.Handshake {
           if port == 5432 {
-              return flowcheck.PostgreSQL // an SSLRequest, then the handshake, verified like TLS
-          }
-          if strings.HasPrefix(f.Name, "ligo-") {
-              return flowcheck.SPIFFE // the certificate is verified as an X509-SVID
+              return client.HandshakePostgreSQL // an SSLRequest, then the handshake, verified like TLS
           }
           return "" // a plain TLS handshake
-      }),
-      flowcheck.WithSPIFFE(bundle)) // an x509bundle.Source: the trust bundle of the workload's trust domain
+      }))
   ```
 
-  A SPIFFE flow with no trust bundle is `Unreachable`, with the reason "no trust bundle". The mapping is yours until a flow can carry the hint itself (backlog item 18 of ligo).
+  A SPIFFE flow with no trust bundle is `Unreachable`, with the reason "no trust bundle". `CheckFlowData` has no client, so it takes the mapping and the bundle from options only.
 - A UDP flow passes when no ICMP error comes back, so a silent peer passes: it means "not refused", not "the service is up".
 - A flow whose destination is a CIDR, or whose ports are a range, is `Skipped` with the reason, never reported as reachable or blocked.
-- Destinations in link-local and cloud metadata ranges are never checked (`WithDeniedNetworks` changes the list), and one call runs at most 1,024 checks.
-- `WithICMP` adds one echo check for each destination host. ICMP is not a flow, so this is a hint. **The process must be allowed to open ICMP sockets.** With `WithICMP(true)` it uses raw sockets, which need the capability `cap_net_raw` on the application's binary: `sudo setcap cap_net_raw=+ep /path/to/application` (the netcheck package does this for `/usr/bin/netcheck`). Grant it to a dedicated binary, never to a shell or an interpreter, and set it again after every rebuild. With `WithICMP(false)` it uses unprivileged ICMP sockets, which need a `net.ipv4.ping_group_range` that includes the process's group. Without either, the ICMP results are `Unreachable` with a reason that names the capability.
+- Destinations in link-local and cloud metadata ranges are never checked (`client.WithDeniedNetworks` changes the list), and one call runs at most 1,024 checks.
+- `client.WithICMP` adds one echo check for each destination host. ICMP is not a flow, so this is a hint. **The process must be allowed to open ICMP sockets.** With `client.WithICMP(true)` it uses raw sockets, which need the capability `cap_net_raw` on the application's binary: `sudo setcap cap_net_raw=+ep /path/to/application` (the netcheck package does this for `/usr/bin/netcheck`). Grant it to a dedicated binary, never to a shell or an interpreter, and set it again after every rebuild. With `client.WithICMP(false)` it uses unprivileged ICMP sockets, which need a `net.ipv4.ping_group_range` that includes the process's group. Without either, the ICMP results are `Unreachable` with a reason that names the capability.

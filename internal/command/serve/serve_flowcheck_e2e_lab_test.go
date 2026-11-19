@@ -11,11 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-
 	"github.com/dihedron/ligo/pkg/client"
-	"github.com/dihedron/ligo/pkg/client/flowcheck"
 )
 
 // flowcheckStep tells lab.sh to act on ligo1 (name is "block" or "unblock",
@@ -41,7 +37,7 @@ func flowcheckStep(t *testing.T, name, arg string) {
 
 // TestServeClientFlowcheck: FC-L1 to FC-L5 (.specs/ligo-network-checks.md §6,
 // chunk 3). A workload checks the flows of a real binding against the real
-// lab servers with pkg/client/flowcheck: all reachable; one made unreachable
+// lab servers with Client.CheckFlows: all reachable; one made unreachable
 // by a route that lab.sh adds on ligo1, and only that one reported; reachable
 // again once the route is gone; a denied network skipped; ICMP opt-in.
 func TestServeClientFlowcheck(t *testing.T) {
@@ -64,27 +60,13 @@ func TestServeClientFlowcheck(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(pem)
-	trust, err := x509bundle.Load(spiffeid.RequireTrustDomainFromString("prod.lab"), filepath.Join(e2eEnv(t, "LIGO_E2E_DIR"), "workload-bundle.pem"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// a flow does not say how its TLS starts: PostgreSQL asks inside the protocol, ligo's own flows present SVIDs
-	handshake := func(f client.Flow, port int) flowcheck.Handshake {
-		switch {
-		case port == 5432:
-			return flowcheck.PostgreSQL
-		case strings.HasPrefix(f.Name, "ligo-"):
-			return flowcheck.SPIFFE
-		}
-		return ""
-	}
 	c := sdkClient(t, client.REST)
 	filter := client.Filter{Target: target}
-	check := func(opts ...flowcheck.Option) flowcheck.Results {
+	check := func(opts ...client.CheckOption) client.FlowResults {
 		t.Helper()
-		res, err := flowcheck.CheckClient(t.Context(), c, filter, append([]flowcheck.Option{flowcheck.WithRoots(roots), flowcheck.WithHandshake(handshake), flowcheck.WithSPIFFE(trust), flowcheck.WithTimeout(5 * time.Second), flowcheck.WithRetries(1)}, opts...)...)
+		res, err := c.CheckFlows(t.Context(), filter, append([]client.CheckOption{client.WithRoots(roots), client.WithTimeout(5 * time.Second), client.WithRetries(1)}, opts...)...)
 		if err != nil {
-			t.Fatalf("CheckClient: %v", err)
+			t.Fatalf("CheckFlows: %v", err)
 		}
 		return res
 	}
@@ -107,12 +89,12 @@ func TestServeClientFlowcheck(t *testing.T) {
 		t.Fatalf("all flows reachable: %s", describe(res))
 	}
 	reachable := 0
-	var blocked flowcheck.Result
+	var blocked client.FlowResult
 	for _, r := range res {
 		if r.Binding != binding || r.Target != target {
 			t.Errorf("a result of another binding: %+v", r)
 		}
-		if r.Status == flowcheck.Reachable {
+		if r.Status == client.Reachable {
 			reachable++
 			if blocked.Destination == "" && r.Port == 5432 {
 				blocked = r // the target's database
@@ -151,20 +133,20 @@ func TestServeClientFlowcheck(t *testing.T) {
 	flows := []client.BindingFlows{{Binding: binding, Target: target, Flows: []client.Flow{
 		{Name: "metadata", Protocol: "TCP", Destination: "169.254.169.254", Ports: []client.PortRange{{Low: 80, High: 80}}},
 	}}}
-	denied, err := flowcheck.Check(t.Context(), flows)
-	if err != nil || len(denied) != 1 || denied[0].Status != flowcheck.Skipped || !strings.Contains(denied[0].Reason, "denied") {
+	denied, err := client.CheckFlowData(t.Context(), flows)
+	if err != nil || len(denied) != 1 || denied[0].Status != client.Skipped || !strings.Contains(denied[0].Reason, "denied") {
 		t.Errorf("a denied network: %+v (%v)", denied, err)
 	}
 
 	// FC-L5: ICMP is opt-in; either the host may ping or the reason names what is missing
-	icmp := check(flowcheck.WithICMP(false))
+	icmp := check(client.WithICMP(false))
 	extra := 0
 	for _, r := range icmp {
 		if r.Protocol != "icmp" {
 			continue
 		}
 		extra++
-		if r.Status == flowcheck.Unreachable && !errors.Is(r.Err, os.ErrPermission) && !strings.Contains(r.Reason, "cap_net_raw") && !strings.Contains(r.Reason, "ping_group_range") {
+		if r.Status == client.Unreachable && !errors.Is(r.Err, os.ErrPermission) && !strings.Contains(r.Reason, "cap_net_raw") && !strings.Contains(r.Reason, "ping_group_range") {
 			t.Errorf("an ICMP result without a reason that names the capability: %+v", r)
 		}
 	}
@@ -175,7 +157,7 @@ func TestServeClientFlowcheck(t *testing.T) {
 }
 
 // describe lists results for a failure message: no secrets are in them.
-func describe(res flowcheck.Results) string {
+func describe(res client.FlowResults) string {
 	var b strings.Builder
 	for _, r := range res {
 		b.WriteString("\n  ")

@@ -1,4 +1,4 @@
-package flowcheck
+package client
 
 import (
 	"context"

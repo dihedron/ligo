@@ -7,13 +7,13 @@
 
 ## 1. Why
 
-Each binding carries its network flows (`c.Flows`). Today a workload learns that a flow is blocked only when its first connection fails. `pkg/client/flowcheck` checks the flows with netcheck, so a workload or an operator sees which flow a firewall still blocks before the application connects.
+Each binding carries its network flows (`c.Flows`). Today a workload learns that a flow is blocked only when its first connection fails. `Client.CheckFlows` (in `pkg/client`, §9) checks the flows with netcheck, so a workload or an operator sees which flow a firewall still blocks before the application connects.
 
 ## 2. Decisions (the user, 2026-11-18)
 
 | Question | Decision |
 |---|---|
-| Where | Sub-package `pkg/client/flowcheck`. `pkg/client` stays free of the netcheck dependency. |
+| Where | `pkg/client` (it began as the sub-package `flowcheck`, moved by §9 on 2026-11-19). |
 | Library | netcheck's own module, `github.com/dihedron/netcheck/v2`, only its core package `pkg/netcheck`. The dependency is netcheck `v2.0.0` (it was pinned to a commit until the tag, 2026-11-18). |
 | `tls: true` | Checked up to the TLS handshake against the system roots; the caller may give a `*x509.CertPool`. |
 | CIDR destination, port range | Skipped and reported with the reason: never a false pass or fail. |
@@ -23,7 +23,7 @@ Each binding carries its network flows (`c.Flows`). Today a workload learns that
 ## 3. The package
 
 ```go
-res, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "ledger"}, flowcheck.WithRoots(pool))
+res, err := c.CheckFlows(ctx, client.Filter{Target: "ledger"}, client.WithRoots(pool))
 for _, r := range res { fmt.Println(r.Flow, r.Destination, r.Port, r.Status, r.Reason) }
 ```
 
