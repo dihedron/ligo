@@ -67,6 +67,11 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-53 | The refusals flood the audit log. | 5 | `LOCK_VIOLATION_REFUSED` at most once a minute per principal and resource; `ligo_lock_violations_total` counts all. |
 | T-54 | The owner column is changed outside a change request, in the database. | 6 | A trigger refuses the update; a test with the application's role. |
 | T-55 | An operator puts a secret in a binding's description or annotations, which every matching workload now reads; or the text carries markup or control characters to a console or a page. | 1, 2, 3 | Documented as public to the binding's workloads; limits on length, count and characters, checked at filing; the UI escapes it; the SDKs never interpret it; changes need the consent of all sides, and the approval hash covers the text. Residual: `ligo` cannot recognize a secret. |
+| T-56 | The Python SDK's private key reaches a disk: the standard library loads a key only from a file. | 1 | A 0700 directory and a 0600 file for the instant of the load, removed at once; the path is never logged. Residual: a crash in that instant leaves a file in a private temporary directory. |
+| T-57 | The Python SDK sends its request to a server that is not `ligo`, because `ssl` has no hook for a peer's SPIFFE ID. | 1 | The ID is checked after the handshake and before the first byte; the SDK gives `connect`, never a bare context, and no option turns the check off; tested with a server of another ID. |
+| T-58 | A secret in a Python `repr`, traceback, log, copy or pickle. | 1 | `Credential` hides its password in `repr`, `str` and `format`, refuses `pickle` and keeps it hidden in copies; errors carry a status or a type name, never a body. |
+| T-59 | A compromised dependency of the Python SDK (`spiffe`, `cryptography`). | 1 | A bounded version range, `pip-audit` and CodeQL in CI, dependency review on pull requests, and the wheel built from the tag in the release workflow, covered by the signed `checksums.txt`. |
+| T-60 | A workload uses `check_flows` to scan the network. | 1 | The destinations are those `ligo` vetted for the binding; link-local and cloud metadata ranges are denied; a name is resolved once and the vetted address is used; a CIDR or a range is never expanded; 1,024 checks at most. |
 
 :::
 
