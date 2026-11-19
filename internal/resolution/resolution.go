@@ -33,7 +33,7 @@ const channel = "ligo_bindings_changed"
 
 const viewColumns = `id, name, platform_type, platform, target_name, source_name, access_level, source_trust_domain,
 	active_revision, active_source_svid_regex, current_source_svid_regex, active_auth_config, active_spec,
-	secret_store_instance, expires_at, updated_at`
+	secret_store_instance, expires_at, updated_at, description, annotations`
 
 // Row is a row of v_active_bindings.
 type Row struct {
@@ -53,6 +53,8 @@ type Row struct {
 	SecretStoreInstance string
 	ExpiresAt           *time.Time
 	UpdatedAt           time.Time
+	Description         string
+	Annotations         map[string]string
 }
 
 // Binding is a resolved binding, with both of its regexes compiled.
@@ -268,10 +270,13 @@ func (c *Cache) reload(ctx context.Context, id uuid.UUID) error {
 
 func scanRow(rows pgx.CollectableRow) (Row, error) {
 	var r Row
-	var store *string
+	var store, description *string
 	err := rows.Scan(&r.ID, &r.Name, &r.PlatformType, &r.Platform, &r.TargetName, &r.SourceName, &r.AccessLevel,
 		&r.TrustDomain, &r.ActiveRevision, &r.ActiveRegex, &r.SourceRegex, &r.AuthConfig, &r.Spec, &store,
-		&r.ExpiresAt, &r.UpdatedAt)
+		&r.ExpiresAt, &r.UpdatedAt, &description, &r.Annotations)
+	if description != nil {
+		r.Description = *description
+	}
 	if store != nil {
 		r.SecretStoreInstance = *store
 	}

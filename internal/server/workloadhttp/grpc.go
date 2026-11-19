@@ -107,7 +107,7 @@ func (v *service) GetBindings(ctx context.Context, req *workloadv1alpha1.GetBind
 		}
 		resp.Items = append(resp.Items, &workloadv1alpha1.WorkloadBinding{Id: it.ID, Name: it.Name, Source: it.Source, Target: it.Target,
 			AccessLevel: it.AccessLevel, PlatformType: it.PlatformType, Platform: it.Platform, Revision: it.Revision, Auth: auth, Spec: spec,
-			UpdatedAt: timestamppb.New(it.UpdatedAt)})
+			UpdatedAt: timestamppb.New(it.UpdatedAt), Description: it.Description, Annotations: it.Annotations})
 	}
 	return resp, nil
 }

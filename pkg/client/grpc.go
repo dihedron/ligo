@@ -56,7 +56,7 @@ func (g *grpcTransport) bindings(ctx context.Context, f Filter, etag string) ([]
 	for i, it := range resp.GetItems() {
 		w := wireBinding{ID: it.GetId(), Name: it.GetName(), Source: it.GetSource(), Target: it.GetTarget(), AccessLevel: it.GetAccessLevel(),
 			PlatformType: it.GetPlatformType(), Platform: it.GetPlatform(), Revision: it.GetRevision(), Spec: it.GetSpec().AsMap(),
-			UpdatedAt: it.GetUpdatedAt().AsTime()}
+			UpdatedAt: it.GetUpdatedAt().AsTime(), Description: it.GetDescription(), Annotations: it.GetAnnotations()}
 		auth, err := it.GetAuth().MarshalJSON() // decoded as the REST body is, so both transports agree
 		if err == nil {
 			err = json.Unmarshal(auth, &w.Auth)

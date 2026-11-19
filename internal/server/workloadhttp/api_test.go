@@ -50,7 +50,7 @@ func apiSetup(t *testing.T) (*env, *fakeCache, *http.Client) {
 	f := &fakeCache{
 		list: []resolution.Binding{{Row: resolution.Row{ID: id, Name: "workers-ledger", PlatformType: "oracle.v1", Platform: "oracle-prod",
 			TargetName: "ledger-schema", SourceName: "workers", AccessLevel: "write", ActiveRevision: 4, AuthConfig: []byte(`{"secretStoreInstance": "vault-prod"}`),
-			Spec: []byte(`{"host": "ledger-db"}`), SecretStoreInstance: "vault-prod", UpdatedAt: time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC)}}},
+			Spec: []byte(`{"host": "ledger-db"}`), Description: "Ledger posting", Annotations: map[string]string{"change": "CHG0012345"}, SecretStoreInstance: "vault-prod", UpdatedAt: time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC)}}},
 		targets: map[uuid.UUID][]flows.Flow{id: {flow("listener", "DATA", "ledger-db.prod.internal", 1522), flow("outside", "DATA", "elsewhere.internal", 22)}},
 	}
 	v.s.Cache = f
@@ -86,8 +86,8 @@ func TestGetBindings(t *testing.T) {
 	v, f, c := apiSetup(t)
 	resp, body := v.fetch(t, c, "/v1/bindings?target=ledger-schema&platformType=oracle.v1", "")
 	id := f.list[0].ID.String()
-	want := `{"callerSpiffeId":"` + worker + `","items":[{"accessLevel":"write","auth":{"secretStoreInstance":"vault-prod"},"id":"` + id +
-		`","name":"workers-ledger","platform":"oracle-prod","platformType":"oracle.v1","revision":4,"source":"workers","spec":{"host":"ledger-db"},` +
+	want := `{"callerSpiffeId":"` + worker + `","items":[{"accessLevel":"write","annotations":{"change":"CHG0012345"},"auth":{"secretStoreInstance":"vault-prod"},` +
+		`"description":"Ledger posting","id":"` + id + `","name":"workers-ledger","platform":"oracle-prod","platformType":"oracle.v1","revision":4,"source":"workers","spec":{"host":"ledger-db"},` +
 		`"target":"ledger-schema","updatedAt":"2026-10-16T07:02:11Z"}]}`
 	sum := sha256.Sum256([]byte(body))
 	if resp.StatusCode != 200 || body != want || resp.Header.Get("ETag") != `"sha256:`+hex.EncodeToString(sum[:])+`"` ||
@@ -100,6 +100,16 @@ func TestGetBindings(t *testing.T) {
 	if again, body := v.fetch(t, c, "/v1/bindings", resp.Header.Get("ETag")); again.StatusCode != 304 || body != "" {
 		t.Errorf("If-None-Match: %d %q", again.StatusCode, body)
 	}
+	// BM-5: a change of the text changes the ETag; no text is omitted from the body
+	f.list[0].Annotations = map[string]string{"change": "CHG0012346"}
+	if changed, _ := v.fetch(t, c, "/v1/bindings", resp.Header.Get("ETag")); changed.StatusCode != 200 || changed.Header.Get("ETag") == resp.Header.Get("ETag") {
+		t.Errorf("an annotation changed and the ETag did not: %d", changed.StatusCode)
+	}
+	f.list[0].Annotations, f.list[0].Description = nil, ""
+	if _, bare := v.fetch(t, c, "/v1/bindings", ""); strings.Contains(bare, "description") || strings.Contains(bare, "annotations") {
+		t.Errorf("empty text is sent: %s", bare)
+	}
+	f.list[0].Annotations, f.list[0].Description = map[string]string{"change": "CHG0012345"}, "Ledger posting"
 	if other, _ := v.fetch(t, c, "/v1/bindings", `"sha256:00"`); other.StatusCode != 200 {
 		t.Errorf("another ETag: %d", other.StatusCode)
 	}
