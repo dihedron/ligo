@@ -252,9 +252,9 @@ def _spire(sock: socket.socket, o: _Options) -> None:
     """The server's chain is verified against the bundle; its ID must belong to the bundle's trust domain."""
     if o.bundle is None:
         raise ssl.SSLError("no trust bundle to verify the SVID with")
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # NOSONAR: SVIDs have no DNS name; the ID is checked instead
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    ctx.check_hostname = False  # NOSONAR: the SPIFFE ID is checked after the handshake; SVIDs carry no DNS name
+    ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     pem = "".join(c.public_bytes(serialization.Encoding.PEM).decode() for c in o.bundle.x509_authorities)
     if not pem:

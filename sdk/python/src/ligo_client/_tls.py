@@ -49,9 +49,9 @@ def build_context(source: X509Source, server_trust_domain: Any) -> tuple[ssl.SSL
     chain = [c.public_bytes(serialization.Encoding.DER) for c in svid.cert_chain]
     fingerprint = (*chain, *(c.public_bytes(serialization.Encoding.DER) for c in authorities))
 
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # NOSONAR: SVIDs have no DNS name; the ID is checked instead
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-    ctx.check_hostname = False  # NOSONAR: the SPIFFE ID is checked after the handshake; SVIDs carry no DNS name
+    ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cadata=b"".join(_pem(c) for c in authorities).decode())
 
