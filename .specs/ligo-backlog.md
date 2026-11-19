@@ -31,6 +31,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
 | 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-annotations.md`, branch `feature/binding-annotations`; see §25 |
+| 26 | MIT license for the client libraries and SDKs (`pkg/client`, `pkg/adminclient`, `sdk/*`), the server staying AGPL-3.0 | 2026-11-19 | Leaning MIT (the user, 2026-11-19); not yet applied; see §26 |
 
 ## 1. Audit pruning
 
@@ -309,3 +310,14 @@ Asked for by the user (2026-11-19).
 - **What.** Each binding gets a free-text `description` and an `annotations` map (the user first called it "metadata"; the admin response already uses that key for its envelope) of string keys to string values. Both are set through the admin API, the CLI, the UI and the Terraform provider, and both are sent to the client in the workload API (REST and gRPC) and inspectable there: the Go SDK's `Binding` and the Python SDK's `Binding` carry them.
 - **To decide in the spec.** Whether they change through the change-request workflow like the rest of a binding, or are editable without approval (they grant nothing); limits (length of the description, number and size of keys and values, key charset); whether they are covered by the revision and the ETag, so a client sees a change; whether they appear in audit events and webhooks; the manifest (`apply`) and Terraform schema; and the threat model: the client gets text it did not write, so it is data and never instructions, and operators must not put secrets in it.
 - **Order.** Best done before the Python SDK's wire types are final, so both SDKs and the golden documents shared by them (`api/testdata/workload/`) gain the fields together.
+
+## 26. A more permissive license for the client libraries
+
+Raised by the user (2026-11-19) while building the Python SDK.
+
+The repository is AGPL-3.0. A workload that links `pkg/client`, `pkg/adminclient` or `ligo-client` becomes a combined work, so the AGPL's terms (source of the whole program, to its network users) reach the application, not only ligo. That is a barrier for the libraries' purpose. The usual answer is to license the client libraries separately and permissively (Apache-2.0 or MIT), and keep the server AGPL.
+
+- **Leaning (the user, 2026-11-19).** MIT, for the client libraries and for all SDKs, the Python one and the later Java and JavaScript/TypeScript ones. Apache-2.0 is the alternative (a patent grant, a longer text).
+- **To decide.** Which paths (`pkg/client`, `pkg/adminclient`, `sdk/python`, the generated `api/gen` and the protobuf contracts they use, `api/openapi`, `docs` examples); whether a path carries its own `LICENSE` file and SPDX headers; that the Go modules stay in one `go.mod` (a license per directory is allowed, but a package that imports `internal/` code of the server cannot be relicensed: `pkg/client` imports none today, which a test could enforce); the Python package metadata (`license` in `pyproject.toml`), the wheel's `LICENSE`, and the README's license section.
+- **Constraints.** Only the copyright holders can relicense. `git shortlog` (2026-11-19) shows one author and dependabot (dependency bumps), so the author can decide alone. Dependencies keep their own licenses (`spiffe`, `cryptography`: Apache-2.0/BSD, compatible).
+- **Until applied.** `sdk/python/pyproject.toml` says AGPL-3.0, as the rest of the repository. Applying it is its own change: a `LICENSE` file in each path, SPDX headers, the package metadata, the README and a test that the MIT paths import nothing of `internal/`.

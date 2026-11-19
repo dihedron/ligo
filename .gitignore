@@ -43,3 +43,14 @@ go.work.sum
 test/lab/.state/
 test/lab/.evidence/
 test/lab/lab.local.env
+
+# Python SDK (sdk/python)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+sdk/python/dist/
+sdk/python/build/
