@@ -23,6 +23,8 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 15 | Change request pruning | 2026-11-11 | Done in v0.3.0 (PR #43) |
 | 16 | Resources managed by automation (the lock) | 2026-11-15 | Done in v0.7.0 (PRs #53 and after): `.specs/ligo-managed-resources.md` |
 | 17 | Man pages and shell completions for `ligo` | 2026-11-18 | Done in v0.8.0 (PR #61): `.specs/ligo-cli-extras.md` (netcheck's: v2.0.0) |
+| 18 | A hint in a flow for the kind of TLS handshake (`postgresql`, `spiffe`), so that a client no longer maps flows to checks itself | 2026-11-19 | Not started; see §18 |
+| 19 | `flowcheck` left out of v0.8.0: a command line, a check on the first fetch, CIDRs and ranges, DTLS, SSH and HTTP flows | 2026-11-19 | Not started; see §19 |
 
 ## 1. Audit pruning
 
@@ -267,3 +269,19 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 **What makes it hard.** Audit entries refer to change requests by `change_request_id`, and resources keep the request that last changed them. Deleting a request must not leave an audit entry or a resource pointing at nothing that explains it, unless the entry itself was pruned or exported first.
 
 **Direction.** Prune only closed requests older than a retention, and only when every audit entry that names them has been pruned (item 1's boundary), so an exported audit file is the remaining record. Retired resources (001: never deleted) are a separate question.
+
+## 18. A hint in a flow for the kind of TLS handshake
+
+**Why.** A flow says `tls: true` and a `serverName`, and nothing about how TLS starts. PostgreSQL negotiates TLS inside its protocol (an `SSLRequest` first), and the workload API presents a SPIFFE SVID instead of a certificate for a name. A plain TLS check reports both as unreachable. netcheck v2.1.0 has the `postgresql` and `spire` checks for them (`netcheck/.specs/netcheck-tls-kinds.md`), but `flowcheck` cannot tell from a flow which to use, so the caller supplies the mapping (`flowcheck.WithProtocol`).
+
+**Direction.** A field of the flow, set by the platform or the target that declares it (the PostgreSQL plugin says `postgresql`; ligo's own flows say `spiffe` with the expected SPIFFE ID), in the OpenAPI document and the protobuf contract, and read by `flowcheck` as the default mapping. It touches the plugin contract, the admin API and the SDK, so it needs its own spec, a decision on the values (a closed list or free text), and, until 1.0.0, no compatibility cost.
+
+## 19. What `flowcheck` leaves out
+
+Listed in `.specs/ligo-network-checks.md` §7 and decided on 2026-11-18, for the record with the reasons to revisit them.
+
+- **A command line.** `ligo binding flows --check`, for an operator to see which flow a firewall blocks from the machine where the command runs. The SDK is the first user; the command waits for a request.
+- **A check on the first fetch.** The SDK checks on demand only. Checking when a binding is first fetched costs connections the application did not ask for, which is why it is off.
+- **CIDRs and ranges.** A destination that is a CIDR or a port range is skipped and reported, never expanded: expanding them would make the SDK scan a network.
+- **DTLS, SSH and HTTP flows.** Flows declare TCP and UDP. netcheck can check the other protocols, but a flow has no way to say it wants them.
+- **ICMP without privileges.** `WithICMP` needs `cap_net_raw` or a `ping_group_range` that includes the process's group; a better fallback is not planned.
