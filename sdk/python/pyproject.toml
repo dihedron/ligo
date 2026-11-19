@@ -8,7 +8,8 @@ dynamic = ["version"]
 description = "Python SDK for workloads that use ligo: bindings, network flows, credentials."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "AGPL-3.0" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Andrea Funtò" }]
 dependencies = [
     "spiffe>=0.4,<0.5",

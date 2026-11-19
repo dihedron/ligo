@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Reading a binding's credential from a Vault-compatible secret store (.specs/ligo-client-sdk.md §3.3)."""
 
 from __future__ import annotations

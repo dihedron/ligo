@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """mTLS with the workload's SVID, and the check of the server's SPIFFE ID (.specs/ligo-client-sdk-python.md §3.4)."""
 
 from __future__ import annotations

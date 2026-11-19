@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package adminraw is the way of the ligo CLI to the raw call of
 // pkg/adminclient. The CLI prints whatever the server answers, so it reaches
 // operations that the typed methods leave out, among them the decisions of

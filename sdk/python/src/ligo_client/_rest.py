@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """One conditional GET of the workload API, over mTLS, with the server's ID checked before the request."""
 
 from __future__ import annotations

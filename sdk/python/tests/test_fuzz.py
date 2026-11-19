@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Fuzzing the decoders: whatever a server or a store sends, the SDK raises its own errors or none."""
 
 from __future__ import annotations

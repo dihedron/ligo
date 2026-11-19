@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The client of ligo's workload API (.specs/ligo-client-sdk-python.md §3)."""
 
 from __future__ import annotations

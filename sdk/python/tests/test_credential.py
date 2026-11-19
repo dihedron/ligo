@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """PY-6 to PY-10 and PY-15 (.specs/ligo-client-sdk-python.md §6)."""
 
 from __future__ import annotations

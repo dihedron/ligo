@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The data the workload API returns, as frozen dataclasses with the Go SDK's fields in snake case."""
 
 from __future__ import annotations

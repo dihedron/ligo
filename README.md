@@ -120,6 +120,19 @@ Every change is a change request. Each jurisdiction involved must approve it (ma
 
 The pipeline runs on DBOS and PostgreSQL. Plugins create the principal, grant the privileges on the target and set up credential delivery through Vault or OpenBao. Housekeeping loops repair drift, rotate static secrets, propagate source and target changes, and revoke expired bindings. Attested workloads then ask `ligo` which targets they may use and how to get their credentials.
 
+## License
+
+The server and the command line are under the [GNU Affero General Public License v3](LICENSE). The client libraries and SDKs, which an application links, are under the [MIT license](https://opensource.org/license/mit), so using them puts no obligation on the application:
+
+| Path | |
+| :-- | :-- |
+| `pkg/client` | The Go SDK of the workload API. |
+| `pkg/adminclient` | The Go client of the admin API. |
+| `sdk/python` | The Python SDK (`ligo-client`). |
+| `api/proto/workload`, `api/gen/workload`, `api/openapi`, `internal/adminraw` | The contracts and the helper the libraries are built on. |
+
+Each of these directories has its own `LICENSE` file, and a test (`test/license`) checks that they import nothing of the server.
+
 ## Status
 
 Working:

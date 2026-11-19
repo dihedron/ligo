@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """The errors of the SDK. A message holds a status, never a body, a token or a password."""
 
 from __future__ import annotations

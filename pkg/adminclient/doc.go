@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package adminclient is the Go client of ligo's admin API
 // (.specs/ligo-adminclient.md): the one client that the ligo CLI, the
 // Terraform provider and the MCP server share, so that authentication,

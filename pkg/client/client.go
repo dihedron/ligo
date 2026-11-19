@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package client is the Go SDK for workloads that use ligo: it fetches the
 // calling workload's bindings and network flows from ligo's workload API,
 // over mTLS with the workload's SVID, and reads each binding's credential

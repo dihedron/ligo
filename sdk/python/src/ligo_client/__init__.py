@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Python SDK for workloads that use ligo (.specs/ligo-client-sdk-python.md)."""
 
 from .client import Client

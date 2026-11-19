@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """An in-memory CA and in-process TLS servers: the tests need no SPIRE agent."""
 
 from __future__ import annotations
