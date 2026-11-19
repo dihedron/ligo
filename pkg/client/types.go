@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,8 @@ type Binding struct {
 	UpdatedAt                time.Time
 	Spec                     map[string]any // differs per platform type
 	Auth                     Auth
+	Description              string            // what the binding is for; text, never interpreted
+	Annotations              map[string]string // operator-defined keys; a copy, the caller may change it
 }
 
 // Endpoint is the spec's "endpoint", or "" when the platform type has none.
@@ -89,17 +92,19 @@ func (p *PortRange) UnmarshalJSON(data []byte) error {
 
 // wireBinding is an item of GET /v1/bindings.
 type wireBinding struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	Source       string         `json:"source"`
-	Target       string         `json:"target"`
-	AccessLevel  string         `json:"accessLevel"`
-	PlatformType string         `json:"platformType"`
-	Platform     string         `json:"platform"`
-	Revision     int64          `json:"revision"`
-	Auth         wireAuth       `json:"auth"`
-	Spec         map[string]any `json:"spec"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Source       string            `json:"source"`
+	Target       string            `json:"target"`
+	AccessLevel  string            `json:"accessLevel"`
+	PlatformType string            `json:"platformType"`
+	Platform     string            `json:"platform"`
+	Revision     int64             `json:"revision"`
+	Auth         wireAuth          `json:"auth"`
+	Spec         map[string]any    `json:"spec"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
+	Description  string            `json:"description"`
+	Annotations  map[string]string `json:"annotations"`
 }
 
 type wireAuth struct {
@@ -120,6 +125,7 @@ func (w wireBinding) binding() Binding {
 	}
 	return Binding{ID: w.ID, Name: w.Name, Source: w.Source, Target: w.Target, AccessLevel: w.AccessLevel,
 		PlatformType: w.PlatformType, Platform: w.Platform, Revision: w.Revision, UpdatedAt: w.UpdatedAt, Spec: w.Spec,
+		Description: w.Description, Annotations: maps.Clone(w.Annotations),
 		Auth: Auth{Strategy: w.Auth.Strategy, StoreType: w.Auth.StoreType, StoreInstance: w.Auth.StoreInstance, Config: cfg}}
 }
 

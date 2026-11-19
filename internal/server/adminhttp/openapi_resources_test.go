@@ -119,7 +119,7 @@ func TestOpenAPISourceTarget(t *testing.T) {
 
 	expires := now.Add(24 * time.Hour)
 	bnd := &bindings.View{APIVersion: sources.APIVersion, Kind: "Binding", Source: "s", Target: "t", AccessLevel: "read",
-		Parameters: json.RawMessage(`{}`), Purpose: "reporting", Labels: map[string]string{"team": "a"}, ExpiresAt: &expires,
+		Parameters: json.RawMessage(`{}`), Description: "reporting", Annotations: map[string]string{"team": "a"}, ExpiresAt: &expires,
 		Auth: json.RawMessage(`{"strategy":"vault-dynamic"}`), Spec: json.RawMessage(`{"host":"db"}`)}
 	bnd.Metadata = bindings.ViewMetadata{ID: uuid.New(), Name: "b", Realm: "prod", SourceJurisdiction: "dc/a", TargetJurisdiction: "dc/b", PlatformJurisdiction: "dc/b",
 		PlatformType: "postgres", Platform: "pg", Revision: 4, ActiveRevision: &revision, CreatedAt: now, UpdatedAt: now, CreatedBy: "ada", UpdatedBy: "ada"}

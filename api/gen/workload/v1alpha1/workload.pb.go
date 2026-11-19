@@ -164,6 +164,8 @@ type WorkloadBinding struct {
 	Auth          *structpb.Struct       `protobuf:"bytes,9,opt,name=auth,proto3" json:"auth,omitempty"`
 	Spec          *structpb.Struct       `protobuf:"bytes,10,opt,name=spec,proto3" json:"spec,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Description   string                 `protobuf:"bytes,12,opt,name=description,proto3" json:"description,omitempty"`
+	Annotations   map[string]string      `protobuf:"bytes,13,rep,name=annotations,proto3" json:"annotations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -271,6 +273,20 @@ func (x *WorkloadBinding) GetSpec() *structpb.Struct {
 func (x *WorkloadBinding) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *WorkloadBinding) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *WorkloadBinding) GetAnnotations() map[string]string {
+	if x != nil {
+		return x.Annotations
 	}
 	return nil
 }
@@ -637,7 +653,7 @@ const file_api_proto_workload_v1alpha1_workload_proto_rawDesc = "" +
 	"\fnot_modified\x18\x01 \x01(\bR\vnotModified\x12\x12\n" +
 	"\x04etag\x18\x02 \x01(\tR\x04etag\x12(\n" +
 	"\x10caller_spiffe_id\x18\x03 \x01(\tR\x0ecallerSpiffeId\x12=\n" +
-	"\x05items\x18\x04 \x03(\v2'.ligo.workload.v1alpha1.WorkloadBindingR\x05items\"\xfa\x02\n" +
+	"\x05items\x18\x04 \x03(\v2'.ligo.workload.v1alpha1.WorkloadBindingR\x05items\"\xb8\x04\n" +
 	"\x0fWorkloadBinding\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -651,7 +667,12 @@ const file_api_proto_workload_v1alpha1_workload_proto_rawDesc = "" +
 	"\x04spec\x18\n" +
 	" \x01(\v2\x17.google.protobuf.StructR\x04spec\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"U\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12 \n" +
+	"\vdescription\x18\f \x01(\tR\vdescription\x12Z\n" +
+	"\vannotations\x18\r \x03(\v28.ligo.workload.v1alpha1.WorkloadBinding.AnnotationsEntryR\vannotations\x1a>\n" +
+	"\x10AnnotationsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"U\n" +
 	"\x0fGetFlowsRequest\x12#\n" +
 	"\rtarget_filter\x18\x01 \x01(\tR\ftargetFilter\x12\x1d\n" +
 	"\n" +
@@ -697,7 +718,7 @@ func file_api_proto_workload_v1alpha1_workload_proto_rawDescGZIP() []byte {
 	return file_api_proto_workload_v1alpha1_workload_proto_rawDescData
 }
 
-var file_api_proto_workload_v1alpha1_workload_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_api_proto_workload_v1alpha1_workload_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_proto_workload_v1alpha1_workload_proto_goTypes = []any{
 	(*GetBindingsRequest)(nil),    // 0: ligo.workload.v1alpha1.GetBindingsRequest
 	(*GetBindingsResponse)(nil),   // 1: ligo.workload.v1alpha1.GetBindingsResponse
@@ -707,26 +728,28 @@ var file_api_proto_workload_v1alpha1_workload_proto_goTypes = []any{
 	(*BindingFlows)(nil),          // 5: ligo.workload.v1alpha1.BindingFlows
 	(*PortRange)(nil),             // 6: ligo.workload.v1alpha1.PortRange
 	(*NetworkFlow)(nil),           // 7: ligo.workload.v1alpha1.NetworkFlow
-	(*structpb.Struct)(nil),       // 8: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	nil,                           // 8: ligo.workload.v1alpha1.WorkloadBinding.AnnotationsEntry
+	(*structpb.Struct)(nil),       // 9: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 }
 var file_api_proto_workload_v1alpha1_workload_proto_depIdxs = []int32{
-	2, // 0: ligo.workload.v1alpha1.GetBindingsResponse.items:type_name -> ligo.workload.v1alpha1.WorkloadBinding
-	8, // 1: ligo.workload.v1alpha1.WorkloadBinding.auth:type_name -> google.protobuf.Struct
-	8, // 2: ligo.workload.v1alpha1.WorkloadBinding.spec:type_name -> google.protobuf.Struct
-	9, // 3: ligo.workload.v1alpha1.WorkloadBinding.updated_at:type_name -> google.protobuf.Timestamp
-	5, // 4: ligo.workload.v1alpha1.GetFlowsResponse.items:type_name -> ligo.workload.v1alpha1.BindingFlows
-	7, // 5: ligo.workload.v1alpha1.BindingFlows.flows:type_name -> ligo.workload.v1alpha1.NetworkFlow
-	6, // 6: ligo.workload.v1alpha1.NetworkFlow.ports:type_name -> ligo.workload.v1alpha1.PortRange
-	0, // 7: ligo.workload.v1alpha1.WorkloadBindingService.GetBindings:input_type -> ligo.workload.v1alpha1.GetBindingsRequest
-	3, // 8: ligo.workload.v1alpha1.WorkloadBindingService.GetFlows:input_type -> ligo.workload.v1alpha1.GetFlowsRequest
-	1, // 9: ligo.workload.v1alpha1.WorkloadBindingService.GetBindings:output_type -> ligo.workload.v1alpha1.GetBindingsResponse
-	4, // 10: ligo.workload.v1alpha1.WorkloadBindingService.GetFlows:output_type -> ligo.workload.v1alpha1.GetFlowsResponse
-	9, // [9:11] is the sub-list for method output_type
-	7, // [7:9] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	2,  // 0: ligo.workload.v1alpha1.GetBindingsResponse.items:type_name -> ligo.workload.v1alpha1.WorkloadBinding
+	9,  // 1: ligo.workload.v1alpha1.WorkloadBinding.auth:type_name -> google.protobuf.Struct
+	9,  // 2: ligo.workload.v1alpha1.WorkloadBinding.spec:type_name -> google.protobuf.Struct
+	10, // 3: ligo.workload.v1alpha1.WorkloadBinding.updated_at:type_name -> google.protobuf.Timestamp
+	8,  // 4: ligo.workload.v1alpha1.WorkloadBinding.annotations:type_name -> ligo.workload.v1alpha1.WorkloadBinding.AnnotationsEntry
+	5,  // 5: ligo.workload.v1alpha1.GetFlowsResponse.items:type_name -> ligo.workload.v1alpha1.BindingFlows
+	7,  // 6: ligo.workload.v1alpha1.BindingFlows.flows:type_name -> ligo.workload.v1alpha1.NetworkFlow
+	6,  // 7: ligo.workload.v1alpha1.NetworkFlow.ports:type_name -> ligo.workload.v1alpha1.PortRange
+	0,  // 8: ligo.workload.v1alpha1.WorkloadBindingService.GetBindings:input_type -> ligo.workload.v1alpha1.GetBindingsRequest
+	3,  // 9: ligo.workload.v1alpha1.WorkloadBindingService.GetFlows:input_type -> ligo.workload.v1alpha1.GetFlowsRequest
+	1,  // 10: ligo.workload.v1alpha1.WorkloadBindingService.GetBindings:output_type -> ligo.workload.v1alpha1.GetBindingsResponse
+	4,  // 11: ligo.workload.v1alpha1.WorkloadBindingService.GetFlows:output_type -> ligo.workload.v1alpha1.GetFlowsResponse
+	10, // [10:12] is the sub-list for method output_type
+	8,  // [8:10] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_workload_v1alpha1_workload_proto_init() }
@@ -740,7 +763,7 @@ func file_api_proto_workload_v1alpha1_workload_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_workload_v1alpha1_workload_proto_rawDesc), len(file_api_proto_workload_v1alpha1_workload_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

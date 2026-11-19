@@ -8,8 +8,8 @@
     {{range .Levels}}<option value="{{.Name}}"{{if .Current}} selected{{end}}>{{.Name}}{{if .Unilateral}} (fewer privileges: unilateral){{end}}</option>{{end}}</select>
     <span class="hint">A level with fewer privileges needs no consent from the other side.</span></div>
   {{range .Params}}{{template "ui-field" .}}{{end}}
-  <div class="field"><label for="b-purpose">Purpose</label><input id="b-purpose" name="purpose" value="{{.Binding.Purpose}}"></div>
-  <div class="field"><label for="b-labels">Labels (key=value per line)</label><textarea id="b-labels" name="labels">{{.Labels}}</textarea></div>
+  <div class="field"><label for="b-description">Description</label><textarea id="b-description" name="description">{{.Binding.Description}}</textarea></div>
+  <div class="field"><label for="b-annotations">Annotations (key=value per line)</label><textarea id="b-annotations" name="annotations">{{.Annotations}}</textarea></div>
   <div class="field"><label for="b-exp">Expires (UTC, optional)</label><input id="b-exp" name="expiresAt" type="datetime-local" value="{{.Expires}}"></div>
   <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>Submit the change</button>
     <a class="button button-secondary" href="/ui/bindings/{{.Binding.Metadata.Name}}">Cancel</a></div>

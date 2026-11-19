@@ -35,6 +35,8 @@ message WorkloadBinding {
   google.protobuf.Struct auth = 9;
   google.protobuf.Struct spec = 10;
   google.protobuf.Timestamp updated_at = 11;
+  string description = 12;
+  map<string, string> annotations = 13;
 }
 
 message GetFlowsRequest {

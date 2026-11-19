@@ -29,8 +29,8 @@
   </fieldset>{{end}}
   {{if ge .Step 4}}<fieldset><legend>4. Details</legend>
     {{range .Params}}{{template "ui-field" .}}{{end}}
-    <div class="field"><label for="w-purpose">Purpose</label><input id="w-purpose" name="purpose" value="{{.Purpose}}"></div>
-    <div class="field"><label for="w-labels">Labels (key=value per line)</label><textarea id="w-labels" name="labels">{{.Labels}}</textarea></div>
+    <div class="field"><label for="w-description">Description</label><textarea id="w-description" name="description">{{.Description}}</textarea></div>
+    <div class="field"><label for="w-annotations">Annotations (key=value per line)</label><textarea id="w-annotations" name="annotations">{{.Annotations}}</textarea></div>
     <div class="field"><label for="w-exp">Expires (UTC, optional)</label><input id="w-exp" name="expiresAt" type="datetime-local" value="{{.ExpiresAt}}"></div>
     {{if eq .Step 4}}<div class="actions"><button type="submit" hx-get="/ui/bindings/wizard" hx-include="#wizard" hx-vals='{"step":"5"}' hx-target="#wizard" hx-swap="outerHTML" {{hxnonce}}>Review</button></div>{{end}}
   </fieldset>{{end}}

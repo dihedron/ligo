@@ -145,7 +145,7 @@ func (s *Service) breakGlassChange(ctx context.Context, c changerequests.Caller,
 	}
 	if cur != nil {
 		previous := Binding{Kind: "Binding", Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel,
-			Parameters: cur.parameters, Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+			Parameters: cur.parameters, Description: cur.description, Annotations: cur.annotations, ExpiresAt: cur.expiresAt}
 		if r.RevertPayload, err = json.Marshal(previous); err != nil {
 			return nil, err
 		}

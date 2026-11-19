@@ -652,21 +652,25 @@ type Binding struct {
 	AccessLevel string         `json:"accessLevel"`
 	Active      *BindingActive `json:"active"`
 
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string `json:"apiVersion"`
 
 	// Auth What the workload API hands the workload: the strategy and its store configuration; never a secret.
-	Auth      interface{} `json:"auth"`
-	ExpiresAt *time.Time  `json:"expiresAt"`
+	Auth interface{} `json:"auth"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string    `json:"description,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
 
 	// Kind Always Binding.
-	Kind     string             `json:"kind"`
-	Labels   *map[string]string `json:"labels,omitempty"`
-	Metadata BindingMetadata    `json:"metadata"`
+	Kind     string          `json:"kind"`
+	Metadata BindingMetadata `json:"metadata"`
 
 	// Parameters Platform-specific.
 	Parameters interface{}      `json:"parameters"`
-	Purpose    *string          `json:"purpose,omitempty"`
 	Requested  BindingRequested `json:"requested"`
 	Source     string           `json:"source"`
 
@@ -688,22 +692,26 @@ type BindingDetail struct {
 	AccessLevel string         `json:"accessLevel"`
 	Active      *BindingActive `json:"active"`
 
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string       `json:"apiVersion"`
 	Audit      []AuditEntry `json:"audit"`
 
 	// Auth What the workload API hands the workload: the strategy and its store configuration; never a secret.
-	Auth      interface{} `json:"auth"`
-	ExpiresAt *time.Time  `json:"expiresAt"`
+	Auth interface{} `json:"auth"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string    `json:"description,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
 
 	// Kind Always Binding.
-	Kind     string             `json:"kind"`
-	Labels   *map[string]string `json:"labels,omitempty"`
-	Metadata BindingMetadata    `json:"metadata"`
+	Kind     string          `json:"kind"`
+	Metadata BindingMetadata `json:"metadata"`
 
 	// Parameters Platform-specific.
 	Parameters interface{}      `json:"parameters"`
-	Purpose    *string          `json:"purpose,omitempty"`
 	Requested  BindingRequested `json:"requested"`
 	Source     string           `json:"source"`
 
@@ -752,20 +760,24 @@ type BindingRequested struct {
 
 // BindingSpec A binding as a caller writes it (§3.5); the body of a filing.
 type BindingSpec struct {
-	AccessLevel string     `json:"accessLevel"`
+	AccessLevel string `json:"accessLevel"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string    `json:"description,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 
 	// InlineSource Registered with the binding; only on a CREATE (§7.2.4).
 	InlineSource *SourceSpec `json:"inlineSource,omitempty"`
 
 	// Kind Always Binding.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
-	Name   string             `json:"name"`
+	Kind *string `json:"kind,omitempty"`
+	Name string  `json:"name"`
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
-	Purpose    *string                 `json:"purpose,omitempty"`
 
 	// Source A source's name; with inlineSource, the name it is registered under.
 	Source string `json:"source"`
@@ -1743,9 +1755,15 @@ type TargetPage struct {
 
 // BindingRequestBody defines model for Binding.
 type BindingRequestBody struct {
-	AccessLevel       string                  `json:"accessLevel"`
+	AccessLevel string `json:"accessLevel"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
 	ExpectedRevision *int64     `json:"expectedRevision,omitempty"`
@@ -1755,8 +1773,7 @@ type BindingRequestBody struct {
 	InlineSource *SourceSpec `json:"inlineSource,omitempty"`
 
 	// Kind Always Binding.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed *bool  `json:"managed,omitempty"`
@@ -1764,7 +1781,6 @@ type BindingRequestBody struct {
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
-	Purpose    *string                 `json:"purpose,omitempty"`
 
 	// Source A source's name; with inlineSource, the name it is registered under.
 	Source string `json:"source"`
@@ -1928,9 +1944,15 @@ type ListBindingsParams struct {
 
 // CreateBindingJSONBody defines parameters for CreateBinding.
 type CreateBindingJSONBody struct {
-	AccessLevel       string                  `json:"accessLevel"`
+	AccessLevel string `json:"accessLevel"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
 	ExpectedRevision *int64     `json:"expectedRevision,omitempty"`
@@ -1940,8 +1962,7 @@ type CreateBindingJSONBody struct {
 	InlineSource *SourceSpec `json:"inlineSource,omitempty"`
 
 	// Kind Always Binding.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed *bool  `json:"managed,omitempty"`
@@ -1949,7 +1970,6 @@ type CreateBindingJSONBody struct {
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
-	Purpose    *string                 `json:"purpose,omitempty"`
 
 	// Source A source's name; with inlineSource, the name it is registered under.
 	Source string `json:"source"`
@@ -1990,9 +2010,15 @@ type DeleteBinding202JSONResponseBody_Resource struct {
 
 // UpdateBindingJSONBody defines parameters for UpdateBinding.
 type UpdateBindingJSONBody struct {
-	AccessLevel       string                  `json:"accessLevel"`
+	AccessLevel string `json:"accessLevel"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
+
+	// Description What the binding is for, in plain text; sent to workloads
+	Description *string `json:"description,omitempty"`
 
 	// ExpectedRevision Required on an update.
 	ExpectedRevision *int64     `json:"expectedRevision,omitempty"`
@@ -2002,8 +2028,7 @@ type UpdateBindingJSONBody struct {
 	InlineSource *SourceSpec `json:"inlineSource,omitempty"`
 
 	// Kind Always Binding.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed *bool  `json:"managed,omitempty"`
@@ -2011,7 +2036,6 @@ type UpdateBindingJSONBody struct {
 
 	// Parameters Platform-specific (the platform type's binding parameters).
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
-	Purpose    *string                 `json:"purpose,omitempty"`
 
 	// Source A source's name; with inlineSource, the name it is registered under.
 	Source string `json:"source"`

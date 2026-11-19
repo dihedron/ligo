@@ -33,8 +33,8 @@ type Binding struct {
 	AccessLevel    string            `json:"accessLevel"`
 	Parameters     json.RawMessage   `json:"parameters,omitempty"`
 	RequestedSpec  json.RawMessage   `json:"requestedSpec,omitempty"` // from ValidateBinding
-	Purpose        string            `json:"purpose,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
 	ExpiresAt      *time.Time        `json:"expiresAt"`
 }
 

@@ -1,4 +1,4 @@
-package flowcheck
+package client
 
 import (
 	"context"
@@ -16,49 +16,47 @@ import (
 	"github.com/dihedron/netcheck/v2/pkg/netcheck/postgres"
 	"github.com/dihedron/netcheck/v2/pkg/netcheck/spire"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
-
-	"github.com/dihedron/ligo/pkg/client"
 )
 
-// MaxChecks is the most checks one call runs. A binding has at most 32 flows
+// MaxFlowChecks is the most checks one call runs. A binding has at most 32 flows
 // of a few ports each, so the limit is never reached by an honest answer: it
 // bounds what a hostile one can make the host connect to.
-const MaxChecks = 1024
+const MaxFlowChecks = 1024
 
-// ErrTooManyFlows: the flows add up to more than MaxChecks checks.
+// ErrTooManyFlows: the flows add up to more than MaxFlowChecks checks.
 var ErrTooManyFlows = errors.New("too many flows to check")
 
 // Status is the outcome of one flow.
-type Status string
+type FlowStatus string
 
 // The outcomes. Skipped means the flow could not be checked (see Reason),
 // which is not a failure.
 const (
-	Reachable   Status = "reachable"
-	Unreachable Status = "unreachable"
-	Skipped     Status = "skipped"
+	Reachable   FlowStatus = "reachable"
+	Unreachable FlowStatus = "unreachable"
+	Skipped     FlowStatus = "skipped"
 )
 
-// Result is the outcome of one flow and port, or of one ICMP check (Flow is
+// FlowResult is the outcome of one flow and port, or of one ICMP check (Flow is
 // empty then).
-type Result struct {
+type FlowResult struct {
 	Binding, Target, Flow string
 	Destination           string
 	Port                  int
 	Protocol              string // "tcp", "tls", "postgresql", "spire", "udp", "icmp"; empty when the flow was skipped before a check was chosen
-	Status                Status
+	Status                FlowStatus
 	Reason                string // why it is unreachable or skipped; for a UDP pass, what the pass means
 	Err                   error  // the check's error when unreachable
 	Latency               time.Duration
 	Attempts              int
 }
 
-// Results is the outcome of a call.
-type Results []Result
+// FlowResults is the outcome of a call.
+type FlowResults []FlowResult
 
 // Unreachable returns the results whose flow is blocked.
-func (r Results) Unreachable() Results {
-	var out Results
+func (r FlowResults) Unreachable() FlowResults {
+	var out FlowResults
 	for _, x := range r {
 		if x.Status == Unreachable {
 			out = append(out, x)
@@ -68,14 +66,9 @@ func (r Results) Unreachable() Results {
 }
 
 // OK says that no flow is unreachable. Skipped flows do not count.
-func (r Results) OK() bool { return len(r.Unreachable()) == 0 }
+func (r FlowResults) OK() bool { return len(r.Unreachable()) == 0 }
 
-// Flowser is what CheckClient needs of a client: *client.Client.
-type Flowser interface {
-	Flows(ctx context.Context, f client.Filter) ([]client.BindingFlows, error)
-}
-
-type options struct {
+type checkOptions struct {
 	timeout     time.Duration
 	retries     int
 	concurrency int
@@ -84,56 +77,57 @@ type options struct {
 	icmp        bool
 	privileged  bool
 	handshake   HandshakeFunc
+	platforms   map[string]string // binding name to platform type, to choose the default handshakes
 	spiffe      x509bundle.Source
 	log         *slog.Logger
 }
 
-// Option tunes a call.
-type Option func(*options)
+// CheckOption tunes a call.
+type CheckOption func(*checkOptions)
 
 // WithRoots sets the trust anchors for flows with tls: true; the default is the system roots.
-func WithRoots(p *x509.CertPool) Option { return func(o *options) { o.roots = p } }
+func WithRoots(p *x509.CertPool) CheckOption { return func(o *checkOptions) { o.roots = p } }
 
 // Handshake is how a TLS flow starts its handshake, which a flow does not say.
 type Handshake string
 
 // The handshakes. The zero value is a plain TLS handshake, verified by name.
 const (
-	// PostgreSQL asks for TLS inside the protocol (an SSLRequest), then verifies like TLS.
-	PostgreSQL Handshake = "postgresql"
-	// SPIFFE verifies the server's certificate as an X509-SVID against the trust bundle of WithSPIFFE.
-	SPIFFE Handshake = "spire"
+	// HandshakePostgreSQL asks for TLS inside the protocol (an SSLRequest), then verifies like TLS.
+	HandshakePostgreSQL Handshake = "postgresql"
+	// HandshakeSPIFFE verifies the server's certificate as an X509-SVID against the trust bundle of WithSPIFFE.
+	HandshakeSPIFFE Handshake = "spire"
 )
 
 // HandshakeFunc says which handshake the flow's port uses. It is called for
 // each port of each flow with tls: true over TCP.
-type HandshakeFunc func(f client.Flow, port int) Handshake
+type HandshakeFunc func(f Flow, port int) Handshake
 
 // WithHandshake chooses the handshake of the TLS flows; by default every one
-// is a plain TLS handshake, which reports PostgreSQL and SPIFFE servers
+// is a plain TLS handshake, which reports HandshakePostgreSQL and HandshakeSPIFFE servers
 // unreachable although their ports are open.
-func WithHandshake(h HandshakeFunc) Option { return func(o *options) { o.handshake = h } }
+func WithHandshake(h HandshakeFunc) CheckOption { return func(o *checkOptions) { o.handshake = h } }
 
 // WithSPIFFE sets the trust bundles that verify the flows whose handshake is
-// SPIFFE; without them such a flow is unreachable, with a reason that says so.
-func WithSPIFFE(s x509bundle.Source) Option { return func(o *options) { o.spiffe = s } }
+// HandshakeSPIFFE; without them such a flow is unreachable, with a reason that says so.
+func WithSPIFFE(s x509bundle.Source) CheckOption { return func(o *checkOptions) { o.spiffe = s } }
 
 // WithTimeout sets the time of one attempt; the default is 5 s.
-func WithTimeout(d time.Duration) Option { return func(o *options) { o.timeout = d } }
+func WithTimeout(d time.Duration) CheckOption { return func(o *checkOptions) { o.timeout = d } }
 
 // WithRetries sets the attempts in total; the default is 2.
-func WithRetries(n int) Option { return func(o *options) { o.retries = n } }
+func WithRetries(n int) CheckOption { return func(o *checkOptions) { o.retries = n } }
 
 // WithConcurrency sets the checks in flight; the default is 8.
-func WithConcurrency(n int) Option { return func(o *options) { o.concurrency = n } }
+func WithConcurrency(n int) CheckOption { return func(o *checkOptions) { o.concurrency = n } }
 
 // WithLogger sets the logger; the default discards. The keys are binding,
 // flow, destination, port, protocol, status, reason and error.
-func WithLogger(l *slog.Logger) Option { return func(o *options) { o.log = l } }
+func WithLogger(l *slog.Logger) CheckOption { return func(o *checkOptions) { o.log = l } }
 
 // WithDeniedNetworks replaces the networks that are never checked: by default
 // the link-local and cloud metadata ranges. Call it with no argument to check everything.
-func WithDeniedNetworks(p ...netip.Prefix) Option { return func(o *options) { o.denied = p } }
+func WithDeniedNetworks(p ...netip.Prefix) CheckOption { return func(o *checkOptions) { o.denied = p } }
 
 // WithICMP adds one echo check for each distinct destination host. Flows
 // declare TCP and UDP only, so this is a reachability hint, not a flow. The
@@ -141,35 +135,59 @@ func WithDeniedNetworks(p ...netip.Prefix) Option { return func(o *options) { o.
 // sockets, which need cap_net_raw on the binary (setcap cap_net_raw=+ep) or
 // root; otherwise datagram sockets, which need net.ipv4.ping_group_range to
 // include the process's group.
-func WithICMP(privileged bool) Option {
-	return func(o *options) { o.icmp, o.privileged = true, privileged }
+func WithICMP(privileged bool) CheckOption {
+	return func(o *checkOptions) { o.icmp, o.privileged = true, privileged }
 }
 
 func defaultDenied() []netip.Prefix {
 	return []netip.Prefix{netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("fe80::/10"), netip.MustParsePrefix("fd00:ec2::/32")}
 }
 
-// CheckClient reads the flows of f from the client and checks them.
-func CheckClient(ctx context.Context, c Flowser, f client.Filter, opts ...Option) (Results, error) {
+// CheckFlows reads the flows of the bindings that match f and tests them, so
+// that a workload or an operator sees which flow a firewall still blocks
+// before the application connects. It runs when it is called and never on its
+// own.
+//
+// A TCP flow is a connection test, or a TLS handshake when the flow says tls;
+// a UDP flow passes when no ICMP error comes back, which means "not refused",
+// not "the service is up"; a CIDR destination or a port range is skipped and
+// reported with its reason. A flow does not say how its TLS starts, so the
+// handshake is chosen from what the client knows: a flow declared by ligo is
+// verified as an X509-SVID against the client's own trust bundle, and a flow
+// that the target or the platform of a PostgreSQL binding declares asks for TLS
+// inside the protocol, as PostgreSQL does. WithHandshake and WithSPIFFE
+// replace both. WithICMP adds an echo check per host and needs the process to
+// be allowed ICMP sockets: cap_net_raw on the binary (setcap
+// cap_net_raw=+ep), or a net.ipv4.ping_group_range that includes its group.
+func (c *Client) CheckFlows(ctx context.Context, f Filter, opts ...CheckOption) (FlowResults, error) {
 	flows, err := c.Flows(ctx, f)
 	if err != nil {
 		return nil, fmt.Errorf("reading the flows: %w", err)
 	}
-	return Check(ctx, flows, opts...)
+	bindings, err := c.Bindings(ctx, f)
+	if err != nil {
+		return nil, fmt.Errorf("reading the bindings: %w", err)
+	}
+	platforms := make(map[string]string, len(bindings))
+	for _, b := range bindings {
+		platforms[b.Name] = b.PlatformType
+	}
+	defaults := []CheckOption{WithSPIFFE(c.source), func(o *checkOptions) { o.platforms = platforms }}
+	return CheckFlowData(ctx, flows, append(defaults, opts...)...)
 }
 
 // item is one flow and port: either a check to run or the reason it is not run.
 type item struct {
-	res   Result
+	res   FlowResult
 	check *netcheck.Check // nil: skipped
 	key   string
 }
 
 // plan turns the flows of a binding into items. It does no I/O.
-func plan(bf client.BindingFlows, handshake HandshakeFunc) []item {
+func plan(bf BindingFlows, choose func(BindingFlows, Flow, int) Handshake) []item {
 	var items []item
 	for _, f := range bf.Flows {
-		base := Result{Binding: bf.Binding, Target: bf.Target, Flow: f.Name, Destination: f.Destination}
+		base := FlowResult{Binding: bf.Binding, Target: bf.Target, Flow: f.Name, Destination: f.Destination}
 		skip := func(port int, why string) {
 			r := base
 			r.Port, r.Status, r.Reason = port, Skipped, why
@@ -207,7 +225,7 @@ func plan(bf client.BindingFlows, handshake HandshakeFunc) []item {
 			switch {
 			case proto == "UDP":
 				c.Protocol, r.Protocol = netcheck.UDP, "udp"
-			case f.TLS && handshakeOf(handshake, f, p.Low) == SPIFFE:
+			case f.TLS && handshakeOf(choose, bf, f, p.Low) == HandshakeSPIFFE:
 				c.Protocol, r.Protocol = netcheck.SPIRE, "spire" // an SVID has no name to verify
 			case f.TLS:
 				name := f.ServerName
@@ -219,7 +237,7 @@ func plan(bf client.BindingFlows, handshake HandshakeFunc) []item {
 					continue
 				}
 				c.Protocol, r.Protocol = netcheck.TLS, "tls"
-				if handshakeOf(handshake, f, p.Low) == PostgreSQL {
+				if handshakeOf(choose, bf, f, p.Low) == HandshakePostgreSQL {
 					c.Protocol, r.Protocol = netcheck.PostgreSQL, "postgresql"
 				}
 				c.TLS = &netcheck.TLSOptions{ServerName: name}
@@ -232,11 +250,26 @@ func plan(bf client.BindingFlows, handshake HandshakeFunc) []item {
 	return items
 }
 
-func handshakeOf(h HandshakeFunc, f client.Flow, port int) Handshake {
-	if h == nil {
+func handshakeOf(choose func(BindingFlows, Flow, int) Handshake, bf BindingFlows, f Flow, port int) Handshake {
+	if choose == nil {
 		return ""
 	}
-	return h(f, port)
+	return choose(bf, f, port)
+}
+
+// handshakeOf is the handshake of a port of a flow: the caller's choice, or the
+// default of what the client knows.
+func (o *checkOptions) handshakeOf(bf BindingFlows, f Flow, port int) Handshake {
+	if o.handshake != nil {
+		return o.handshake(f, port)
+	}
+	switch {
+	case f.DeclaredBy == "ligo":
+		return HandshakeSPIFFE
+	case isPostgres(o.platforms[bf.Binding]) && (strings.HasPrefix(f.DeclaredBy, "target:") || strings.HasPrefix(f.DeclaredBy, "platform:")):
+		return HandshakePostgreSQL
+	}
+	return ""
 }
 
 func serverName(c *netcheck.Check) string {
@@ -264,20 +297,24 @@ func denies(denied []netip.Prefix, host string) bool {
 	return false
 }
 
-// Check checks the flows. A flow that cannot be checked is Skipped with its
-// reason; an unreachable one is Unreachable with the check's error. The error
-// is for the call itself: too many flows, or a bundle netcheck refuses.
-func Check(ctx context.Context, flows []client.BindingFlows, opts ...Option) (Results, error) {
-	o := options{timeout: 5 * time.Second, retries: 2, concurrency: 8, denied: defaultDenied(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+// CheckFlowData tests flows obtained elsewhere, as CheckFlows does, but with
+// no client: it knows only the flows, so a flow declared by ligo is a SPIFFE
+// handshake only when WithSPIFFE gives it a trust bundle, and no flow is
+// PostgreSQL's unless WithHandshake says so. A flow that cannot be checked is
+// Skipped with its reason; an unreachable one is Unreachable with the check's
+// error. The error is for the call itself: too many flows, or a bundle netcheck
+// refuses.
+func CheckFlowData(ctx context.Context, flows []BindingFlows, opts ...CheckOption) (FlowResults, error) {
+	o := checkOptions{timeout: 5 * time.Second, retries: 2, concurrency: 8, denied: defaultDenied(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	for _, opt := range opts {
 		opt(&o)
 	}
 	var items []item
 	for _, bf := range flows {
-		items = append(items, plan(bf, o.handshake)...)
+		items = append(items, plan(bf, o.handshakeOf)...)
 	}
-	if len(items) > MaxChecks {
-		return nil, fmt.Errorf("%w: %d checks, at most %d", ErrTooManyFlows, len(items), MaxChecks)
+	if len(items) > MaxFlowChecks {
+		return nil, fmt.Errorf("%w: %d checks, at most %d", ErrTooManyFlows, len(items), MaxFlowChecks)
 	}
 
 	// one netcheck check for each distinct key; denied literals never reach it
@@ -333,7 +370,7 @@ func Check(ctx context.Context, flows []client.BindingFlows, opts ...Option) (Re
 		}
 	}
 
-	out := make(Results, 0, len(items)+len(icmpHosts))
+	out := make(FlowResults, 0, len(items)+len(icmpHosts))
 	for _, it := range items {
 		r := it.res
 		if it.check != nil {
@@ -343,7 +380,7 @@ func Check(ctx context.Context, flows []client.BindingFlows, opts ...Option) (Re
 		logResult(o.log, r)
 	}
 	for _, host := range icmpHosts {
-		r := Result{Destination: host, Protocol: "icmp"}
+		r := FlowResult{Destination: host, Protocol: "icmp"}
 		fill(&r, report.Results[icmpAt[host]])
 		if r.Status == Unreachable {
 			r.Reason += "; if ICMP is refused to this process, it needs cap_net_raw (setcap cap_net_raw=+ep on the binary) or a net.ipv4.ping_group_range that includes its group"
@@ -370,7 +407,7 @@ func interrupted(n int) *netcheck.Report {
 }
 
 // fill copies a netcheck result into r.
-func fill(r *Result, nr netcheck.Result) {
+func fill(r *FlowResult, nr netcheck.Result) {
 	r.Latency, r.Attempts = nr.Latency, nr.Attempts
 	switch {
 	case nr.Status == netcheck.Passed:
@@ -390,10 +427,15 @@ func fill(r *Result, nr netcheck.Result) {
 	}
 }
 
-func logResult(l *slog.Logger, r Result) {
+func logResult(l *slog.Logger, r FlowResult) {
 	attrs := []any{"binding", r.Binding, "flow", r.Flow, "destination", r.Destination, "port", r.Port, "protocol", r.Protocol, "status", string(r.Status)}
 	if r.Reason != "" {
 		attrs = append(attrs, "reason", r.Reason)
 	}
 	l.Info("flow checked", attrs...)
+}
+
+// isPostgres says whether a platform type is the PostgreSQL provider's.
+func isPostgres(platformType string) bool {
+	return platformType == "postgres" || strings.HasPrefix(platformType, "postgres.")
 }

@@ -107,7 +107,8 @@ func TestServeClientSDK(t *testing.T) {
 		}
 	}
 
-	code, filed := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read"})
+	code, filed := olga.do("POST", "/v1/admin/bindings", map[string]any{"name": binding, "source": source, "target": target, "accessLevel": "read",
+		"description": "SDK lab binding", "annotations": map[string]any{"change": "CHG0012345"}})
 	if code != http.StatusAccepted {
 		t.Fatalf("binding: %d %v", code, filed)
 	}
@@ -117,6 +118,10 @@ func TestServeClientSDK(t *testing.T) {
 	added := next(client.Added)
 	if added.Binding.Name != binding || added.Binding.Target != target || added.Binding.Auth.Strategy != "vault-dynamic" || added.Binding.Endpoint() == "" {
 		t.Errorf("Added: %+v", added.Binding)
+	}
+	// BM-L1: the text set by the operator reaches the workload
+	if added.Binding.Description != "SDK lab binding" || added.Binding.Annotations["change"] != "CHG0012345" {
+		t.Errorf("description %q annotations %v", added.Binding.Description, added.Binding.Annotations)
 	}
 	rotated := next(client.CredentialRotated)
 	cred := rotated.Credential

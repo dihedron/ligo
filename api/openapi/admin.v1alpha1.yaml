@@ -1085,8 +1085,8 @@ components:
         target: { type: string }
         accessLevel: { type: string }
         parameters: { type: object, description: "Platform-specific (the platform type's binding parameters)." }
-        purpose: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        description: { type: string, maxLength: 4096, description: "What the binding is for, in plain text; sent to workloads" }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads" }
         expiresAt: { type: [string, "null"], format: date-time }
         inlineSource: { $ref: "#/components/schemas/SourceSpec", description: "Registered with the binding; only on a CREATE (§7.2.4)." }
     InstanceRef:
@@ -1171,8 +1171,8 @@ components:
         target: { type: string }
         accessLevel: { type: string }
         parameters: { description: "Platform-specific." }
-        purpose: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        description: { type: string, maxLength: 4096, description: "What the binding is for, in plain text; sent to workloads" }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), sent to workloads" }
         expiresAt: { type: [string, "null"], format: date-time }
         status: { $ref: "#/components/schemas/BindingStatus" }
         requested: { $ref: "#/components/schemas/BindingRequested" }

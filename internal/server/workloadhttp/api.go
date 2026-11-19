@@ -37,6 +37,9 @@ type Item struct {
 	Auth         json.RawMessage `json:"auth"`
 	Spec         json.RawMessage `json:"spec"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
+	// Description and Annotations are operator text: data for the workload, never interpreted (§3.6).
+	Description string            `json:"description,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // BindingFlows are the effective flows of one binding (§3.6, ADR-16).
@@ -79,7 +82,7 @@ func (s *Server) Bindings(caller spiffeid.ID, target, platformType string) (*Doc
 	for i, b := range list {
 		items[i] = Item{ID: b.ID.String(), Name: b.Name, Source: b.SourceName, Target: b.TargetName, AccessLevel: b.AccessLevel,
 			PlatformType: b.PlatformType, Platform: b.Platform, Revision: b.ActiveRevision, Auth: b.AuthConfig, Spec: b.Spec,
-			UpdatedAt: b.UpdatedAt.UTC()}
+			UpdatedAt: b.UpdatedAt.UTC(), Description: b.Description, Annotations: b.Annotations}
 	}
 	doc, err := document(caller, items)
 	return doc, list, err

@@ -323,7 +323,7 @@ func samples() map[string]any {
 		"binding-check":   TargetCheck{Charter: gov},
 		"wizard-form":     wz,
 		"wizard":          wz,
-		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Labels: "a=b"},
+		"binding-form":    BindingForm{Binding: v, Levels: []LevelChoice{{Name: "read", Current: true}, {Name: "ro", Unilateral: true}}, Params: fields, Annotations: "a=b"},
 		"status-row":      row,
 		"trail":           trail,
 		"bindings-table":  []*bindings.View{v},
@@ -523,6 +523,14 @@ func TestManagedPages(t *testing.T) {
 				t.Errorf("%s: a managed binding lost Revoke", tc.page)
 			}
 		}
+	}
+	// BM-3, T-M2: a binding's text is shown, escaped
+	text := &bindings.View{Source: "s", Target: "t", AccessLevel: "read", Spec: []byte(`{}`), Auth: []byte(`{}`),
+		Description: "<script>alert(1)</script>", Annotations: map[string]string{"k": `"><img src=x>`}}
+	text.Metadata.Name, text.Status.Phase = "b", "ACTIVE"
+	if got := render("binding", BindingPage{Binding: text, Row: StatusRow{Name: "b", Phase: "ACTIVE"}}); strings.Contains(got, "<script>alert") ||
+		strings.Contains(got, "<img src=x>") || !strings.Contains(got, "&lt;script&gt;alert(1)") || !strings.Contains(got, "<code>k</code>") {
+		t.Errorf("the binding's text is not shown escaped:\n%s", got)
 	}
 	if got := render("bindings", Dashboard{Phases: phases, Holds: []bindings.Hold{{ID: uuid.NewV7(), BindingName: "held", ManagedBy: owner, Basis: "CONTAINMENT"}}}); !strings.Contains(got, "Open holds") ||
 		!strings.Contains(got, "/lift") {

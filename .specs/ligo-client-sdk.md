@@ -77,6 +77,8 @@ type Binding struct {
     UpdatedAt                time.Time
     Spec                     map[string]any // differs per platform type (endpoint, database, user, serverId, …)
     Auth                     Auth
+    Description              string            // what the binding is for; plain text, never interpreted
+    Annotations              map[string]string // operator-defined keys; a copy, never shared
 }
 
 type Auth struct {
@@ -252,7 +254,7 @@ Each chunk ends with `go test ./...`, `make lint`, `make vuln` and `make secrets
 ## 11. Out of scope
 
 - Ready connections per platform type (a `database/sql` connector, an LDAP bind).
-- Network checks on the flows: done in `pkg/client/flowcheck`, `.specs/ligo-network-checks.md`.
+- Network checks on the flows: done by `Client.CheckFlows` in `pkg/client`, `.specs/ligo-network-checks.md`.
 - SDKs in Java, Python and JavaScript/TypeScript (backlog item 7, later).
 - A streaming watch on the server.
 - Secret stores other than Vault and OpenBao.

@@ -66,6 +66,7 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-52 | A race between a lock being set and a change being applied, or between two owners. | 2, 6 | The owner is checked in the applying transaction under the row lock; the lab races two automations for one name. |
 | T-53 | The refusals flood the audit log. | 5 | `LOCK_VIOLATION_REFUSED` at most once a minute per principal and resource; `ligo_lock_violations_total` counts all. |
 | T-54 | The owner column is changed outside a change request, in the database. | 6 | A trigger refuses the update; a test with the application's role. |
+| T-55 | An operator puts a secret in a binding's description or annotations, which every matching workload now reads; or the text carries markup or control characters to a console or a page. | 1, 2, 3 | Documented as public to the binding's workloads; limits on length, count and characters, checked at filing; the UI escapes it; the SDKs never interpret it; changes need the consent of all sides, and the approval hash covers the text. Residual: `ligo` cannot recognize a secret. |
 
 :::
 

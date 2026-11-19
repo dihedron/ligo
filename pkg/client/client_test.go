@@ -86,6 +86,7 @@ func (v *env) client(t testing.TB, address string, transport ...Transport) *Clie
 
 const bindingsBody = `{"callerSpiffeId":"` + workerID + `","items":[{"id":"0192","name":"workers-ledger","source":"workers","target":"ledger",
 	"accessLevel":"write","platformType":"postgres","platform":"pg-prod","revision":4,"updatedAt":"2026-10-16T07:02:11Z",
+	"description":"Ledger posting","annotations":{"change":"CHG0012345"},
 	"auth":{"secretStorageStrategy":"vault-static","secretStoreType":"vault","secretStoreInstance":"vault-prod",
 		"config":{"address":"https://vault.lab:8200","audience":"https://vault.lab","authMount":"jwt","role":"binding-0192","policy":"binding-0192","secretPath":"kv/data/bindings/0192"}},
 	"spec":{"endpoint":"db.lab:5432","database":"ledger","port":5432}}]}`
@@ -133,6 +134,7 @@ func TestBindings(t *testing.T) {
 	}
 	want := []Binding{{ID: "0192", Name: "workers-ledger", Source: "workers", Target: "ledger", AccessLevel: "write", PlatformType: "postgres",
 		Platform: "pg-prod", Revision: 4, UpdatedAt: time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC),
+		Description: "Ledger posting", Annotations: map[string]string{"change": "CHG0012345"},
 		Spec: map[string]any{"endpoint": "db.lab:5432", "database": "ledger", "port": float64(5432)},
 		Auth: Auth{Strategy: "vault-static", StoreType: "vault", StoreInstance: "vault-prod", Config: map[string]string{"address": "https://vault.lab:8200",
 			"audience": "https://vault.lab", "authMount": "jwt", "role": "binding-0192", "policy": "binding-0192", "secretPath": "kv/data/bindings/0192"}}}}
@@ -317,5 +319,18 @@ func BenchmarkBindingsNotModified(b *testing.B) {
 		if items, err := c.Bindings(b.Context(), Filter{}); err != nil || len(items) != 1 {
 			b.Fatal(err)
 		}
+	}
+}
+
+// BM-9: the annotations are a copy: a change by the caller reaches no one else.
+func TestAnnotationsAreACopy(t *testing.T) {
+	w := wireBinding{ID: "1", Annotations: map[string]string{"a": "1"}}
+	b := w.binding()
+	b.Annotations["a"] = "changed"
+	if w.Annotations["a"] != "1" || w.binding().Annotations["a"] != "1" {
+		t.Error("the annotations of a binding are shared")
+	}
+	if (wireBinding{}).binding().Annotations != nil {
+		t.Error("absent annotations are not nil")
 	}
 }

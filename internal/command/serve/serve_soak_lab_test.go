@@ -373,7 +373,7 @@ func (s *soakRun) revokeBinding() {
 	}
 }
 
-// updateBinding changes a live binding's purpose.
+// updateBinding changes a live binding's description.
 func (s *soakRun) updateBinding() {
 	b, ok := s.randomBinding()
 	if !ok {
@@ -384,7 +384,7 @@ func (s *soakRun) updateBinding() {
 		return
 	}
 	code, filed := s.call(s.op, "soakop", "binding:update", b.name, "PUT", "/v1/admin/bindings/"+b.name, map[string]any{"name": b.name,
-		"source": b.source, "target": b.target, "accessLevel": "read", "purpose": fmt.Sprintf("soak %d", s.rng.IntN(1000)), "expectedRevision": rev})
+		"source": b.source, "target": b.target, "accessLevel": "read", "description": fmt.Sprintf("soak %d", s.rng.IntN(1000)), "expectedRevision": rev})
 	if code == http.StatusAccepted {
 		s.decideAll(filed, b.name, accountOfTarget(b.source), accountOfTarget(b.target), false)
 	}

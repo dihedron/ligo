@@ -1,4 +1,4 @@
-package flowcheck_test
+package client_test
 
 import (
 	"context"
@@ -6,11 +6,10 @@ import (
 	"log"
 
 	"github.com/dihedron/ligo/pkg/client"
-	"github.com/dihedron/ligo/pkg/client/flowcheck"
 )
 
-// A workload checks the flows of its binding to a database before it connects.
-func Example() {
+// A workload tests the flows of its binding to a database before it connects.
+func ExampleClient_CheckFlows() {
 	ctx := context.Background()
 	c, err := client.New(ctx, client.Config{Address: "ligo.example.com:8443", ServerID: "spiffe://example.com/ns/sys/sa/ligo"})
 	if err != nil {
@@ -18,7 +17,7 @@ func Example() {
 	}
 	defer func() { _ = c.Close() }()
 
-	results, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "orders-db"})
+	results, err := c.CheckFlows(ctx, client.Filter{Target: "orders-db"})
 	if err != nil {
 		log.Fatal(err)
 	}

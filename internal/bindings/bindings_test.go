@@ -177,7 +177,7 @@ func TestDecode(t *testing.T) {
 			t.Errorf("%s: %v", field, err)
 		}
 	}
-	if _, err := decode([]byte(`{"name":"b","source":"s","target":"t","accessLevel":"read","purpose":"p"}`)); err != nil {
+	if _, err := decode([]byte(`{"name":"b","source":"s","target":"t","accessLevel":"read","description":"p"}`)); err != nil {
 		t.Error(err)
 	}
 }

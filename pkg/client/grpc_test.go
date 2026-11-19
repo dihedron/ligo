@@ -74,7 +74,8 @@ func TestGRPC(t *testing.T) {
 	f := &fakeService{
 		bindings: []*workloadv1alpha1.WorkloadBinding{{Id: "0192", Name: "workers-ledger", Source: "workers", Target: "ledger", AccessLevel: "write",
 			PlatformType: "postgres", Platform: "pg-prod", Revision: 4, UpdatedAt: timestamppb.New(time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC)),
-			Spec: mustStruct(t, map[string]any{"endpoint": "db.lab:5432", "port": 5432}),
+			Spec:        mustStruct(t, map[string]any{"endpoint": "db.lab:5432", "port": 5432}),
+			Description: "Ledger posting", Annotations: map[string]string{"change": "CHG0012345"},
 			Auth: mustStruct(t, map[string]any{"secretStorageStrategy": "vault-dynamic", "secretStoreType": "vault", "secretStoreInstance": "vault-prod",
 				"config": map[string]any{"address": "https://vault.lab:8200", "credsPath": "database/creds/binding-0192"}})}},
 		flows: []*workloadv1alpha1.BindingFlows{{Binding: "workers-ledger", Source: "workers", Target: "ledger", Flows: []*workloadv1alpha1.NetworkFlow{{
@@ -84,6 +85,7 @@ func TestGRPC(t *testing.T) {
 	c := v.client(t, v.serveGRPC(t, ligoID, f), GRPC)
 	want := []Binding{{ID: "0192", Name: "workers-ledger", Source: "workers", Target: "ledger", AccessLevel: "write", PlatformType: "postgres",
 		Platform: "pg-prod", Revision: 4, UpdatedAt: time.Date(2026, 10, 16, 7, 2, 11, 0, time.UTC),
+		Description: "Ledger posting", Annotations: map[string]string{"change": "CHG0012345"},
 		Spec: map[string]any{"endpoint": "db.lab:5432", "port": float64(5432)},
 		Auth: Auth{Strategy: "vault-dynamic", StoreType: "vault", StoreInstance: "vault-prod",
 			Config: map[string]string{"address": "https://vault.lab:8200", "credsPath": "database/creds/binding-0192"}}}}

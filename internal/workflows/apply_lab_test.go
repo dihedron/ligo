@@ -381,7 +381,7 @@ func TestLabBreakGlass(t *testing.T) {
 	}
 	var purpose string
 	var n int
-	if err := l.owner.QueryRow(ctx, `select coalesce(b.purpose, ''), (select count(*) from audit_log a join change_requests c
+	if err := l.owner.QueryRow(ctx, `select coalesce(b.description, ''), (select count(*) from audit_log a join change_requests c
 		on c.id = a.change_request_id where a.resource_id = b.id and a.action = 'BREAK_GLASS_REVERTED' and c.reverts_cr_id = $2)
 		from bindings b where b.id = $1`, l.id, r.ID).Scan(&purpose, &n); err != nil || purpose != "" || n != 1 {
 		t.Errorf("purpose %q, %d BREAK_GLASS_REVERTED (%v)", purpose, n, err)

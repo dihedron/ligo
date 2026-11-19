@@ -137,7 +137,7 @@ func TestServeCampaignLifecycle(t *testing.T) {
 	if got := managedBy(t, olga, "bindings", w.binding); got != "" {
 		t.Errorf("the binding is released and managedBy is %q", got)
 	}
-	if code, b := olga.req("PUT", "/v1/admin/bindings/"+w.binding, w.bindDoc(map[string]any{"purpose": "edited by a person", "expectedRevision": revisionOf(t, olga, "bindings", w.binding)})); code/100 != 2 {
+	if code, b := olga.req("PUT", "/v1/admin/bindings/"+w.binding, w.bindDoc(map[string]any{"description": "edited by a person", "expectedRevision": revisionOf(t, olga, "bindings", w.binding)})); code/100 != 2 {
 		t.Errorf("a person edits the released binding: %d %v", code, b)
 	} else if cr, _ := b["changeRequest"].(map[string]any); cr["status"] == "PENDING" {
 		approveAll(t, dora, b)
@@ -229,11 +229,11 @@ func TestServeCampaignBreakGlassLimits(t *testing.T) {
 	t.Cleanup(revertOpen)
 	var worlds []campaignWorld
 	for i := range 4 {
-		worlds = append(worlds, newCampaignWorld(t, pipeline, olga, fmt.Sprintf("bg%d", i), map[string]any{"purpose": "original"}))
+		worlds = append(worlds, newCampaignWorld(t, pipeline, olga, fmt.Sprintf("bg%d", i), map[string]any{"description": "original"}))
 	}
 	file := func(w campaignWorld, ttl string) (int, map[string]any) {
 		return livia.req("POST", "/v1/admin/break-glass", map[string]any{"operation": "UPDATE", "ttl": ttl,
-			"binding":       w.bindDoc(map[string]any{"purpose": "emergency", "expectedRevision": revisionOf(t, olga, "bindings", w.binding)}),
+			"binding":       w.bindDoc(map[string]any{"description": "emergency", "expectedRevision": revisionOf(t, olga, "bindings", w.binding)}),
 			"justification": "campaign: the limits of the policy", "incidentReference": "INC0099999"})
 	}
 
@@ -305,7 +305,7 @@ func bindingPurpose(t *testing.T, a *admin, name string) string {
 	if code != http.StatusOK {
 		t.Fatalf("get binding %s: %d %v", name, code, b)
 	}
-	if s, ok := b["purpose"].(string); ok {
+	if s, ok := b["description"].(string); ok {
 		return s
 	}
 	spec, _ := b["spec"].(map[string]any)

@@ -119,7 +119,7 @@ func (s *Service) propagate(ctx context.Context, id uuid.UUID) (bool, error) {
 		return false, s.deferPropagation(ctx, cur)
 	}
 	b := &Binding{Name: cur.name, Source: cur.source, Target: cur.target, AccessLevel: cur.accessLevel, Parameters: cur.parameters,
-		Purpose: cur.purpose, Labels: cur.labels, ExpiresAt: cur.expiresAt}
+		Description: cur.description, Annotations: cur.annotations, ExpiresAt: cur.expiresAt}
 	// no caller: the change was approved on the source or target (§6.8)
 	if _, err := s.resolve(ctx, nil, b, cur, &charter.Policy{}, "", nil); err != nil {
 		if e := (*changerequests.Error)(nil); errors.As(err, &e) {

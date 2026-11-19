@@ -132,6 +132,15 @@ func TestRefresh(t *testing.T) {
 		return len(got) == 1 && string(got[0].Spec) == `{"host": "ledger-db-2"}`
 	})
 
+	// BM-6: a change of the text alone reaches the cache through the trigger
+	if _, err := owner.Exec(ctx, `update bindings set description = 'Ledger posting', annotations = '{"change":"CHG1"}' where id = $1`, binding); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "updated text", func() bool {
+		got, _ := c.Resolve(caller, "", "")
+		return len(got) == 1 && got[0].Description == "Ledger posting" && got[0].Annotations["change"] == "CHG1"
+	})
+
 	narrowed := `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/` + suffix + `-[0-9]$`
 	if _, err := owner.Exec(ctx, `update sources set svid_regex = $2 where id = $1`, source, narrowed); err != nil {
 		t.Fatal(err)
