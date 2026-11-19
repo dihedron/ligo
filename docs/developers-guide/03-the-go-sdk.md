@@ -95,6 +95,23 @@ for _, r := range results.Unreachable() {
 The check runs on demand, when the application calls it; the SDK never checks on its own.
 
 - A TCP flow without TLS is a connection test. A TCP flow with `tls: true` is checked up to the TLS handshake, verifying the flow's `serverName` (or the destination, when it is a name) against the system roots; `flowcheck.WithRoots` gives other roots. A flow to a bare IP address with `tls: true` and no `serverName` is skipped: there is no name to verify.
+- A flow says `tls: true` and nothing about how the TLS starts, so two kinds of server need to be named. PostgreSQL negotiates TLS inside its protocol, and ligo's own endpoints present a SPIFFE SVID, which has no DNS name to verify. A plain check reports both as unreachable although their ports are open. Say which flows they are with `flowcheck.WithHandshake`, and give the trust bundles of the SPIFFE ones with `flowcheck.WithSPIFFE`:
+
+  ```go
+  results, err := flowcheck.CheckClient(ctx, c, client.Filter{Target: "orders-db"},
+      flowcheck.WithHandshake(func(f client.Flow, port int) flowcheck.Handshake {
+          if port == 5432 {
+              return flowcheck.PostgreSQL // an SSLRequest, then the handshake, verified like TLS
+          }
+          if strings.HasPrefix(f.Name, "ligo-") {
+              return flowcheck.SPIFFE // the certificate is verified as an X509-SVID
+          }
+          return "" // a plain TLS handshake
+      }),
+      flowcheck.WithSPIFFE(bundle)) // an x509bundle.Source: the trust bundle of the workload's trust domain
+  ```
+
+  A SPIFFE flow with no trust bundle is `Unreachable`, with the reason "no trust bundle". The mapping is yours until a flow can carry the hint itself (backlog item 18 of ligo).
 - A UDP flow passes when no ICMP error comes back, so a silent peer passes: it means "not refused", not "the service is up".
 - A flow whose destination is a CIDR, or whose ports are a range, is `Skipped` with the reason, never reported as reachable or blocked.
 - Destinations in link-local and cloud metadata ranges are never checked (`WithDeniedNetworks` changes the list), and one call runs at most 1,024 checks.

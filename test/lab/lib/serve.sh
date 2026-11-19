@@ -30,6 +30,7 @@ cmd_serve() {
 	test-faults) serve_test_faults ;;
 	test-audit) serve_test_audit ;;
 	test-adminclient) serve_test_adminclient ;;
+	test-flowcheck) serve_test_flowcheck ;;
 	test-managed) serve_test_managed ;;
 	test-campaign) serve_test_campaign ;;
 	test-attestation) serve_test_attestation ;;
@@ -47,7 +48,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-flowcheck, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -511,7 +512,7 @@ serve_e2e() {
 	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_ADMIN2=https://$other.ligo.lab:9443"
 		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SECRETS=$LIGO_E2E_SECRETS"
 		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" --env "LIGO_E2E_TRACE=${E2E_TRACE:-}")
-	lxd exec lxd -- lxc exec ligo1 --user "$uid" --cwd "$LIGO_TESTS" "${envs[@]}" -- \
+	lxd exec lxd -- lxc exec ligo1 --user "$uid" ${E2E_GID:+--group "$E2E_GID"} --cwd "$LIGO_TESTS" "${envs[@]}" -- \
 		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
 }
 
@@ -553,6 +554,7 @@ serve_test() {
 	serve_test_ldap "$other"
 	serve_test_topologies "$other"
 	serve_test_adminclient
+	serve_test_flowcheck
 	if inner_exists lb; then
 		section "e2e through lb"
 		E2E_SUFFIX="$(openssl rand -hex 4)" # new resources, and a fresh workload JWT-SVID
@@ -598,6 +600,49 @@ serve_test_adminclient() {
 	inner_exec ligo1 sh -c "touch $LIGO1_E2E/wait-restarted && chown ligo:ligo $LIGO1_E2E/wait-restarted"
 	wait "$pid" || die "TestServeAdminClientWait failed"
 	info "pkg/adminclient: a wait rode out a restart of ligo1"
+}
+
+# serve_test_flowcheck: pkg/client/flowcheck against the real servers
+# (.specs/ligo-network-checks.md, chunk 3). The test checks a binding's flows,
+# files "block" with the database's host, and waits; this function then makes
+# ligo1 reject, at once, the connections to that host of the processes of one
+# group (the test's; ligo runs as the same user in its own group and keeps
+# its database), and lifts the block on "unblock", or when the run ends.
+serve_test_flowcheck() {
+	local FLOWCHECK_GID=64999 # the test runs under this group, so that the block does not reach ligo itself, which runs as the same user
+	deploy_tests
+	section "e2e of pkg/client/flowcheck"
+	local pid ip="" step host
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	inner_exec ligo1 sh -c "rm -f $LIGO1_E2E/flowcheck-*"
+	trap 'inner_exec ligo1 nft delete table inet flowcheck 2>/dev/null || true' EXIT
+	E2E_GID=$FLOWCHECK_GID serve_e2e '^TestServeClientFlowcheck$' ligo1 ligo1 &
+	pid=$!
+	for step in block unblock; do
+		for ((i = 0; i < 300; i++)); do
+			inner_exec ligo1 test -f "$LIGO1_E2E/flowcheck-$step" && break
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 1
+		done
+		inner_exec ligo1 test -f "$LIGO1_E2E/flowcheck-$step" || { wait "$pid" || true; die "pkg/client/flowcheck: the test did not ask to $step"; }
+		if [[ "$step" == block ]]; then
+			host="$(inner_exec ligo1 cat "$LIGO1_E2E/flowcheck-block")"
+			ip="$(inner_exec ligo1 getent ahostsv4 "$host" | awk 'NR == 1 {print $1}')"
+			[[ "$ip" =~ ^[0-9.]+$ ]] || { kill "$pid" 2>/dev/null || true; die "pkg/client/flowcheck: cannot resolve $host on ligo1"; }
+			inner_exec ligo1 sh -c "nft add table inet flowcheck && nft 'add chain inet flowcheck out { type filter hook output priority 0; }' && nft add rule inet flowcheck out meta skgid $FLOWCHECK_GID ip daddr $ip reject"
+			info "pkg/client/flowcheck: $host ($ip) is blocked on ligo1 for gid $FLOWCHECK_GID"
+		else
+			inner_exec ligo1 nft delete table inet flowcheck
+			ip=""
+			info "pkg/client/flowcheck: the block is lifted"
+		fi
+		inner_exec ligo1 sh -c "touch $LIGO1_E2E/flowcheck-$step-done && chown ligo:ligo $LIGO1_E2E/flowcheck-$step-done"
+	done
+	wait "$pid" || die "TestServeClientFlowcheck failed"
+	trap - EXIT
+	! inner_exec ligo1 nft list table inet flowcheck >/dev/null 2>&1 || die "pkg/client/flowcheck: the block is left on ligo1"
+	info "pkg/client/flowcheck: reachable, one blocked, reachable again, denied, ICMP passed"
 }
 
 # serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,

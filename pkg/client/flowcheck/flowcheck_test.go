@@ -285,7 +285,7 @@ func FuzzMapping(f *testing.F) {
 	f.Add("", "", 0, -1, true, "")
 	f.Fuzz(func(t *testing.T, proto, dest string, low, high int, tls bool, name string) {
 		_ = plan(client.BindingFlows{Binding: "b", Target: "t", Flows: []client.Flow{{
-			Name: "f", Protocol: proto, Destination: dest, Ports: []client.PortRange{{Low: low, High: high}}, TLS: tls, ServerName: name}}})
+			Name: "f", Protocol: proto, Destination: dest, Ports: []client.PortRange{{Low: low, High: high}}, TLS: tls, ServerName: name}}}, nil)
 	})
 }
 
@@ -297,6 +297,6 @@ func BenchmarkPlan(b *testing.B) {
 	bf := one2(flows)[0]
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = plan(bf)
+		_ = plan(bf, nil)
 	}
 }

@@ -1,6 +1,6 @@
 # Network checks in the client SDK
 
-- **Version:** 0.1 (2026-11-18), approved by the user in plan mode
+- **Version:** 0.2 (2026-11-19): the handshakes of PostgreSQL and SPIFFE (§8) and the lab scenario (chunk 3); 0.1 (2026-11-18), approved by the user in plan mode
 - **Backlog:** item 12
 - **Branch:** `feature/network-checks`
 - **Depends on:** `.specs/ligo-client-sdk.md` (flows as data, §3.4) and netcheck v2 (v2.0.0, tagged 2026-11-18)
@@ -64,9 +64,25 @@ for _, r := range res { fmt.Println(r.Flow, r.Destination, r.Port, r.Status, r.R
 | 0 | This spec, the backlog row. |
 | 1 | The dependency (pinned), the tests red, then `flowcheck` (FC-1 to FC-9), fuzz, benchmark. |
 | 2 | Package doc, `Example`, the Developer's Guide chapter (with the ICMP capability note), README. |
-| 3 | Lab scenario in `lab.sh serve test`: a binding's flows checked against the real servers, one blocked (proposed, not in this chunk). |
+| 3 | Lab scenario `lab.sh serve test-flowcheck`, part of `serve test`: a binding's flows checked against the real servers, one blocked (done 2026-11-19, §8). |
 | 4 | After the netcheck soak: the dependency moves to `v2.0.0` (done 2026-11-18). |
 
 ## 7. Out of scope
 
 DTLS, SSH, HTTP, SSO checks; a command line; checking on the first fetch; expanding CIDRs or ranges.
+
+## 8. The lab scenario, and the two handshakes it found (0.2, 2026-11-19)
+
+The first lab run reported two real flows unreachable although their ports were open: PostgreSQL negotiates TLS inside its protocol (an `SSLRequest` first), and ligo's workload API presents an X509-SVID, which has a URI SAN and no DNS name, so verification by name against the CA fails. The user decided (2026-11-19) that netcheck gets both handshakes as checks, usable by anyone (netcheck v2.1.0: `postgresql` and `spire`, `netcheck/.specs/netcheck-tls-kinds.md`), and that `flowcheck` uses them as library code.
+
+| Decision | |
+|---|---|
+| Mapping | `WithHandshake(func(client.Flow, port int) Handshake)` chooses `PostgreSQL`, `SPIFFE` or the plain default for a TCP flow with `tls: true`. A flow does not carry the hint, so the caller maps it; a hint in the flow is backlog item 18. |
+| Trust | `WithSPIFFE(x509bundle.Source)`. Without it a SPIFFE flow is `Unreachable`, "no trust bundle". The expected ID is not checked: any ID the bundle vouches for passes. |
+| Results | `Protocol` is `postgresql` or `spire` for these flows. A SPIFFE flow needs no server name, so a bare IP is not skipped. |
+
+Tests: **FC-10** the mapping chooses the check of a TLS flow and of no other; **FC-11** a fake PostgreSQL (`SSLRequest`, `S`, TLS) is reachable with the `postgresql` handshake and unreachable with plain TLS; **FC-12** an SVID server is reachable with the SPIFFE handshake and its bundle, unreachable without the bundle, with an empty bundle and with plain TLS.
+
+**Lab** (`TestServeClientFlowcheck`, `lab.sh serve test-flowcheck`, also in `serve test`): a workload binds a `pg-ledger-dynamic` target and checks its four flows (the target's and the platform's PostgreSQL, the secret store, ligo's workload API). **FC-L1** all four are reachable, on OpenBao and on Vault, with the PostgreSQL and SPIFFE handshakes. **FC-L2** `lab.sh` makes ligo1 reject, at once, the connections to the database host of the test's processes only (an `nft` rule on the test's group, so that ligo, which runs as the same user, keeps its database): exactly the two PostgreSQL flows are `Unreachable`, with the refusal as the error, and the others stay reachable. **FC-L3** after the rule is gone, all four are reachable again. **FC-L4** a link-local destination (the cloud metadata address) is `Skipped` as denied, and nothing is sent. **FC-L5** `WithICMP` adds one result per distinct host; unprivileged, each is `Unreachable` with a reason that names `cap_net_raw` and `ping_group_range`. The rule is removed when the run ends, even by a failure.
+
+Observed once, and not again in five later runs: right after a binding was `ACTIVE` for the admin API, the check saw no flows at all. The cause is not found (a delay of the workload API, or the change of group of the test); the test waits up to 30 s for the flows, and the item stays open until it can be reproduced or ruled out.

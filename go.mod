@@ -9,7 +9,7 @@ require (
 	github.com/chromedp/cdproto v0.160.0
 	github.com/chromedp/chromedp v0.23.0
 	github.com/dbos-inc/dbos-transact-golang v1.8.0
-	github.com/dihedron/netcheck/v2 v2.0.0
+	github.com/dihedron/netcheck/v2 v2.1.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/uuid v1.6.0
