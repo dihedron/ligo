@@ -1,6 +1,6 @@
 # Network checks in the client SDK
 
-- **Version:** 0.2 (2026-11-19): the handshakes of PostgreSQL and SPIFFE (§8) and the lab scenario (chunk 3); 0.1 (2026-11-18), approved by the user in plan mode
+- **Version:** 0.3 (2026-11-19): flow testing moves into the client (§9); 0.2 (2026-11-19): the handshakes of PostgreSQL and SPIFFE (§8) and the lab scenario (chunk 3); 0.1 (2026-11-18), approved by the user in plan mode
 - **Backlog:** item 12
 - **Branch:** `feature/network-checks`
 - **Depends on:** `.specs/ligo-client-sdk.md` (flows as data, §3.4) and netcheck v2 (v2.0.0, tagged 2026-11-18)
@@ -86,3 +86,18 @@ Tests: **FC-10** the mapping chooses the check of a TLS flow and of no other; **
 **Lab** (`TestServeClientFlowcheck`, `lab.sh serve test-flowcheck`, also in `serve test`): a workload binds a `pg-ledger-dynamic` target and checks its four flows (the target's and the platform's PostgreSQL, the secret store, ligo's workload API). **FC-L1** all four are reachable, on OpenBao and on Vault, with the PostgreSQL and SPIFFE handshakes. **FC-L2** `lab.sh` makes ligo1 reject, at once, the connections to the database host of the test's processes only (an `nft` rule on the test's group, so that ligo, which runs as the same user, keeps its database): exactly the two PostgreSQL flows are `Unreachable`, with the refusal as the error, and the others stay reachable. **FC-L3** after the rule is gone, all four are reachable again. **FC-L4** a link-local destination (the cloud metadata address) is `Skipped` as denied, and nothing is sent. **FC-L5** `WithICMP` adds one result per distinct host; unprivileged, each is `Unreachable` with a reason that names `cap_net_raw` and `ping_group_range`. The rule is removed when the run ends, even by a failure.
 
 Observed once, and not again in five later runs: right after a binding was `ACTIVE` for the admin API, the check saw no flows at all. The cause is not found (a delay of the workload API, or the change of group of the test); the test waits up to 30 s for the flows, and the item stays open until it can be reproduced or ruled out.
+
+## 9. Flow testing is a method of the client (0.3, 2026-11-19)
+
+The user observed that neither SDK tests the flows from the client itself: the Go `Client` only enumerates them (`Flows`), and testing is a separate package; the Python SDK has nothing. Decided (2026-11-19): **both SDKs get flow testing as a method of the client, in the public interface**, and, for Go, `pkg/client` stops being free of the netcheck dependency (it reverses §2, row "Where").
+
+**Go.** `pkg/client/flowcheck` moves into `pkg/client`, and the package is deleted (no compatibility code before 1.0.0):
+
+- `func (c *Client) CheckFlows(ctx, Filter, ...CheckOption) (FlowResults, error)` reads the flows and tests them; `func CheckFlowData(ctx, []BindingFlows, ...CheckOption) (FlowResults, error)` tests flows obtained elsewhere.
+- Types `FlowResult` (the old `Result`), `FlowStatus` (`Reachable`, `Unreachable`, `Skipped`), `FlowResults` (`OK`, `Unreachable`), `ErrTooManyFlows`, `Handshake` and its constants, `HandshakeFunc`, `CheckOption`. The options keep their names: `WithRoots`, `WithTimeout`, `WithRetries`, `WithConcurrency`, `WithICMP`, `WithDeniedNetworks`, `WithLogger`, `WithHandshake`, `WithSPIFFE`.
+- **Defaults come from the client**, so the common case needs no option. The trust bundle of the SPIFFE flows is the client's own X.509 source; a flow with `DeclaredBy == "ligo"` is checked with the SPIFFE handshake; a flow of a binding whose platform type is PostgreSQL's is checked with the PostgreSQL handshake (`CheckFlows` reads the bindings to know it; `CheckFlowData` has no bindings and uses only the first rule). Both are replaced by the hint in the flow when backlog item 18 is done. `WithHandshake` and `WithSPIFFE` override them.
+- T-N4 (the supply chain) now concerns every user of the SDK: netcheck's core is the standard library and three small modules, and its `postgres` and `spire` packages add nothing that `pkg/client` does not already link (`go-spiffe`).
+
+Tests: FC-1 to FC-12 move with the code and run on `CheckFlowData`; **FC-13** `CheckFlows` reads the flows and the bindings of the real `workloadhttp` handler and chooses the default handshakes; **FC-14** a `HandshakeFunc` and a `WithSPIFFE` override the defaults. The lab scenario (§8) calls `c.CheckFlows`.
+
+**Python.** `Client.check_flows` and `check_flow_data`, on the standard library: `.specs/ligo-client-sdk-python.md` §5.
