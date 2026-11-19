@@ -1,0 +1,8 @@
+{"items":[
+ {"binding":"orders-db","source":"orders","target":"pg-main","flows":[
+  {"name":"postgres","purpose":"queries","protocol":"TCP","destination":"pg.example.org","ports":[5432],"tls":true,
+   "serverName":"pg.example.org","description":"SQL","declaredBy":"target:pg-main"},
+  {"name":"workloads","purpose":"","protocol":"TCP","destination":"10.0.0.0/24","ports":["8000-8010", 9000],"tls":false,
+   "serverName":"","description":"","declaredBy":"ligo"}]},
+ {"binding":"cache","source":"orders","target":"redis-1","flows":[]}
+]}

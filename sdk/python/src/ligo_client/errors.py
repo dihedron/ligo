@@ -34,3 +34,7 @@ class StoreNotAllowed(LigoError):
 
 class StoreError(LigoError):
     """The secret store answered with an error."""
+
+
+class TooManyFlows(LigoError):
+    """The flows add up to more checks than one call runs (MAX_FLOW_CHECKS)."""

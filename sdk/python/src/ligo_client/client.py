@@ -7,16 +7,25 @@ import logging
 import ssl
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any
 
 from spiffe import SpiffeId
 
-from . import _rest, _tls, store
-from .errors import NoCredential, StoreError, StoreNotAllowed, Unauthorized, UnsupportedStrategy
+from . import _rest, _tls, flowcheck, store
+from .errors import (
+    LigoError,
+    NoCredential,
+    StoreError,
+    StoreNotAllowed,
+    Unauthorized,
+    Unavailable,
+    UnsupportedStrategy,
+)
 from .types import Binding, BindingFlows, binding_from_json, flows_from_json
+from .watch import MAX_BACKOFF, Event, EventKind, jitter
 
 MIN_POLL = 5.0  # T-C6
 DEFAULT_POLL = 30.0
@@ -77,6 +86,7 @@ class Client:
         self._bindings: dict[tuple[str, str], _Cached] = {}
         self._flows: dict[str, _Cached] = {}
         self._closed = False
+        self._closing = threading.Event()  # set by close(): ends every watch
 
     # -- lifecycle
 
@@ -90,6 +100,7 @@ class Client:
 
     def close(self) -> None:
         """Drops what the client remembers and closes the sources it opened."""
+        self._closing.set()
         with self._lock:
             self._closed = True
             self._bindings.clear()
@@ -137,6 +148,131 @@ class Client:
         cfg = binding.auth.config
         with self._lock:
             self._tokens.pop((address, cfg.get("namespace", ""), cfg.get("authMount", ""), cfg.get("role", "")), None)
+
+    def check_flows(self, target: str | None = None, **options: Any) -> flowcheck.FlowResults:
+        """Reads the flows of the bindings and tests them (see flowcheck.check_flow_data for the options).
+
+        The defaults come from what the client knows: a flow declared by ligo is verified as an X509-SVID
+        against the client's own bundle, and a flow of a PostgreSQL binding that a target or a platform
+        declares asks for TLS inside the protocol. It runs when called, never on its own.
+        """
+        flows = self.flows(target)
+        platforms = {b.name: b.platform_type for b in self.bindings(target)}
+        if "spiffe_bundle" not in options:
+            with self._lock:
+                source = self._source_locked()
+            options["spiffe_bundle"] = source.get_bundle_for_trust_domain(self._server.trust_domain)
+        options.setdefault("platforms", platforms)
+        return flowcheck.check_flow_data(flows, **options)
+
+    def check_flow_data(self, flows: Sequence[BindingFlows], **options: Any) -> flowcheck.FlowResults:
+        """Tests flows obtained elsewhere; with the client's own bundle for the flows of ligo."""
+        if "spiffe_bundle" not in options:
+            with self._lock:
+                source = self._source_locked()
+            options["spiffe_bundle"] = source.get_bundle_for_trust_domain(self._server.trust_domain)
+        return flowcheck.check_flow_data(flows, **options)
+
+    def watch(
+        self,
+        target: str | None = None,
+        platform_type: str | None = None,
+        *,
+        watch_credentials: bool = False,
+        stop: threading.Event | None = None,
+    ) -> Iterator[Event]:
+        """Polls the bindings that match and yields an Event for every change; it blocks between polls.
+
+        With watch_credentials it also reads the credential of each new or changed binding, and again at
+        two thirds of a lease. A failed poll keeps the state and is tried again later, with a backoff up
+        to five minutes and the server's Retry-After. The generator ends when it is closed, when close() is
+        called on the client, or when `stop` is set.
+        """
+        known: dict[str, Binding] = {}
+        due: dict[str, float] = {}  # when to read a binding's credential
+        failures = 0
+        next_poll = self._now()
+        while not self._stopped(stop):
+            now = self._now()
+            if now >= next_poll:
+                wait = jitter(self._poll)
+                try:
+                    items = self.bindings(target, platform_type)
+                except LigoError as e:
+                    wait = min(self._poll * 2 ** min(failures, 10), MAX_BACKOFF)
+                    if isinstance(e, Unavailable) and e.retry_after:
+                        wait = max(wait, e.retry_after)
+                    failures += 1
+                    self._log.warning("watch: poll failed, retry in %.0f s: %s", wait, e)
+                except RuntimeError:
+                    if self._closing.is_set():
+                        return
+                    raise
+                else:
+                    failures = 0
+                    yield from self._diff(known, due, items, watch_credentials, now)
+                next_poll = now + wait
+            wake = next_poll
+            for b in sorted(known.values(), key=lambda x: (x.name, x.id)):
+                at = due.get(b.id)
+                if at is None:
+                    continue
+                if at > now:
+                    wake = min(wake, at)
+                    continue
+                try:
+                    cred = self.credential(b)
+                except NoCredential:
+                    del due[b.id]
+                except LigoError as e:
+                    due[b.id] = next_poll
+                    self._log.warning("watch: credential not read: binding %s, target %s: %s", b.name, b.target, e)
+                else:
+                    del due[b.id]
+                    if cred.expires is not None:
+                        due[b.id] = now + (cred.expires.timestamp() - now) * 2 / 3
+                        wake = min(wake, due[b.id])
+                    yield Event(EventKind.CREDENTIAL_ROTATED, binding=b, credential=cred)
+            if self._sleep(max(0.0, wake - self._now()), stop):
+                return
+
+    def _stopped(self, stop: threading.Event | None) -> bool:
+        return self._closing.is_set() or (stop is not None and stop.is_set())
+
+    def _sleep(self, seconds: float, stop: threading.Event | None) -> bool:
+        """Waits; True when the watch must end. The tests replace it."""
+        if stop is None:
+            return self._closing.wait(seconds)
+        deadline = time.monotonic() + seconds
+        while not self._stopped(stop):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            self._closing.wait(min(left, 0.25))  # `stop` is another event: look at it often
+        return True
+
+    @staticmethod
+    def _diff(
+        known: dict[str, Binding], due: dict[str, float], items: list[Binding], credentials: bool, now: float
+    ) -> Iterator[Event]:
+        seen = set()
+        for b in sorted(items, key=lambda x: (x.name, x.id)):
+            seen.add(b.id)
+            old = known.get(b.id)
+            if old is not None and old.revision == b.revision:
+                continue
+            known[b.id] = b
+            if credentials:
+                due[b.id] = now
+            if old is not None:
+                yield Event(EventKind.CHANGED, binding=b, previous=old)
+            else:
+                yield Event(EventKind.ADDED, binding=b)
+        for old in sorted(known.values(), key=lambda x: (x.name, x.id)):
+            if old.id not in seen:
+                del known[old.id]
+                due.pop(old.id, None)
+                yield Event(EventKind.REMOVED, previous=old)
 
     def connect(self, address: str, server_id: str, *, timeout: float = 15.0) -> ssl.SSLSocket:
         """An mTLS connection with the workload's SVID to a server that presents server_id only.
