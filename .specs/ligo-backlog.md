@@ -27,10 +27,11 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 19 | `flowcheck` left out of v0.8.0: a command line, a check on the first fetch, CIDRs and ranges, DTLS, SSH and HTTP flows | 2026-11-19 | Not started; see §19 |
 | 20 | A Python asyncio client | 2026-11-19 | Not started; see §20 |
 | 21 | ICMP in the Python SDK's flow testing | 2026-11-19 | Not started; see §20 |
-| 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Not started; needs the user's PyPI project and trusted publishing; see §20 |
+| 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Waiting for a stable ecosystem, like the Terraform provider's registries; see §20 |
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
 | 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-annotations.md`, branch `feature/binding-annotations`; see §25 |
+| 26 | MIT license for the client libraries and SDKs (`pkg/client`, `pkg/adminclient`, `sdk/*`), the server staying AGPL-3.0 | 2026-11-19 | Done (2026-11-19): MIT; see §26 |
 
 ## 1. Audit pruning
 
@@ -298,7 +299,7 @@ Decided with `.specs/ligo-client-sdk-python.md` (2026-11-19).
 
 - **asyncio (item 20).** The v1 client is synchronous and thread-safe; `watch` blocks. An `async` client, with `async for` on `watch`, doubles the surface and its tests, and waits for a user who needs it.
 - **ICMP in flow testing (item 21).** Raw sockets need privileges that a Python program rarely has; unprivileged ICMP sockets need `net.ipv4.ping_group_range`. Go's `WithICMP` has both; Python's `check_flows` does TCP, TLS, PostgreSQL, SPIFFE and UDP.
-- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release. Publishing needs a PyPI project for `ligo-client` and trusted publishing configured for the repository; the workflow can be added without running a first upload on its own.
+- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release (`make py-build`, `release.yml`) and nothing else. **The user's condition (2026-11-19):** like the Terraform and OpenTofu registries (`terraform-provider-ligo/.specs/ligo-provider-backlog.md` item 2), published only when the ecosystem is stable and `ligo`'s API and the SDK's are no longer changing: a published version cannot be replaced, and users pin it. Then: a PyPI project for `ligo-client`, trusted publishing configured for the repository, a publish job in `release.yml` run after the release's checks, and the README's install line changed from the release asset to `pip install ligo-client`.
 - **gRPC (item 23).** The workload API also speaks gRPC, but `grpcio` has no hook for custom peer verification, and ligo's certificate is an SVID with no DNS name, so the SDK could not hold its rule that only ligo's SPIFFE ID is accepted. To revisit when `grpcio` can verify a URI SAN, or with a custom TLS layer.
 - **Connection reuse and signing (item 24).** Each call opens its own connection, which is correct and simple at the SDK's call rates. Keep-alive pooling is possible later. The wheel is covered by the release's signed `checksums.txt`; sigstore attestation of the build is a further step.
 
@@ -309,3 +310,14 @@ Asked for by the user (2026-11-19).
 - **What.** Each binding gets a free-text `description` and an `annotations` map (the user first called it "metadata"; the admin response already uses that key for its envelope) of string keys to string values. Both are set through the admin API, the CLI, the UI and the Terraform provider, and both are sent to the client in the workload API (REST and gRPC) and inspectable there: the Go SDK's `Binding` and the Python SDK's `Binding` carry them.
 - **To decide in the spec.** Whether they change through the change-request workflow like the rest of a binding, or are editable without approval (they grant nothing); limits (length of the description, number and size of keys and values, key charset); whether they are covered by the revision and the ETag, so a client sees a change; whether they appear in audit events and webhooks; the manifest (`apply`) and Terraform schema; and the threat model: the client gets text it did not write, so it is data and never instructions, and operators must not put secrets in it.
 - **Order.** Best done before the Python SDK's wire types are final, so both SDKs and the golden documents shared by them (`api/testdata/workload/`) gain the fields together.
+
+## 26. A more permissive license for the client libraries
+
+Raised by the user (2026-11-19) while building the Python SDK.
+
+The repository is AGPL-3.0. A workload that links `pkg/client`, `pkg/adminclient` or `ligo-client` becomes a combined work, so the AGPL's terms (source of the whole program, to its network users) reach the application, not only ligo. That is a barrier for the libraries' purpose. The usual answer is to license the client libraries separately and permissively (Apache-2.0 or MIT), and keep the server AGPL.
+
+- **Leaning (the user, 2026-11-19).** MIT, for the client libraries and for all SDKs, the Python one and the later Java and JavaScript/TypeScript ones. Apache-2.0 is the alternative (a patent grant, a longer text).
+- **To decide.** Which paths (`pkg/client`, `pkg/adminclient`, `sdk/python`, the generated `api/gen` and the protobuf contracts they use, `api/openapi`, `docs` examples); whether a path carries its own `LICENSE` file and SPDX headers; that the Go modules stay in one `go.mod` (a license per directory is allowed, but a package that imports `internal/` code of the server cannot be relicensed: `pkg/client` imports none today, which a test could enforce); the Python package metadata (`license` in `pyproject.toml`), the wheel's `LICENSE`, and the README's license section.
+- **Constraints.** Only the copyright holders can relicense. `git shortlog` (2026-11-19) shows one author and dependabot (dependency bumps), so the author can decide alone. Dependencies keep their own licenses (`spiffe`, `cryptography`: Apache-2.0/BSD, compatible).
+- **Done (2026-11-19).** MIT, `Copyright (c) 2026 Andrea Funtò`. A `LICENSE` file in `pkg/client`, `pkg/adminclient`, `internal/adminraw`, `api/proto/workload`, `api/gen/workload`, `api/openapi` and `sdk/python`; `SPDX-License-Identifier: MIT` in their hand-written sources (not in generated files, nor in `workload.proto`, which must equal the main spec's block); the package metadata; a License section in the README; `test/license` checks that every one has its file and that `pkg/client` and `pkg/adminclient` import nothing of the server. A new SDK adds its directory to the list in that test. Past releases stay under the license they were published with.

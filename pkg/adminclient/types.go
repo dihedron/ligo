@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package adminclient
 
 import "github.com/dihedron/ligo/pkg/adminclient/internal/gen"

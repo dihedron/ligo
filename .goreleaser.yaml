@@ -435,6 +435,7 @@ checksum:
   # then covers them like the packages (T-7)
   extra_files:
     - glob: ./build/docs/*.pdf
+    - glob: ./build/python/*
 
 # the checksums file covers every archive, package and SBOM: its detached
 # signature, made with the packaging key whose fingerprint is in
@@ -459,6 +460,7 @@ release:
   # the release documents (make release builds them first): .specs/ligo-docs.md
   extra_files:
     - glob: ./build/docs/*.pdf
+    - glob: ./build/python/*  # the Python SDK's wheel and sdist (make py-build)
   footer: |
     ---
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

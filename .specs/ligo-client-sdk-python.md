@@ -1,8 +1,8 @@
 # The Python client SDK
 
-- **Version:** 0.1 (2026-11-19), approved by the user in plan mode
+- **Version:** 0.2 (2026-11-19): `connect` replaces `tls_context` (§3.2); 0.1 (2026-11-19), approved by the user in plan mode
 - **Backlog:** item 7 (Python), items 20 to 24
-- **Branch:** `feature/python-sdk`
+- **Branch:** `feature/python-sdk` (specs), `feature/python-sdk-core` (chunk 1)
 - **Depends on:** `.specs/ligo-client-sdk.md` (the Go SDK; everything not said here is the same), `.specs/ligo-network-checks.md` §9 (flow testing in both SDKs)
 
 ## 1. Why
@@ -47,7 +47,7 @@ with ligo_client.Client(address="ligo1.example.com:8443",
 | `flows(target=None) -> list[BindingFlows]` | `Flows` | Data only. |
 | `credential(binding) -> Credential` | `Credential` | `vault-static` and `vault-dynamic`; JWT-SVID for `auth.config.audience`; login at `auth/<authMount>/login`; read of `secretPath` (KV v2) or `credsPath`; `X-Vault-Namespace` when the binding has a namespace; store token reused to 80 % of its TTL; one new login and one retry on a 403; `NoCredential` for strategy `svid`. |
 | `invalidate(binding)` | `Invalidate` | Drops the remembered store token. |
-| `tls_context(server_id) -> ssl.SSLContext` | `TLSConfig` | mTLS with the workload's SVID, TLS 1.3, accepting only `server_id` (§3.4). |
+| `connect(address, server_id, *, timeout=15) -> ssl.SSLSocket` | `TLSConfig` | An mTLS connection with the workload's SVID, TLS 1.3, to a server that presents `server_id` only (§3.4). It is not a `tls_context`: the standard library has no hook to check a peer's SPIFFE ID inside an `SSLContext`, so the check runs after the handshake, in `connect`, and a bare context would let a caller skip it (T-P5). |
 | `watch(target=None, platform_type=None, *, watch_credentials=False, stop=None)` | `Watch` | A blocking generator of `Event` (`kind` `added`, `changed`, `removed`, `credential_rotated`; `binding`, `previous`, `credential`). It ends when the generator is closed, `close()` is called, or the `threading.Event` `stop` is set. Poll cadence, jitter, backoff to 5 minutes and `Retry-After` as the Go SDK (§3.5). |
 | `check_flows(target=None, **options) -> FlowResults` and `check_flow_data(flows, **options)` | `CheckFlows`, `CheckFlowData` | §5. |
 | `close()` | `Close` | Drops the store tokens, closes the sources it opened. |
@@ -138,7 +138,7 @@ A Developer's Guide chapter, "The Python SDK" (client, bindings, credential, con
 | 2 | `credential`, the store, errors, fuzz (PY-6 to PY-10, PY-15). |
 | 3 | `watch` (PY-11, PY-12), `check_flows` (PY-F), the golden documents (PY-G), the benchmark. |
 | 4 | CI, `make` targets, the release wiring. |
-| 5 | The lab (PY-L1 to PY-L3), the guide, the READMEs. |
+| 5 | The lab (PY-L1 to PY-L3), the guide, the READMEs. Guide and READMEs done; the lab is written (`test/lab/lib/python.sh`, `test/lab/echo/client-py`, `test/lab/python/sdk_check.py`, `internal/command/serve/serve_python_e2e_lab_test.go`, `lab.sh serve test-python`, the Python client in `echo smoke`) and **not yet run**: it needs an overnight session (`lab.sh reset`, `serve install`, `echo install`, `echo smoke`, `serve test-python`). ligo1 gets uv from the lab host and Python and the wheel's dependencies from the internet through the VM's NAT. |
 | 6 | The PR. |
 
 ## 10. Out of scope

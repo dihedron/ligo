@@ -120,6 +120,19 @@ Every change is a change request. Each jurisdiction involved must approve it (ma
 
 The pipeline runs on DBOS and PostgreSQL. Plugins create the principal, grant the privileges on the target and set up credential delivery through Vault or OpenBao. Housekeeping loops repair drift, rotate static secrets, propagate source and target changes, and revoke expired bindings. Attested workloads then ask `ligo` which targets they may use and how to get their credentials.
 
+## License
+
+The server and the command line are under the [GNU Affero General Public License v3](LICENSE). The client libraries and SDKs, which an application links, are under the [MIT license](https://opensource.org/license/mit), so using them puts no obligation on the application:
+
+| Path | |
+| :-- | :-- |
+| `pkg/client` | The Go SDK of the workload API. |
+| `pkg/adminclient` | The Go client of the admin API. |
+| `sdk/python` | The Python SDK (`ligo-client`). |
+| `api/proto/workload`, `api/gen/workload`, `api/openapi`, `internal/adminraw` | The contracts and the helper the libraries are built on. |
+
+Each of these directories has its own `LICENSE` file, and a test (`test/license`) checks that they import nothing of the server.
+
 ## Status
 
 Working:
@@ -133,6 +146,7 @@ Working:
 - resources managed by automation (the lock): a `trusted_automation` pipeline owns what it files with `managed: true`, nobody else may change it, a removal in an emergency leaves a hold that only a person lifts, and an administrator releases an orphaned lock ([.specs/ligo-managed-resources.md](.specs/ligo-managed-resources.md));
 - `ligo serve` with the admin API (`api/openapi/admin.v1alpha1.yaml`), the `ligo` CLI and webhook notifications;
 - the workload API (REST and gRPC), which attested workloads use to find their bindings and network flows, and the Go client SDK (`pkg/client`) that wraps it: bindings, credentials from Vault or OpenBao, a watch for changes, rotations and revocations, and `pkg/client/flowcheck`, which checks a binding's network flows with [netcheck](https://github.com/dihedron/netcheck) ([.specs/ligo-client-sdk.md](.specs/ligo-client-sdk.md));
+- the Python SDK (`sdk/python`, `ligo-client`, MIT-licensed): the same operations over REST and mTLS, with credentials, a `watch` generator and flow testing on the standard library ([.specs/ligo-client-sdk-python.md](.specs/ligo-client-sdk-python.md));
 - the Go admin client (`pkg/adminclient`), which the `ligo` CLI is built on and which the Terraform and OpenTofu provider and the MCP server will use: every read and the filing of every change, `WaitChangeRequest`, and a revision on every update ([.specs/ligo-adminclient.md](.specs/ligo-adminclient.md));
 - the lease of a credential that a store makes on demand, set per platform or for the installation, with the one hour and 24 hours of before as the default;
 - the web UI (htmx), including the binding wizard, approvals and break-glass, with operator theming;
@@ -141,7 +155,7 @@ Working:
 
 Known limits of v0.9.0:
 - the admin client is for Go only and its API may change between minor versions until 1.0.0; it has no method for the decisions of people (approve, decline, ratify, revert, break-glass), by design, and the Terraform and OpenTofu provider and the MCP server are not written yet (backlog items 8 and 11);
-- the client SDK is for Go only: SDKs for Java, Python and JavaScript/TypeScript are not written yet (backlog item 7); `pkg/client`'s API may change between minor versions until 1.0.0;
+- the client SDKs are for Go and Python (REST only, synchronous, not on PyPI yet: the wheel is attached to each release); SDKs for Java and JavaScript/TypeScript are not written yet (backlog item 7); `pkg/client`'s API may change between minor versions until 1.0.0;
 - `Client.CheckFlows` is tested in the lab against the real servers (`lab.sh serve test-flowcheck`); a flow does not say how its TLS starts, so the client infers PostgreSQL and SPIFFE flows from the platform type and the declaring party (backlog item 18); its ICMP check needs `cap_net_raw` on the program's binary (`setcap`) or a `net.ipv4.ping_group_range` that includes its group; CIDR and range destinations, and TLS to a bare IP address with no name, are skipped, with the reason in the result;
 - the SDK's `Watch` polls (every 30 s by default), as the workload API has no stream, so a revocation reaches a watching workload within one poll; and every `Credential` call on a `vault-dynamic` binding makes a new database user, which the SDK does not cache;
 - the SDK reads credentials from Vault and OpenBao only; a binding applied before v0.5.0 has no `audience` (and no `namespace`) in its `auth` until its next apply or reconciliation, and the SDK reports that as an error;

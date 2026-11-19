@@ -28,6 +28,8 @@ source "$LAB_DIR/lib/ldap.sh"
 source "$LAB_DIR/lib/deploy.sh"
 # shellcheck source=lib/echo.sh
 source "$LAB_DIR/lib/echo.sh"
+# shellcheck source=lib/python.sh
+source "$LAB_DIR/lib/python.sh"
 # shellcheck source=lib/iac.sh
 source "$LAB_DIR/lib/iac.sh"
 # shellcheck source=lib/pg.sh

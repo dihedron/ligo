@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package workload_test
 
 import (

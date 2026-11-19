@@ -1,0 +1,23 @@
+{
+ "bindings":[
+  {"id":"b1","name":"orders-db","source":"orders","target":"pg-main","accessLevel":"read-write","platformType":"postgres",
+   "platform":"postgres.16","revision":7,"updatedAt":1795084200,"description":"Orders service, main database.\nOwner: team-orders",
+   "annotations":{"team":"orders","cost-center":"cc-42"},"endpoint":"pg.example.org:5432",
+   "auth":{"strategy":"vault-dynamic","storeType":"vault","storeInstance":"main",
+           "config":{"address":"https://vault.example.org:8200","audience":"vault","authMount":"jwt","role":"orders","credsPath":"database/creds/orders"}}},
+  {"id":"b2","name":"cache","source":"orders","target":"redis-1","accessLevel":"read","platformType":"redis","platform":"redis.7",
+   "revision":1,"updatedAt":1795080660,"description":"","annotations":{},"endpoint":"",
+   "auth":{"strategy":"svid","storeType":"none","storeInstance":"","config":{}}}
+ ],
+ "flows":[
+  {"binding":"orders-db","source":"orders","target":"pg-main","flows":[
+   {"name":"postgres","purpose":"queries","protocol":"TCP","destination":"pg.example.org","ports":[[5432,5432]],"tls":true,
+    "serverName":"pg.example.org","description":"SQL","declaredBy":"target:pg-main"},
+   {"name":"workloads","purpose":"","protocol":"TCP","destination":"10.0.0.0/24","ports":[[8000,8010],[9000,9000]],"tls":false,
+    "serverName":"","description":"","declaredBy":"ligo"}]},
+  {"binding":"cache","source":"orders","target":"redis-1","flows":[]}
+ ],
+ "login":{"token":"hvs.golden-token","ttlSeconds":3600},
+ "static":{"username":"app","password":"golden-static","leaseSeconds":0},
+ "dynamic":{"username":"v-orders-xyz","password":"golden-dynamic","leaseSeconds":300}
+}

@@ -2,7 +2,7 @@
 
 This guide is for developers. It has three parts.
 
-**Part 1, Developing an application,** is for the developer of a workload that `ligo` gives access to a target: a service that needs a database, a directory or any other system through a binding. It shows how the workload finds its bindings, reads the credentials and follows their rotation, with the Go client SDK, `pkg/client`. SDKs for Java, Python and JavaScript/TypeScript will follow; the chapter "Other languages" says what they will cover.
+**Part 1, Developing an application,** is for the developer of a workload that `ligo` gives access to a target: a service that needs a database, a directory or any other system through a binding. It shows how the workload finds its bindings, reads the credentials and follows their rotation, with the Go client SDK, `pkg/client`, or the Python one, `ligo-client`. SDKs for Java and JavaScript/TypeScript will follow; the chapter "Other languages" says what they will cover.
 
 **Part 2, Developing a Ligo Plugin,** is for the developer of a new kind of identity provider, platform provider or secret store, with the plugin SDK, `pkg/pluginsdk`. It assumes Part 1's vocabulary and the Architecture and Design Guide's.
 
@@ -19,4 +19,4 @@ The Setup Guide installs `ligo` and the Operator's Guide runs it; this guide doe
 
 ## Versions
 
-The Go SDK and the admin client are part of `ligo`'s module, `github.com/dihedron/ligo/pkg/client` and `github.com/dihedron/ligo/pkg/adminclient`, and have its version. Until `ligo` is 1.0.0, their APIs may change between minor versions; the release notes say how.
+The Python SDK, `ligo-client`, is built from the same tag as `ligo` and has its version; its wheel is attached to the release. The Go SDK and the admin client are part of `ligo`'s module, `github.com/dihedron/ligo/pkg/client` and `github.com/dihedron/ligo/pkg/adminclient`, and have its version. Until `ligo` is 1.0.0, their APIs may change between minor versions; the release notes say how.

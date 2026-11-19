@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package adminclient_test
 
 import (

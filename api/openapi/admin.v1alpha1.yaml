@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # The admin REST API of ligo (§7.2). It MUST be kept consistent with §7.2:
 # internal/server/adminhttp's contract test checks that its paths and
 # methods are exactly the routes the server registers.

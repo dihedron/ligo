@@ -56,6 +56,23 @@ openapi-lint: ## lint api/openapi/admin.v1alpha1.yaml with Redocly CLI, as CI do
 		echo "$$out" | grep -v "^npm notice"; \
 		[ $$status -eq 0 ] && ! echo "$$out" | grep -q "You have [0-9]* warning"
 
+# The Python SDK (sdk/python) is built and checked with the Python of the
+# environment, which needs its dev extra: pip install -e "sdk/python[dev]"
+PYTHON ?= python3
+
+.PHONY: py-lint
+py-lint: ## check the Python SDK: ruff, ruff format, mypy --strict (needs sdk/python[dev])
+	@cd sdk/python && $(PYTHON) -m ruff check . && $(PYTHON) -m ruff format --check . && $(PYTHON) -m mypy
+
+.PHONY: py-test
+py-test: ## run the Python SDK's tests (needs sdk/python[dev])
+	@cd sdk/python && $(PYTHON) -m pytest
+
+.PHONY: py-build
+py-build: ## build the Python SDK's wheel and sdist into build/python (version from the git tag)
+	@rm -rf build/python
+	@$(PYTHON) -m build --outdir build/python sdk/python
+
 .PHONY: compile
 compile: lint go-dev ## build for the default linux/amd64 platform
 
@@ -63,9 +80,10 @@ compile: lint go-dev ## build for the default linux/amd64 platform
 snapshot: signing-check lint go-snapshot ## build a snapshot version for the supported platforms (signed if GPG_FINGERPRINT and GPG_KEY_FILE are set)
 
 .PHONY: release
-release: signing-check lint ## build a release version (requires a valid tag and the packaging key), documents included
+release: signing-check lint ## build a release version (requires a valid tag and the packaging key), documents and the Python SDK included
 	@test -n "$(GPG_FINGERPRINT)" || { echo "a release must be signed: set GPG_FINGERPRINT and GPG_KEY_FILE" >&2; exit 1; }
 	@DOCS_VERSION="$$(git describe --tags --exact-match)" docs/build.sh
+	@$(MAKE) --no-print-directory py-build
 	@$(MAKE) --no-print-directory go-release
 
 .PHONY: docs

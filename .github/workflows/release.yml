@@ -25,6 +25,15 @@ jobs:
         with:
           go-version-file: "go.mod"
 
+      # make release builds the Python SDK's wheel and sdist (make py-build)
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the Python build tool
+        run: python -m pip install build
+
       - name: Ensure GoReleaser is installed
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
