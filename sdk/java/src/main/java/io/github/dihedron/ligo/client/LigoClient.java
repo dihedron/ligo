@@ -526,7 +526,7 @@ public final class LigoClient implements AutoCloseable {
         static Address parse(String address) {
             Objects.requireNonNull(address, "address");
             int i = address.lastIndexOf(':');
-            String h = i < 0 ? "" : address.substring(0, i).replaceAll("(?:^\\[|]$)", "");
+            String h = i < 0 ? "" : address.substring(0, i).replaceAll("(?:^\\[)|(?:]$)", "");
             String p = i < 0 ? "" : address.substring(i + 1);
             if (h.isEmpty() || !p.matches("[0-9]{1,5}") || Integer.parseInt(p) > 65535 || address.contains("/")) {
                 throw new IllegalArgumentException("address \"" + address + "\": host:port is required, with no scheme");

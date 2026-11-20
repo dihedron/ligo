@@ -194,7 +194,7 @@ public final class FlowCheck {
                     items.add(skip(base, p.low(), "the destination is in a denied network"));
                     continue;
                 }
-                String host = f.destination().replaceAll("(?:^\\[|]$)", "");
+                String host = f.destination().replaceAll("(?:^\\[)|(?:]$)", "");
                 String kind;
                 String name = "";
                 if (proto.equals("UDP")) {
