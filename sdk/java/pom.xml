@@ -28,6 +28,12 @@
 
   <dependencyManagement>
     <dependencies>
+      <!-- grpc-java brings 33.5.0-android, which GHSA-xxph-c9ww-hj94 (CVSS 8.2) hits: 33.7.2 is the fix -->
+      <dependency>
+        <groupId>com.google.guava</groupId>
+        <artifactId>guava</artifactId>
+        <version>33.7.2-android</version>
+      </dependency>
       <!-- java-spiffe and grpc-java ask for three versions of it: the highest wins, and the enforcer checks the rest -->
       <dependency>
         <groupId>com.google.errorprone</groupId>
