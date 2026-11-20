@@ -83,7 +83,7 @@ def watch(client: ligo_client.Client, target: str) -> None:
             rotated = 1
             emit(kind="second_credential", credential=credential_doc(client.credential(ev.binding)))
             flows = client.flows(target=target)
-            emit(kind="flows", bindings=len(flows), flows=sum(len(bf.flows) for bf in flows))
+            emit(kind="flows", count=len(flows), flows=sum(len(bf.flows) for bf in flows))
         if ev.kind is ligo_client.EventKind.REMOVED and ev.previous is not None:
             client.invalidate(ev.previous)
             try:
