@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.dihedron.ligo</groupId>
+  <artifactId>ligo-client</artifactId>
+  <version>${revision}</version>
+  <name>ligo-client</name>
+  <description>The Java client of ligo's workload API (.specs/ligo-client-sdk-java.md)</description>
+  <url>https://github.com/dihedron/ligo</url>
+  <licenses>
+    <license><name>MIT</name><url>https://opensource.org/license/mit</url></license>
+  </licenses>
+
+  <properties>
+    <!-- the release build passes the ligo tag: mvn -Drevision=0.11.0 -->
+    <revision>0.0.0-SNAPSHOT</revision>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <java-spiffe.version>0.8.17</java-spiffe.version>
+    <jackson.version>2.22.4</jackson.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- java-spiffe and grpc-java ask for three versions of it: the highest wins, and the enforcer checks the rest -->
+      <dependency>
+        <groupId>com.google.errorprone</groupId>
+        <artifactId>error_prone_annotations</artifactId>
+        <version>2.45.0</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.spiffe</groupId>
+      <artifactId>java-spiffe-core</artifactId>
+      <version>${java-spiffe.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.spiffe</groupId>
+      <artifactId>java-spiffe-provider</artifactId>
+      <version>${java-spiffe.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>6.1.2</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>3.27.7</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
+      <version>1.86</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.16.0</version>
+        <configuration><compilerArgs><arg>-Xlint:all</arg></compilerArgs></configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.6.1</version>
+      </plugin>
+      <plugin>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.5.1</version>
+      </plugin>
+      <plugin>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.7.0</version>
+        <executions>
+          <execution>
+            <id>enforce</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion><version>[17,)</version></requireJavaVersion>
+                <dependencyConvergence/>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

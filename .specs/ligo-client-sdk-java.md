@@ -17,7 +17,7 @@ A Java workload does by hand the steps the Go SDK does (`.specs/ligo-client-sdk.
 | Transport | REST (`java.net.http.HttpClient`) and gRPC (`grpc-java`), selectable, both verifying ligo's SPIFFE ID. |
 | Async | Every remote call has an `...Async` twin returning `CompletableFuture`; `watch` has a blocking and a listener form. |
 | Java | 17 or later; CI runs 17 and 21. |
-| SPIFFE | `java-spiffe` (`io.github.spiffe`), pinned to an exact version: v0.8.17 (2026-04-20) is maintained (commits in November 2026, 5 open issues), supports X.509 and JWT sources over the Workload API and a `TrustManager` that accepts only given SPIFFE IDs. |
+| SPIFFE | `java-spiffe` (`io.spiffe`), pinned to an exact version: v0.8.17 (2026-04-20) is maintained (commits in November 2026, 5 open issues), supports X.509 and JWT sources over the Workload API and a `TrustManager` that accepts only given SPIFFE IDs. |
 | Build | Maven, wrapper checked in. Coordinates `io.github.dihedron.ligo:ligo-client`, package `io.github.dihedron.ligo.client`. |
 | Publishing | Jar, sources jar and javadoc jar attached to the GitHub release and covered by the signed `checksums.txt`. Maven Central waits, together with PyPI and the Terraform and OpenTofu registries (backlog item 22). |
 | License | MIT, as the Go and Python SDKs. |
