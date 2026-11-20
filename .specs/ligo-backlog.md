@@ -12,7 +12,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
-| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java built on `feature/java-sdk` (`.specs/ligo-client-sdk-java.md`; PR and lab run pending); JavaScript/TypeScript not started |
+| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java released in v0.11.0 (2026-11-20; `.specs/ligo-client-sdk-java.md`, lab-tested on REST and gRPC); JavaScript/TypeScript not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Released as v0.1.0 on GitHub (2026-11-17), on `ligo` v0.7.0 and the Go admin client; resources and data sources done, pre-release campaign passed. Left: the soak before v0.2.0 and the registries, in the provider's own backlog (`terraform-provider-ligo/.specs/ligo-provider-backlog.md`) |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
@@ -34,6 +34,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 26 | MIT license for the client libraries and SDKs (`pkg/client`, `pkg/adminclient`, `sdk/*`), the server staying AGPL-3.0 | 2026-11-19 | Done (2026-11-19): MIT; see §26 |
 | 27 | An admin API client in Python (first, for Ansible), later in Java | 2026-11-20 | Not started; see §27 |
 | 28 | An Ansible collection: install and set up ligo, manage the server, manage sources, targets and bindings | 2026-11-20 | Not started; needs item 27; see §28 |
+| 29 | Flow-check semantics in netcheck, with pure-Python and pure-Java ports sharing conformance vectors | 2026-11-20 | Not started; see §29 |
 
 ## 1. Audit pruning
 
@@ -343,3 +344,11 @@ Asked for by the user (2026-11-20).
 - **Manage resources:** modules `ligo_source`, `ligo_target`, `ligo_binding` (and their info modules), through change requests and approvals as the admin API requires, with the managed-resource lock of `.specs/ligo-managed-resources.md` so that Ansible and the UI do not fight.
 
 **Needs.** The Python admin client (item 27), a spec with a threat model (secrets in playbooks, vault integration, approval identities: an automation account cannot approve its own change), a lab scenario (the lab already builds ligo on LXD VMs: a playbook installs it there), and the Ansible Galaxy publication with the rest (item 22).
+
+## 29. Flow checks in netcheck, with Python and Java ports
+
+**Why.** The flow-check rules (tcp, tls, postgresql SSLRequest, spire, udp; denied networks; resolve once and connect to the vetted address; at most 1,024 checks) now exist three times: `pkg/client` (Go), `sdk/python` and `sdk/java`. They must agree. The user's suggestion (2026-11-20): netcheck owns the semantics.
+
+**Proposal.** netcheck holds the specification and a set of conformance vectors (flow, expected status and reason). It provides a Go library, and pure-Python and pure-Java ports that use only each language's standard library. The three SDKs depend on netcheck, or vendor its ports, and run the same vectors in their tests, so a change to the rules is made once and cannot drift.
+
+**Open points.** Release and versioning of netcheck and the ports; whether the SDKs depend on it or embed it; how the vectors are shared (a JSON file in netcheck, copied to `api/testdata/`). Best done after the SDKs have settled, not before.
