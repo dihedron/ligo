@@ -84,7 +84,7 @@ func (s *Server) listSources(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	list, more, err := s.Sources.List(r.Context(), c, sources.Filter{Jurisdiction: q.Get("jurisdiction"), TrustDomain: q.Get("trustDomain"),
-		State: q.Get("state"), Label: q.Get("label"), Q: q.Get("q"), After: cursor.AfterName, Limit: size})
+		State: q.Get("state"), Annotation: q.Get("annotation"), Q: q.Get("q"), After: cursor.AfterName, Limit: size})
 	if err != nil {
 		s.fail(w, r, err)
 		return

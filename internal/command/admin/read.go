@@ -130,18 +130,18 @@ type Catalog struct {
 type CatalogSearch struct {
 	Base
 	Page
-	Query        string   `short:"q" long:"query" description:"Text to match in name, display name, description and labels."`
+	Query        string   `short:"q" long:"query" description:"Text to match in name, display name, description and annotations."`
 	Platform     string   `long:"platform" description:"Filter by platform."`
 	Type         string   `short:"t" long:"type" description:"Filter by platform type."`
 	Jurisdiction string   `long:"jurisdiction" description:"Filter by target jurisdiction pattern."`
-	Label        []string `long:"label" description:"Filter by label key=value (repeatable)."`
+	Annotation   []string `long:"annotation" description:"Filter by annotation key=value (repeatable)."`
 	ForSource    string   `long:"for-source" description:"Only targets allowed for this source, marking those already bound."`
 }
 
 func (cmd *CatalogSearch) Execute([]string) error {
 	q := cmd.query("q", cmd.Query, "platform", cmd.Platform, "platformType", cmd.Type, "jurisdiction", cmd.Jurisdiction, "forSource", cmd.ForSource)
-	for _, l := range cmd.Label {
-		q.Add("label", l) // shortcut: the server applies the first label only; filter the rest client-side when several are needed
+	for _, l := range cmd.Annotation {
+		q.Add("annotation", l) // shortcut: the server applies the first annotation only; filter the rest client-side when several are needed
 	}
 	return cmd.get(path("catalog", "targets"), q, columns["catalog"]...)
 }

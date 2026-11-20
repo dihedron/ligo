@@ -8,7 +8,7 @@
     {{with .Description}}<dt>Description</dt><dd>{{.}}</dd>{{end}}
     {{with .DocumentationURL}}<dt>Documentation</dt><dd><a href="{{.}}" rel="noopener noreferrer">{{.}}</a></dd>{{end}}
     {{with .Contacts}}<dt>Contacts</dt><dd>{{range .}}<div>{{.Name}} &lt;{{.Email}}&gt;</div>{{end}}</dd>{{end}}
-    {{range $k, $v := .Labels}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
+    {{range $k, $v := .Annotations}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}
     <dt>Updated</dt><dd>{{when .Metadata.UpdatedAt}} by {{.Metadata.UpdatedBy}}</dd>
     {{with .Metadata.PendingChangeRequestID}}<dt>Pending change</dt><dd><a href="/ui/change-requests/{{.}}">{{.}}</a></dd>{{end}}
   </dl></section>

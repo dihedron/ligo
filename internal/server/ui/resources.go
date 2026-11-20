@@ -189,7 +189,7 @@ func (s *Server) catalogSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	cq := catalog.Query{Q: q.Get("q"), PlatformType: q.Get("platformType"), Platform: q.Get("platform"), Jurisdiction: q.Get("jurisdiction"),
-		Label: q.Get("label"), Deprecated: q.Get("deprecated") == "on", AfterName: q.Get("after"), Limit: pageSize + 1}
+		Annotation: q.Get("annotation"), Deprecated: q.Get("deprecated") == "on", AfterName: q.Get("after"), Limit: pageSize + 1}
 	list, err := s.Catalog.Targets(r.Context(), session(r).Caller(), cq)
 	if err != nil {
 		s.fail(w, r, err)

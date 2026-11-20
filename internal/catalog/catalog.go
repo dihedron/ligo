@@ -38,19 +38,19 @@ type Target struct {
 	State                string            `json:"state"`
 	DisplayName          string            `json:"displayName,omitempty"`
 	Description          string            `json:"description,omitempty"`
-	Labels               map[string]string `json:"labels,omitempty"`
+	Annotations          map[string]string `json:"annotations,omitempty"`
 	Bound                bool              `json:"bound,omitempty"` // to Query.ForSource
 	visibility           string
 	visibleTo            []string
 }
 
 const targetColumns = `name, jurisdiction, platform, platform_type, platform_jurisdiction, state, coalesce(display_name, ''), coalesce(description, ''),
-	labels, visibility, visible_to`
+	annotations, visibility, visible_to`
 
 func scanTarget(row pgx.Row, extra ...any) (Target, error) {
 	var t Target
 	err := row.Scan(append([]any{&t.Name, &t.Jurisdiction, &t.Platform, &t.PlatformType, &t.PlatformJurisdiction, &t.State, &t.DisplayName,
-		&t.Description, &t.Labels, &t.visibility, &t.visibleTo}, extra...)...)
+		&t.Description, &t.Annotations, &t.visibility, &t.visibleTo}, extra...)...)
 	return t, err
 }
 
@@ -69,11 +69,11 @@ func (r *Reader) Target(ctx context.Context, c changerequests.Caller, name strin
 
 // Query filters the catalog of targets.
 type Query struct {
-	Q            string // in the name, display name, description or labels
+	Q            string // in the name, display name, description or annotations
 	Platform     string
 	PlatformType string
 	Jurisdiction string // a jurisdiction pattern the target jurisdiction matches
-	Label        string // key=value
+	Annotation   string // key=value
 	ForSource    string // only targets the policy allows for this source, marked if bound to it
 	Deprecated   bool   // DEPRECATED targets too
 	AfterName    string // keyset pagination (§7.2.3)
@@ -114,12 +114,12 @@ func (r *Reader) Targets(ctx context.Context, c changerequests.Caller, q Query) 
 		}
 		sourceID = &id
 	}
-	key, value, _ := strings.Cut(q.Label, "=")
+	key, value, _ := strings.Cut(q.Annotation, "=")
 	rows, err := r.DB.Query(ctx, "SELECT "+targetColumns+`,
 			EXISTS (SELECT 1 FROM bindings b WHERE b.target_id = targets.id AND b.source_id = $7) FROM targets
 		WHERE state = ANY($1) AND name > $2 AND ($3 = '' OR name ILIKE '%' || $3 || '%' OR display_name ILIKE '%' || $3 || '%'
-			OR description ILIKE '%' || $3 || '%' OR labels::text ILIKE '%' || $3 || '%')
-			AND ($4 = '' OR platform = $4) AND ($5 = '' OR platform_type = $5) AND ($6 = '' OR labels ->> $6 = $8)
+			OR description ILIKE '%' || $3 || '%' OR annotations::text ILIKE '%' || $3 || '%')
+			AND ($4 = '' OR platform = $4) AND ($5 = '' OR platform_type = $5) AND ($6 = '' OR annotations ->> $6 = $8)
 		ORDER BY name`, states, q.AfterName, q.Q, q.Platform, q.PlatformType, key, sourceID, value)
 	if err != nil {
 		return nil, err

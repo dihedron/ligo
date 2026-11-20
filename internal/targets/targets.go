@@ -36,7 +36,7 @@ type Target struct {
 	NetworkFlows     []flows.Flow       `json:"networkFlows"`
 	DisplayName      string             `json:"displayName,omitempty"`
 	Description      string             `json:"description,omitempty"`
-	Labels           map[string]string  `json:"labels,omitempty"`
+	Annotations      map[string]string  `json:"annotations,omitempty"`
 	DocumentationURL string             `json:"documentationUrl,omitempty"`
 	Contacts         []sources.Contact  `json:"contacts,omitempty"`
 	Visibility       sources.Visibility `json:"visibility"`

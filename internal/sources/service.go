@@ -340,7 +340,7 @@ func changes(old, cur *Source) []string {
 		changerequests.Field{Name: "identity", Old: old.Identity, New: cur.Identity},
 		changerequests.Field{Name: "displayName", Old: old.DisplayName, New: cur.DisplayName},
 		changerequests.Field{Name: "description", Old: old.Description, New: cur.Description},
-		changerequests.Field{Name: "labels", Old: old.Labels, New: cur.Labels},
+		changerequests.Field{Name: "annotations", Old: old.Annotations, New: cur.Annotations},
 		changerequests.Field{Name: "externalRefs", Old: old.ExternalRefs, New: cur.ExternalRefs},
 		changerequests.Field{Name: "contacts", Old: old.Contacts, New: cur.Contacts},
 		changerequests.Field{Name: "visibility", Old: old.Visibility, New: cur.Visibility})
@@ -368,13 +368,13 @@ func inUse(ctx context.Context, q store.Querier, id uuid.UUID) error {
 }
 
 const columns = `id, revision, name, jurisdiction, state, trust_domain, svid_regex, sample_spiffe_ids, coalesce(display_name, ''),
-	coalesce(description, ''), labels, external_refs, contacts, visibility, visible_to, coalesce(managed_by, '')`
+	coalesce(description, ''), annotations, external_refs, contacts, visibility, visible_to, coalesce(managed_by, '')`
 
 func scan(row pgx.Row) (*stored, error) {
 	var st stored
 	st.Kind = "Source"
 	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
-		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
+		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Annotations, &st.ExternalRefs,
 		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &st.ManagedBy)
 	if len(st.Visibility.VisibleTo) == 0 {
 		st.Visibility.VisibleTo = nil
@@ -409,10 +409,10 @@ func jsonb(v any, empty string) string {
 
 func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, account, actor string) error {
 	_, err := tx.Exec(ctx, `INSERT INTO sources (id, name, jurisdiction, trust_domain, svid_regex, sample_spiffe_ids, display_name,
-		description, labels, external_refs, contacts, visibility, visible_to, account, state, created_by, updated_by)
+		description, annotations, external_refs, contacts, visibility, visible_to, account, state, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13::jsonb, $15, 'ACTIVE', $14, $14)`,
 		id, s.Metadata.Name, s.Metadata.Jurisdiction, s.Identity.TrustDomain, s.Identity.SVIDRegex, jsonb(s.Identity.SampleSPIFFEIDs, "[]"),
-		null(s.DisplayName), null(s.Description), jsonb(s.Labels, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"),
+		null(s.DisplayName), null(s.Description), jsonb(s.Annotations, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"),
 		s.Visibility.Mode, jsonb(s.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_sources_name" {
 		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", s.Metadata.Name)
@@ -422,11 +422,11 @@ func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, account, ac
 
 func update(ctx context.Context, tx pgx.Tx, id uuid.UUID, s *Source, actor string) error {
 	_, err := tx.Exec(ctx, `UPDATE sources SET svid_regex = $2, sample_spiffe_ids = $3::jsonb, display_name = $4, description = $5,
-		labels = $6::jsonb, external_refs = $7::jsonb, contacts = $8::jsonb, visibility = $9, visible_to = $10::jsonb, state = $11,
+		annotations = $6::jsonb, external_refs = $7::jsonb, contacts = $8::jsonb, visibility = $9, visible_to = $10::jsonb, state = $11,
 		revision = revision + 1, updated_at = now(), updated_by = $12
 		WHERE id = $1`,
 		id, s.Identity.SVIDRegex, jsonb(s.Identity.SampleSPIFFEIDs, "[]"), null(s.DisplayName), null(s.Description),
-		jsonb(s.Labels, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"), s.Visibility.Mode,
+		jsonb(s.Annotations, "{}"), jsonb(s.ExternalRefs, "{}"), jsonb(s.Contacts, "[]"), s.Visibility.Mode,
 		jsonb(s.Visibility.VisibleTo, "[]"), s.Metadata.State, actor)
 	return err
 }

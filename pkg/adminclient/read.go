@@ -23,14 +23,14 @@ type SourceFilter struct {
 	Jurisdiction string // a jurisdiction pattern
 	TrustDomain  string
 	State        string // ACTIVE, DEPRECATED or RETIRED; empty: every state but RETIRED
-	Label        string // key=value
+	Annotation   string // key=value
 	Q            string // matched in names, display names and descriptions
 	PageSize     int
 }
 
 func (f SourceFilter) params(token string) *gen.ListSourcesParams {
 	return &gen.ListSourcesParams{Jurisdiction: opt[string](f.Jurisdiction), TrustDomain: opt[string](f.TrustDomain), State: opt[gen.ListSourcesParamsState](f.State),
-		Label: opt[string](f.Label), Q: opt[string](f.Q), PageSize: optSize(f.PageSize), PageToken: opt[string](token)}
+		Annotation: opt[string](f.Annotation), Q: opt[string](f.Q), PageSize: optSize(f.PageSize), PageToken: opt[string](token)}
 }
 
 // ListSourcesPage is one page of the sources the caller sees.
@@ -85,7 +85,7 @@ type TargetFilter struct {
 	Platform     string
 	PlatformType string
 	Jurisdiction string // a jurisdiction pattern
-	Label        string // key=value
+	Annotation   string // key=value
 	State        string // ACTIVE, DEPRECATED or RETIRED; empty: every state but RETIRED
 	PageSize     int
 }
@@ -93,7 +93,7 @@ type TargetFilter struct {
 // ListTargetsPage is one page of the targets the caller owns or administers.
 func (c *Client) ListTargetsPage(ctx context.Context, f TargetFilter, pageToken string) (Page[Target], error) {
 	p := &gen.ListTargetsParams{Q: opt[string](f.Q), Platform: opt[string](f.Platform), PlatformType: opt[string](f.PlatformType), Jurisdiction: opt[string](f.Jurisdiction),
-		Label: opt[string](f.Label), State: opt[gen.ListTargetsParamsState](f.State), PageSize: optSize(f.PageSize), PageToken: opt[string](pageToken)}
+		Annotation: opt[string](f.Annotation), State: opt[gen.ListTargetsParamsState](f.State), PageSize: optSize(f.PageSize), PageToken: opt[string](pageToken)}
 	r, err := fetch[gen.TargetPage](ctx, c, func(ctx context.Context, e ...gen.RequestEditorFn) (*http.Response, error) {
 		return c.gen.ListTargets(ctx, p, e...)
 	})
@@ -203,7 +203,7 @@ func flowsOf(f gen.Flows) []NetworkFlow {
 type CatalogFilter struct {
 	Q, Platform, PlatformType string
 	Jurisdiction              string // a pattern
-	Label                     string // key=value
+	Annotation                string // key=value
 	IncludeDeprecated         bool
 	ForSource                 string // only targets the charter allows for this source; those bound to it are marked
 	PageSize                  int
@@ -212,7 +212,7 @@ type CatalogFilter struct {
 // SearchCatalogPage is one page of the targets the caller could request.
 func (c *Client) SearchCatalogPage(ctx context.Context, f CatalogFilter, pageToken string) (Page[CatalogTarget], error) {
 	p := &gen.SearchCatalogParams{Q: opt[string](f.Q), Platform: opt[string](f.Platform), PlatformType: opt[string](f.PlatformType), Jurisdiction: opt[string](f.Jurisdiction),
-		Label: opt[string](f.Label), ForSource: opt[string](f.ForSource), PageSize: optSize(f.PageSize), PageToken: opt[string](pageToken)}
+		Annotation: opt[string](f.Annotation), ForSource: opt[string](f.ForSource), PageSize: optSize(f.PageSize), PageToken: opt[string](pageToken)}
 	if f.IncludeDeprecated {
 		s := gen.SearchCatalogParamsStateDEPRECATED
 		p.State = &s

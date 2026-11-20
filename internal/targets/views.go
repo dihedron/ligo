@@ -90,7 +90,7 @@ func (s *Service) Get(ctx context.Context, c changerequests.Caller, name string)
 type Filter struct {
 	Q, Platform, PlatformType string
 	Jurisdiction              string // a jurisdiction pattern
-	Label                     string // key=value
+	Annotation                string // key=value
 	State                     string // default: every state but RETIRED
 	After                     string
 	Limit                     int
@@ -101,13 +101,13 @@ type Filter struct {
 // f.Limit, and whether more follow (keyset on name, §7.2.3).
 // shortcut: a target is read with its levels, flows and metadata (five queries), fine for admin pages of ≤ 200; join in SQL if lists get hot.
 func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) ([]*View, bool, error) {
-	key, value, _ := strings.Cut(f.Label, "=")
+	key, value, _ := strings.Cut(f.Annotation, "=")
 	var out []*View
 	after := f.After
 	for {
 		rows, err := s.DB.Query(ctx, `SELECT id FROM targets WHERE name > $1 AND ($2 = '' OR platform = $2)
 			AND ($3 = '' OR platform_type = $3) AND (state::text = $4 OR $4 = '' AND state <> 'RETIRED')
-			AND ($5 = '' OR labels ->> $5 = $6) AND ($7 = '' OR name ILIKE '%' || $7 || '%' OR display_name ILIKE '%' || $7 || '%')
+			AND ($5 = '' OR annotations ->> $5 = $6) AND ($7 = '' OR name ILIKE '%' || $7 || '%' OR display_name ILIKE '%' || $7 || '%')
 			ORDER BY name LIMIT $8`, after, f.Platform, f.PlatformType, f.State, key, value, f.Q, 2*f.Limit)
 		if err != nil {
 			return nil, false, err

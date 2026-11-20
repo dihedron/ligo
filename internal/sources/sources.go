@@ -25,7 +25,7 @@ type Source struct {
 	Identity     Identity          `json:"identity"`
 	DisplayName  string            `json:"displayName,omitempty"`
 	Description  string            `json:"description,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
 	ExternalRefs map[string]string `json:"externalRefs,omitempty"`
 	Contacts     []Contact         `json:"contacts,omitempty"`
 	Visibility   Visibility        `json:"visibility"`
