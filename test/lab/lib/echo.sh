@@ -187,6 +187,7 @@ echo_smoke() {
 			expect 0 "^smoke $mode"$'\t'"bnd_[a-z0-9]+ $bound\$" echo-bound "$target" --message "smoke $mode" --transport grpc
 		fi
 		echo_smoke_py "$mode" "$target" "$bound"
+		echo_smoke_java "$mode" "$target" "$bound"
 		if [[ "$mode" == ns ]]; then namespace_holds_binding; fi
 		expect 2 '^no binding$' echo-unbound "$target"
 		expect 3 '^denied$' echo-unbound "$target" --direct "ligo1.ligo.lab:$port" "${direct[@]}"
@@ -211,6 +212,18 @@ echo_smoke_py() {
 	if [[ "$mode" == svid ]]; then pattern="^smoke py $mode"$'\t'"$bound\$"; else pattern="^smoke py $mode"$'\t'"bnd_[a-z0-9]+ $bound\$"; fi
 	ECHO_CLIENT_BIN=/usr/local/bin/echo-client-py expect 0 "$pattern" echo-bound "$target" --message "smoke py $mode"
 	ECHO_CLIENT_BIN=/usr/local/bin/echo-client-py expect 2 '^no binding$' echo-unbound "$target"
+}
+
+# echo_smoke_java MODE TARGET BOUND: the Java echo client (JV-L1) with the binding in place, on REST and on gRPC:
+# the same answer as the Go client's; and the refusal of the other user.
+echo_smoke_java() {
+	local mode="$1" target="$2" bound="$3" pattern transport
+	inner_exec ligo1 test -x /usr/local/bin/echo-client-java || java_install
+	if [[ "$mode" == svid ]]; then pattern="^smoke java $mode"$'\t'"$bound\$"; else pattern="^smoke java $mode"$'\t'"bnd_[a-z0-9]+ $bound\$"; fi
+	for transport in rest grpc; do
+		ECHO_CLIENT_BIN=/usr/local/bin/echo-client-java expect 0 "$pattern" echo-bound "$target" --message "smoke java $mode" --transport "$transport"
+	done
+	ECHO_CLIENT_BIN=/usr/local/bin/echo-client-java expect 2 '^no binding$' echo-unbound "$target"
 }
 
 # echo_ui PHASE TARGET BINDING REGISTER: the human steps of the guide in

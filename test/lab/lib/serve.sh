@@ -32,6 +32,7 @@ cmd_serve() {
 	test-adminclient) serve_test_adminclient ;;
 	test-flowcheck) serve_test_flowcheck ;;
 	test-python) serve_test_python ;;
+	test-java) serve_test_java ;;
 	test-managed) serve_test_managed ;;
 	test-campaign) serve_test_campaign ;;
 	test-attestation) serve_test_attestation ;;
@@ -49,7 +50,7 @@ cmd_serve() {
 			esac
 		done
 		;;
-	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-flowcheck, test-python, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
+	*) die "serve: install, start, stop, reload, status, logs, test, test-ha, test-otel, test-webhook, test-faults, test-audit, test-adminclient, test-flowcheck, test-python, test-java, test-managed, test-campaign, test-attestation, test-instances, test-accounts or test-accounts-chaos" ;;
 	esac
 }
 
@@ -512,7 +513,7 @@ serve_e2e() {
 	done < <(env_ligo)
 	envs+=(--env "LIGO_E2E_ADMIN=https://$host.ligo.lab:9443" --env "LIGO_E2E_ADMIN2=https://$other.ligo.lab:9443"
 		--env "LIGO_E2E_WORKLOAD=https://$other.ligo.lab:8443" --env "LIGO_E2E_DIR=$LIGO1_E2E" --env "LIGO_E2E_SECRETS=$LIGO_E2E_SECRETS"
-		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" --env "LIGO_E2E_TRACE=${E2E_TRACE:-}")
+		--env "LIGO_E2E_SUFFIX=$E2E_SUFFIX" --env "LIGO_E2E_TRACE=${E2E_TRACE:-}" --env "LIGO_E2E_TRANSPORT=${E2E_TRANSPORT:-rest}")
 	lxd exec lxd -- lxc exec ligo1 --user "$uid" ${E2E_GID:+--group "$E2E_GID"} --cwd "$LIGO_TESTS" "${envs[@]}" -- \
 		"$LIGO_TESTS/internal_command_serve.test" -test.count=1 -test.v -test.run "$1" | sed 's/^/        /'
 }
@@ -665,6 +666,25 @@ serve_test_python() {
 	serve_admins
 	serve_flowcheck '^TestServeClientFlowcheckPython$' "ligo-client check_flows"
 	info "e2e of the Python SDK passed"
+}
+
+# serve_test_java: the Java SDK against the real servers (.specs/ligo-client-sdk-java.md, JV-L2 and JV-L3): the
+# watch of a vault-dynamic binding on REST and on gRPC, its credentials, its revocation, and the flow scenario of
+# serve_test_flowcheck, with ligo-client on ligo1 (java.sh) doing what the Go SDK did there.
+serve_test_java() {
+	java_install
+	deploy_tests
+	section "e2e of the Java SDK"
+	local transport
+	for transport in rest grpc; do
+		E2E_SUFFIX="$(openssl rand -hex 4)"
+		serve_admins
+		E2E_TRANSPORT="$transport" serve_e2e "^TestServeClientSDKJava\$" ligo1 || die "TestServeClientSDKJava ($transport) failed"
+	done
+	E2E_SUFFIX="$(openssl rand -hex 4)"
+	serve_admins
+	serve_flowcheck '^TestServeClientFlowcheckJava$' "ligo-client checkFlows"
+	info "e2e of the Java SDK passed"
 }
 
 # serve_test_ldap OTHER: the openldap.v1 e2e (.specs/ligo-openldap-plugin.md,

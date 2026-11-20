@@ -117,6 +117,17 @@ jobs:
         # the coverage of every package's tests, not only its own; -p 1: the
         # packages share one database, and the singletons act on all of it
         run: go test -count=1 -p 1 -tags integration ./... -coverpkg=./... -coverprofile=coverage.txt
+      # the Java SDK's tests, with JaCoCo, for the Sonar analysis below
+      - name: Set up Java
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: sdk/java/pom.xml
+      - name: Test the Java SDK with coverage
+        run: make java-test
+
       - name: Merge coverage blocks
         # with -coverpkg every test binary reports every block, most with 0;
         # SonarCloud does not merge them, so keep the highest count of each
@@ -191,6 +202,53 @@ jobs:
 
       - name: Build the wheel and the sdist (make py-build)
         run: make py-build
+
+  # the Java SDK (sdk/java): tests, dependency convergence, SpotBugs, javadoc and
+  # the jar build, on the oldest and the newest supported JDK
+  java:
+    name: Java SDK (${{ matrix.java }})
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["17", "21"]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+          cache-dependency-path: sdk/java/pom.xml
+
+      - name: Test (make java-test)
+        run: make java-test
+
+      - name: Dependency convergence, SpotBugs and javadoc (make java-lint)
+        run: make java-lint
+
+      - name: Build the jars (make java-build)
+        run: make java-build
+
+  # the dependencies of the Java SDK against the OSV database
+  java-audit:
+    name: Java SDK dependency audit
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@32d3cd482bdadfb38b186c0ad1b031902d55d932 # v2.7.1
+        with:
+          scan-args: |-
+            --recursive
+            ./sdk/java
 
   secrets:
     name: Secret scans

@@ -30,6 +30,8 @@ source "$LAB_DIR/lib/deploy.sh"
 source "$LAB_DIR/lib/echo.sh"
 # shellcheck source=lib/python.sh
 source "$LAB_DIR/lib/python.sh"
+# shellcheck source=lib/java.sh
+source "$LAB_DIR/lib/java.sh"
 # shellcheck source=lib/iac.sh
 source "$LAB_DIR/lib/iac.sh"
 # shellcheck source=lib/pg.sh

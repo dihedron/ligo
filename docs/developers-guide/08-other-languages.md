@@ -1,8 +1,8 @@
 # Other languages
 
-The Python SDK is the previous chapter. SDKs for Java and JavaScript/TypeScript will follow the Go SDK. They are not written yet; this chapter says what they will do, so that a developer in another language can plan.
+The Python and Java SDKs are the previous chapters. An SDK for JavaScript/TypeScript will follow the Go SDK. It is not written yet; this chapter says what it will do, so that a developer in another language can plan.
 
-Each will wrap that language's SPIFFE library (`java-spiffe`, and the JavaScript equivalent), and be generated from the same protocol buffers, `api/proto/workload/v1alpha1`. Each will offer the same operations with the idioms of its language:
+It will wrap that language's SPIFFE library, and be generated from the same protocol buffers, `api/proto/workload/v1alpha1`. It will offer the same operations with the idioms of its language:
 
 - get the bindings of a target;
 - read a binding's credential from its secret store;
