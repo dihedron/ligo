@@ -71,7 +71,7 @@ try (LigoClient c = LigoClient.builder()
 
 - **The context.** The SVID and the bundle come from `java-spiffe`'s `X509Source` in memory: no key file touches the disk (T-J1). The `SSLContext` is built with a key manager over the source and `SpiffeTrustManager` set to accept only `serverId`; protocols TLS 1.3 only.
 - **The ID check.** Done in the trust manager during the handshake, before the first byte of the request. The JDK hostname check is off because an SVID has no DNS name; there is no option to turn the ID check or the verification off.
-- **gRPC.** `NettyChannelBuilder` with a `GrpcSslContexts` client context over the same key and trust managers, `passthrough:///address`, `maxInboundMessageSize` 8 MiB. A refused ID is reported as `Unauthorized`.
+- **gRPC.** `NettyChannelBuilder.forAddress` (grpc-java 1.80 has no `passthrough` resolver; the DNS one takes an IP literal as it is) with a `GrpcSslContexts` client context over the same key and trust managers, `maxInboundMessageSize` 8 MiB. A refused ID is reported as `Unauthorized`.
 - **Rotation.** Both managers read the source on every handshake, so a rotated SVID or bundle applies to the next connection.
 - **The store.** Its own `HttpClient` and `SSLContext` from `storeRoots`, `https` only, pinned by `allowedStores`, redirects never followed, bodies limited to 8 MiB, a 15 s timeout.
 

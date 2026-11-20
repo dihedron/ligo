@@ -18,13 +18,10 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /** One conditional GET of the workload API, over mTLS, with the server's ID checked in the handshake. */
-final class Rest {
+final class Rest implements Wire {
     static final int MAX_BODY = 8 << 20; // T-C7
     static final Duration MAX_RETRY_AFTER = Duration.ofHours(1); // a longer one is ignored
     static final Duration CALL_TIMEOUT = Duration.ofSeconds(15);
-
-    /** What came back: the items and the ETag, or notModified. */
-    record Answer(List<JsonNode> items, String etag, boolean notModified) {}
 
     private final HttpClient http;
     private final String host;
@@ -36,7 +33,9 @@ final class Rest {
         this.port = port;
     }
 
-    Answer get(String path, Map<String, String> query, String etag) {
+    @Override
+    public Answer get(Kind kind, Map<String, String> query, String etag) {
+        String path = kind == Kind.BINDINGS ? "/v1/bindings" : "/v1/flows";
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path, query)).timeout(CALL_TIMEOUT)
                 .header("Accept", "application/json").GET();
         if (!etag.isEmpty()) {
@@ -53,6 +52,11 @@ final class Rest {
             Thread.currentThread().interrupt();
             throw new Unavailable("the call to ligo was interrupted");
         }
+    }
+
+    @Override
+    public void close() {
+        // the JDK's HttpClient has no close before Java 21: its connections end with it
     }
 
     private Answer answer(HttpResponse<InputStream> response, InputStream in, String etag) throws IOException {

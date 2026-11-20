@@ -43,6 +43,9 @@ import javax.net.ssl.SSLSocket;
  * closed by {@link #close()}. A source the caller gives is the caller's to close.
  */
 public final class LigoClient implements AutoCloseable {
+    /** How the client talks to ligo: both verify the server's SPIFFE ID in the handshake and give the same answers. */
+    public enum Transport { REST, GRPC }
+
     static final Duration MIN_POLL = Duration.ofSeconds(5); // T-C6
     static final Duration DEFAULT_POLL = Duration.ofSeconds(30);
 
@@ -58,6 +61,7 @@ public final class LigoClient implements AutoCloseable {
     private final Map<String, Cached> flows = new ConcurrentHashMap<>();
     private final Set<String> allowedStores;
     private final List<X509Certificate> storeRoots;
+    private final Transport transport;
     private final Clock clock;
     private final System.Logger log;
     private final Map<TokenKey, Token> tokens = new ConcurrentHashMap<>();
@@ -71,7 +75,7 @@ public final class LigoClient implements AutoCloseable {
     private boolean ownsSource;
     private JwtSvidSource jwtSource;
     private Closeable ownedJwt;
-    private Rest rest;
+    private Wire wire;
     private Store store;
     private boolean closed;
 
@@ -84,6 +88,7 @@ public final class LigoClient implements AutoCloseable {
         this.jwtSource = b.jwtSource;
         this.allowedStores = Set.copyOf(b.allowedStores);
         this.storeRoots = List.copyOf(b.storeRoots);
+        this.transport = b.transport;
         this.clock = b.clock;
         this.log = b.logger;
         if (b.executor != null) {
@@ -113,23 +118,23 @@ public final class LigoClient implements AutoCloseable {
         if (!filter.platformType().isEmpty()) {
             query.put("platformType", filter.platformType());
         }
-        return get("/v1/bindings", query, bindings, filter.target() + "\u0000" + filter.platformType()).stream()
+        return get(Wire.Kind.BINDINGS, query, bindings, filter.target() + "\u0000" + filter.platformType()).stream()
                 .map(Documents::binding).toList();
     }
 
     public CompletableFuture<List<Binding>> bindingsAsync(Filter filter) {
-        return CompletableFuture.supplyAsync(() -> bindings(filter), executor);
+        return Async.run(executor, () -> bindings(filter));
     }
 
     /** The network flows of the workload's bindings, for one target or all. Data only. */
     public List<BindingFlows> flows(String target) {
         String t = target == null ? "" : target;
-        return get("/v1/flows", t.isEmpty() ? Map.of() : Map.of("target", t), flows, t).stream()
+        return get(Wire.Kind.FLOWS, t.isEmpty() ? Map.of() : Map.of("target", t), flows, t).stream()
                 .map(Documents::flows).toList();
     }
 
     public CompletableFuture<List<BindingFlows>> flowsAsync(String target) {
-        return CompletableFuture.supplyAsync(() -> flows(target), executor);
+        return Async.run(executor, () -> flows(target));
     }
 
     /**
@@ -151,7 +156,7 @@ public final class LigoClient implements AutoCloseable {
     }
 
     public CompletableFuture<Credential> credentialAsync(Binding binding) {
-        return CompletableFuture.supplyAsync(() -> credential(binding), executor);
+        return Async.run(executor, () -> credential(binding));
     }
 
     /** Forgets the store login of the binding: call it when the target refuses the credential. */
@@ -198,7 +203,10 @@ public final class LigoClient implements AutoCloseable {
         bindings.clear();
         flows.clear();
         tokens.clear();
-        rest = null;
+        if (wire != null) {
+            wire.close();
+            wire = null;
+        }
         store = null;
         if (ownedJwt != null) {
             try {
@@ -357,10 +365,10 @@ public final class LigoClient implements AutoCloseable {
         return jwtSource;
     }
 
-    private List<com.fasterxml.jackson.databind.JsonNode> get(String path, Map<String, String> query,
+    private List<com.fasterxml.jackson.databind.JsonNode> get(Wire.Kind kind, Map<String, String> query,
             Map<String, Cached> cache, String key) {
         Cached known = cache.get(key);
-        Rest.Answer a = rest().get(path, query, known == null ? "" : known.etag());
+        Wire.Answer a = wire().get(kind, query, known == null ? "" : known.etag());
         if (a.notModified() && known != null) {
             return known.items();
         }
@@ -371,19 +379,23 @@ public final class LigoClient implements AutoCloseable {
         return a.items();
     }
 
-    private synchronized Rest rest() {
+    private synchronized Wire wire() {
         if (closed) {
             throw new LigoException("the client is closed");
         }
-        if (rest == null) {
+        if (wire == null) {
             X509Source s = source();
             Tls.check(s, serverId);
-            HttpClient http = HttpClient.newBuilder().sslContext(Tls.context(s, serverId))
-                    .sslParameters(Tls.parameters()).connectTimeout(Rest.CALL_TIMEOUT)
-                    .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
-            rest = new Rest(http, host, port);
+            if (transport == Transport.GRPC) {
+                wire = new Grpc(host, port, s, serverId);
+            } else {
+                HttpClient http = HttpClient.newBuilder().sslContext(Tls.context(s, serverId))
+                        .sslParameters(Tls.parameters()).connectTimeout(Rest.CALL_TIMEOUT)
+                        .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
+                wire = new Rest(http, host, port);
+            }
         }
-        return rest;
+        return wire;
     }
 
     private synchronized X509Source source() {
@@ -430,12 +442,19 @@ public final class LigoClient implements AutoCloseable {
         private Duration pollInterval = DEFAULT_POLL;
         private Executor executor;
         private JwtSvidSource jwtSource;
+        private Transport transport = Transport.REST;
         private Set<String> allowedStores = Set.of();
         private List<X509Certificate> storeRoots = List.of();
         private Clock clock = Clock.systemUTC();
         private System.Logger logger = System.getLogger("io.github.dihedron.ligo.client");
 
         private Builder() {}
+
+        /** REST (the default) or gRPC. */
+        public Builder transport(Transport transport) {
+            this.transport = Objects.requireNonNull(transport, "transport");
+            return this;
+        }
 
         /** The JWT-SVIDs for the stores; the default is the Workload API on SPIFFE_ENDPOINT_SOCKET. */
         public Builder jwtSource(JwtSvidSource jwtSource) {

@@ -42,9 +42,9 @@ final class Documents {
             throw new LigoException("the answer is not a bindings document: revision is not an integer");
         }
         Map<String, String> configuration = new LinkedHashMap<>();
-        config.fields().forEachRemaining(e -> configuration.put(e.getKey(), e.getValue().asText())); // the store plugins write strings
+        config.properties().forEach(e -> configuration.put(e.getKey(), e.getValue().asText())); // the store plugins write strings
         Map<String, String> annotations = new LinkedHashMap<>();
-        object(d.path("annotations"), "annotations").fields().forEachRemaining(e -> {
+        object(d.path("annotations"), "annotations").properties().forEach(e -> {
             if (e.getValue().isTextual()) {
                 annotations.put(e.getKey(), e.getValue().asText());
             }
