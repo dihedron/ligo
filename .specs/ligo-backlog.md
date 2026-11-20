@@ -12,7 +12,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
-| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java in progress on `feature/java-sdk` (`.specs/ligo-client-sdk-java.md`); JavaScript/TypeScript not started |
+| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java built on `feature/java-sdk` (`.specs/ligo-client-sdk-java.md`; PR and lab run pending); JavaScript/TypeScript not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Released as v0.1.0 on GitHub (2026-11-17), on `ligo` v0.7.0 and the Go admin client; resources and data sources done, pre-release campaign passed. Left: the soak before v0.2.0 and the registries, in the provider's own backlog (`terraform-provider-ligo/.specs/ligo-provider-backlog.md`) |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |

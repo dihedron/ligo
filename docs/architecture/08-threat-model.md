@@ -72,6 +72,10 @@ This is a STRIDE analysis, across the boundaries of *Components and trust bounda
 | T-58 | A secret in a Python `repr`, traceback, log, copy or pickle. | 1 | `Credential` hides its password in `repr`, `str` and `format`, refuses `pickle` and keeps it hidden in copies; errors carry a status or a type name, never a body. |
 | T-59 | A compromised dependency of the Python SDK (`spiffe`, `cryptography`). | 1 | A bounded version range, `pip-audit` and CodeQL in CI, dependency review on pull requests, and the wheel built from the tag in the release workflow, covered by the signed `checksums.txt`. |
 | T-60 | A workload uses `check_flows` to scan the network. | 1 | The destinations are those `ligo` vetted for the binding; link-local and cloud metadata ranges are denied; a name is resolved once and the vetted address is used; a CIDR or a range is never expanded; 1,024 checks at most. |
+| T-61 | The Java SDK sends its request to a server that is not `ligo`, on REST or on gRPC. | 1 | The ID is checked in the TLS handshake by the trust manager, before the first byte; both transports use the same one and no option turns it off; tested with a server of another ID on both. |
+| T-62 | A secret in a Java `toString`, stack trace, log or serialized object. | 1 | `Credential` hides its password everywhere, is not `Serializable` and compares it in constant time; exceptions carry a status or a type name, never a body. |
+| T-63 | A compromised dependency of the Java SDK (`java-spiffe`, `grpc-java`, `netty`, `protobuf`, `jackson`). | 1 | Exact versions, `maven-enforcer` dependency convergence, SpotBugs, OSV-Scanner and CodeQL in CI, and the jars built from the tag in the release workflow, covered by the signed `checksums.txt`. A first audit found `guava` and pinned its fix. |
+| T-64 | A Java watch or flow check leaves threads or sockets behind after `close()` or `cancel()`. | 1 | `close()` stops every watch and check and joins their threads; tested: no `ligo-` thread survives. |
 
 :::
 
