@@ -18,10 +18,10 @@ import java.util.function.Consumer;
  */
 public final class Watch implements Subscription, Iterable<Event> {
     private static final Event END = new Event(null, null, null, null);
-    private static final int QUEUE = 1024;
+    private static final int CAPACITY = 1024;
     private static final long JOIN_MILLIS = 5000;
 
-    private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>(QUEUE);
+    private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>(CAPACITY);
     private final Object lock = new Object();
     private final Thread thread;
     private volatile boolean stopped;

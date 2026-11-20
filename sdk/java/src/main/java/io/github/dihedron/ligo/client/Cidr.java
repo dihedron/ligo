@@ -23,6 +23,25 @@ record Cidr(byte[] address, int bits) {
         }
     }
 
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Cidr c && bits == c.bits && java.util.Arrays.equals(address, c.address);
+    }
+
+    @Override
+    public int hashCode() {
+        return 31 * java.util.Arrays.hashCode(address) + bits;
+    }
+
+    @Override
+    public String toString() {
+        try {
+            return InetAddress.getByAddress(address).getHostAddress() + "/" + bits;
+        } catch (UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     boolean contains(InetAddress ip) {
         byte[] b = ip.getAddress();
         if (b.length != address.length) {
@@ -47,13 +66,13 @@ record Cidr(byte[] address, int bits) {
         private Literal() {}
 
         static boolean is(String host) {
-            String h = host.replaceAll("^\\[|]$", "");
+            String h = host.replaceAll("(?:^\\[|]$)", "");
             return h.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}") || (h.contains(":") && h.matches("[0-9a-fA-F:.]+"));
         }
 
         static InetAddress of(String host) {
             try {
-                return InetAddress.getByName(host.replaceAll("^\\[|]$", ""));
+                return InetAddress.getByName(host.replaceAll("(?:^\\[|]$)", ""));
             } catch (UnknownHostException e) {
                 throw new IllegalArgumentException(e);
             }

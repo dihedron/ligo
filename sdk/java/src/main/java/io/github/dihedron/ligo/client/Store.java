@@ -101,7 +101,7 @@ final class Store {
                 || !path.replace("/", "").isEmpty() || u.getRawQuery() != null || u.getRawFragment() != null) {
             throw new IllegalArgumentException("\"" + raw + "\": https://host:port is required");
         }
-        String host = u.getHost().toLowerCase(Locale.ROOT).replaceAll("^\\[|]$", "");
+        String host = u.getHost().toLowerCase(Locale.ROOT).replaceAll("(?:^\\[|]$)", "");
         return "https://" + (host.contains(":") ? "[" + host + "]" : host) + ":" + (u.getPort() < 0 ? 443 : u.getPort());
     }
 
