@@ -21,7 +21,7 @@
   <div class="field"><label for="s-vis">Visibility</label><select id="s-vis" name="visibility">
     {{range $m := list "PRIVATE" "LISTED" "PUBLIC"}}<option{{if eq $m $.Content.Source.Visibility.Mode}} selected{{end}}>{{$m}}</option>{{end}}</select></div>
   <div class="field"><label for="s-visto">Visible to jurisdictions (one per line)</label><textarea id="s-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
-  <div class="field"><label for="s-labels">Labels (key=value per line)</label><textarea id="s-labels" name="labels">{{.Labels}}</textarea></div>
+  <div class="field"><label for="s-annotations">Annotations (key=value per line)</label><textarea id="s-annotations" name="annotations">{{.Annotations}}</textarea></div>
   <div class="field"><label for="s-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="s-contacts" name="contacts">{{.Contacts}}</textarea></div>
   <div class="actions"><button type="submit"{{if $.Maintenance}} disabled{{end}}>{{if .Edit}}Submit the change{{else}}Submit the registration{{end}}</button>
     <a class="button button-secondary" href="/ui/sources{{if .Edit}}/{{.Source.Metadata.Name}}{{end}}">Cancel</a></div>

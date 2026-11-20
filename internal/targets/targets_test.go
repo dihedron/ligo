@@ -280,6 +280,15 @@ func TestMetadata(t *testing.T) {
 	for name, edit := range map[string]func(*Target){
 		"display name":      func(t *Target) { t.DisplayName = strings.Repeat("x", 129) },
 		"description":       func(t *Target) { t.Description = strings.Repeat("x", 4097) },
+		"control character": func(t *Target) { t.Description = "a\x07b" },
+		"33 annotations": func(t *Target) {
+			t.Annotations = map[string]string{}
+			for i := 0; i < 33; i++ {
+				t.Annotations["k"+strings.Repeat("x", i)] = "v"
+			}
+		},
+		"annotation key":    func(t *Target) { t.Annotations = map[string]string{"a b": "v"} },
+		"annotation value":  func(t *Target) { t.Annotations = map[string]string{"a": strings.Repeat("x", 257)} },
 		"long URL":          func(t *Target) { t.DocumentationURL = "https://wiki.example.org/" + strings.Repeat("x", 500) },
 		"relative URL":      func(t *Target) { t.DocumentationURL = "wiki/ledger" },
 		"javascript URL":    func(t *Target) { t.DocumentationURL = "javascript:alert(1)" },
@@ -295,6 +304,7 @@ func TestMetadata(t *testing.T) {
 		}
 	}
 	tg := ledger()
+	tg.Annotations = map[string]string{"example.org/change-id": "CHG0012345"}
 	tg.DocumentationURL = "https://wiki.example.org/ledger"
 	if err := r.validate(context.Background(), (&plugin{}).validate, &tg, nil, nil); err != nil {
 		t.Errorf("absolute URL: %v", err)

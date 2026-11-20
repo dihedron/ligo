@@ -6,7 +6,7 @@
       {{range .Types}}<option{{if eq . $.Content.Query.PlatformType}} selected{{end}}>{{.}}</option>{{end}}</select></div>
     <div class="field"><label for="f-platform">Platform</label><input id="f-platform" name="platform" value="{{.Query.Platform}}"></div>
     <div class="field"><label for="f-jurisdiction">Owner jurisdiction</label><input id="f-jurisdiction" name="jurisdiction" value="{{.Query.Jurisdiction}}"></div>
-    <div class="field"><label for="f-label">Label (key=value)</label><input id="f-label" name="label" value="{{.Query.Label}}"></div>
+    <div class="field"><label for="f-annotation">Annotation (key=value)</label><input id="f-annotation" name="annotation" value="{{.Query.Annotation}}"></div>
     <div class="field"><label><input type="checkbox" name="deprecated"{{if .Query.Deprecated}} checked{{end}}> Deprecated targets too</label></div>
   </div>
   <div class="actions"><button type="submit">Search</button><a class="button button-secondary" href="/ui/catalog">Clear</a></div>
@@ -18,5 +18,5 @@
     <td>{{.Platform}} ({{.PlatformType}})</td><td>{{.Jurisdiction}}</td><td>{{.Description}}</td></tr>
   {{else}}<tr><td colspan="4" class="muted">No targets match.</td></tr>{{end}}</tbody>
 </table></div>
-{{with .Next}}<p><a href="/ui/catalog?after={{.}}&amp;q={{$.Content.Query.Q}}&amp;platformType={{$.Content.Query.PlatformType}}&amp;platform={{$.Content.Query.Platform}}&amp;jurisdiction={{$.Content.Query.Jurisdiction}}&amp;label={{$.Content.Query.Label}}{{if $.Content.Query.Deprecated}}&amp;deprecated=on{{end}}">Next page</a></p>{{end}}
+{{with .Next}}<p><a href="/ui/catalog?after={{.}}&amp;q={{$.Content.Query.Q}}&amp;platformType={{$.Content.Query.PlatformType}}&amp;platform={{$.Content.Query.Platform}}&amp;jurisdiction={{$.Content.Query.Jurisdiction}}&amp;annotation={{$.Content.Query.Annotation}}{{if $.Content.Query.Deprecated}}&amp;deprecated=on{{end}}">Next page</a></p>{{end}}
 {{end}}{{end}}

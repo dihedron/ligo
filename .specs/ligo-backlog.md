@@ -35,6 +35,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 27 | An admin API client in Python (first, for Ansible), later in Java | 2026-11-20 | Not started; see §27 |
 | 28 | An Ansible collection: install and set up ligo, manage the server, manage sources, targets and bindings | 2026-11-20 | Not started; needs item 27; see §28 |
 | 29 | Flow-check semantics in netcheck, with pure-Python and pure-Java ports sharing conformance vectors | 2026-11-20 | Not started; see §29 |
+| 30 | `annotations` on sources and targets (the rename of `labels`), v0.12.0, then the Terraform provider's three resources | 2026-11-20 | In progress on `feature/resource-annotations` (`.specs/ligo-resource-annotations.md`) |
 
 ## 1. Audit pruning
 

@@ -60,7 +60,7 @@ paths:
         - $ref: "#/components/parameters/jurisdiction"
         - { name: trustDomain, in: query, schema: { type: string } }
         - $ref: "#/components/parameters/state"
-        - $ref: "#/components/parameters/label"
+        - $ref: "#/components/parameters/annotation"
         - $ref: "#/components/parameters/q"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
@@ -128,7 +128,7 @@ paths:
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
         - $ref: "#/components/parameters/jurisdiction"
-        - $ref: "#/components/parameters/label"
+        - $ref: "#/components/parameters/annotation"
         - $ref: "#/components/parameters/state"
         - $ref: "#/components/parameters/pageSize"
         - $ref: "#/components/parameters/pageToken"
@@ -332,7 +332,7 @@ paths:
         - $ref: "#/components/parameters/platform"
         - $ref: "#/components/parameters/platformType"
         - $ref: "#/components/parameters/jurisdiction"
-        - $ref: "#/components/parameters/label"
+        - $ref: "#/components/parameters/annotation"
         - { name: state, in: query, description: "ACTIVE (default), or DEPRECATED to include deprecated targets.", schema: { type: string, enum: [ACTIVE, DEPRECATED] } }
         - { name: forSource, in: query, description: "Only targets the policy allows for this source; those bound to it are marked.", schema: { type: string } }
         - $ref: "#/components/parameters/pageSize"
@@ -712,7 +712,7 @@ components:
     q: { name: q, in: query, description: "Matched in names, display names and descriptions.", schema: { type: string } }
     jurisdiction: { name: jurisdiction, in: query, description: "A jurisdiction pattern.", schema: { type: string } }
     state: { name: state, in: query, schema: { type: string, enum: [ACTIVE, DEPRECATED, RETIRED] } }
-    label: { name: label, in: query, description: "key=value", schema: { type: string } }
+    annotation: { name: annotation, in: query, description: "key=value", schema: { type: string } }
     platform: { name: platform, in: query, schema: { type: string } }
     platformType: { name: platformType, in: query, schema: { type: string } }
   requestBodies:
@@ -930,7 +930,7 @@ components:
         identity: { $ref: "#/components/schemas/SourceSpecIdentity" }
         displayName: { type: string }
         description: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -972,7 +972,7 @@ components:
         identity: { $ref: "#/components/schemas/SourceIdentity" }
         displayName: { type: string }
         description: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1005,7 +1005,7 @@ components:
         networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1041,7 +1041,7 @@ components:
         networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1310,7 +1310,7 @@ components:
         state: { $ref: "#/components/schemas/ResourceState" }
         displayName: { type: string }
         description: { type: string }
-        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         bound: { type: boolean, description: "Bound to the source of forSource." }
     CatalogSource:
       description: A source visible to the caller beyond their own (§7.2.4).

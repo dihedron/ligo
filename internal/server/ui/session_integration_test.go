@@ -799,7 +799,7 @@ func TestSourceForms(t *testing.T) {
 	}
 	regex := `^spiffe://prod\.internal/ns/uis/sa/` + x + `$`
 	form := url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "visibility": {"PRIVATE"},
-		"samples": {"spiffe://prod.internal/ns/uis/sa/" + x + "\nspiffe://prod.internal/ns/other/sa/x"}, "labels": {"team=ledger"}}
+		"samples": {"spiffe://prod.internal/ns/uis/sa/" + x + "\nspiffe://prod.internal/ns/other/sa/x"}, "annotations": {"team=ledger"}}
 	resp, check := b.do("POST", "/ui/sources/test", form)
 	if resp.StatusCode != 200 || !strings.Contains(check, "dc/corp-prod") || !strings.Contains(check, ">matches<") ||
 		!strings.Contains(check, ">does not match<") || !strings.Contains(check, "Charter") || !strings.Contains(check, "OWNER") {
@@ -810,8 +810,8 @@ func TestSourceForms(t *testing.T) {
 	if _, check := b.do("POST", "/ui/sources/test", bad); !strings.Contains(check, "not valid") {
 		t.Errorf("invalid regex: %s", check)
 	}
-	if resp, _ := b.do("POST", "/ui/sources", url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "labels": {"nokey"}}); resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("bad labels: %d", resp.StatusCode)
+	if resp, _ := b.do("POST", "/ui/sources", url.Values{"name": {name}, "trustDomain": {"prod.internal"}, "svidRegex": {regex}, "annotations": {"nokey"}}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("bad annotations: %d", resp.StatusCode)
 	}
 	// dc/corp-prod needs an approver (required_jurisdictions dc/corp-prod/*): each change redirects to its request
 	filed := func(resp *http.Response, body, what string) {

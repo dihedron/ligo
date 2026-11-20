@@ -23,7 +23,7 @@
   <div class="field"><label for="t-vis">Visibility</label><select id="t-vis" name="visibility">
     {{range $m := list "PRIVATE" "LISTED" "PUBLIC"}}<option{{if eq $m $.Content.Target.Visibility.Mode}} selected{{end}}>{{$m}}</option>{{end}}</select></div>
   <div class="field"><label for="t-visto">Visible to jurisdictions (one per line)</label><textarea id="t-visto" name="visibleTo">{{.VisibleTo}}</textarea></div>
-  <div class="field"><label for="t-labels">Labels (key=value per line)</label><textarea id="t-labels" name="labels">{{.Labels}}</textarea></div>
+  <div class="field"><label for="t-annotations">Annotations (key=value per line)</label><textarea id="t-annotations" name="annotations">{{.Annotations}}</textarea></div>
   <div class="field"><label for="t-contacts">Contacts (Name &lt;email&gt; per line)</label><textarea id="t-contacts" name="contacts">{{.Contacts}}</textarea></div>
   {{if .Edit}}<section class="card"><h3>Bindings this change re-applies</h3>
     {{if .Reapplied}}<ul>{{range .Reapplied}}<li>{{.Metadata.Name}} ({{.Source}}, {{.AccessLevel}})</li>{{end}}</ul>

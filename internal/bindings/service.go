@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/annotations"
 	"github.com/dihedron/ligo/internal/audit"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
@@ -295,7 +296,7 @@ func (s *Service) resolve(ctx context.Context, c *changerequests.Caller, b *Bind
 	if !engine.ValidName(b.Name) {
 		return nil, invalid("name %q is not a valid name (§3.8)", b.Name)
 	}
-	if err := checkText(b); err != nil {
+	if err := annotations.Check(b.Description, b.Annotations); err != nil {
 		return nil, invalid("%v", err)
 	}
 	if cur != nil && (b.Name != cur.name || b.Source != cur.source || b.Target != cur.target) {

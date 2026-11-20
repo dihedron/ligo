@@ -96,6 +96,11 @@ func TestValidate(t *testing.T) {
 		"jurisdiction on create":   {func(s *Source) { s.Metadata.Jurisdiction = "cloud/fin-01/payments" }, false, "validation-failed"},
 		"listed without visibleTo": {func(s *Source) { s.Visibility.Mode = "LISTED" }, false, "validation-failed"},
 		"display name too long":    {func(s *Source) { s.DisplayName = strings.Repeat("x", 129) }, false, "validation-failed"},
+		"description too long":     {func(s *Source) { s.Description = strings.Repeat("x", 4097) }, false, "validation-failed"},
+		"control character":        {func(s *Source) { s.Description = "a\x07b" }, false, "validation-failed"},
+		"annotation key":           {func(s *Source) { s.Annotations = map[string]string{"a b": "v"} }, false, "validation-failed"},
+		"annotation value":         {func(s *Source) { s.Annotations = map[string]string{"a": strings.Repeat("x", 257)} }, false, "validation-failed"},
+		"annotations":              {func(s *Source) { s.Annotations = map[string]string{"example.org/change-id": "CHG1"} }, false, ""},
 		"narrowing": {func(s *Source) {
 			s.Identity.SVIDRegex = `^spiffe://cloud\.internal/acct/fin-01/tenant/payments/sa/ledger-1$`
 			s.Identity.SampleSPIFFEIDs = []string{sample1}

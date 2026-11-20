@@ -1,11 +1,14 @@
-package bindings
+// Package annotations checks the description and the annotations that bindings,
+// sources and targets carry (.specs/ligo-binding-annotations.md §3.2,
+// .specs/ligo-resource-annotations.md §2).
+package annotations
 
 import (
 	"fmt"
 	"unicode/utf8"
 )
 
-// Limits of a binding's description and annotations (.specs/ligo-binding-annotations.md §3.2).
+// Limits of a description and of annotations.
 const (
 	maxDescription      = 4096 // runes
 	maxAnnotations      = 32   // entries
@@ -14,16 +17,16 @@ const (
 	maxValue            = 256  // runes
 )
 
-// checkText validates the description and the annotations of a binding.
-func checkText(b *Binding) error {
-	if err := text("description", b.Description, maxDescription, true); err != nil {
+// Check validates a description and a map of annotations; the error names the field.
+func Check(description string, annotations map[string]string) error {
+	if err := text("description", description, maxDescription, true); err != nil {
 		return err
 	}
-	if len(b.Annotations) > maxAnnotations {
-		return fmt.Errorf("annotations has %d entries, the limit is %d", len(b.Annotations), maxAnnotations)
+	if len(annotations) > maxAnnotations {
+		return fmt.Errorf("annotations has %d entries, the limit is %d", len(annotations), maxAnnotations)
 	}
 	total := 0
-	for k, v := range b.Annotations {
+	for k, v := range annotations {
 		if !validKey(k) {
 			return fmt.Errorf("annotations key %q is not 1 to %d characters of [A-Za-z0-9._/-] starting with a letter or a digit", k, maxKey)
 		}

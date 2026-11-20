@@ -212,10 +212,10 @@ func TestFiltersReachTheServer(t *testing.T) {
 		t.Errorf("an empty field was sent: %s", rec.last().URL.RawQuery)
 	}
 
-	if err := drainSeq(c.ListSources(ctx, SourceFilter{State: "DEPRECATED", Label: "team=a", Q: "led"})); err != nil {
+	if err := drainSeq(c.ListSources(ctx, SourceFilter{State: "DEPRECATED", Annotation: "team=a", Q: "led"})); err != nil {
 		t.Fatal(err)
 	}
-	if q := rec.last().URL.Query(); q.Get("state") != "DEPRECATED" || q.Get("label") != "team=a" || q.Get("q") != "led" {
+	if q := rec.last().URL.Query(); q.Get("state") != "DEPRECATED" || q.Get("annotation") != "team=a" || q.Get("q") != "led" {
 		t.Errorf("sources: %s", rec.last().URL.RawQuery)
 	}
 	if err := drainSeq(c.SearchCatalog(ctx, CatalogFilter{IncludeDeprecated: true, ForSource: "s"})); err != nil {

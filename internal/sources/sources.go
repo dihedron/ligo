@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
+	"github.com/dihedron/ligo/internal/annotations"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
@@ -25,7 +26,7 @@ type Source struct {
 	Identity     Identity          `json:"identity"`
 	DisplayName  string            `json:"displayName,omitempty"`
 	Description  string            `json:"description,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
 	ExternalRefs map[string]string `json:"externalRefs,omitempty"`
 	Contacts     []Contact         `json:"contacts,omitempty"`
 	Visibility   Visibility        `json:"visibility"`
@@ -201,8 +202,9 @@ func (r *Rules) validateMetadata(s *Source) error {
 	switch {
 	case utf8.RuneCountInString(s.DisplayName) > 128:
 		return invalid("displayName: at most 128 characters")
-	case utf8.RuneCountInString(s.Description) > 4096:
-		return invalid("description: at most 4096 characters")
+	}
+	if err := annotations.Check(s.Description, s.Annotations); err != nil {
+		return invalid("%v", err)
 	}
 	return s.Visibility.Normalize()
 }

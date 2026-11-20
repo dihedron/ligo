@@ -835,22 +835,27 @@ type CatalogSource struct {
 
 // CatalogTarget A target as the catalog lists it (§7.2.4).
 type CatalogTarget struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// Bound Bound to the source of forSource.
-	Bound                *bool              `json:"bound,omitempty"`
-	Description          *string            `json:"description,omitempty"`
-	DisplayName          *string            `json:"displayName,omitempty"`
-	Jurisdiction         string             `json:"jurisdiction"`
-	Labels               *map[string]string `json:"labels,omitempty"`
-	Name                 string             `json:"name"`
-	Platform             string             `json:"platform"`
-	PlatformJurisdiction string             `json:"platformJurisdiction"`
-	PlatformType         string             `json:"platformType"`
-	State                ResourceState      `json:"state"`
+	Bound                *bool         `json:"bound,omitempty"`
+	Description          *string       `json:"description,omitempty"`
+	DisplayName          *string       `json:"displayName,omitempty"`
+	Jurisdiction         string        `json:"jurisdiction"`
+	Name                 string        `json:"name"`
+	Platform             string        `json:"platform"`
+	PlatformJurisdiction string        `json:"platformJurisdiction"`
+	PlatformType         string        `json:"platformType"`
+	State                ResourceState `json:"state"`
 }
 
 // CatalogTargetDetail A target with the charter outcome for each of the caller's sources.
 type CatalogTargetDetail struct {
 	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string     `json:"apiVersion"`
@@ -863,13 +868,12 @@ type CatalogTargetDetail struct {
 	DocumentationUrl *string                `json:"documentationUrl,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
-	Metadata     TargetMetadata     `json:"metadata"`
-	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
-	Outcomes     []Outcome          `json:"outcomes"`
-	Status       ResourceStatus     `json:"status"`
-	Visibility   Visibility         `json:"visibility"`
+	Kind         *string        `json:"kind,omitempty"`
+	Metadata     TargetMetadata `json:"metadata"`
+	NetworkFlows *[]NetworkFlow `json:"networkFlows,omitempty"`
+	Outcomes     []Outcome      `json:"outcomes"`
+	Status       ResourceStatus `json:"status"`
+	Visibility   Visibility     `json:"visibility"`
 }
 
 // ChangeEnvelope What every filing may add to the resource it carries.
@@ -1308,6 +1312,9 @@ type SideDecision string
 
 // Source A source as the server returns it (§3.2).
 type Source struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion   string             `json:"apiVersion"`
 	Contacts     *[]Contact         `json:"contacts,omitempty"`
@@ -1317,15 +1324,17 @@ type Source struct {
 	Identity     SourceIdentity     `json:"identity"`
 
 	// Kind Always Source.
-	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
-	Metadata   SourceMetadata     `json:"metadata"`
-	Status     ResourceStatus     `json:"status"`
-	Visibility Visibility         `json:"visibility"`
+	Kind       *string        `json:"kind,omitempty"`
+	Metadata   SourceMetadata `json:"metadata"`
+	Status     ResourceStatus `json:"status"`
+	Visibility Visibility     `json:"visibility"`
 }
 
 // SourceDetail A source with its last 20 audit entries, newest first.
 type SourceDetail struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion   string             `json:"apiVersion"`
 	Audit        []AuditEntry       `json:"audit"`
@@ -1336,11 +1345,10 @@ type SourceDetail struct {
 	Identity     SourceIdentity     `json:"identity"`
 
 	// Kind Always Source.
-	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
-	Metadata   SourceMetadata     `json:"metadata"`
-	Status     ResourceStatus     `json:"status"`
-	Visibility Visibility         `json:"visibility"`
+	Kind       *string        `json:"kind,omitempty"`
+	Metadata   SourceMetadata `json:"metadata"`
+	Status     ResourceStatus `json:"status"`
+	Visibility Visibility     `json:"visibility"`
 }
 
 // SourceIdentity defines model for SourceIdentity.
@@ -1369,6 +1377,8 @@ type SourceMetadata struct {
 
 // SourceSpec A source as a caller writes it (§3.2); the body of a registration or an update.
 type SourceSpec struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations  *map[string]string `json:"annotations,omitempty"`
 	Contacts     *[]Contact         `json:"contacts,omitempty"`
 	Description  *string            `json:"description,omitempty"`
 	DisplayName  *string            `json:"displayName,omitempty"`
@@ -1377,7 +1387,6 @@ type SourceSpec struct {
 
 	// Kind Always Source.
 	Kind       *string            `json:"kind,omitempty"`
-	Labels     *map[string]string `json:"labels,omitempty"`
 	Metadata   SourceSpecMetadata `json:"metadata"`
 	Visibility *Visibility        `json:"visibility,omitempty"`
 }
@@ -1456,6 +1465,9 @@ type StageStatus string
 type Target struct {
 	AccessLevels []AccessLevel `json:"accessLevels"`
 
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string     `json:"apiVersion"`
 	Contacts   *[]Contact `json:"contacts,omitempty"`
@@ -1467,17 +1479,19 @@ type Target struct {
 	DocumentationUrl *string                `json:"documentationUrl,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
-	Metadata     TargetMetadata     `json:"metadata"`
-	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
-	Status       ResourceStatus     `json:"status"`
-	Visibility   Visibility         `json:"visibility"`
+	Kind         *string        `json:"kind,omitempty"`
+	Metadata     TargetMetadata `json:"metadata"`
+	NetworkFlows *[]NetworkFlow `json:"networkFlows,omitempty"`
+	Status       ResourceStatus `json:"status"`
+	Visibility   Visibility     `json:"visibility"`
 }
 
 // TargetDetail A target with its last 20 audit entries, newest first.
 type TargetDetail struct {
 	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string       `json:"apiVersion"`
@@ -1491,12 +1505,11 @@ type TargetDetail struct {
 	DocumentationUrl *string                `json:"documentationUrl,omitempty"`
 
 	// Kind Always Target.
-	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
-	Metadata     TargetMetadata     `json:"metadata"`
-	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
-	Status       ResourceStatus     `json:"status"`
-	Visibility   Visibility         `json:"visibility"`
+	Kind         *string        `json:"kind,omitempty"`
+	Metadata     TargetMetadata `json:"metadata"`
+	NetworkFlows *[]NetworkFlow `json:"networkFlows,omitempty"`
+	Status       ResourceStatus `json:"status"`
+	Visibility   Visibility     `json:"visibility"`
 }
 
 // TargetMetadata defines model for TargetMetadata.
@@ -1523,7 +1536,10 @@ type TargetMetadata struct {
 // TargetSpec A target as a caller writes it (§3.3); the body of a publication or an update.
 type TargetSpec struct {
 	AccessLevels []AccessLevel `json:"accessLevels"`
-	Contacts     *[]Contact    `json:"contacts,omitempty"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+	Contacts    *[]Contact         `json:"contacts,omitempty"`
 
 	// Definition Platform-specific (the platform type's target schema).
 	Definition       map[string]interface{} `json:"definition"`
@@ -1533,7 +1549,6 @@ type TargetSpec struct {
 
 	// Kind Always Target.
 	Kind         *string            `json:"kind,omitempty"`
-	Labels       *map[string]string `json:"labels,omitempty"`
 	Metadata     TargetSpecMetadata `json:"metadata"`
 	NetworkFlows *[]NetworkFlow     `json:"networkFlows,omitempty"`
 	Visibility   *Visibility        `json:"visibility,omitempty"`
@@ -1572,14 +1587,14 @@ type WithdrawRequest struct {
 	Comment *string `json:"comment,omitempty"`
 }
 
+// Annotation defines model for annotation.
+type Annotation = string
+
 // Id defines model for id.
 type Id = openapi_types.UUID
 
 // Jurisdiction defines model for jurisdiction.
 type Jurisdiction = string
-
-// Label defines model for label.
-type Label = string
 
 // Level defines model for level.
 type Level = string
@@ -1845,6 +1860,8 @@ type Release = ReleaseRequest
 
 // SourceRequestBody defines model for Source.
 type SourceRequestBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -1857,8 +1874,7 @@ type SourceRequestBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed    *bool              `json:"managed,omitempty"`
@@ -1875,7 +1891,10 @@ type StateChange struct {
 
 // TargetRequestBody defines model for Target.
 type TargetRequestBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -1890,8 +1909,7 @@ type TargetRequestBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed      *bool              `json:"managed,omitempty"`
@@ -2099,8 +2117,8 @@ type SearchCatalogParams struct {
 	// Jurisdiction A jurisdiction pattern.
 	Jurisdiction *Jurisdiction `form:"jurisdiction,omitempty" json:"jurisdiction,omitempty"`
 
-	// Label key=value
-	Label *Label `form:"label,omitempty" json:"label,omitempty"`
+	// Annotation key=value
+	Annotation *Annotation `form:"annotation,omitempty" json:"annotation,omitempty"`
 
 	// State ACTIVE (default), or DEPRECATED to include deprecated targets.
 	State *SearchCatalogParamsState `form:"state,omitempty" json:"state,omitempty"`
@@ -2580,8 +2598,8 @@ type ListSourcesParams struct {
 	TrustDomain  *string                 `form:"trustDomain,omitempty" json:"trustDomain,omitempty"`
 	State        *ListSourcesParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Label key=value
-	Label *Label `form:"label,omitempty" json:"label,omitempty"`
+	// Annotation key=value
+	Annotation *Annotation `form:"annotation,omitempty" json:"annotation,omitempty"`
 
 	// Q Matched in names, display names and descriptions.
 	Q         *Q         `form:"q,omitempty" json:"q,omitempty"`
@@ -2594,6 +2612,8 @@ type ListSourcesParamsState string
 
 // CreateSourceJSONBody defines parameters for CreateSource.
 type CreateSourceJSONBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -2606,8 +2626,7 @@ type CreateSourceJSONBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed    *bool              `json:"managed,omitempty"`
@@ -2622,6 +2641,8 @@ type CreateSource202JSONResponseBody_Resource struct {
 
 // UpdateSourceJSONBody defines parameters for UpdateSource.
 type UpdateSourceJSONBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -2634,8 +2655,7 @@ type UpdateSourceJSONBody struct {
 	Identity         SourceSpecIdentity `json:"identity"`
 
 	// Kind Always Source.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed    *bool              `json:"managed,omitempty"`
@@ -2711,11 +2731,11 @@ type ListTargetsParams struct {
 	// Jurisdiction A jurisdiction pattern.
 	Jurisdiction *Jurisdiction `form:"jurisdiction,omitempty" json:"jurisdiction,omitempty"`
 
-	// Label key=value
-	Label     *Label                  `form:"label,omitempty" json:"label,omitempty"`
-	State     *ListTargetsParamsState `form:"state,omitempty" json:"state,omitempty"`
-	PageSize  *PageSize               `form:"pageSize,omitempty" json:"pageSize,omitempty"`
-	PageToken *PageToken              `form:"pageToken,omitempty" json:"pageToken,omitempty"`
+	// Annotation key=value
+	Annotation *Annotation             `form:"annotation,omitempty" json:"annotation,omitempty"`
+	State      *ListTargetsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	PageSize   *PageSize               `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+	PageToken  *PageToken              `form:"pageToken,omitempty" json:"pageToken,omitempty"`
 }
 
 // ListTargetsParamsState defines parameters for ListTargets.
@@ -2723,7 +2743,10 @@ type ListTargetsParamsState string
 
 // CreateTargetJSONBody defines parameters for CreateTarget.
 type CreateTargetJSONBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -2738,8 +2761,7 @@ type CreateTargetJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed      *bool              `json:"managed,omitempty"`
@@ -2755,7 +2777,10 @@ type CreateTarget202JSONResponseBody_Resource struct {
 
 // UpdateTargetJSONBody defines parameters for UpdateTarget.
 type UpdateTargetJSONBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
 	Contacts          *[]Contact              `json:"contacts,omitempty"`
@@ -2770,8 +2795,7 @@ type UpdateTargetJSONBody struct {
 	ExpectedRevision *int64 `json:"expectedRevision,omitempty"`
 
 	// Kind Always Target.
-	Kind   *string            `json:"kind,omitempty"`
-	Labels *map[string]string `json:"labels,omitempty"`
+	Kind *string `json:"kind,omitempty"`
 
 	// Managed true sets the lock of the resource (trusted_automation only; the filer becomes its owner), false releases it (its owner only); omitted leaves it as it is.
 	Managed      *bool              `json:"managed,omitempty"`
@@ -9978,9 +10002,9 @@ func NewSearchCatalogRequest(server string, params *SearchCatalogParams) (*http.
 
 		}
 
-		if params.Label != nil {
+		if params.Annotation != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "label", *params.Label, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "annotation", *params.Annotation, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -11796,9 +11820,9 @@ func NewListSourcesRequest(server string, params *ListSourcesParams) (*http.Requ
 
 		}
 
-		if params.Label != nil {
+		if params.Annotation != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "label", *params.Label, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "annotation", *params.Annotation, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -12429,9 +12453,9 @@ func NewListTargetsRequest(server string, params *ListTargetsParams) (*http.Requ
 
 		}
 
-		if params.Label != nil {
+		if params.Annotation != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "label", *params.Label, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "annotation", *params.Annotation, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {

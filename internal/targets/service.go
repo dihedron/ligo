@@ -344,10 +344,10 @@ func multirange(f *pluginv1.NetworkFlow) string {
 func insert(ctx context.Context, tx pgx.Tx, id uuid.UUID, t *Target, account, actor string) error {
 	m := t.Metadata
 	_, err := tx.Exec(ctx, `INSERT INTO targets (id, name, platform, platform_type, realm, jurisdiction, platform_jurisdiction, definition,
-		display_name, description, labels, documentation_url, contacts, visibility, visible_to, account, state, created_by, updated_by)
+		display_name, description, annotations, documentation_url, contacts, visibility, visible_to, account, state, created_by, updated_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15::jsonb, $17, 'ACTIVE', $16, $16)`,
 		id, m.Name, m.Platform, m.PlatformType, m.Realm, m.Jurisdiction, m.PlatformJurisdiction, string(t.Definition), null(t.DisplayName),
-		null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
+		null(t.Description), jsonb(t.Annotations, "{}"), null(t.DocumentationURL), jsonb(t.Contacts, "[]"), t.Visibility.Mode,
 		jsonb(t.Visibility.VisibleTo, "[]"), actor, null(account))
 	if pe := (*pgconn.PgError)(nil); errors.As(err, &pe) && pe.ConstraintName == "uq_targets_name" {
 		return refuse(409, "invalid-transition", "metadata.name %q is in use: a change of it needs expectedRevision", m.Name)
@@ -401,13 +401,13 @@ func load(ctx context.Context, q store.Querier, where string, arg any, lock bool
 	m := &t.Metadata
 	t.Kind = "Target"
 	sql := `SELECT id, revision, name, jurisdiction, platform, platform_type, platform_jurisdiction, realm, state, definition,
-		coalesce(display_name, ''), coalesce(description, ''), labels, coalesce(documentation_url, ''), contacts, visibility, visible_to, coalesce(managed_by, '')
+		coalesce(display_name, ''), coalesce(description, ''), annotations, coalesce(documentation_url, ''), contacts, visibility, visible_to, coalesce(managed_by, '')
 		FROM targets WHERE ` + where
 	if lock {
 		sql += " FOR UPDATE"
 	}
 	err := q.QueryRow(ctx, sql, arg).Scan(&st.ID, &st.Revision, &m.Name, &m.Jurisdiction, &m.Platform, &m.PlatformType, &m.PlatformJurisdiction,
-		&m.Realm, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Labels, &t.DocumentationURL, &t.Contacts,
+		&m.Realm, &m.State, &t.Definition, &t.DisplayName, &t.Description, &t.Annotations, &t.DocumentationURL, &t.Contacts,
 		&t.Visibility.Mode, &t.Visibility.VisibleTo, &st.ManagedBy)
 	if err != nil {
 		return nil, err
@@ -485,10 +485,10 @@ func (s *Service) applyUpdate(ctx context.Context, tx pgx.Tx, r *changerequests.
 		return nil, err
 	}
 	m := t.Metadata
-	if _, err := tx.Exec(ctx, `UPDATE targets SET definition = $2::jsonb, display_name = $3, description = $4, labels = $5::jsonb,
+	if _, err := tx.Exec(ctx, `UPDATE targets SET definition = $2::jsonb, display_name = $3, description = $4, annotations = $5::jsonb,
 		documentation_url = $6, contacts = $7::jsonb, visibility = $8, visible_to = $9::jsonb, state = $10,
 		revision = revision + 1, updated_at = now(), updated_by = $11 WHERE id = $1`,
-		cur.ID, string(t.Definition), null(t.DisplayName), null(t.Description), jsonb(t.Labels, "{}"), null(t.DocumentationURL),
+		cur.ID, string(t.Definition), null(t.DisplayName), null(t.Description), jsonb(t.Annotations, "{}"), null(t.DocumentationURL),
 		jsonb(t.Contacts, "[]"), t.Visibility.Mode, jsonb(t.Visibility.VisibleTo, "[]"), m.State, r.RequestedBy); err != nil {
 		return nil, err
 	}
@@ -559,7 +559,7 @@ func changes(old, cur *Target, definition bool) []string {
 	return append(out, changerequests.Changed(
 		changerequests.Field{Name: "displayName", Old: old.DisplayName, New: cur.DisplayName},
 		changerequests.Field{Name: "description", Old: old.Description, New: cur.Description},
-		changerequests.Field{Name: "labels", Old: old.Labels, New: cur.Labels},
+		changerequests.Field{Name: "annotations", Old: old.Annotations, New: cur.Annotations},
 		changerequests.Field{Name: "documentationUrl", Old: old.DocumentationURL, New: cur.DocumentationURL},
 		changerequests.Field{Name: "contacts", Old: old.Contacts, New: cur.Contacts},
 		changerequests.Field{Name: "visibility", Old: old.Visibility, New: cur.Visibility})...)

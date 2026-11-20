@@ -84,8 +84,8 @@ func TestOpenAPISourceTarget(t *testing.T) {
 	}
 
 	src := &sources.View{APIVersion: sources.APIVersion, Source: sources.Source{Kind: "Source",
-		Identity: sources.Identity{TrustDomain: "example.org", SVIDRegex: "^spiffe://example.org/ns/(a)/sa/.*$", SampleSPIFFEIDs: []string{"spiffe://example.org/ns/a/sa/x"}},
-		Labels:   map[string]string{"team": "a"}, Contacts: []sources.Contact{{Name: "Ada", Email: "ada@example.org"}},
+		Identity:    sources.Identity{TrustDomain: "example.org", SVIDRegex: "^spiffe://example.org/ns/(a)/sa/.*$", SampleSPIFFEIDs: []string{"spiffe://example.org/ns/a/sa/x"}},
+		Annotations: map[string]string{"team": "a"}, Contacts: []sources.Contact{{Name: "Ada", Email: "ada@example.org"}},
 		Visibility: sources.Visibility{Mode: "LISTED", VisibleTo: []string{"dc/*"}}}}
 	src.Metadata = sources.ViewMetadata{ID: uuid.New(), Name: "s", Jurisdiction: "dc/a", State: "ACTIVE", Revision: 7, CreatedAt: now, UpdatedAt: now, CreatedBy: "ada", UpdatedBy: "ada"}
 	src.Status.Bindings = 2
@@ -204,7 +204,7 @@ func TestOpenAPISourceTarget(t *testing.T) {
 		body    any
 	}{
 		"catalog targets": {"/components/responses/CatalogTargetPage/content/application~1json/schema", map[string]any{"items": []catalog.Target{{Name: "t", Jurisdiction: "dc/b", Platform: "pg",
-			PlatformType: "postgres", PlatformJurisdiction: "dc/b", State: "ACTIVE", Labels: map[string]string{"a": "b"}, Bound: true}}, "nextPageToken": nil}},
+			PlatformType: "postgres", PlatformJurisdiction: "dc/b", State: "ACTIVE", Annotations: map[string]string{"a": "b"}, Bound: true}}, "nextPageToken": nil}},
 		"catalog target": {"/components/responses/CatalogTarget/content/application~1json/schema", struct {
 			*targets.View
 			Outcomes []catalog.Outcome `json:"outcomes"`

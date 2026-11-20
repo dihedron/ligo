@@ -1,8 +1,8 @@
 # Architectural & Technical Specification: `ligo`, the SPIFFE Binding Lifecycle Service
 
-- **Document Version:** `4.2.0` (`v1alpha1` API)
+- **Document Version:** `4.3.0` (`v1alpha1` API)
 - **Status:** Baseline for Spec-Driven Development (SDD)
-- **Supersedes:** `4.1.1` (**breaking change**: on a binding, `purpose` becomes `description` and `labels` becomes `annotations`, and both are sent to workloads; `.specs/ligo-binding-annotations.md`). 4.1.1 superseded `4.1.0` (the Vault plugin's client auth gains `audience` and `namespace`, and gRPC errors gain `RetryInfo`, for the Go client SDK, §0.5). 4.1.0 superseded `4.0.9` (**breaking change**: platforms, identity provider instances and secret store instances move from `server.yaml` to the database, changed by four-eyes change requests; `server.yaml` keeps plugin types, §0.6). 4.0.9 superseded `4.0.8` (change requests are pruned once no audit entry names them, and travel in the audit export; a binding's parties are kept on the binding, §0.7). 4.0.8 superseded `4.0.7` (the audit log is pruned, only through a signed checkpoint someone exported, and webhook rows are kept on configurable windows, §0.8). 4.0.7 superseded `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.9). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.10). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.11). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.12). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.13). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.14). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.15). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.16).
+- **Supersedes:** `4.2.0` (**breaking change**: on a source and a target, `labels` becomes `annotations` and the `label` filter becomes `annotation`; `.specs/ligo-resource-annotations.md`). 4.2.0 superseded `4.1.1` (**breaking change**: on a binding, `purpose` becomes `description` and `labels` becomes `annotations`, and both are sent to workloads; `.specs/ligo-binding-annotations.md`). 4.1.1 superseded `4.1.0` (the Vault plugin's client auth gains `audience` and `namespace`, and gRPC errors gain `RetryInfo`, for the Go client SDK, §0.5). 4.1.0 superseded `4.0.9` (**breaking change**: platforms, identity provider instances and secret store instances move from `server.yaml` to the database, changed by four-eyes change requests; `server.yaml` keeps plugin types, §0.6). 4.0.9 superseded `4.0.8` (change requests are pruned once no audit entry names them, and travel in the audit export; a binding's parties are kept on the binding, §0.7). 4.0.8 superseded `4.0.7` (the audit log is pruned, only through a signed checkpoint someone exported, and webhook rows are kept on configurable windows, §0.8). 4.0.7 superseded `4.0.6` (verifying the audit chain scales, and a chain rewritten in the database is detected: signed checkpoints, §0.9). 4.0.6 superseded `4.0.5` (an outage of a dependency no longer leaves access in place: deletes remove access first, and failed bindings are retried automatically, §0.10). 4.0.5 superseded `4.0.4` ("governance" becomes "charter", §0.11). 4.0.4 superseded `4.0.3` ("scope" becomes "jurisdiction", §0.12). 4.0.3 superseded `4.0.2` ("zone" becomes "realm", §0.13). 4.0.2 superseded `4.0.1` (no migration from 3.x, Go 1.27.3, §0.14). 4.0.1 superseded `4.0.0` (the web UI moves to htmx 4, §0.15). 4.0.0 superseded `3.0.2` with a **breaking change**: sources and targets become first-class resources, target instances become platforms, and a binding links a registered source to a registered target at one of its access levels (§0.16).
 - **Target Stack:** Go 1.27.4+, PostgreSQL 15+ (`pgx/v5`), DBOS Transact for Go (`dbos-transact-golang`, pinned at v1.8.0), SPIFFE/SPIRE (`go-spiffe/v2`), HashiCorp `go-plugin`, `expr-lang/expr`, `github.com/jessevdk/go-flags`, htmx 4.0 (pinned `4.0.0`, served by `ligo` itself, with the `hx-csp` extension), HashiCorp Vault or OpenBao (Transit, KV v2, Database Secrets Engine)
 - **Purpose:** Complete Specification and Threat Model for Spec-Driven Development
 
@@ -667,7 +667,7 @@ Code generators and maintainers MUST preserve these decisions.
   },
   "displayName": "Payments ledger workers",
   "description": "Batch workers that post ledger entries.",
-  "labels": { "app": "payments", "tier": "batch" },
+  "annotations": { "app": "payments", "tier": "batch" },
   "externalRefs": { "cmdb": "APP-0042", "environment": "prod" },
   "contacts": [ { "name": "Payments team", "email": "payments@example.org" } ],
   "visibility": { "mode": "LISTED", "visibleTo": ["dc/corp-prod/*"] },
@@ -719,7 +719,7 @@ Field rules:
   ],
   "displayName": "Ledger schema",
   "description": "General ledger of the payments platform.",
-  "labels": { "domain": "finance", "data-class": "confidential" },
+  "annotations": { "domain": "finance", "data-class": "confidential" },
   "documentationUrl": "https://wiki.example.org/ledger",
   "contacts": [ { "name": "Ledger DBAs", "email": "ledger-dba@example.org" } ],
   "visibility": { "mode": "LISTED", "visibleTo": ["cloud/fin-01/*", "dc/corp-prod/*"] },
@@ -965,7 +965,7 @@ Flows within an item are ordered target, platform, secret store, `ligo`, each gr
 | `identity.trustDomain` | Yes | **No** | |
 | `identity.svidRegex` | Yes | **Narrow only** | The new regex MUST match a subset of the identities the current one matches (§3.10); otherwise `422 widening-not-allowed`. Its fixed prefix MUST resolve to the same jurisdiction. Propagated to every binding (§6.8, priority 0). |
 | `identity.sampleSpiffeIds` | Yes | Yes | Each MUST match the regex. |
-| `displayName`, `description`, `labels`, `externalRefs`, `contacts`, `visibility` | Yes | Yes | No propagation. |
+| `displayName`, `description`, `annotations`, `externalRefs`, `contacts`, `visibility` | Yes | Yes | No propagation. |
 | `metadata.state` | `ACTIVE` | Yes | `RETIRED` only without bindings, and final. |
 
 **Target.**
@@ -980,7 +980,7 @@ Flows within an item are ordered target, platform, secret store, `ligo`, each gr
 | `accessLevels[].description` | Yes | Yes | Owner | |
 | `accessLevels[].state` | `ACTIVE` | Yes | Owner | `RETIRED` only when no binding uses the level. |
 | `networkFlows` | Yes | Yes | Owner and platform | Served at once to workloads and the catalog; no re-apply. |
-| `displayName`, `description`, `labels`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | `documentationUrl`: an absolute `https` or `http` URL with a host, at most 512 characters. |
+| `displayName`, `description`, `annotations`, `documentationUrl`, `contacts`, `visibility` | Yes | Yes | Owner | `documentationUrl`: an absolute `https` or `http` URL with a host, at most 512 characters. |
 | `metadata.state` | `ACTIVE` | Yes | Owner | `RETIRED` only without bindings, and final. |
 
 When the target jurisdiction equals the platform jurisdiction, "owner and platform" is a single `OWNER` side.
@@ -1494,7 +1494,7 @@ CREATE TABLE sources (
     sample_spiffe_ids  JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of SPIFFE IDs the regex must match
     display_name       VARCHAR(128),
     description        TEXT CHECK (length(description) <= 4096),
-    labels             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    annotations             JSONB NOT NULL DEFAULT '{}'::jsonb,
     external_refs      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- e.g. {"cmdb": "APP-0042", "environment": "prod"}
     contacts           JSONB NOT NULL DEFAULT '[]'::jsonb,
     visibility         visibility NOT NULL DEFAULT 'PRIVATE',
@@ -1534,7 +1534,7 @@ CREATE TABLE targets (
     definition         JSONB NOT NULL,                      -- normalized by PlatformProvider.ValidateTarget
     display_name       VARCHAR(128),
     description        TEXT CHECK (length(description) <= 4096),
-    labels             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    annotations             JSONB NOT NULL DEFAULT '{}'::jsonb,
     documentation_url  VARCHAR(512),
     contacts           JSONB NOT NULL DEFAULT '[]'::jsonb,
     visibility         visibility NOT NULL DEFAULT 'PRIVATE',
@@ -3422,7 +3422,7 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | `POST` | `/v1/admin/sources` | operator (the source's jurisdiction) | Change request `SOURCE`/`CREATE`. Body as §3.2 without `metadata` except `name`. |
 | `PUT` | `/v1/admin/sources/{name}` | operator | Change request `SOURCE`/`UPDATE` (`expectedRevision` required). A regex change MUST narrow (§3.10): otherwise `422 widening-not-allowed` with the witness. |
 | `POST` | `/v1/admin/sources/{name}/deprecate`, `/reactivate`, `/retire` | operator | Change request `SOURCE`/`UPDATE` of the state (`expectedRevision` required). `retire` is refused while bindings exist (`409 resource-in-use`, with their number and, for those visible to the caller, their names). |
-| `GET` | `/v1/admin/sources` | viewer | Keyset-paginated list of visible sources. Filters: `jurisdiction`, `trustDomain`, `state`, `label` (`key=value`), `q` (name and display name). |
+| `GET` | `/v1/admin/sources` | viewer | Keyset-paginated list of visible sources. Filters: `jurisdiction`, `trustDomain`, `state`, `annotation` (`key=value`), `q` (name and display name). |
 | `GET` | `/v1/admin/sources/{name}` | viewer | Representation (§3.2) plus the last 20 audit entries. |
 | `GET` | `/v1/admin/sources/{name}/bindings` | viewer | The source's bindings visible to the caller ("what can this source reach"). |
 | `POST` | `/v1/admin/sources/test` | viewer | Regex tester. Body `{"trustDomain", "svidRegex", "spiffeIds": [...], "currentSource": "<name>"}`. Returns the Appendix A result, the derived jurisdiction, which IDs match, and, with `currentSource`, whether the regex narrows it (with a witness if not) and which of the source's samples it would drop. Also lists other sources of the same jurisdiction whose regex overlaps (T-34). Stores nothing. |
@@ -3446,7 +3446,7 @@ Roles are bound to jurisdiction patterns (§3.9). A principal's effective permis
 | :--- | :--- | :--- | :--- |
 | `GET` | `/v1/admin/platforms` | viewer | Platforms (§3.4) with health. |
 | `GET` | `/v1/admin/platforms/{name}` | viewer | One platform, with its `uiSchemas`. |
-| `GET` | `/v1/admin/catalog/targets` | viewer | Catalog search (§7.2.4). Filters: `q`, `platform`, `platformType`, `jurisdiction`, `label`, `state` (default `ACTIVE`), `forSource=<name>` (only targets the interconnection policy allows for that source, marking those already bound). |
+| `GET` | `/v1/admin/catalog/targets` | viewer | Catalog search (§7.2.4). Filters: `q`, `platform`, `platformType`, `jurisdiction`, `annotation`, `state` (default `ACTIVE`), `forSource=<name>` (only targets the interconnection policy allows for that source, marking those already bound). |
 | `GET` | `/v1/admin/catalog/targets/{name}` | viewer | Catalog view of a target: description, contacts, access levels (names, descriptions, privileges), flows, platform, and the charter outcome for each of the caller's sources (`allowed` with the sides it would need, or `denied`). |
 | `GET` | `/v1/admin/catalog/targets/{name}/flows` | viewer | The target's effective flows without a secret store (§3.6), for the verification tool before a binding exists. |
 | `GET` | `/v1/admin/catalog/sources` | viewer | Sources visible to the caller beyond their own (for a target owner offering a binding). |
@@ -3681,8 +3681,8 @@ Source change requests carry `ownerJurisdiction`; target change requests carry `
 
 #### 7.2.4 Catalog, visibility and the binding wizard
 - **Visibility (Normative).** A source or target is visible to a principal who holds any role on its jurisdiction (for a target, also on its platform's jurisdiction), or, beyond them, according to `visibility`: `LISTED` to holders of any role on a jurisdiction matching `visibleTo`; `PUBLIC` to every authenticated principal with any role. A binding is visible to holders of a role on any of its three jurisdictions or on a party's jurisdiction; seeing a binding shows the names and jurisdictions of its source and target even when those are not otherwise visible, because the link concerns both. Everything else is `404`.
-- **Catalog (Normative).** `GET /v1/admin/catalog/targets` returns the `ACTIVE` (and, on request, `DEPRECATED`) targets visible to the caller whose target jurisdiction the interconnection policy allows for at least one source jurisdiction in which the caller holds `operator` or `trusted_automation` (ADR-14 rule 7); same-jurisdiction targets are always allowed. Owners and administrators of a target see it regardless. Results are sorted by name; `q` matches name, display name, description and labels.
-- **Binding wizard (UI).** 1) Pick a target from the catalog (search, filters, details with access levels, flows and contacts). 2) Pick an access level. 3) Pick one of the caller's sources, filtered to those the target's platform and the policy allow, or register a new source inline. 4) Fill the parameters (form from `GetUISchemas`), purpose, labels and optional expiry. 5) Review: jurisdictions, sides with their basis, the matched interconnection rule, the effective flows, and the name (suggested, §3.8). 6) Submit.
+- **Catalog (Normative).** `GET /v1/admin/catalog/targets` returns the `ACTIVE` (and, on request, `DEPRECATED`) targets visible to the caller whose target jurisdiction the interconnection policy allows for at least one source jurisdiction in which the caller holds `operator` or `trusted_automation` (ADR-14 rule 7); same-jurisdiction targets are always allowed. Owners and administrators of a target see it regardless. Results are sorted by name; `q` matches name, display name, description and annotations.
+- **Binding wizard (UI).** 1) Pick a target from the catalog (search, filters, details with access levels, flows and contacts). 2) Pick an access level. 3) Pick one of the caller's sources, filtered to those the target's platform and the policy allow, or register a new source inline. 4) Fill the parameters (form from `GetUISchemas`), description, annotations and optional expiry. 5) Review: jurisdictions, sides with their basis, the matched interconnection rule, the effective flows, and the name (suggested, §3.8). 6) Submit.
 - **Inline source (Normative).** When the wizard (or `POST /v1/admin/bindings` with `inlineSource`) registers a new source, `ligo` creates, in one transaction, the source's `CREATE` change request and the binding's `CREATE` change request with `depends_on_cr_id` pointing to it. The binding request's sides are built from the jurisdiction the new source will have. The binding request can be approved only after the source request is `APPLIED` (`409 dependency-pending`); if the source request is rejected, withdrawn or expires, the binding request is failed (`CR_DEPENDENCY_FAILED`). When both requests are approved at creation, the source is created first and the binding applied in the same transaction.
 - **Offering a binding (scenario 14).** A target owner uses the same wizard from the target's page, picking a source from the sources visible to them (`GET /v1/admin/catalog/sources`). The source side then needs its owner's consent, which preserves the protection against credential injection (ADR-13).
 
@@ -3752,7 +3752,7 @@ Theme assets under `/ui/theme/` are the only exception to `Cache-Control: no-sto
 | `POST` | `/ui/preferences/theme` | Set the color mode cookie (`system`, `light`, `dark`); returns `200 OK` with `HX-Refresh: true`. |
 | `POST` | `/ui/login` | Authenticate; clears pre-login cookie; `200 OK` with `HX-Redirect: /ui/bindings`. |
 | `POST` | `/ui/logout` | Revoke the session; `200 OK` with `HX-Redirect: /ui/login`. |
-| `GET` | `/ui/catalog` | Catalog of targets (§7.2.4): search, filters by platform type, platform, owner jurisdiction and label; deprecated targets marked. |
+| `GET` | `/ui/catalog` | Catalog of targets (§7.2.4): search, filters by platform type, platform, owner jurisdiction and annotation; deprecated targets marked. |
 | `GET` | `/ui/catalog/{target}` | Target card: description, contacts, documentation, access levels with privileges, flows (with a "copy for verification" JSON button), and, per source of the user, whether a binding would be allowed and which sides it needs (computed on each request from all active sources, not paginated, so its cost grows with their number). "Request access" opens the wizard. |
 | `GET` | `/ui/sources` · `/ui/sources/{name}` | Sources the user can see; detail with identity, samples, metadata, bindings and audit trail. |
 | `GET` | `/ui/sources/new-form` · `/ui/sources/{name}/edit-form` | Source forms. The regex field calls `/ui/sources/test`. Immutable fields are read-only. |
@@ -4543,11 +4543,11 @@ type CatalogCommand struct {
 
 type CatalogSearchCommand struct {
 	ClientOptions
-	Query     string `short:"q" long:"query" description:"Text to match in name, display name, description and labels."`
+	Query     string `short:"q" long:"query" description:"Text to match in name, display name, description and annotations."`
 	Platform  string `long:"platform" description:"Filter by platform."`
 	Type      string `short:"t" long:"type" description:"Filter by platform type."`
 	Jurisdiction     string `long:"jurisdiction" description:"Filter by target jurisdiction pattern."`
-	Label     []string `long:"label" description:"Filter by label key=value (repeatable)."`
+	Annotation []string `long:"annotation" description:"Filter by annotation key=value (repeatable)."`
 	ForSource string `long:"for-source" description:"Only targets allowed for this source, marking those already bound."`
 	PageSize  int    `long:"page-size" default:"50" description:"Maximum items per page (<= 200)."`
 	PageToken string `long:"page-token" description:"Keyset cursor token from previous page."`

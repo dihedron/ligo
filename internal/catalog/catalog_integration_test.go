@@ -298,3 +298,42 @@ func TestPartyJurisdictions(t *testing.T) {
 		t.Errorf("after a later request: %v", got)
 	}
 }
+
+// RA-1 and RA-3 (.specs/ligo-resource-annotations.md): migration 003 leaves no
+// `labels` column on sources and targets, and the catalog finds a target by an
+// annotation key and value, or by a word in an annotation.
+func TestAnnotations(t *testing.T) {
+	r, o, x := setup(t)
+	ctx := context.Background()
+	var n int
+	if err := o.QueryRow(ctx, `select count(*) from information_schema.columns where table_name in ('sources','targets')
+		and column_name = 'labels'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("old columns left: %d (%v)", n, err)
+	}
+	if err := o.QueryRow(ctx, `select count(*) from information_schema.columns where table_name in ('sources','targets')
+		and column_name = 'annotations'`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("the new columns: %d (%v)", n, err)
+	}
+	a, b := "a-"+x, "b-"+x
+	target(t, o, a, "dc/corp-prod/ledger", "PUBLIC", "[]")
+	target(t, o, b, "dc/corp-prod/ledger", "PUBLIC", "[]")
+	exec(t, o, `update targets set annotations = '{"team": "fin", "note": "zebrafish"}'::jsonb where name = $1`, a)
+	exec(t, o, `update targets set annotations = '{"team": "ops"}'::jsonb where name = $1`, b)
+	pam := caller("pam", config.RoleViewer, "dc/corp-prod")
+	for name, tc := range map[string]struct {
+		q    Query
+		want []string
+	}{
+		"by key and value": {Query{Annotation: "team=fin", Q: x}, []string{a}},
+		"by another value": {Query{Annotation: "team=ops", Q: x}, []string{b}},
+		"by a word":        {Query{Q: "zebrafish"}, []string{a}},
+	} {
+		list, err := r.Targets(ctx, pam, tc.q)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := names(list); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+		}
+	}
+}

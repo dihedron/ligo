@@ -293,16 +293,16 @@ func (s *Server) platformFieldsFragment(w http.ResponseWriter, r *http.Request) 
 
 // TargetForm is the data of the target form, new or edit.
 type TargetForm struct {
-	Edit      bool
-	Revision  int64
-	Target    targets.Target
-	Platforms []string
-	Fields    *PlatformFields
-	Flows     string // JSON
-	Labels    string
-	Contacts  string
-	VisibleTo string
-	Reapplied []*bindings.View // for an update: the bindings a change re-applies
+	Edit        bool
+	Revision    int64
+	Target      targets.Target
+	Platforms   []string
+	Fields      *PlatformFields
+	Flows       string // JSON
+	Annotations string
+	Contacts    string
+	VisibleTo   string
+	Reapplied   []*bindings.View // for an update: the bindings a change re-applies
 }
 
 func (s *Server) targetNewForm(w http.ResponseWriter, r *http.Request) {
@@ -335,8 +335,8 @@ func (s *Server) targetEditForm(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.MarshalIndent(v.NetworkFlows, "", "  ")
 	f.Flows = string(b)
-	for _, k := range slices.Sorted(maps.Keys(v.Labels)) {
-		f.Labels += k + "=" + v.Labels[k] + "\n"
+	for _, k := range slices.Sorted(maps.Keys(v.Annotations)) {
+		f.Annotations += k + "=" + v.Annotations[k] + "\n"
 	}
 	for _, ct := range v.Contacts {
 		f.Contacts += ct.Name + " <" + ct.Email + ">\n"
@@ -359,12 +359,12 @@ func (s *Server) targetOf(r *http.Request, name string) (*targets.Target, error)
 	if t.Metadata.Name == "" {
 		t.Metadata.Name = strings.TrimSpace(r.PostFormValue("name"))
 	}
-	labels, err := pairs(r.PostFormValue("labels"))
+	annotations, err := pairs(r.PostFormValue("annotations"))
 	if err != nil {
 		return nil, err
 	}
-	if len(labels) > 0 {
-		t.Labels = labels
+	if len(annotations) > 0 {
+		t.Annotations = annotations
 	}
 	if raw := strings.TrimSpace(r.PostFormValue("networkFlows")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &t.NetworkFlows); err != nil {

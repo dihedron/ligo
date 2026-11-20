@@ -289,7 +289,7 @@ func samples() map[string]any {
 	approved := "APPROVED"
 	gov := &preview.Evaluation{Jurisdictions: map[string]string{"owner": "dc/x"}, NamePrefix: preview.NameCheck{Valid: true}, Consent: "ALL",
 		Interconnect: &preview.Interconnect{Rule: "r", Action: "allow"}, Sides: []preview.Side{{Side: "OWNER", Jurisdiction: "dc/x", Decision: &approved}}}
-	src := &sources.View{Source: sources.Source{DisplayName: "d", Labels: map[string]string{"k": "v"}, Contacts: []sources.Contact{{Name: "n", Email: "e"}},
+	src := &sources.View{Source: sources.Source{DisplayName: "d", Annotations: map[string]string{"k": "v"}, Contacts: []sources.Contact{{Name: "n", Email: "e"}},
 		Identity: sources.Identity{SampleSPIFFEIDs: []string{"spiffe://x/y"}}}}
 	src.Metadata.Name, src.Metadata.State, src.Metadata.PendingChangeRequestID = "s", "ACTIVE", &id
 	tgt := &targets.View{Target: targets.Target{Definition: []byte(`{}`), DocumentationURL: "https://docs.example", AccessLevels: []targets.AccessLevel{{Name: "read"}}}}

@@ -53,7 +53,7 @@ func scanView(row pgx.Row) (*View, *stored, error) {
 	st := &stored{}
 	st.Kind = "Source"
 	err := row.Scan(&st.ID, &st.Revision, &st.Metadata.Name, &st.Metadata.Jurisdiction, &st.Metadata.State, &st.Identity.TrustDomain,
-		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Labels, &st.ExternalRefs,
+		&st.Identity.SVIDRegex, &st.Identity.SampleSPIFFEIDs, &st.DisplayName, &st.Description, &st.Annotations, &st.ExternalRefs,
 		&st.Contacts, &st.Visibility.Mode, &st.Visibility.VisibleTo, &st.ManagedBy, &m.CreatedAt, &m.UpdatedAt, &m.CreatedBy, &m.UpdatedBy,
 		&m.PendingChangeRequestID)
 	if len(st.Visibility.VisibleTo) == 0 {
@@ -104,7 +104,7 @@ type Filter struct {
 	Jurisdiction string // a jurisdiction pattern
 	TrustDomain  string
 	State        string // default: every state but RETIRED
-	Label        string // key=value
+	Annotation   string // key=value
 	Q            string // in the name or the display name
 	After        string
 	Limit        int
@@ -113,13 +113,13 @@ type Filter struct {
 // List returns the sources the caller sees that f selects, by name, at
 // most f.Limit, and whether more follow (keyset on name, §7.2.3).
 func (s *Service) List(ctx context.Context, c changerequests.Caller, f Filter) ([]*View, bool, error) {
-	key, value, _ := strings.Cut(f.Label, "=")
+	key, value, _ := strings.Cut(f.Annotation, "=")
 	var out []*View
 	after := f.After
 	for {
 		rows, err := s.DB.Query(ctx, "SELECT "+viewColumns+` FROM sources WHERE name > $1
 			AND ($2 = '' OR trust_domain = $2) AND (state::text = $3 OR $3 = '' AND state <> 'RETIRED')
-			AND ($4 = '' OR labels ->> $4 = $5) AND ($6 = '' OR name ILIKE '%' || $6 || '%' OR display_name ILIKE '%' || $6 || '%')
+			AND ($4 = '' OR annotations ->> $4 = $5) AND ($6 = '' OR name ILIKE '%' || $6 || '%' OR display_name ILIKE '%' || $6 || '%')
 			ORDER BY name LIMIT $7`, after, f.TrustDomain, f.State, key, value, f.Q, 2*f.Limit)
 		if err != nil {
 			return nil, false, err

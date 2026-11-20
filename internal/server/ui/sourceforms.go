@@ -31,7 +31,7 @@ func pairs(s string) (map[string]string, error) {
 	for _, l := range lines(s) {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok || strings.TrimSpace(k) == "" {
-			return nil, &changerequests.Error{Status: http.StatusUnprocessableEntity, Slug: "validation-failed", Detail: "labels: " + l + " is not key=value"}
+			return nil, &changerequests.Error{Status: http.StatusUnprocessableEntity, Slug: "validation-failed", Detail: "annotations: " + l + " is not key=value"}
 		}
 		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
@@ -55,7 +55,7 @@ type SourceForm struct {
 	Source       sources.Source
 	TrustDomains []string
 	Samples      string // one per line
-	Labels       string // key=value per line
+	Annotations  string // key=value per line
 	Contacts     string // Name <email> per line
 	VisibleTo    string
 }
@@ -82,8 +82,8 @@ func (s *Server) sourceEditForm(w http.ResponseWriter, r *http.Request) {
 	}
 	f := SourceForm{Edit: true, Revision: v.Metadata.Revision, Source: v.Source, TrustDomains: s.trustDomains(),
 		Samples: strings.Join(v.Identity.SampleSPIFFEIDs, "\n"), VisibleTo: strings.Join(v.Visibility.VisibleTo, "\n")}
-	for _, k := range slices.Sorted(maps.Keys(v.Labels)) {
-		f.Labels += k + "=" + v.Labels[k] + "\n"
+	for _, k := range slices.Sorted(maps.Keys(v.Annotations)) {
+		f.Annotations += k + "=" + v.Annotations[k] + "\n"
 	}
 	for _, c := range v.Contacts {
 		f.Contacts += c.Name + " <" + c.Email + ">\n"
@@ -101,9 +101,9 @@ func sourceOf(r *http.Request) (sources.Source, error) {
 		DisplayName: strings.TrimSpace(r.PostFormValue("displayName")), Description: strings.TrimSpace(r.PostFormValue("description")),
 		Contacts:   contacts(r.PostFormValue("contacts")),
 		Visibility: sources.Visibility{Mode: r.PostFormValue("visibility"), VisibleTo: lines(r.PostFormValue("visibleTo"))}}
-	labels, err := pairs(r.PostFormValue("labels"))
-	if len(labels) > 0 {
-		src.Labels = labels
+	annotations, err := pairs(r.PostFormValue("annotations"))
+	if len(annotations) > 0 {
+		src.Annotations = annotations
 	}
 	return src, err
 }
@@ -122,7 +122,7 @@ func (s *Server) sourceTest(w http.ResponseWriter, r *http.Request) {
 	if !s.readable(w, r) {
 		return
 	}
-	src, _ := sourceOf(r) // labels do not matter here
+	src, _ := sourceOf(r) // annotations do not matter here
 	ctx, c := r.Context(), session(r).Caller()
 	var d SourceCheck
 	var err error

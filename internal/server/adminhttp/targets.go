@@ -76,7 +76,7 @@ func (s *Server) listTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	list, more, err := s.Targets.List(r.Context(), c, targets.Filter{Q: q.Get("q"), Platform: q.Get("platform"),
-		PlatformType: q.Get("platformType"), Jurisdiction: q.Get("jurisdiction"), Label: q.Get("label"), State: q.Get("state"),
+		PlatformType: q.Get("platformType"), Jurisdiction: q.Get("jurisdiction"), Annotation: q.Get("annotation"), State: q.Get("state"),
 		After: cursor.AfterName, Limit: size})
 	if err != nil {
 		s.fail(w, r, err)
