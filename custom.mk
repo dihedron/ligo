@@ -56,48 +56,6 @@ openapi-lint: ## lint api/openapi/admin.v1alpha1.yaml with Redocly CLI, as CI do
 		echo "$$out" | grep -v "^npm notice"; \
 		[ $$status -eq 0 ] && ! echo "$$out" | grep -q "You have [0-9]* warning"
 
-# The Python SDK (sdk/python) is built and checked with the Python of the
-# environment, which needs its dev extra: pip install -e "sdk/python[dev]"
-PYTHON ?= python3
-
-.PHONY: py-lint
-py-lint: ## check the Python SDK: ruff, ruff format, mypy --strict (needs sdk/python[dev])
-	@cd sdk/python && $(PYTHON) -m ruff check . && $(PYTHON) -m ruff format --check . && $(PYTHON) -m mypy
-
-.PHONY: py-test
-py-test: ## run the Python SDK's tests (needs sdk/python[dev])
-	@cd sdk/python && $(PYTHON) -m pytest
-
-.PHONY: py-build
-py-build: ## build the Python SDK's wheel and sdist into build/python (version from the git tag)
-	@rm -rf build/python
-	@$(PYTHON) -m build --outdir build/python sdk/python
-
-# The Java SDK (sdk/java) builds with the Maven wrapper checked in beside it, on
-# a JDK 17 or later. A release is built at the tag's version (-Drevision);
-# without a tag the jars are 0.0.0-SNAPSHOT.
-JAVA_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null | sed 's/^v//')
-JAVA_REVISION = $(if $(JAVA_VERSION),-Drevision=$(JAVA_VERSION),)
-
-.PHONY: java-test
-java-test: ## run the Java SDK's tests (JDK 17 or later)
-	@cd sdk/java && ./mvnw -B -ntp test
-
-.PHONY: java-lint
-java-lint: ## check the Java SDK: dependency convergence, SpotBugs, javadoc (the tests are java-test)
-	@cd sdk/java && ./mvnw -B -ntp -DskipTests verify
-
-.PHONY: java-build
-java-build: ## build the Java SDK's jar, sources jar, javadoc jar and pom into build/java (version from the git tag)
-	@rm -rf build/java && mkdir -p build/java
-	@cd sdk/java && ./mvnw -B -ntp -DskipTests $(JAVA_REVISION) package
-	@cp sdk/java/target/ligo-client-*.jar build/java/
-	@sed 's|$${revision}|$(or $(JAVA_VERSION),0.0.0-SNAPSHOT)|' sdk/java/pom.xml > build/java/ligo-client-$(or $(JAVA_VERSION),0.0.0-SNAPSHOT).pom
-
-.PHONY: java-bench
-java-bench: ## run the Java SDK's JMH benchmark of bindings answered 304
-	@cd sdk/java && ./mvnw -B -ntp -q -Pbench test-compile exec:exec
-
 .PHONY: compile
 compile: lint go-dev ## build for the default linux/amd64 platform
 

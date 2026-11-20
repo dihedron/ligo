@@ -18,5 +18,7 @@ _APPLICATION_DOTENV_VAR_NAME=LIGO_DOTENV
 include help.mk
 include go.mk
 include release.mk
+include python.mk
+include java.mk
 -include custom.mk
 # Add custom targets below...
