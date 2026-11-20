@@ -930,7 +930,7 @@ components:
         identity: { $ref: "#/components/schemas/SourceSpecIdentity" }
         displayName: { type: string }
         description: { type: string }
-        annotations: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -972,7 +972,7 @@ components:
         identity: { $ref: "#/components/schemas/SourceIdentity" }
         displayName: { type: string }
         description: { type: string }
-        annotations: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         externalRefs: { type: object, additionalProperties: { type: string } }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1005,7 +1005,7 @@ components:
         networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
-        annotations: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1041,7 +1041,7 @@ components:
         networkFlows: { type: [array, "null"], items: { $ref: "#/components/schemas/NetworkFlow" } }
         displayName: { type: string }
         description: { type: string }
-        annotations: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         documentationUrl: { type: string }
         contacts: { type: array, items: { $ref: "#/components/schemas/Contact" } }
         visibility: { $ref: "#/components/schemas/Visibility" }
@@ -1310,7 +1310,7 @@ components:
         state: { $ref: "#/components/schemas/ResourceState" }
         displayName: { type: string }
         description: { type: string }
-        annotations: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, maxProperties: 32, additionalProperties: { type: string, maxLength: 256 }, description: "Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo" }
         bound: { type: boolean, description: "Bound to the source of forSource." }
     CatalogSource:
       description: A source visible to the caller beyond their own (§7.2.4).

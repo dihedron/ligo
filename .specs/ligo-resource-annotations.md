@@ -18,7 +18,7 @@ Since v0.10.0 a binding has a `description` and an `annotations` map. A source a
 | The filter | `label=key=value` becomes `annotation=key=value` (admin API query parameter, CLI `--annotation`), on sources, targets and the catalog; it keeps matching one key to one value |
 | The text search | `q` matches the name, display name, description and annotations, as it matched labels |
 | Compatibility | None (AGENTS rule 8, before 1.0.0): the old name is refused by the admin API (unknown field) and the old flag is gone |
-| Limits | Unchanged: sources and targets keep the checks they have (`description` at most 4096 characters in the database). The limits of a binding's annotations (§3.2 of the binding spec) are not extended to them in this change |
+| Limits | The same as a binding's (§3.2 of the binding spec), one checker for all three (`internal/annotations`): `description` at most 4096 runes, no control characters but newline and tab; at most 32 annotations, 8 KiB in all; a key 1 to 63 characters of `[A-Za-z0-9._/-]` starting with a letter or a digit; a value at most 256 runes without control characters. Checked when a change request is filed, on the admin API, the UI and a manifest alike; a violation is a `400` naming the field (the user, 2026-11-20) |
 | Workload API and SDKs | Unchanged: a workload never saw a source's or a target's labels |
 | How a change is made | As today: a change request; the diff field is named `annotations` |
 
@@ -48,6 +48,7 @@ Since v0.10.0 a binding has a `description` and an `annotations` map. A source a
 | RA-4 | A change request on a source or a target shows `annotations` in its diff |
 | RA-5 | The UI forms round trip annotations and escape their text |
 | RA-6 | The CLI `--annotation` filters; a manifest with `annotations` applies |
+| RA-8 | A source and a target are refused with a description over 4096 runes or with a control character, 33 annotations, a bad key or a value over 256 runes; they accept a key such as `example.org/change-id`. The shared checker has the binding tests (BM-1, BM-10) and the fuzz |
 | RA-7 | Lab: the e2e tests that file sources and targets pass |
 
 ## 6. Plan
@@ -56,4 +57,4 @@ Spec, tests, migration and Go domain (`internal/sources`, `internal/targets`, `i
 
 ## 7. Out of scope
 
-Selectors apart from annotations (a `labels` of their own, if one is ever needed); the limits of §3.2 of the binding spec for sources and targets; exposing source or target annotations to workloads.
+Selectors apart from annotations (a `labels` of their own, if one is ever needed); exposing source or target annotations to workloads.

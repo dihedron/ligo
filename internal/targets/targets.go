@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	pluginv1 "github.com/dihedron/ligo/api/gen/plugin/v1"
+	"github.com/dihedron/ligo/internal/annotations"
 	"github.com/dihedron/ligo/internal/changerequests"
 	"github.com/dihedron/ligo/internal/charter"
 	"github.com/dihedron/ligo/internal/config"
@@ -323,10 +324,11 @@ func checkMetadata(t *Target) error {
 	switch {
 	case utf8.RuneCountInString(t.DisplayName) > 128:
 		return invalid("displayName: at most 128 characters")
-	case utf8.RuneCountInString(t.Description) > 4096:
-		return invalid("description: at most 4096 characters")
 	case len(t.DocumentationURL) > 512:
 		return invalid("documentationUrl: at most 512 characters")
+	}
+	if err := annotations.Check(t.Description, t.Annotations); err != nil {
+		return invalid("%v", err)
 	}
 	if t.DocumentationURL != "" {
 		if u, err := url.Parse(t.DocumentationURL); err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" {

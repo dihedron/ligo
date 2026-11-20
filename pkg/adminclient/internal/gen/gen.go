@@ -835,6 +835,7 @@ type CatalogSource struct {
 
 // CatalogTarget A target as the catalog lists it (§7.2.4).
 type CatalogTarget struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// Bound Bound to the source of forSource.
@@ -851,8 +852,10 @@ type CatalogTarget struct {
 
 // CatalogTargetDetail A target with the charter outcome for each of the caller's sources.
 type CatalogTargetDetail struct {
-	AccessLevels []AccessLevel      `json:"accessLevels"`
-	Annotations  *map[string]string `json:"annotations,omitempty"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string     `json:"apiVersion"`
@@ -1309,6 +1312,7 @@ type SideDecision string
 
 // Source A source as the server returns it (§3.2).
 type Source struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
@@ -1328,6 +1332,7 @@ type Source struct {
 
 // SourceDetail A source with its last 20 audit entries, newest first.
 type SourceDetail struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
@@ -1372,6 +1377,7 @@ type SourceMetadata struct {
 
 // SourceSpec A source as a caller writes it (§3.2); the body of a registration or an update.
 type SourceSpec struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations  *map[string]string `json:"annotations,omitempty"`
 	Contacts     *[]Contact         `json:"contacts,omitempty"`
 	Description  *string            `json:"description,omitempty"`
@@ -1457,8 +1463,10 @@ type StageStatus string
 
 // Target A target as the server returns it (§3.3).
 type Target struct {
-	AccessLevels []AccessLevel      `json:"accessLevels"`
-	Annotations  *map[string]string `json:"annotations,omitempty"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string     `json:"apiVersion"`
@@ -1480,8 +1488,10 @@ type Target struct {
 
 // TargetDetail A target with its last 20 audit entries, newest first.
 type TargetDetail struct {
-	AccessLevels []AccessLevel      `json:"accessLevels"`
-	Annotations  *map[string]string `json:"annotations,omitempty"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
 
 	// ApiVersion Examples: ligo.dihedron.org/v1alpha1
 	ApiVersion string       `json:"apiVersion"`
@@ -1525,9 +1535,11 @@ type TargetMetadata struct {
 
 // TargetSpec A target as a caller writes it (§3.3); the body of a publication or an update.
 type TargetSpec struct {
-	AccessLevels []AccessLevel      `json:"accessLevels"`
-	Annotations  *map[string]string `json:"annotations,omitempty"`
-	Contacts     *[]Contact         `json:"contacts,omitempty"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
+	Annotations *map[string]string `json:"annotations,omitempty"`
+	Contacts    *[]Contact         `json:"contacts,omitempty"`
 
 	// Definition Platform-specific (the platform type's target schema).
 	Definition       map[string]interface{} `json:"definition"`
@@ -1848,6 +1860,7 @@ type Release = ReleaseRequest
 
 // SourceRequestBody defines model for Source.
 type SourceRequestBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
@@ -1878,7 +1891,9 @@ type StateChange struct {
 
 // TargetRequestBody defines model for Target.
 type TargetRequestBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
@@ -2597,6 +2612,7 @@ type ListSourcesParamsState string
 
 // CreateSourceJSONBody defines parameters for CreateSource.
 type CreateSourceJSONBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
@@ -2625,6 +2641,7 @@ type CreateSource202JSONResponseBody_Resource struct {
 
 // UpdateSourceJSONBody defines parameters for UpdateSource.
 type UpdateSourceJSONBody struct {
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
@@ -2726,7 +2743,9 @@ type ListTargetsParamsState string
 
 // CreateTargetJSONBody defines parameters for CreateTarget.
 type CreateTargetJSONBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
@@ -2758,7 +2777,9 @@ type CreateTarget202JSONResponseBody_Resource struct {
 
 // UpdateTargetJSONBody defines parameters for UpdateTarget.
 type UpdateTargetJSONBody struct {
-	AccessLevels      []AccessLevel           `json:"accessLevels"`
+	AccessLevels []AccessLevel `json:"accessLevels"`
+
+	// Annotations Operator-defined keys (at most 63 characters of [A-Za-z0-9._/-], starting with a letter or a digit), not interpreted by ligo
 	Annotations       *map[string]string      `json:"annotations,omitempty"`
 	ApprovalReference *string                 `json:"approvalReference,omitempty"`
 	AutomationContext *map[string]interface{} `json:"automationContext,omitempty"`
