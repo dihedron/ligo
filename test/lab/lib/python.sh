@@ -19,7 +19,8 @@ py_install() {
 	inner_push "$wheel" ligo1 "/root/$(basename "$wheel")" 0644
 	# Python is installed outside root's home, so that the workload's user can run it
 	inner_exec ligo1 sh -ec "export UV_PYTHON_INSTALL_DIR=/opt/uv-python
-		uv venv --quiet --python 3.12 $PY_DIR
+		mkdir -p /opt/uv-python
+		uv venv --quiet --clear --python 3.12 $PY_DIR
 		uv pip install --quiet --python $PY_DIR/bin/python --reinstall /root/$(basename "$wheel")
 		chmod -R a+rX /opt/uv-python $PY_DIR" || die "cannot install the Python SDK on ligo1 (does it reach PyPI?)"
 	inner_exec ligo1 mkdir -p "$PY_HOME"
