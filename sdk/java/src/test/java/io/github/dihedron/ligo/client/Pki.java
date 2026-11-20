@@ -63,6 +63,25 @@ final class Pki {
         }
     }
 
+    /** A TLS server certificate for an IP address, as a secret store has: an IP SAN, checked by the client's hostname verification. */
+    Leaf server(String ip) {
+        try {
+            KeyPair key = keys();
+            JcaX509ExtensionUtils utils = new JcaX509ExtensionUtils();
+            JcaX509v3CertificateBuilder b = builder(new X500Name("CN=test CA"), new X500Name("CN=store"), key.getPublic());
+            b.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+            b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+            b.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
+            b.addExtension(Extension.subjectAlternativeName, false,
+                    new GeneralNames(new GeneralName(GeneralName.iPAddress, ip)));
+            b.addExtension(Extension.subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(key.getPublic()));
+            b.addExtension(Extension.authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(ca));
+            return new Leaf(sign(b, caKey.getPrivate()), key.getPrivate());
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private JcaX509v3CertificateBuilder builder(X500Name issuer, X500Name subject, java.security.PublicKey key) {
         long now = System.currentTimeMillis();
         return new JcaX509v3CertificateBuilder(issuer, BigInteger.valueOf(serial++), new Date(now - 3_600_000),

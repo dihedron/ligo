@@ -46,7 +46,7 @@ try (LigoClient c = LigoClient.builder()
 
 ### 3.1 The client
 
-`LigoClient.builder()` with `address` (`host:port`, TLS always), `serverId` (the only SPIFFE ID accepted; required), `x509Source` and `jwtSource` (default: `java-spiffe`'s `DefaultX509Source` and `DefaultJwtSource` on `SPIFFE_ENDPOINT_SOCKET`), `storeRoots` (default: the JDK's), `allowedStores`, `pollInterval` (30 s), `transport` (`REST` default, or `GRPC`), `executor` (default: a daemon thread pool the client owns and shuts down in `close()`), `logger` (`System.Logger`). `build()` refuses what the Go `New` refuses. The client is thread-safe.
+`LigoClient.builder()` with `address` (`host:port`, TLS always), `serverId` (the only SPIFFE ID accepted; required), `x509Source` and `jwtSource` (a `JwtSvidSource`; default: `java-spiffe`'s `DefaultX509Source` and `DefaultJwtSource` on `SPIFFE_ENDPOINT_SOCKET`), `storeRoots` (a collection of certificates or a PEM file; default: the JDK's), `allowedStores`, `pollInterval` (30 s), `transport` (`REST` default, or `GRPC`), `executor` (default: a daemon thread pool the client owns and shuts down in `close()`), `logger` (`System.Logger`). `build()` refuses what the Go `New` refuses. The client is thread-safe.
 
 ### 3.2 Operations
 
@@ -130,7 +130,7 @@ A Developer's Guide chapter "The Java SDK" (client, bindings, credential and JDB
 |---|---|
 | 0 | This spec, the backlog (item 22 with Maven Central, item 7), the provider backlog note. |
 | 1 | The Maven project, builder, the mTLS context and the ID check, `bindings`, `flows` on REST (JV-1 to JV-4, JV-13, JV-T1). |
-| 2 | `credential`, the store, errors, property tests (JV-6 to JV-10, JV-15). |
+| 2 | `credential`, the store, errors, and a seeded fuzz of the store's answers instead of a property-testing library (JV-6 to JV-10, JV-15). |
 | 3 | The gRPC transport and the async twins (JV-A, and JV-2 to JV-4 on gRPC). |
 | 4 | `watch`, flow testing, golden documents, the benchmark (JV-11, JV-12, JV-F, JV-G, JV-T2). |
 | 5 | CI, `make` targets, the release wiring. |
