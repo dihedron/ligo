@@ -12,7 +12,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 4 | Manual test A-1 | 2026-11-07 | Postponed past v0.2.0; known limit |
 | 5 | Lab work for v0.2.0 | 2026-11-07 | Soak done; new lab tests and in-person session postponed past v0.2.0 |
 | 6 | Product examples in the Planning for Deployment Guide | 2026-11-08 | Later release |
-| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java and JavaScript/TypeScript not started |
+| 7 | Client SDKs (Go, then Java, Python and JavaScript/TypeScript) | 2026-11-08 | Go released in v0.5.0 (2026-11-14): `.specs/ligo-client-sdk.md`; Python in progress on `feature/python-sdk` (`.specs/ligo-client-sdk-python.md`; items 20 to 24 are what it leaves out); Java in progress on `feature/java-sdk` (`.specs/ligo-client-sdk-java.md`); JavaScript/TypeScript not started |
 | 8 | Terraform and OpenTofu provider | 2026-11-08 | Released as v0.1.0 on GitHub (2026-11-17), on `ligo` v0.7.0 and the Go admin client; resources and data sources done, pre-release campaign passed. Left: the soak before v0.2.0 and the registries, in the provider's own backlog (`terraform-provider-ligo/.specs/ligo-provider-backlog.md`) |
 | 9 | A map of the `ligo` topology, and a discovery protocol | 2026-11-08 | To explore |
 | 10 | Instances managed at run time, plugin types in `server.yaml` | 2026-11-08 | Done in v0.4.0 (PR #45): `.specs/ligo-instances.md` |
@@ -27,11 +27,13 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 19 | `flowcheck` left out of v0.8.0: a command line, a check on the first fetch, CIDRs and ranges, DTLS, SSH and HTTP flows | 2026-11-19 | Not started; see §19 |
 | 20 | A Python asyncio client | 2026-11-19 | Not started; see §20 |
 | 21 | ICMP in the Python SDK's flow testing | 2026-11-19 | Not started; see §20 |
-| 22 | Publish `ligo-client` on PyPI | 2026-11-19 | Waiting for a stable ecosystem, like the Terraform provider's registries; see §20 |
+| 22 | Publish `ligo-client` on PyPI and the Java SDK on Maven Central | 2026-11-19, Maven Central 2026-11-20 | Waiting for a stable ecosystem, like the Terraform provider's registries; all go out together; see §20 |
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
 | 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-annotations.md`, branch `feature/binding-annotations`; see §25 |
 | 26 | MIT license for the client libraries and SDKs (`pkg/client`, `pkg/adminclient`, `sdk/*`), the server staying AGPL-3.0 | 2026-11-19 | Done (2026-11-19): MIT; see §26 |
+| 27 | An admin API client in Python (first, for Ansible), later in Java | 2026-11-20 | Not started; see §27 |
+| 28 | An Ansible collection: install and set up ligo, manage the server, manage sources, targets and bindings | 2026-11-20 | Not started; needs item 27; see §28 |
 
 ## 1. Audit pruning
 
@@ -299,7 +301,7 @@ Decided with `.specs/ligo-client-sdk-python.md` (2026-11-19).
 
 - **asyncio (item 20).** The v1 client is synchronous and thread-safe; `watch` blocks. An `async` client, with `async for` on `watch`, doubles the surface and its tests, and waits for a user who needs it.
 - **ICMP in flow testing (item 21).** Raw sockets need privileges that a Python program rarely has; unprivileged ICMP sockets need `net.ipv4.ping_group_range`. Go's `WithICMP` has both; Python's `check_flows` does TCP, TLS, PostgreSQL, SPIFFE and UDP.
-- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release (`make py-build`, `release.yml`) and nothing else. **The user's condition (2026-11-19):** like the Terraform and OpenTofu registries (`terraform-provider-ligo/.specs/ligo-provider-backlog.md` item 2), published only when the ecosystem is stable and `ligo`'s API and the SDK's are no longer changing: a published version cannot be replaced, and users pin it. Then: a PyPI project for `ligo-client`, trusted publishing configured for the repository, a publish job in `release.yml` run after the release's checks, and the README's install line changed from the release asset to `pip install ligo-client`.
+- **PyPI (item 22).** The wheel and the sdist are attached to each GitHub release (`make py-build`, `release.yml`) and nothing else. **The user's condition (2026-11-19):** like the Terraform and OpenTofu registries (`terraform-provider-ligo/.specs/ligo-provider-backlog.md` item 2), published only when the ecosystem is stable and `ligo`'s API and the SDK's are no longer changing: a published version cannot be replaced, and users pin it. **Maven Central (added 2026-11-20)** follows the same condition: the Java SDK (`io.github.dihedron.ligo:ligo-client`) is attached to each GitHub release as a jar with its sources and javadoc, and goes to Maven Central in the same stable moment as PyPI and the Terraform and OpenTofu registries (Sonatype namespace `io.github.dihedron`, signed artifacts, a publish job in `release.yml`). Then: a PyPI project for `ligo-client`, trusted publishing configured for the repository, a publish job in `release.yml` run after the release's checks, and the README's install line changed from the release asset to `pip install ligo-client`.
 - **gRPC (item 23).** The workload API also speaks gRPC, but `grpcio` has no hook for custom peer verification, and ligo's certificate is an SVID with no DNS name, so the SDK could not hold its rule that only ligo's SPIFFE ID is accepted. To revisit when `grpcio` can verify a URI SAN, or with a custom TLS layer.
 - **Connection reuse and signing (item 24).** Each call opens its own connection, which is correct and simple at the SDK's call rates. Keep-alive pooling is possible later. The wheel is covered by the release's signed `checksums.txt`; sigstore attestation of the build is a further step.
 
@@ -321,3 +323,23 @@ The repository is AGPL-3.0. A workload that links `pkg/client`, `pkg/adminclient
 - **To decide.** Which paths (`pkg/client`, `pkg/adminclient`, `sdk/python`, the generated `api/gen` and the protobuf contracts they use, `api/openapi`, `docs` examples); whether a path carries its own `LICENSE` file and SPDX headers; that the Go modules stay in one `go.mod` (a license per directory is allowed, but a package that imports `internal/` code of the server cannot be relicensed: `pkg/client` imports none today, which a test could enforce); the Python package metadata (`license` in `pyproject.toml`), the wheel's `LICENSE`, and the README's license section.
 - **Constraints.** Only the copyright holders can relicense. `git shortlog` (2026-11-19) shows one author and dependabot (dependency bumps), so the author can decide alone. Dependencies keep their own licenses (`spiffe`, `cryptography`: Apache-2.0/BSD, compatible).
 - **Done (2026-11-19).** MIT, `Copyright (c) 2026 Andrea Funtò`. A `LICENSE` file in `pkg/client`, `pkg/adminclient`, `internal/adminraw`, `api/proto/workload`, `api/gen/workload`, `api/openapi` and `sdk/python`; `SPDX-License-Identifier: MIT` in their hand-written sources (not in generated files, nor in `workload.proto`, which must equal the main spec's block); the package metadata; a License section in the README; `test/license` checks that every one has its file and that `pkg/client` and `pkg/adminclient` import nothing of the server. A new SDK adds its directory to the list in that test. Past releases stay under the license they were published with.
+
+## 27. An admin API client in Python and Java
+
+Asked for by the user (2026-11-20).
+
+**Why.** The SDKs (Go, Python, Java) cover the workload API only: what a workload reads. The admin API (sources, targets, bindings, change requests, approvals, audit) has a Go client, `pkg/adminclient`, used by the CLI and the Terraform provider, and nothing else. Python is the language of Ansible, so a Python admin client is the base of item 28.
+
+**What.** A package in `sdk/python` (to decide: the same distribution `ligo-client` with a second module, or `ligo-admin`), generated from or checked against `api/openapi/admin.v1alpha1.yaml`, with the semantics of `pkg/adminclient`: the admin authentication (to read from `internal/adminauth`: mTLS with an SVID or a token), the typed resources, the change-request flow with approvals, waiting for an applied change, manifests (`apply`). Java later, the same way, after the Java SDK. MIT license (item 26). Own spec, threat model and tests first (golden documents shared with Go, as the workload ones); published on PyPI and Maven Central with the rest (item 22).
+
+## 28. An Ansible collection
+
+Asked for by the user (2026-11-20).
+
+**Why.** Operators install and configure ligo with the tools they already use. The collection (name to decide, e.g. `dihedron.ligo`) covers three areas, all idempotent, with check mode and `diff`:
+
+- **Install and set up:** roles for the packages from the release, the `server.yaml` (platforms, plugins, the database, SPIRE and the TLS identity), the systemd unit, the migrations, the first start and the health check; the plugins' packages.
+- **Manage the ligo server:** modules or roles for upgrades, `serve` reload, backups of the database, audit verification and export, and the readiness of a replica set (HA).
+- **Manage resources:** modules `ligo_source`, `ligo_target`, `ligo_binding` (and their info modules), through change requests and approvals as the admin API requires, with the managed-resource lock of `.specs/ligo-managed-resources.md` so that Ansible and the UI do not fight.
+
+**Needs.** The Python admin client (item 27), a spec with a threat model (secrets in playbooks, vault integration, approval identities: an automation account cannot approve its own change), a lab scenario (the lab already builds ligo on LXD VMs: a playbook installs it there), and the Ansible Galaxy publication with the rest (item 22).
