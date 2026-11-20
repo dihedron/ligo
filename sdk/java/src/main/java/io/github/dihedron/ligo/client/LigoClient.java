@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Consumer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -64,6 +66,9 @@ public final class LigoClient implements AutoCloseable {
     private final Transport transport;
     private final Clock clock;
     private final System.Logger log;
+    private final Set<Watch> watches = new CopyOnWriteArraySet<>();
+    private final Watcher.Sleeper sleeper;
+    private final AtomicInteger watchCount = new AtomicInteger();
     private final Map<TokenKey, Token> tokens = new ConcurrentHashMap<>();
 
     /** Where a store token was got: the same store, namespace, mount and role share one. */
@@ -77,7 +82,7 @@ public final class LigoClient implements AutoCloseable {
     private Closeable ownedJwt;
     private Wire wire;
     private Store store;
-    private boolean closed;
+    private volatile boolean closed;
 
     private LigoClient(Builder b) {
         this.host = b.host;
@@ -90,6 +95,7 @@ public final class LigoClient implements AutoCloseable {
         this.storeRoots = List.copyOf(b.storeRoots);
         this.transport = b.transport;
         this.clock = b.clock;
+        this.sleeper = b.sleeper;
         this.log = b.logger;
         if (b.executor != null) {
             this.executor = b.executor;
@@ -197,8 +203,103 @@ public final class LigoClient implements AutoCloseable {
         }
     }
 
+    /**
+     * Reads the flows of the bindings and tests them (see {@link FlowCheck}). The defaults come from what the client
+     * knows: a flow declared by ligo is verified as an X509-SVID against the client's own bundle, and a flow of a
+     * PostgreSQL binding that a target or a platform declares asks for TLS inside the protocol. It runs when called,
+     * never on its own, and its unstarted checks are skipped when the client is closed.
+     */
+    public FlowResults checkFlows(String target, FlowOptions options) {
+        List<BindingFlows> flows = flows(target);
+        FlowOptions.Builder b = options.toBuilder();
+        if (options.platforms.isEmpty()) {
+            Map<String, String> platforms = new LinkedHashMap<>();
+            for (Binding binding : bindings(target == null || target.isEmpty() ? Filter.all() : Filter.target(target))) {
+                platforms.put(binding.name(), binding.platformType());
+            }
+            b.platforms(platforms);
+        }
+        return checkFlowData(flows, b.build());
+    }
+
+    public CompletableFuture<FlowResults> checkFlowsAsync(String target, FlowOptions options) {
+        return Async.run(executor, () -> checkFlows(target, options));
+    }
+
+    /** Tests flows obtained elsewhere, with the client's own bundle for the flows of ligo. */
+    public FlowResults checkFlowData(List<BindingFlows> flows, FlowOptions options) {
+        FlowOptions.Builder b = options.toBuilder().stop(() -> closed);
+        if (options.spiffeBundle == null) {
+            X509Source s = source();
+            try {
+                b.spiffeBundle(s.getBundleForTrustDomain(serverId.getTrustDomain()));
+            } catch (io.spiffe.exception.BundleNotFoundException e) {
+                throw new Unauthorized("the SPIFFE source has no bundle for the server's trust domain");
+            }
+        }
+        return FlowCheck.run(flows, b.build());
+    }
+
+    public CompletableFuture<FlowResults> checkFlowDataAsync(List<BindingFlows> flows, FlowOptions options) {
+        return Async.run(executor, () -> checkFlowData(flows, options));
+    }
+
+    /**
+     * Polls the bindings that match and reports every change, blocking between polls; with
+     * {@code WatchOptions.withCredentials()} it also reads the credential of each new or changed binding, and again at two
+     * thirds of a lease. A failed poll keeps the state and is tried again later, with a backoff up to five minutes and
+     * the server's Retry-After. The watch ends when it or the client is closed.
+     */
+    public Watch watch(Filter filter, WatchOptions options) {
+        return startWatch(filter, options, null);
+    }
+
+    /** As {@link #watch(Filter, WatchOptions)}, with the events delivered to {@code listener} in order, on the watch's thread. */
+    public Subscription watch(Filter filter, WatchOptions options, Consumer<Event> listener) {
+        return startWatch(filter, options, Objects.requireNonNull(listener, "listener"));
+    }
+
+    private Watch startWatch(Filter filter, WatchOptions options, Consumer<Event> listener) {
+        synchronized (this) {
+            if (closed) {
+                throw new LigoException("the client is closed");
+            }
+        }
+        Watcher.Backend backend = new Watcher.Backend() {
+            @Override
+            public List<Binding> bindings() {
+                return LigoClient.this.bindings(filter);
+            }
+
+            @Override
+            public Credential credential(Binding binding) {
+                return LigoClient.this.credential(binding);
+            }
+        };
+        Watch[] holder = new Watch[1];
+        Watch w = new Watch("ligo-watch-" + watchCount.incrementAndGet(), backend, clock, pollInterval, log,
+                options.credentials(), listener, sleeper, () -> {
+                    Watch self = holder[0];
+                    if (self != null) {
+                        watches.remove(self);
+                    }
+                });
+        holder[0] = w;
+        watches.add(w);
+        return w;
+    }
+
+    /** Stops the watches and waits for their threads, forgets the store tokens, closes what the client opened. */
     @Override
-    public synchronized void close() {
+    public void close() {
+        for (Watch w : watches) {
+            w.cancel(); // outside the lock: a watch in a call needs it to finish
+        }
+        watches.clear();
+        closeResources();
+    }
+
+    private synchronized void closeResources() {
         closed = true;
         bindings.clear();
         flows.clear();
@@ -446,6 +547,7 @@ public final class LigoClient implements AutoCloseable {
         private Set<String> allowedStores = Set.of();
         private List<X509Certificate> storeRoots = List.of();
         private Clock clock = Clock.systemUTC();
+        private Watcher.Sleeper sleeper;
         private System.Logger logger = System.getLogger("io.github.dihedron.ligo.client");
 
         private Builder() {}
@@ -496,6 +598,12 @@ public final class LigoClient implements AutoCloseable {
         /** Where the client logs (store logins at DEBUG, never a secret); the default is the platform logger. */
         public Builder logger(System.Logger logger) {
             this.logger = Objects.requireNonNull(logger, "logger");
+            return this;
+        }
+
+        /** How a watch waits; for tests. */
+        Builder sleeper(Watcher.Sleeper sleeper) {
+            this.sleeper = sleeper;
             return this;
         }
 

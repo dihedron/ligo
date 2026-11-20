@@ -94,12 +94,62 @@
     </dependency>
   </dependencies>
 
+  <profiles>
+    <profile>
+      <id>bench</id>
+      <properties><jmh.version>1.37</jmh.version></properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.openjdk.jmh</groupId>
+          <artifactId>jmh-core</artifactId>
+          <version>${jmh.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <configuration>
+              <testExcludes combine.self="override"/>
+              <annotationProcessorPaths>
+                <path>
+                  <groupId>org.openjdk.jmh</groupId>
+                  <artifactId>jmh-generator-annprocess</artifactId>
+                  <version>${jmh.version}</version>
+                </path>
+              </annotationProcessorPaths>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <version>3.6.3</version>
+            <configuration>
+              <classpathScope>test</classpathScope>
+              <executable>java</executable>
+              <arguments>
+                <argument>-classpath</argument>
+                <classpath/>
+                <argument>io.github.dihedron.ligo.client.BindingsBenchmark</argument>
+              </arguments>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+
   <build>
     <plugins>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.16.0</version>
-        <configuration><compilerArgs><arg>-Xlint:all</arg></compilerArgs></configuration>
+        <configuration>
+          <compilerArgs><arg>-Xlint:all</arg></compilerArgs>
+          <!-- the JMH benchmark builds only in the bench profile -->
+          <testExcludes><testExclude>**/*Benchmark.java</testExclude></testExcludes>
+        </configuration>
       </plugin>
       <plugin>
         <!-- the stubs are built from the proto of the repository; nothing generated is checked in -->

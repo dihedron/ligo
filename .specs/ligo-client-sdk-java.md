@@ -37,7 +37,7 @@ try (LigoClient c = LigoClient.builder()
         Credential cred = c.credential(b);
     }
     c.credentialAsync(b).thenAccept(cr -> ...);
-    try (Watch w = c.watch(Filter.target("orders-db"), WatchOptions.credentials())) {
+    try (Watch w = c.watch(Filter.target("orders-db"), WatchOptions.withCredentials())) {
         for (Event ev : w) { ... }
     }
     FlowResults results = c.checkFlows("orders-db");
@@ -57,7 +57,7 @@ try (LigoClient c = LigoClient.builder()
 | `credential(Binding)` / `credentialAsync` | `Credential` | `vault-static`, `vault-dynamic`; JWT-SVID for `auth.config.audience`; login at `auth/<authMount>/login`; read of `secretPath` (KV v2) or `credsPath`; `X-Vault-Namespace` when set. |
 | `invalidate(Binding)` | `Invalidate` | Drops the remembered store token. |
 | `connect(address, serverId)` | `TLSConfig` | An mTLS `SSLSocket` with the workload's SVID, TLS 1.3, to a server that presents `serverId` only (§3.4). |
-| `watch(Filter, WatchOptions)` | `Watch` | A `Watch`: `AutoCloseable`, `Iterable<Event>` (blocking `next`), ends on `close()`. `watch(Filter, WatchOptions, Consumer<Event>)` returns a `Subscription` (`cancel()`) and delivers on the executor, in order. Kinds `ADDED`, `CHANGED`, `REMOVED`, `CREDENTIAL_ROTATED`; rotation at two thirds of the lease; state kept through failed polls; backoff and `Retry-After`. |
+| `watch(Filter, WatchOptions)` | `Watch` | A `Watch`: `AutoCloseable`, `Iterable<Event>` (blocking `next`), ends on `close()`. `watch(Filter, WatchOptions, Consumer<Event>)` returns a `Subscription` (`cancel()`) and delivers on the watch's own thread, in order (not on the caller's executor, T-J7). Kinds `ADDED`, `CHANGED`, `REMOVED`, `CREDENTIAL_ROTATED`; rotation at two thirds of the lease; state kept through failed polls; backoff and `Retry-After`. |
 | `checkFlows(target, FlowOptions)` / `checkFlowData(flows, FlowOptions)` (+ `Async`) | `CheckFlows`, `CheckFlowData` | §5. |
 | `close()` | `Close` | Cancels watches, drops the store tokens, closes the sources and the executor it created, the gRPC channel. |
 
@@ -72,7 +72,7 @@ try (LigoClient c = LigoClient.builder()
 - **The context.** The SVID and the bundle come from `java-spiffe`'s `X509Source` in memory: no key file touches the disk (T-J1). The `SSLContext` is built with a key manager over the source and `SpiffeTrustManager` set to accept only `serverId`; protocols TLS 1.3 only.
 - **The ID check.** Done in the trust manager during the handshake, before the first byte of the request. The JDK hostname check is off because an SVID has no DNS name; there is no option to turn the ID check or the verification off.
 - **gRPC.** `NettyChannelBuilder.forAddress` (grpc-java 1.80 has no `passthrough` resolver; the DNS one takes an IP literal as it is) with a `GrpcSslContexts` client context over the same key and trust managers, `maxInboundMessageSize` 8 MiB. A refused ID is reported as `Unauthorized`.
-- **Rotation.** Both managers read the source on every handshake, so a rotated SVID or bundle applies to the next connection.
+- **Rotation.** Both managers read the source on every handshake, so a rotated SVID or bundle applies to the next connection. The JDK's `HttpClient` keeps connections alive, so on REST a rotated SVID applies to the connections opened after the rotation, not to the one in use; the server's own limits on a connection's age bring them round.
 - **The store.** Its own `HttpClient` and `SSLContext` from `storeRoots`, `https` only, pinned by `allowedStores`, redirects never followed, bodies limited to 8 MiB, a 15 s timeout.
 
 ## 4. Threat model
@@ -92,7 +92,7 @@ The Go rows T-C1 to T-C8 and the Python rows T-P2, T-P3, T-P5 and T-P6 apply. Ne
 
 ## 5. Flow testing
 
-`checkFlows` and `checkFlowData`: the semantics of Go and Python (`.specs/ligo-network-checks.md` §3 and §9, `.specs/ligo-client-sdk-python.md` §5): one `FlowResult` per flow and port with `binding`, `target`, `flow`, `destination`, `port`, `protocol` (`tcp`, `tls`, `postgresql`, `spire`, `udp`), `status` (`REACHABLE`, `UNREACHABLE`, `SKIPPED`), `reason`, `error`, `latency`, `attempts`. The checks in the JDK alone: `Socket` connect; `SSLSocket` handshake with the name verified; the PostgreSQL `SSLRequest` then TLS; the SPIFFE check against the bundle (any ID of the trust domain, or `spiffeId`); a datagram on a connected `DatagramChannel` for UDP. Defaults: 5 s a try, 2 tries, 8 at a time, 1,024 checks, link-local and metadata ranges denied (`deniedNetworks`), the name resolved once and the vetted address connected, `handshake` callback to choose the check. No ICMP.
+`checkFlows` and `checkFlowData`: the semantics of Go and Python (`.specs/ligo-network-checks.md` §3 and §9, `.specs/ligo-client-sdk-python.md` §5): one `FlowResult` per flow and port with `binding`, `target`, `flow`, `destination`, `port`, `protocol` (`tcp`, `tls`, `postgresql`, `spire`, `udp`), `status` (`REACHABLE`, `UNREACHABLE`, `SKIPPED`), `reason`, `error`, `latency`, `attempts`. The checks in the JDK alone: `Socket` connect; `SSLSocket` handshake with the name verified; the PostgreSQL `SSLRequest` then TLS; the SPIFFE check against the bundle (any ID of the trust domain, or `spiffeId`); a datagram on a connected `DatagramSocket` for UDP. Defaults: 5 s a try, 2 tries, 8 at a time, 1,024 checks, link-local and metadata ranges denied (`deniedNetworks`), the name resolved once and the vetted address connected, `handshake` callback to choose the check. No ICMP.
 
 ## 6. Tests first
 
@@ -105,7 +105,7 @@ JUnit 5 and AssertJ, with an in-memory CA and in-process TLS servers (`SSLServer
 - **JV-T1** no file is created while connecting. **JV-T2** no thread survives `close()`.
 - **JV-F1 to JV-F9** flow testing as the Go FC-n and Python PY-F.
 - **JV-G** the golden documents in `api/testdata/workload/` decoded by Go, Python and Java to equal values.
-- Property tests (`jqwik`) on a bindings document and a store response. A JMH benchmark of `bindings` answered 304.
+- A seeded fuzz of a store response (no property-testing library). A JMH benchmark of `bindings` answered 304, in the `bench` profile (`./mvnw -Pbench test-compile exec:exec`): about 120 µs a call on loopback.
 
 Lab (the release-run, OpenBao and Vault; written first, run overnight):
 

@@ -65,6 +65,15 @@ final class Pki {
 
     /** A TLS server certificate for an IP address, as a secret store has: an IP SAN, checked by the client's hostname verification. */
     Leaf server(String ip) {
+        return server(new GeneralName(GeneralName.iPAddress, ip));
+    }
+
+    /** A TLS server certificate for a DNS name. */
+    Leaf dnsServer(String dns) {
+        return server(new GeneralName(GeneralName.dNSName, dns));
+    }
+
+    private Leaf server(GeneralName name) {
         try {
             KeyPair key = keys();
             JcaX509ExtensionUtils utils = new JcaX509ExtensionUtils();
@@ -73,7 +82,7 @@ final class Pki {
             b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
             b.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
             b.addExtension(Extension.subjectAlternativeName, false,
-                    new GeneralNames(new GeneralName(GeneralName.iPAddress, ip)));
+                    new GeneralNames(name));
             b.addExtension(Extension.subjectKeyIdentifier, false, utils.createSubjectKeyIdentifier(key.getPublic()));
             b.addExtension(Extension.authorityKeyIdentifier, false, utils.createAuthorityKeyIdentifier(ca));
             return new Leaf(sign(b, caKey.getPrivate()), key.getPrivate());

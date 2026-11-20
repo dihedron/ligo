@@ -57,7 +57,7 @@ class CredentialTest {
     }
 
     /** A logger that keeps what it is given. */
-    static final class Recording implements System.Logger {
+    static class Recording implements System.Logger {
         final List<String> lines = new ArrayList<>();
 
         @Override
