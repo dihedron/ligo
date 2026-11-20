@@ -20,7 +20,7 @@
 10. **Lab Testing:** Whenever applicable, propose to set up a lab environment to cover complex integration scenarios; don't shy away from proposing more coverage scenarios, including lengthy stress tests and chaos monkey to check for correctness under random conditions (e.g. race conditions, malfunctions), whenever reasonable.
 11. **Up-to-date Documentation:** Always keep documentation up to date and aligned with the code and the product behaviour.
 12. **Publish Documentation:** Always produce and attach to the release a Setup Guide, an Operator's Guide and an Architecture and Design Guide, in PDF format from Markdown sources; when diagrams and tables do not fit a page in portrait mode, use the landscape orientation for that page. Additional documents may be produced on a per-project basis.
-13. **Sane Commits:** run `go test ./...` before every commit and check that everything is still sane.
+13. **Sane Commits:** before every commit, run the tests of every component the commit touches (Go: `go test ./...`; Python: `pytest` in `sdk/python`; Java: `./mvnw test` in `sdk/java`), and of anything that consumes a shared input the commit changes, such as `api/proto/` or `api/testdata/`. A commit that changes no code and no test input (documentation only) needs none. Check that everything is still sane.
 14. **Overnight Runs:** Any run that takes hours (soak and chaos runs, full lab rebuilds, release-run campaigns) is written up as a plan and run in an overnight, unattended session, never started in the middle of a working day: propose it, say how long it takes, and report the outcome in the morning.
 
 ## Coding Style & Architecture Standards
