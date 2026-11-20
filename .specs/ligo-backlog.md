@@ -30,7 +30,7 @@ Until 1.0.0, a release does not wait for open items: each one that affects users
 | 22 | Publish `ligo-client` on PyPI and the Java SDK on Maven Central | 2026-11-19, Maven Central 2026-11-20 | Waiting for a stable ecosystem, like the Terraform provider's registries; all go out together; see §20 |
 | 23 | A gRPC transport in the Python SDK | 2026-11-19 | Blocked: `grpcio` cannot verify the server's SPIFFE ID; see §20 |
 | 24 | Connection reuse in the Python SDK, and signing or attesting the wheel | 2026-11-19 | Not started; see §20 |
-| 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | In progress: `.specs/ligo-binding-annotations.md`, branch `feature/binding-annotations`; see §25 |
+| 25 | A description and an annotations map (first asked for as "metadata") on each binding, sent to the client | 2026-11-19 | Done in v0.10.0 (migration 002): `.specs/ligo-binding-annotations.md`; see §25 |
 | 26 | MIT license for the client libraries and SDKs (`pkg/client`, `pkg/adminclient`, `sdk/*`), the server staying AGPL-3.0 | 2026-11-19 | Done (2026-11-19): MIT; see §26 |
 | 27 | An admin API client in Python (first, for Ansible), later in Java | 2026-11-20 | Not started; see §27 |
 | 28 | An Ansible collection: install and set up ligo, manage the server, manage sources, targets and bindings | 2026-11-20 | Not started; needs item 27; see §28 |
