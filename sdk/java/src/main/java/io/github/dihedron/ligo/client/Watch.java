@@ -43,7 +43,7 @@ public final class Watch implements Subscription, Iterable<Event> {
                 watcher.run();
             } finally {
                 stopped = true;
-                queue.offer(END);
+                signalEnd();
                 onEnd.run();
             }
         }, name);
@@ -93,10 +93,14 @@ public final class Watch implements Subscription, Iterable<Event> {
         }
         if (e == END) {
             ended = true;
-            queue.offer(END);
+            signalEnd();
             return Optional.empty();
         }
         return Optional.of(e);
+    }
+
+    private synchronized void markEnded() {
+        ended = true;
     }
 
     /** True once the watch has stopped and its events are read. */
@@ -119,7 +123,14 @@ public final class Watch implements Subscription, Iterable<Event> {
                     return false;
                 }
                 try {
-                    ahead = take(queue.take()).orElse(null);
+                    Event e = queue.poll(200, TimeUnit.MILLISECONDS);
+                    while (e == null && !(stopped && queue.isEmpty())) {
+                        e = queue.poll(200, TimeUnit.MILLISECONDS);
+                    }
+                    ahead = take(e).orElse(null);
+                    if (e == null) {
+                        markEnded();
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return false;
@@ -155,6 +166,13 @@ public final class Watch implements Subscription, Iterable<Event> {
             }
         }
         queue.clear();
-        queue.offer(END);
+        signalEnd();
+    }
+
+    /** Puts the end marker for the readers; a full queue has readers that will see {@code stopped} and an empty queue. */
+    private void signalEnd() {
+        if (!queue.offer(END)) {
+            stopped = true; // full: the iterator ends the iteration itself, once the queue is read dry
+        }
     }
 }

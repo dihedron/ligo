@@ -25,6 +25,13 @@ jobs:
         with:
           go-version-file: "go.mod"
 
+      # make release builds the Java SDK's jars (make java-build)
+      - name: Set up Java
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
       # make release builds the Python SDK's wheel and sdist (make py-build)
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0

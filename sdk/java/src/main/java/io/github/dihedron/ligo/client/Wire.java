@@ -10,7 +10,11 @@ interface Wire extends AutoCloseable {
     enum Kind { BINDINGS, FLOWS }
 
     /** What came back: the items and the ETag, or notModified. */
-    record Answer(List<JsonNode> items, String etag, boolean notModified) {}
+    record Answer(List<JsonNode> items, String etag, boolean notModified) {
+        public Answer {
+            items = List.copyOf(items);
+        }
+    }
 
     /** One conditional read; {@code query} holds {@code target} and {@code platformType}. */
     Answer get(Kind kind, Map<String, String> query, String etag);

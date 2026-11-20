@@ -115,10 +115,10 @@ Lab (the release-run, OpenBao and Vault; written first, run overnight):
 
 ## 7. CI, build and release
 
-- `ci.yml` gets a `java` job on 17 and 21: `mvn verify` (tests, `maven-enforcer`, SpotBugs), javadoc, the dependency audit; CodeQL covers `java-kotlin`.
-- `make java-test`, `java-lint`, `java-build`. `make lint` stays Go.
+- `ci.yml` gets a `java` job on 17 and 21: `make java-test`, `make java-lint` (`maven-enforcer` convergence, SpotBugs at Medium, javadoc with doclint) and `make java-build`, with a separate `java-audit` job (OSV-Scanner on `sdk/java/pom.xml`); CodeQL covers `java-kotlin` (build mode none).
+- `make java-test`, `java-lint`, `java-build`, `java-bench`. `make lint` stays Go.
 - The version is the ligo tag, passed to Maven (`-Drevision`); `0.0.0-SNAPSHOT` without a tag.
-- `release.yml` builds the jar, the sources jar and the javadoc jar from the tag (JDK 17) and attaches them with the checksums; `.goreleaser.yaml` adds them to `extra_files`.
+- `release.yml` builds the jar, the sources jar and the javadoc jar from the tag (JDK 17) and attaches them, with the pom (its `${revision}` resolved) so that the jar's dependencies can be resolved, to the release and the signed checksums; `.goreleaser.yaml` adds them to `extra_files`.
 
 ## 8. Documentation
 
