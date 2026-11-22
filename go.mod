@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/huh/v2 v2.0.3
-	github.com/chromedp/cdproto v0.160.0
+	github.com/chromedp/cdproto v0.160.5
 	github.com/chromedp/chromedp v0.23.0
 	github.com/dbos-inc/dbos-transact-golang v1.8.0
 	github.com/dihedron/netcheck/v2 v2.1.0
