@@ -8,7 +8,7 @@ require (
 	charm.land/huh/v2 v2.0.3
 	github.com/chromedp/cdproto v0.160.0
 	github.com/chromedp/chromedp v0.23.0
-	github.com/dbos-inc/dbos-transact-golang v1.8.0
+	github.com/dbos-inc/dbos-transact-golang v1.9.0
 	github.com/dihedron/netcheck/v2 v2.1.0
 	github.com/expr-lang/expr v1.17.8
 	github.com/go-ldap/ldap/v3 v3.4.15
@@ -59,7 +59,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dprotaso/go-yit v0.0.0-20220510233725-9ba8df137936 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/getkin/kin-openapi v0.153.0 // indirect
@@ -75,7 +75,7 @@ require (
 	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/puddle/v2 v2.2.3 // indirect
+	github.com/jackc/puddle/v2 v2.2.4 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
