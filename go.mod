@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.1
+	charm.land/bubbletea/v2 v2.1.2
 	charm.land/huh/v2 v2.0.3
 	github.com/chromedp/cdproto v0.160.0
 	github.com/chromedp/chromedp v0.23.0
